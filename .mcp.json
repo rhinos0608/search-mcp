@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "search-mcp": {
+      "command": "node",
+      "args": ["/Users/rhinesharar/search-mcp/dist/index.js"],
+      "env": {
+        "SEARCH_MCP_CONFIG_KEY": "secret"
+      }
+    }
+  }
+}

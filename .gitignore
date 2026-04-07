@@ -1,0 +1,9 @@
+node_modules/
+dist/
+*.js.map
+.env
+.env.local
+config.json
+config.enc
+.DS_Store
+stderr.log
