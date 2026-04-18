@@ -18,6 +18,16 @@ const PKG_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 
 export type SearchBackend = 'brave' | 'searxng';
 
+export interface RedditConfig {
+  clientId: string;
+  clientSecret: string;
+  userAgent: string;
+  /** True iff both clientId and clientSecret are present. */
+  oauthEnabled: boolean;
+  /** False iff exactly one of clientId/clientSecret is present (partial config). */
+  oauthConfigValid: boolean;
+}
+
 export interface SearchConfig {
   searchBackend: SearchBackend;
   brave: { apiKey: string };
@@ -28,10 +38,11 @@ export interface SearchConfig {
   patentsview: { apiKey: string };
   youtube: { apiKey: string };
   stackexchange: { apiKey: string };
+  reddit: RedditConfig;
 }
 
 const DEFAULTS: SearchConfig = {
-  searchBackend: 'brave',
+  searchBackend: 'searxng',
   brave: { apiKey: '' },
   searxng: { baseUrl: '' },
   nitter: { baseUrl: '' },
@@ -40,6 +51,13 @@ const DEFAULTS: SearchConfig = {
   patentsview: { apiKey: '' },
   youtube: { apiKey: '' },
   stackexchange: { apiKey: '' },
+  reddit: {
+    clientId: '',
+    clientSecret: '',
+    userAgent: '',
+    oauthEnabled: false,
+    oauthConfigValid: true,
+  },
 };
 
 const VALID_BACKENDS = new Set<string>(['brave', 'searxng']);
@@ -68,8 +86,12 @@ function decryptConfigFile(filePath: string, password: string): SearchConfig {
   return JSON.parse(decrypted.toString('utf8')) as SearchConfig;
 }
 
-function loadFromEnv(): Partial<SearchConfig> {
-  const cfg: Partial<SearchConfig> = {};
+type EnvConfig = Omit<Partial<SearchConfig>, 'reddit'> & {
+  reddit?: Partial<RedditConfig>;
+};
+
+function loadFromEnv(): EnvConfig {
+  const cfg: EnvConfig = {};
 
   const backend = process.env.SEARCH_BACKEND;
   if (backend && VALID_BACKENDS.has(backend)) {
@@ -118,6 +140,21 @@ function loadFromEnv(): Partial<SearchConfig> {
     cfg.stackexchange = { apiKey: seKey };
   }
 
+  const redditClientId = process.env.REDDIT_CLIENT_ID;
+  const redditClientSecret = process.env.REDDIT_CLIENT_SECRET;
+  const redditUserAgent = process.env.REDDIT_USER_AGENT;
+  if (
+    redditClientId !== undefined ||
+    redditClientSecret !== undefined ||
+    redditUserAgent !== undefined
+  ) {
+    const redditCfg: Partial<RedditConfig> = {};
+    if (redditClientId !== undefined) redditCfg.clientId = redditClientId;
+    if (redditClientSecret !== undefined) redditCfg.clientSecret = redditClientSecret;
+    if (redditUserAgent !== undefined) redditCfg.userAgent = redditUserAgent;
+    cfg.reddit = redditCfg;
+  }
+
   return cfg;
 }
 
@@ -126,7 +163,7 @@ let cached: SearchConfig | undefined;
 export function loadConfig(): SearchConfig {
   if (cached) return cached;
 
-  let fileConfig: Partial<SearchConfig> = {};
+  let fileConfig: EnvConfig = {};
 
   const encPath = join(PKG_ROOT, 'config.enc');
   const configKey = process.env.SEARCH_MCP_CONFIG_KEY;
@@ -181,10 +218,53 @@ export function loadConfig(): SearchConfig {
         fileConfig.stackexchange?.apiKey ??
         DEFAULTS.stackexchange.apiKey,
     },
+    reddit: resolveRedditConfig(envConfig.reddit, fileConfig.reddit),
   };
+
+  if (!cached.reddit.oauthConfigValid) {
+    logger.warn(
+      {
+        hasClientId: cached.reddit.clientId !== '',
+        hasClientSecret: cached.reddit.clientSecret !== '',
+      },
+      'Reddit OAuth is partially configured; both REDDIT_CLIENT_ID and REDDIT_CLIENT_SECRET are required',
+    );
+  }
 
   logger.info({ backend: cached.searchBackend }, 'Search config loaded');
   return cached;
+}
+
+function resolveRedditConfig(
+  envReddit: Partial<RedditConfig> | undefined,
+  fileReddit: Partial<RedditConfig> | undefined,
+): RedditConfig {
+  // Trim whitespace so values like `REDDIT_CLIENT_ID=' '` (common with
+  // misquoted .env lines) are treated as unset rather than partial config.
+  const clientId = (envReddit?.clientId ?? fileReddit?.clientId ?? DEFAULTS.reddit.clientId).trim();
+  const clientSecret = (
+    envReddit?.clientSecret ??
+    fileReddit?.clientSecret ??
+    DEFAULTS.reddit.clientSecret
+  ).trim();
+  const userAgent = (
+    envReddit?.userAgent ??
+    fileReddit?.userAgent ??
+    DEFAULTS.reddit.userAgent
+  ).trim();
+
+  const hasId = clientId !== '';
+  const hasSecret = clientSecret !== '';
+  const oauthEnabled = hasId && hasSecret;
+  const oauthConfigValid = hasId === hasSecret;
+
+  return {
+    clientId,
+    clientSecret,
+    userAgent,
+    oauthEnabled,
+    oauthConfigValid,
+  };
 }
 
 /** Reset cached config (for testing). */

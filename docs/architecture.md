@@ -36,7 +36,13 @@ search-mcp/
 │       ├── githubRepo.ts
 │       ├── githubTrending.ts
 │       ├── youtubeTranscript.ts
-│       └── redditSearch.ts
+│       ├── redditSearch.ts
+│       ├── redditComments.ts
+│       ├── redditClient.ts        # shared Reddit transport (public + OAuth paths)
+│       ├── redditAuth.ts          # client_credentials token cache
+│       ├── redditSearchParser.ts
+│       ├── redditThreadParser.ts
+│       └── redditPermalink.ts
 ├── package.json
 ├── tsconfig.json
 └── eslint.config.js
@@ -66,6 +72,18 @@ Shared TypeScript interfaces and type aliases used across tool files (e.g. resul
 ### `src/tools/`
 
 One file per MCP tool. Each file exports a single registration function that accepts the `McpServer` instance and calls `server.tool(name, schema, handler)`. Splitting tools into separate files keeps each file small, makes individual tools easy to find and modify, and avoids merge conflicts when multiple tools are developed in parallel.
+
+---
+
+## Shared Reddit Transport
+
+Both `reddit_search` and `reddit_comments` route all HTTP through the shared client in `src/tools/redditClient.ts` (built by `createRedditClient`), which picks the transport based on config:
+
+- **No credentials configured** (`REDDIT_CLIENT_ID` and `REDDIT_CLIENT_SECRET` both unset): requests go to `https://www.reddit.com/... .json` with no `Authorization` header. Quota is Reddit's unauthenticated limit (~10 QPM, bot-detection-prone).
+- **Both credentials configured**: the client uses the `client_credentials` grant against `https://www.reddit.com/api/v1/access_token`, caches the token in memory (see `src/tools/redditAuth.ts`), and routes content requests to `https://oauth.reddit.com/...` with `Authorization: bearer <token>`. A 401 mid-session clears the cached token and retries once. Quota is 100 QPM per app.
+- **Partially configured** (exactly one of the two credentials set): the server still starts successfully. `loadConfig()` records `reddit.oauthConfigValid = false` and emits a `logger.warn`. `health_check` reports the synthesized `reddit_oauth` entry as `degraded` with remediation text. The first call to either Reddit tool throws `VALIDATION_ERROR` — there is no silent fallback to the public path when credentials are partial or broken.
+
+Runtime OAuth failures (bad credentials, token refresh failure, content-request transport errors) surface as tool-local errors, never as startup crashes. The rate-limit tracker for the `reddit` backend is shared between `reddit_search` and `reddit_comments`, so a 429 observed by one tool gates subsequent calls from either.
 
 ---
 

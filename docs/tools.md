@@ -1,6 +1,6 @@
 # Tools
 
-`search-mcp` exposes six MCP tools. This document describes each tool's inputs, outputs, underlying approach, and known caveats.
+`search-mcp` exposes a set of MCP tools. This document describes each tool's inputs, outputs, underlying approach, and known caveats.
 
 ---
 
@@ -306,11 +306,13 @@ Array<{
 
 ### Underlying approach
 
-Calls Reddit's public `.json` API endpoint (`reddit.com/search.json` or `reddit.com/r/{subreddit}/search.json`). No OAuth token is needed for read-only search. The `User-Agent` header is set to avoid Reddit's bot detection.
+Routes through the shared Reddit transport in `src/tools/redditClient.ts`. By default calls Reddit's public `.json` API endpoint (`https://www.reddit.com/search.json` or `https://www.reddit.com/r/{subreddit}/search.json`). When both `REDDIT_CLIENT_ID` and `REDDIT_CLIENT_SECRET` are configured, requests are routed through `https://oauth.reddit.com` with a cached `client_credentials` bearer token instead. The `User-Agent` header is set to avoid Reddit's bot detection.
 
 ### Rate limits / caveats
 
-- Reddit's public API allows approximately 60 requests per minute for unauthenticated clients.
+- Unauthenticated public path is aggressively rate-limited per User-Agent (roughly 10 QPM in practice; Reddit's documented "60 QPM unauth" figure is no longer accurate as of 2023).
+- OAuth path raises the quota to 100 QPM per OAuth `client_id`, averaged over a rolling 10-minute window.
+- See `reddit_comments` below for the full Reddit OAuth env var setup; both tools share the same configuration and rate-limit tracker.
 - Reddit may return fewer results than `limit` for some queries.
 - Very new posts may not appear in search results immediately.
 - Deleted or removed posts may appear in results with `[deleted]` or `[removed]` content.
@@ -328,6 +330,138 @@ Calls Reddit's public `.json` API endpoint (`reddit.com/search.json` or `reddit.
     "sort": "top",
     "timeframe": "year",
     "limit": 10
+  }
+}
+```
+
+---
+
+## `reddit_comments`
+
+Fetch a Reddit post plus its comment tree as a single normalized payload. Accepts three mutually-exclusive locator forms and supports focused-subthread retrieval.
+
+### Inputs
+
+| Parameter   | Type                                                                           | Required                 | Default        | Description                                                                                                       |
+| ----------- | ------------------------------------------------------------------------------ | ------------------------ | -------------- | ----------------------------------------------------------------------------------------------------------------- |
+| `url`       | string                                                                         | one-of locator           | —              | Full Reddit post URL, e.g. `https://www.reddit.com/r/{sub}/comments/{id}/...`.                                    |
+| `permalink` | string                                                                         | one-of locator           | —              | Relative Reddit permalink beginning with `/r/{sub}/comments/{id}`.                                                |
+| `subreddit` | string                                                                         | with `article`           | —              | Subreddit name (without `r/`). Must be provided together with `article`.                                          |
+| `article`   | string                                                                         | with `subreddit`         | —              | Post id without the `t3_` prefix. Must be provided together with `subreddit`.                                     |
+| `comment`   | string                                                                         | no                       | —              | Comment id (without `t1_` prefix). When set, narrows retrieval to a focused subthread.                            |
+| `context`   | number                                                                         | no (only with `comment`) | Reddit default | Number of parent (ancestor) context comments Reddit should include around `comment`. Integer `0..8`.              |
+| `sort`      | `"confidence"` \| `"top"` \| `"new"` \| `"controversial"` \| `"old"` \| `"qa"` | no                       | `"confidence"` | Comment sort order.                                                                                               |
+| `depth`     | number                                                                         | no                       | Reddit default | Maximum tree depth. Integer `1..10`.                                                                              |
+| `limit`     | number                                                                         | no                       | Reddit default | Maximum number of comment nodes. Integer `1..100`.                                                                |
+| `showMore`  | boolean                                                                        | no                       | `false`        | When `false`, `more` placeholders are omitted from `comments` and surfaced in the top-level `more` array instead. |
+
+Exactly one locator form (`url`, `permalink`, or `subreddit`+`article`) must be supplied. `url` and `permalink` may include a trailing comment id; an explicit `comment` argument overrides any id parsed from the locator.
+
+### Output
+
+```ts
+{
+  post: {
+    id: string;
+    fullname: string;        // e.g. "t3_1abc23"
+    title: string;
+    selftext: string;
+    author: string;
+    subreddit: string;
+    score: number;
+    numComments: number;
+    createdUtc: number;      // Unix seconds
+    permalink: string;
+    url: string;             // linked URL (for link posts) or self-post URL
+    isVideo: boolean;
+  };
+  comments: Array<NormalizedComment | NormalizedMore>;   // nested tree
+  more: NormalizedMore[];    // `more` placeholders omitted from `comments` when showMore=false
+  request: {
+    source: "url" | "permalink" | "subreddit_article";
+    sort: "confidence" | "top" | "new" | "controversial" | "old" | "qa";
+    depth: number | undefined;
+    limit: number | undefined;
+    comment: string | undefined;
+    context: number | undefined;
+    showMore: boolean;
+    usedOAuth: boolean;      // true iff this request was routed via oauth.reddit.com
+    permalink: string;
+    url: string;
+  };
+}
+
+type NormalizedComment = {
+  id: string;
+  fullname: string;          // e.g. "t1_xyz789"
+  author: string;
+  body: string;
+  score: number;
+  createdUtc: number;
+  permalink: string;
+  parentId: string;          // e.g. "t3_..." or "t1_..."
+  depth: number;
+  replies: Array<NormalizedComment | NormalizedMore>;
+  distinguished: string | null;
+  stickied: boolean;
+  collapsed: boolean;
+};
+
+type NormalizedMore = {
+  id: string;
+  parentId: string;
+  depth: number;
+  count: number;
+  children: string[];        // comment ids referenced by this placeholder
+};
+```
+
+### Underlying approach
+
+Uses the shared Reddit transport in `src/tools/redditClient.ts`:
+
+- When neither `REDDIT_CLIENT_ID` nor `REDDIT_CLIENT_SECRET` is set, fetches `https://www.reddit.com/r/{sub}/comments/{id}.json` (public JSON API).
+- When both are set, fetches `https://oauth.reddit.com/r/{sub}/comments/{id}` with `Authorization: bearer <token>`, using a `client_credentials` app-only token acquired from `https://www.reddit.com/api/v1/access_token`. Tokens are cached in memory and refreshed on expiry or 401.
+- `request.usedOAuth` in the output reflects which transport actually served the request.
+
+### Error codes
+
+| Code               | When                                                                                                                                                                             |
+| ------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `VALIDATION_ERROR` | Mixed or missing locator, out-of-range numeric, `context` without `comment`, or partial OAuth config (one of `REDDIT_CLIENT_ID` / `REDDIT_CLIENT_SECRET` set without the other). |
+| `RATE_LIMIT`       | Reddit returned 429, or the in-process rate-limit tracker blocks the request.                                                                                                    |
+| `UNAVAILABLE`      | Reddit returned 403 (private / quarantined / banned subreddit), 404 (thread not found), or another non-OK status.                                                                |
+| `TIMEOUT`          | Request exceeded the 30s timeout.                                                                                                                                                |
+
+### Rate limits / caveats
+
+- Unauthenticated public path: ~10 QPM (Reddit's unauth quota; bot-detected clients may get less).
+- OAuth (`client_credentials`) path: 100 QPM per app.
+- v1 does not call `/api/morechildren`. `showMore` only controls whether existing `more` placeholders are preserved in the returned tree.
+- `depth`, `limit`, and `context` are forwarded to Reddit; omitting them lets Reddit apply its own defaults.
+- Deleted or removed comments surface with `[deleted]` / `[removed]` bodies and authors.
+
+### Configuration
+
+| Environment variable   | Required | Description                                                                                                                                                               |
+| ---------------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `REDDIT_CLIENT_ID`     | optional | Reddit app client id. Pair with `REDDIT_CLIENT_SECRET` to enable OAuth.                                                                                                   |
+| `REDDIT_CLIENT_SECRET` | optional | Reddit app client secret. Pair with `REDDIT_CLIENT_ID` to enable OAuth.                                                                                                   |
+| `REDDIT_USER_AGENT`    | optional | Custom `User-Agent`. Should follow Reddit's required format `<platform>:<app-id>:<version> (by /u/<username>)`. See `docs/plans/2026-04-18-reddit-api-reference.md` §4.8. |
+
+Setting exactly one of `REDDIT_CLIENT_ID` / `REDDIT_CLIENT_SECRET` is treated as invalid configuration: the server still starts, `health_check` reports the `reddit_oauth` entry as `degraded`, and `reddit_comments` / `reddit_search` calls throw `VALIDATION_ERROR` until the other credential is supplied or both are unset.
+
+### Example
+
+```json
+{
+  "name": "reddit_comments",
+  "arguments": {
+    "url": "https://www.reddit.com/r/MachineLearning/comments/1abc23/example_post/",
+    "sort": "top",
+    "depth": 4,
+    "limit": 50,
+    "showMore": false
   }
 }
 ```

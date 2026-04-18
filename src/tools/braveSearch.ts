@@ -110,8 +110,9 @@ export async function braveSearch(
     const deepLinks =
       buttons && buttons.length > 0
         ? buttons
-            .filter((b): b is BraveDeepButton & { title: string; url: string } =>
-              typeof b.title === 'string' && typeof b.url === 'string',
+            .filter(
+              (b): b is BraveDeepButton & { title: string; url: string } =>
+                typeof b.title === 'string' && typeof b.url === 'string',
             )
             .map((b) => ({ title: b.title, url: b.url }))
         : null;

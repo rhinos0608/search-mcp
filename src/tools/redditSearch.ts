@@ -1,14 +1,22 @@
 import { logger } from '../logger.js';
-import { safeResponseJson, TRUNCATED_MARKER } from '../httpGuards.js';
+import { safeResponseJson } from '../httpGuards.js';
 import { ToolCache, cacheKey } from '../cache.js';
 import { retryWithBackoff } from '../retry.js';
 import { assertRateLimitOk, getTracker } from '../rateLimit.js';
 import { ToolError, unavailableError, timeoutError } from '../errors.js';
 import type { RedditPost } from '../types.js';
-
-const REDDIT_USER_AGENT = 'search-mcp/1.0 (MCP server for local use)';
+import {
+  createRedditClient,
+  mergeRedditClientOptions,
+  type RedditClientOptions,
+} from './redditClient.js';
+import { parseRedditSearchListing } from './redditSearchParser.js';
 
 const cache = new ToolCache<RedditPost[]>({ maxSize: 100, ttlMs: 10 * 60 * 1000 });
+
+export function resetRedditSearchCache(): void {
+  cache.clear();
+}
 
 export async function redditSearch(
   query: string,
@@ -16,6 +24,7 @@ export async function redditSearch(
   sort: 'relevance' | 'hot' | 'top' | 'new' | 'comments' = 'relevance',
   timeframe: 'all' | 'year' | 'month' | 'week' | 'day' | 'hour' = 'year',
   limit = 25,
+  clientOptions: RedditClientOptions = {},
 ): Promise<RedditPost[]> {
   if (subreddit && !/^[A-Za-z0-9_]{1,21}$/.test(subreddit)) {
     throw new Error(
@@ -32,16 +41,30 @@ export async function redditSearch(
   const effectiveTimeframe = unscoped && broadTimeframe ? 'week' : timeframe;
   const effectiveSort = unscoped && sort === 'relevance' ? 'new' : sort;
 
-  const key = cacheKey('reddit', query, subreddit, effectiveSort, effectiveTimeframe, String(limit));
+  const key = cacheKey(
+    'reddit',
+    query,
+    subreddit,
+    effectiveSort,
+    effectiveTimeframe,
+    String(limit),
+  );
   const cached = cache.get(key);
   if (cached !== null) {
     logger.debug({ cacheHit: true }, 'Reddit search cache hit');
     return cached;
   }
 
-  const url = subreddit
-    ? `https://www.reddit.com/r/${encodeURIComponent(subreddit)}/search.json?q=${encodeURIComponent(query)}&restrict_sr=1&sort=${effectiveSort}&t=${effectiveTimeframe}&limit=${String(limit)}&include_over_18=0`
-    : `https://www.reddit.com/search.json?q=${encodeURIComponent(query)}&sort=${effectiveSort}&t=${effectiveTimeframe}&limit=${String(limit)}&include_over_18=0`;
+  const client = createRedditClient(mergeRedditClientOptions(clientOptions));
+  const path = subreddit ? `/r/${encodeURIComponent(subreddit)}/search` : '/search';
+  const queryParams = {
+    q: query,
+    restrict_sr: subreddit ? 1 : undefined,
+    sort: effectiveSort,
+    t: effectiveTimeframe,
+    limit,
+    include_over_18: 0,
+  };
 
   logger.info({ tool: 'reddit_search', subreddit, sort, timeframe, limit }, 'Searching Reddit');
 
@@ -55,8 +78,7 @@ export async function redditSearch(
       }, 30_000);
 
       try {
-        const res = await fetch(url, {
-          headers: { 'User-Agent': REDDIT_USER_AGENT },
+        const { response: res, url } = await client.fetch(path, queryParams, {
           signal: controller.signal,
         });
 
@@ -87,7 +109,7 @@ export async function redditSearch(
           });
         }
 
-        return res;
+        return { response: res, url };
       } catch (err) {
         const error = err instanceof Error ? err : new Error(String(err));
         if (error.name === 'AbortError') {
@@ -104,50 +126,8 @@ export async function redditSearch(
     { label: 'reddit-search', maxAttempts: 2 },
   );
 
-  const json: unknown = await safeResponseJson(response, url);
-
-  if (typeof json !== 'object' || json === null || Array.isArray(json)) {
-    throw new Error('Unexpected Reddit API response shape');
-  }
-  const top = json as Record<string, unknown>;
-  const data = top.data;
-  if (typeof data !== 'object' || data === null || Array.isArray(data)) {
-    throw new Error('Unexpected Reddit API response shape');
-  }
-  const dataObj = data as Record<string, unknown>;
-  if (!Array.isArray(dataObj.children)) {
-    throw new Error('Unexpected Reddit API response shape');
-  }
-
-  const children = dataObj.children as unknown[];
-
-  const results: RedditPost[] = children
-    .map((child) => {
-      if (typeof child !== 'object' || child === null) return null;
-      const c = child as Record<string, unknown>;
-      const d = c.data;
-      if (typeof d !== 'object' || d === null) return null;
-      const post = d as Record<string, unknown>;
-
-      const rawSelftext = typeof post.selftext === 'string' ? post.selftext.trim() : '';
-      const selftext =
-        rawSelftext.length > 2000 ? rawSelftext.slice(0, 2000) + TRUNCATED_MARKER : rawSelftext;
-
-      return {
-        title: typeof post.title === 'string' ? post.title : '',
-        url: typeof post.url === 'string' ? post.url : '',
-        selftext,
-        score: typeof post.score === 'number' ? post.score : 0,
-        numComments: typeof post.num_comments === 'number' ? post.num_comments : 0,
-        subreddit: typeof post.subreddit === 'string' ? post.subreddit : '',
-        author: typeof post.author === 'string' ? post.author : '',
-        createdUtc: typeof post.created_utc === 'number' ? post.created_utc : 0,
-        permalink:
-          typeof post.permalink === 'string' ? `https://www.reddit.com${post.permalink}` : '',
-        isVideo: typeof post.is_video === 'boolean' ? post.is_video : false,
-      } satisfies RedditPost;
-    })
-    .filter((post): post is RedditPost => post !== null && Boolean(post.title));
+  const json: unknown = await safeResponseJson(response.response, response.url);
+  const results = parseRedditSearchListing(json);
 
   cache.set(key, results);
   logger.debug({ resultCount: results.length }, 'Reddit search complete');

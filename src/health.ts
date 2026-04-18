@@ -83,6 +83,7 @@ const FREE_TOOLS = [
   'github_trending',
   'youtube_transcript',
   'reddit_search',
+  'reddit_comments',
   'academic_search',
   'hackernews_search',
   'arxiv_search',
@@ -104,7 +105,11 @@ export function configHealth(cfg: SearchConfig): Record<string, ToolHealth> {
   for (const [tool, rule] of Object.entries(GATED_TOOLS)) {
     report[tool] = rule.check(cfg)
       ? { status: 'healthy', message: 'Configured.' }
-      : { status: 'unconfigured', message: 'Missing required configuration.', remediation: rule.remediation };
+      : {
+          status: 'unconfigured',
+          message: 'Missing required configuration.',
+          remediation: rule.remediation,
+        };
   }
 
   // Optional-config tools: healthy or degraded
@@ -119,7 +124,42 @@ export function configHealth(cfg: SearchConfig): Record<string, ToolHealth> {
     report[tool] = { status: 'healthy', message: 'Free API, no configuration required.' };
   }
 
+  // Synthesized Reddit OAuth config-layer indicator.
+  // Surfaced as its own tool entry so health_check callers can see the
+  // OAuth posture without inferring from reddit_search / reddit_comments.
+  report.reddit_oauth = redditOAuthHealth(cfg);
+
   return report;
+}
+
+function redditOAuthHealth(cfg: SearchConfig): ToolHealth {
+  const hasId = cfg.reddit.clientId !== '';
+
+  if (!cfg.reddit.oauthConfigValid) {
+    // Partial config: exactly one of clientId / clientSecret is present.
+    const missing = hasId ? 'REDDIT_CLIENT_SECRET' : 'REDDIT_CLIENT_ID';
+    return {
+      status: 'degraded',
+      message: `Reddit OAuth is partially configured — missing ${missing}. reddit_search and reddit_comments will fail at runtime until this is fixed.`,
+      remediation: `Set ${missing}, or unset both REDDIT_CLIENT_ID and REDDIT_CLIENT_SECRET to use the unauthenticated public Reddit API.`,
+    };
+  }
+
+  if (cfg.reddit.oauthEnabled) {
+    return {
+      status: 'healthy',
+      message:
+        'Reddit OAuth configured. Requests use https://oauth.reddit.com (100 QPM app-only quota).',
+    };
+  }
+
+  return {
+    status: 'healthy',
+    message:
+      'Reddit OAuth not configured (using public Reddit JSON API, ~10 QPM unauthenticated quota).',
+    remediation:
+      'Set REDDIT_CLIENT_ID and REDDIT_CLIENT_SECRET to enable OAuth and raise the quota to 100 QPM.',
+  };
 }
 
 /**
@@ -224,6 +264,7 @@ function getNetworkProbes(cfg: SearchConfig): NetworkProbe[] {
 const RATE_LIMIT_TOOL_MAP: [string, RateLimitedBackend][] = [
   ['web_search', 'brave'],
   ['reddit_search', 'reddit'],
+  ['reddit_comments', 'reddit'],
   ['github_repo', 'github'],
   ['academic_search', 'semantic_scholar'],
 ];
@@ -290,9 +331,7 @@ export async function runHealthProbes(cfg: SearchConfig): Promise<HealthReport> 
   const otherStatuses = Object.entries(tools)
     .filter(([name]) => name !== 'web_search')
     .map(([, h]) => h.status);
-  const hasOtherIssues = otherStatuses.some(
-    (s) => s === 'rate_limited' || s === 'unreachable',
-  );
+  const hasOtherIssues = otherStatuses.some((s) => s === 'rate_limited' || s === 'unreachable');
 
   let overall: 'healthy' | 'degraded' | 'unhealthy';
   if (webSearchStatus === 'healthy') {

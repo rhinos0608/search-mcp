@@ -78,7 +78,7 @@ If you already have other servers in the file, add `search-mcp` inside the exist
 
 **4. Restart Claude Desktop.** The tools will appear in Claude's tool list automatically.
 
-To verify: ask Claude "what tools do you have?" and you should see `web_search`, `web_read`, `github_repo`, `github_trending`, `youtube_transcript`, and `reddit_search`.
+To verify: ask Claude "what tools do you have?" and you should see `web_search`, `web_read`, `github_repo`, `github_trending`, `youtube_transcript`, `reddit_search`, and `reddit_comments`.
 
 ---
 
@@ -121,6 +121,7 @@ Each extension has its own MCP config location but the same structure — `comma
 | `github_trending`    | Today's / this week's / this month's trending repos              |
 | `youtube_transcript` | Full transcript from any YouTube video (by ID or URL)            |
 | `reddit_search`      | Search posts across all of Reddit or within a subreddit          |
+| `reddit_comments`    | Fetch a Reddit post plus its normalized comment tree             |
 
 Full parameter details: see `docs/tools.md`.
 
@@ -128,10 +129,15 @@ Full parameter details: see `docs/tools.md`.
 
 ## Environment variables
 
-| Variable    | Default | Description                                                        |
-| ----------- | ------- | ------------------------------------------------------------------ |
-| `LOG_LEVEL` | `info`  | Pino log level: `trace`, `debug`, `info`, `warn`, `error`, `fatal` |
-| `NODE_ENV`  | —       | Set to `production` to force JSON log output                       |
+| Variable               | Default | Description                                                                                                                                                 |
+| ---------------------- | ------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `LOG_LEVEL`            | `info`  | Pino log level: `trace`, `debug`, `info`, `warn`, `error`, `fatal`                                                                                          |
+| `NODE_ENV`             | —       | Set to `production` to force JSON log output                                                                                                                |
+| `REDDIT_CLIENT_ID`     | —       | Reddit app client id. Optional — if both this and `REDDIT_CLIENT_SECRET` are set, `reddit_search` and `reddit_comments` use the OAuth path (100 QPM quota). |
+| `REDDIT_CLIENT_SECRET` | —       | Reddit app client secret. Must be set together with `REDDIT_CLIENT_ID`; setting only one fails fast with a validation error at tool invocation.             |
+| `REDDIT_USER_AGENT`    | —       | Optional custom User-Agent. Should follow Reddit's format `<platform>:<app-id>:<version> (by /u/<username>)`.                                               |
+
+Without Reddit OAuth, the Reddit tools fall back to the public JSON API (~10 QPM, bot-detection-prone). Setting both OAuth credentials raises the quota to 100 QPM per app. Setting only one of the two is treated as invalid: the server still starts, `health_check` reports `reddit_oauth` as `degraded`, and the tools throw `VALIDATION_ERROR` on first use.
 
 Example — verbose debug logs:
 

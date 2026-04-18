@@ -27,7 +27,7 @@ Append `--json` (via `dev:json` / `start:json`) for structured JSON logging inst
 
 **Transport**: stdio only. stdout is exclusively for JSON-RPC frames; never write anything else to stdout. All logging uses pino routed to stderr via `src/logger.ts`.
 
-**Tool registration**: `src/server.ts` creates the `McpServer` and registers all eighteen tools inline with Zod input schemas. Each tool delegates to a function in `src/tools/`.
+**Tool registration**: `src/server.ts` creates the `McpServer` and registers all tools inline with Zod input schemas. Each tool delegates to a function in `src/tools/`.
 
 **Tools** (one file each in `src/tools/`):
 - `web_search` — Multi-backend search with fallback chain: primary backend (configured) → remaining backend. Supports Brave and SearXNG.
@@ -35,7 +35,8 @@ Append `--json` (via `dev:json` / `start:json`) for structured JSON logging inst
 - `github_repo` — GitHub API (unauthenticated) for repo metadata, latest release, optional README.
 - `github_trending` — Scrapes github.com/trending with cheerio (no API).
 - `youtube_transcript` — Fetches video captions via youtube-transcript library.
-- `reddit_search` — Reddit public JSON API search.
+- `reddit_search` — Reddit search via shared Reddit transport (`src/tools/redditClient.ts`): public JSON API by default, OAuth (`oauth.reddit.com`) when `REDDIT_CLIENT_ID` and `REDDIT_CLIENT_SECRET` are both set.
+- `reddit_comments` — Fetches a Reddit post plus a normalized comment tree via the same shared transport. Supports `url` / `permalink` / `subreddit`+`article` locators, focused subthreads via `comment`+`context`, and `sort` / `depth` / `limit` / `showMore` controls.
 - `twitter_search` — Searches Twitter/X via a configurable Nitter instance (cheerio scraping). Requires `NITTER_BASE_URL`.
 - `producthunt_search` — Product Hunt search via GraphQL API (with `PRODUCTHUNT_API_TOKEN`) or public leaderboard scraping fallback.
 - `patent_search` — USPTO PatentsView API for US patent search. Requires `PATENTSVIEW_API_KEY` (free registration).
@@ -49,7 +50,7 @@ Append `--json` (via `dev:json` / `start:json`) for structured JSON logging inst
 - `pypi_search` — PyPI search via HTML scraping (cheerio) with top-result enrichment from PyPI JSON API (free, no auth).
 - `news_search` — GDELT Global Knowledge Graph API for news articles (free, no auth). Supports date range filtering and language selection.
 
-**Config resolution** (`src/config.ts`): encrypted file (`config.enc` + `SEARCH_MCP_CONFIG_KEY` env var) → individual env vars (`BRAVE_API_KEY`, `SEARXNG_BASE_URL`, `SEARCH_BACKEND`, `NITTER_BASE_URL`, `LISTENNOTES_API_KEY`, `PRODUCTHUNT_API_TOKEN`, `PATENTSVIEW_API_KEY`, `YOUTUBE_API_KEY`, `STACKEXCHANGE_API_KEY`) → defaults. Config is cached after first load.
+**Config resolution** (`src/config.ts`): encrypted file (`config.enc` + `SEARCH_MCP_CONFIG_KEY` env var) → individual env vars (`BRAVE_API_KEY`, `SEARXNG_BASE_URL`, `SEARCH_BACKEND`, `NITTER_BASE_URL`, `LISTENNOTES_API_KEY`, `PRODUCTHUNT_API_TOKEN`, `PATENTSVIEW_API_KEY`, `YOUTUBE_API_KEY`, `STACKEXCHANGE_API_KEY`, `REDDIT_CLIENT_ID`, `REDDIT_CLIENT_SECRET`, `REDDIT_USER_AGENT`) → defaults. Config is cached after first load. Reddit OAuth is optional: both `REDDIT_CLIENT_ID` and `REDDIT_CLIENT_SECRET` must be set to enable the OAuth path; setting exactly one is treated as invalid configuration (server starts, health reports degraded, Reddit tools throw `VALIDATION_ERROR` at first use).
 
 **HTTP safety** (`src/httpGuards.ts`): SSRF protection (blocks private IPs, localhost, cloud metadata endpoints) and 10MB response size limits. All outbound HTTP in tools should use `assertSafeUrl` and `safeResponseText`/`safeResponseJson`.
 

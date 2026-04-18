@@ -13,11 +13,12 @@
     "build": "tsc --project tsconfig.json",
     "start": "node dist/index.js",
     "start:json": "node dist/index.js --json",
+    "test": "node scripts/run-tests.cjs",
     "lint": "eslint src",
     "lint:fix": "eslint src --fix",
     "format": "prettier --write src docs",
     "format:check": "prettier --check src docs",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.test.json",
     "config:encrypt": "tsx scripts/encrypt-config.ts",
     "config:decrypt": "tsx scripts/decrypt-config.ts"
   },

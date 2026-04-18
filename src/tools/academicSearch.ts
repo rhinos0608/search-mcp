@@ -265,10 +265,12 @@ async function searchSemanticScholar(
 
         if (res.status === 429) {
           getTracker('semantic_scholar').recordLimitHit();
-          throw new ToolError(
-            'Semantic Scholar API rate limit exceeded (429). Try again later.',
-            { code: 'RATE_LIMIT', retryable: false, statusCode: 429, backend: 'semantic_scholar' },
-          );
+          throw new ToolError('Semantic Scholar API rate limit exceeded (429). Try again later.', {
+            code: 'RATE_LIMIT',
+            retryable: false,
+            statusCode: 429,
+            backend: 'semantic_scholar',
+          });
         }
 
         if (!res.ok) {
@@ -464,9 +466,7 @@ export async function academicSearch(
 
     // If both failed, throw so the caller gets an error
     if (allPapers.length === 0 && warnings.length >= 2) {
-      throw unavailableError(
-        `Both ArXiv and Semantic Scholar APIs failed. ${warnings.join('. ')}`,
-      );
+      throw unavailableError(`Both ArXiv and Semantic Scholar APIs failed. ${warnings.join('. ')}`);
     }
   }
 

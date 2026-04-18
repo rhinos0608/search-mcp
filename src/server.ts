@@ -8,6 +8,7 @@ import { getGitHubRepo } from './tools/githubRepo.js';
 import { getGitHubTrending } from './tools/githubTrending.js';
 import { getYouTubeTranscript } from './tools/youtubeTranscript.js';
 import { redditSearch } from './tools/redditSearch.js';
+import { redditComments } from './tools/redditComments.js';
 import { twitterSearch } from './tools/twitterSearch.js';
 import { producthuntSearch } from './tools/producthuntSearch.js';
 import { patentSearch } from './tools/patentSearch.js';
@@ -98,10 +99,7 @@ export function createServer(): McpServer {
     const startupHealth = configHealth(cfg);
     for (const tool of gated) {
       const h = startupHealth[tool];
-      logger.info(
-        { tool, remediation: h?.remediation },
-        'Tool not registered (unconfigured)',
-      );
+      logger.info({ tool, remediation: h?.remediation }, 'Tool not registered (unconfigured)');
     }
   }
 
@@ -336,154 +334,271 @@ export function createServer(): McpServer {
     },
   );
 
-  // ── twitter_search ──────────────────────────────────────────────────────
-  if (!gated.has('twitter_search'))
+  // ── reddit_comments ───────────────────────────────────────────────────────
   server.registerTool(
-    'twitter_search',
+    'reddit_comments',
     {
       description:
-        'Search Twitter/X posts via a Nitter instance. Returns tweets with author, content, engagement metrics (likes, retweets, replies), and timestamps. Requires a Nitter instance URL configured via NITTER_BASE_URL.',
+        'Fetch a Reddit post and its comment tree via the public JSON API. Accepts exactly one locator form: `url` (full Reddit post URL), `permalink` (relative /r/{sub}/comments/{id} path), or `subreddit`+`article` (subreddit name plus post id without t3_ prefix). Optionally focus on a subthread via `comment` (id without t1_ prefix) with `context` parent depth (0–8, only valid with `comment`). Controls: `sort` (confidence|top|new|controversial|old|qa), `depth` (1–10), `limit` (1–100). When `showMore=false` (default), Reddit `more` placeholders are omitted from `comments` and surfaced in the top-level `more` metadata; set true to preserve them inline. Returns normalized post metadata plus a nested comment tree.',
       inputSchema: {
-        query: z.string().describe('Search query string'),
-        limit: z
-          .number()
-          .int()
-          .min(1)
-          .max(50)
+        url: z
+          .url()
           .optional()
-          .default(20)
-          .describe('Maximum number of tweets to return (1–50, default 20)'),
-      },
-    },
-    async ({ query, limit }) => {
-      logger.info({ tool: 'twitter_search', limit }, 'Tool invoked');
-      const start = Date.now();
-      try {
-        const data = await twitterSearch(query, cfg.nitter.baseUrl, limit);
-        const result = makeResult('twitter_search', data, Date.now() - start);
-        return successResponse(result);
-      } catch (err: unknown) {
-        logger.error({ err, tool: 'twitter_search' }, 'Tool failed');
-        return errorResponse(err);
-      }
-    },
-  );
-
-  // ── producthunt_search ─────────────────────────────────────────────────
-  if (!gated.has('producthunt_search'))
-  server.registerTool(
-    'producthunt_search',
-    {
-      description:
-        'Search Product Hunt for product launches, tools, and apps. Returns products with name, tagline, vote/comment counts, topics, and launch dates. Uses the GraphQL API if a token is configured (PRODUCTHUNT_API_TOKEN), otherwise scrapes the public leaderboard.',
-      inputSchema: {
-        query: z.string().describe('Search query string'),
-        sort: z
-          .enum(['popularity', 'newest', 'votes'])
-          .optional()
-          .default('popularity')
-          .describe('Sort order: popularity | newest | votes'),
-        limit: z
-          .number()
-          .int()
-          .min(1)
-          .max(50)
-          .optional()
-          .default(20)
-          .describe('Maximum number of products to return (1–50, default 20)'),
-      },
-    },
-    async ({ query, sort, limit }) => {
-      logger.info({ tool: 'producthunt_search', sort, limit }, 'Tool invoked');
-      const start = Date.now();
-      try {
-        const data = await producthuntSearch(query, cfg.producthunt.apiToken, sort, limit);
-        const result = makeResult('producthunt_search', data, Date.now() - start);
-        return successResponse(result);
-      } catch (err: unknown) {
-        logger.error({ err, tool: 'producthunt_search' }, 'Tool failed');
-        return errorResponse(err);
-      }
-    },
-  );
-
-  // ── patent_search ──────────────────────────────────────────────────────
-  if (!gated.has('patent_search'))
-  server.registerTool(
-    'patent_search',
-    {
-      description:
-        'Search US patents via the USPTO PatentsView API. Returns patent number, title, abstract, inventors, assignees, filing/grant dates, and a Google Patents link. Requires PATENTSVIEW_API_KEY env var (free registration at patentsview.org).',
-      inputSchema: {
-        query: z.string().describe('Patent search query (searches abstracts)'),
-        assignee: z
+          .describe('Full Reddit post URL (https://www.reddit.com/r/{sub}/comments/{id}/...)'),
+        permalink: z
           .string()
           .optional()
-          .default('')
+          .describe('Relative Reddit permalink starting with /r/{sub}/comments/{id}'),
+        subreddit: z
+          .string()
+          .regex(/^[A-Za-z0-9_]{1,21}$/)
+          .optional()
+          .describe('Subreddit name (without r/). Required together with `article`.'),
+        article: z
+          .string()
+          .regex(/^[A-Za-z0-9]+$/)
+          .optional()
+          .describe('Reddit post id without the t3_ prefix. Required together with `subreddit`.'),
+        comment: z
+          .string()
+          .regex(/^[A-Za-z0-9]+$/)
+          .optional()
+          .describe('Comment id (no t1_ prefix) to focus a subthread.'),
+        context: z
+          .number()
+          .int()
+          .min(0)
+          .max(8)
+          .optional()
           .describe(
-            'Filter by assignee/company name (e.g. "Google", "Apple"). Leave empty for no filter.',
+            'Number of parent comments to include around `comment` (0–8). Only valid when `comment` is provided.',
           ),
+        sort: z
+          .enum(['confidence', 'top', 'new', 'controversial', 'old', 'qa'])
+          .optional()
+          .default('confidence')
+          .describe('Comment sort: confidence | top | new | controversial | old | qa'),
+        depth: z
+          .number()
+          .int()
+          .min(1)
+          .max(10)
+          .optional()
+          .describe('Maximum tree depth (1–10). Reddit default is 10.'),
         limit: z
           .number()
           .int()
           .min(1)
           .max(100)
           .optional()
-          .default(25)
-          .describe('Maximum number of patents to return (1–100, default 25)'),
+          .describe('Maximum number of comment nodes (1–100).'),
+        showMore: z
+          .boolean()
+          .optional()
+          .default(false)
+          .describe(
+            'Include `more` placeholders inline in `comments` when true; otherwise omit them and surface them in `more` summary metadata.',
+          ),
       },
     },
-    async ({ query, assignee, limit }) => {
-      logger.info({ tool: 'patent_search', assignee, limit }, 'Tool invoked');
+    async ({
+      url,
+      permalink,
+      subreddit,
+      article,
+      comment,
+      context,
+      sort,
+      depth,
+      limit,
+      showMore,
+    }) => {
+      logger.info(
+        {
+          tool: 'reddit_comments',
+          hasUrl: url !== undefined,
+          hasPermalink: permalink !== undefined,
+          subreddit,
+          article,
+          comment,
+          sort,
+          depth,
+          limit,
+          showMore,
+        },
+        'Tool invoked',
+      );
       const start = Date.now();
       try {
-        const data = await patentSearch(query, cfg.patentsview.apiKey, assignee, limit);
-        const result = makeResult('patent_search', data, Date.now() - start);
+        const data = await redditComments({
+          ...(url !== undefined ? { url } : {}),
+          ...(permalink !== undefined ? { permalink } : {}),
+          ...(subreddit !== undefined ? { subreddit } : {}),
+          ...(article !== undefined ? { article } : {}),
+          ...(comment !== undefined ? { comment } : {}),
+          ...(context !== undefined ? { context } : {}),
+          sort,
+          ...(depth !== undefined ? { depth } : {}),
+          ...(limit !== undefined ? { limit } : {}),
+          showMore,
+        });
+        const result = makeResult('reddit_comments', data, Date.now() - start);
         return successResponse(result);
       } catch (err: unknown) {
-        logger.error({ err, tool: 'patent_search' }, 'Tool failed');
+        logger.error({ err, tool: 'reddit_comments' }, 'Tool failed');
         return errorResponse(err);
       }
     },
   );
 
+  // ── twitter_search ──────────────────────────────────────────────────────
+  if (!gated.has('twitter_search'))
+    server.registerTool(
+      'twitter_search',
+      {
+        description:
+          'Search Twitter/X posts via a Nitter instance. Returns tweets with author, content, engagement metrics (likes, retweets, replies), and timestamps. Requires a Nitter instance URL configured via NITTER_BASE_URL.',
+        inputSchema: {
+          query: z.string().describe('Search query string'),
+          limit: z
+            .number()
+            .int()
+            .min(1)
+            .max(50)
+            .optional()
+            .default(20)
+            .describe('Maximum number of tweets to return (1–50, default 20)'),
+        },
+      },
+      async ({ query, limit }) => {
+        logger.info({ tool: 'twitter_search', limit }, 'Tool invoked');
+        const start = Date.now();
+        try {
+          const data = await twitterSearch(query, cfg.nitter.baseUrl, limit);
+          const result = makeResult('twitter_search', data, Date.now() - start);
+          return successResponse(result);
+        } catch (err: unknown) {
+          logger.error({ err, tool: 'twitter_search' }, 'Tool failed');
+          return errorResponse(err);
+        }
+      },
+    );
+
+  // ── producthunt_search ─────────────────────────────────────────────────
+  if (!gated.has('producthunt_search'))
+    server.registerTool(
+      'producthunt_search',
+      {
+        description:
+          'Search Product Hunt for product launches, tools, and apps. Returns products with name, tagline, vote/comment counts, topics, and launch dates. Uses the GraphQL API if a token is configured (PRODUCTHUNT_API_TOKEN), otherwise scrapes the public leaderboard.',
+        inputSchema: {
+          query: z.string().describe('Search query string'),
+          sort: z
+            .enum(['popularity', 'newest', 'votes'])
+            .optional()
+            .default('popularity')
+            .describe('Sort order: popularity | newest | votes'),
+          limit: z
+            .number()
+            .int()
+            .min(1)
+            .max(50)
+            .optional()
+            .default(20)
+            .describe('Maximum number of products to return (1–50, default 20)'),
+        },
+      },
+      async ({ query, sort, limit }) => {
+        logger.info({ tool: 'producthunt_search', sort, limit }, 'Tool invoked');
+        const start = Date.now();
+        try {
+          const data = await producthuntSearch(query, cfg.producthunt.apiToken, sort, limit);
+          const result = makeResult('producthunt_search', data, Date.now() - start);
+          return successResponse(result);
+        } catch (err: unknown) {
+          logger.error({ err, tool: 'producthunt_search' }, 'Tool failed');
+          return errorResponse(err);
+        }
+      },
+    );
+
+  // ── patent_search ──────────────────────────────────────────────────────
+  if (!gated.has('patent_search'))
+    server.registerTool(
+      'patent_search',
+      {
+        description:
+          'Search US patents via the USPTO PatentsView API. Returns patent number, title, abstract, inventors, assignees, filing/grant dates, and a Google Patents link. Requires PATENTSVIEW_API_KEY env var (free registration at patentsview.org).',
+        inputSchema: {
+          query: z.string().describe('Patent search query (searches abstracts)'),
+          assignee: z
+            .string()
+            .optional()
+            .default('')
+            .describe(
+              'Filter by assignee/company name (e.g. "Google", "Apple"). Leave empty for no filter.',
+            ),
+          limit: z
+            .number()
+            .int()
+            .min(1)
+            .max(100)
+            .optional()
+            .default(25)
+            .describe('Maximum number of patents to return (1–100, default 25)'),
+        },
+      },
+      async ({ query, assignee, limit }) => {
+        logger.info({ tool: 'patent_search', assignee, limit }, 'Tool invoked');
+        const start = Date.now();
+        try {
+          const data = await patentSearch(query, cfg.patentsview.apiKey, assignee, limit);
+          const result = makeResult('patent_search', data, Date.now() - start);
+          return successResponse(result);
+        } catch (err: unknown) {
+          logger.error({ err, tool: 'patent_search' }, 'Tool failed');
+          return errorResponse(err);
+        }
+      },
+    );
+
   // ── podcast_search ─────────────────────────────────────────────────────
   if (!gated.has('podcast_search'))
-  server.registerTool(
-    'podcast_search',
-    {
-      description:
-        'Search podcast episodes via the ListenNotes API. Returns episode title, description, podcast name, publisher, audio URL, duration, and published date. Requires LISTENNOTES_API_KEY env var.',
-      inputSchema: {
-        query: z.string().describe('Search query string'),
-        sort: z
-          .enum(['relevance', 'date'])
-          .optional()
-          .default('relevance')
-          .describe('Sort order: relevance | date'),
-        limit: z
-          .number()
-          .int()
-          .min(1)
-          .max(50)
-          .optional()
-          .default(20)
-          .describe('Maximum number of episodes to return (1–50, default 20)'),
+    server.registerTool(
+      'podcast_search',
+      {
+        description:
+          'Search podcast episodes via the ListenNotes API. Returns episode title, description, podcast name, publisher, audio URL, duration, and published date. Requires LISTENNOTES_API_KEY env var.',
+        inputSchema: {
+          query: z.string().describe('Search query string'),
+          sort: z
+            .enum(['relevance', 'date'])
+            .optional()
+            .default('relevance')
+            .describe('Sort order: relevance | date'),
+          limit: z
+            .number()
+            .int()
+            .min(1)
+            .max(50)
+            .optional()
+            .default(20)
+            .describe('Maximum number of episodes to return (1–50, default 20)'),
+        },
       },
-    },
-    async ({ query, sort, limit }) => {
-      logger.info({ tool: 'podcast_search', sort, limit }, 'Tool invoked');
-      const start = Date.now();
-      try {
-        const data = await podcastSearch(query, cfg.listennotes.apiKey, sort, limit);
-        const result = makeResult('podcast_search', data, Date.now() - start);
-        return successResponse(result);
-      } catch (err: unknown) {
-        logger.error({ err, tool: 'podcast_search' }, 'Tool failed');
-        return errorResponse(err);
-      }
-    },
-  );
+      async ({ query, sort, limit }) => {
+        logger.info({ tool: 'podcast_search', sort, limit }, 'Tool invoked');
+        const start = Date.now();
+        try {
+          const data = await podcastSearch(query, cfg.listennotes.apiKey, sort, limit);
+          const result = makeResult('podcast_search', data, Date.now() - start);
+          return successResponse(result);
+        } catch (err: unknown) {
+          logger.error({ err, tool: 'podcast_search' }, 'Tool failed');
+          return errorResponse(err);
+        }
+      },
+    );
 
   // ── academic_search ────────────────────────────────────────────────────
   server.registerTool(
@@ -593,41 +708,41 @@ export function createServer(): McpServer {
 
   // ── youtube_search ──────────────────────────────────────────────────────
   if (!gated.has('youtube_search'))
-  server.registerTool(
-    'youtube_search',
-    {
-      description:
-        'Search YouTube for videos by query. Returns video IDs, titles, descriptions, channel names, publish dates, and thumbnail URLs. Requires YOUTUBE_API_KEY env var (Google Cloud Console). Use with youtube_transcript to get full video content.',
-      inputSchema: {
-        query: z.string().describe('Search query string'),
-        order: z
-          .enum(['relevance', 'date', 'viewCount', 'rating'])
-          .optional()
-          .default('relevance')
-          .describe('Sort order: relevance | date | viewCount | rating'),
-        limit: z
-          .number()
-          .int()
-          .min(1)
-          .max(50)
-          .optional()
-          .default(10)
-          .describe('Maximum number of videos to return (1–50, default 10)'),
+    server.registerTool(
+      'youtube_search',
+      {
+        description:
+          'Search YouTube for videos by query. Returns video IDs, titles, descriptions, channel names, publish dates, and thumbnail URLs. Requires YOUTUBE_API_KEY env var (Google Cloud Console). Use with youtube_transcript to get full video content.',
+        inputSchema: {
+          query: z.string().describe('Search query string'),
+          order: z
+            .enum(['relevance', 'date', 'viewCount', 'rating'])
+            .optional()
+            .default('relevance')
+            .describe('Sort order: relevance | date | viewCount | rating'),
+          limit: z
+            .number()
+            .int()
+            .min(1)
+            .max(50)
+            .optional()
+            .default(10)
+            .describe('Maximum number of videos to return (1–50, default 10)'),
+        },
       },
-    },
-    async ({ query, order, limit }) => {
-      logger.info({ tool: 'youtube_search', order, limit }, 'Tool invoked');
-      const start = Date.now();
-      try {
-        const data = await youtubeSearch(query, cfg.youtube.apiKey, order, limit);
-        const result = makeResult('youtube_search', data, Date.now() - start);
-        return successResponse(result);
-      } catch (err: unknown) {
-        logger.error({ err, tool: 'youtube_search' }, 'Tool failed');
-        return errorResponse(err);
-      }
-    },
-  );
+      async ({ query, order, limit }) => {
+        logger.info({ tool: 'youtube_search', order, limit }, 'Tool invoked');
+        const start = Date.now();
+        try {
+          const data = await youtubeSearch(query, cfg.youtube.apiKey, order, limit);
+          const result = makeResult('youtube_search', data, Date.now() - start);
+          return successResponse(result);
+        } catch (err: unknown) {
+          logger.error({ err, tool: 'youtube_search' }, 'Tool failed');
+          return errorResponse(err);
+        }
+      },
+    );
 
   // ── arxiv_search ────────────────────────────────────────────────────────
   server.registerTool(
