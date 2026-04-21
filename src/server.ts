@@ -286,7 +286,8 @@ export function createServer(): McpServer {
       const start = Date.now();
       try {
         const data = await getGitHubRepoTree(owner, repo, path, branch, recursive, limit);
-        const result = makeResult('github_repo_tree', data, Date.now() - start);
+        const opts = data.warnings && data.warnings.length > 0 ? { warnings: data.warnings } : {};
+        const result = makeResult('github_repo_tree', data, Date.now() - start, opts);
         return successResponse(result);
       } catch (err: unknown) {
         logger.error({ err, tool: 'github_repo_tree' }, 'Tool failed');
@@ -349,10 +350,10 @@ export function createServer(): McpServer {
           .number()
           .int()
           .min(1)
-          .max(100)
+          .max(1000)
           .optional()
           .default(30)
-          .describe('Max results (1–100)'),
+          .describe('Max results (1–1000)'),
       },
     },
     async ({ query, owner, repo, language, path, limit }) => {

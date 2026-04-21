@@ -263,7 +263,11 @@ export async function getGitHubRepoTree(
       .filter((e): e is GitHubTreeEntry => e !== null);
 
     const sliced = limit > 0 ? entries.slice(0, limit) : entries;
-    return { entries: sliced, truncated };
+    const warnings =
+      entries.length > limit
+        ? [`Result truncated from ${String(entries.length)} to ${String(limit)} entries.`]
+        : undefined;
+    return { entries: sliced, truncated, ...(warnings ? { warnings } : {}) };
   }
 
   // ── Non-recursive path: /repos/{owner}/{repo}/contents/{path}?ref={branch} ─
