@@ -19,7 +19,7 @@ export interface RateLimitInfo {
   backend: string;
 }
 
-export type RateLimitedBackend = 'brave' | 'github' | 'reddit' | 'semantic_scholar' | 'arxiv';
+export type RateLimitedBackend = 'brave' | 'github' | 'github_search' | 'reddit' | 'semantic_scholar' | 'arxiv';
 
 const LOW_REMAINING_THRESHOLD = 5;
 const MAX_SHORT_BACKOFF_MS = 5_000;
@@ -86,6 +86,12 @@ function parseGitHubHeaders(headers: Headers): RateLimitInfo | null {
   };
 }
 
+function parseGitHubSearchHeaders(headers: Headers): RateLimitInfo | null {
+  const result = parseGitHubHeaders(headers);
+  if (result === null) return null;
+  return { ...result, backend: 'github_search' };
+}
+
 function parseRedditHeaders(headers: Headers): RateLimitInfo | null {
   const remaining = headers.get('x-ratelimit-remaining');
   if (remaining === null) return null;
@@ -137,7 +143,7 @@ function parseSemanticScholarHeaders(headers: Headers): RateLimitInfo | null {
   };
 }
 
-function parseRateLimitHeaders(
+export function parseRateLimitHeaders(
   backend: RateLimitedBackend,
   headers: Headers,
 ): RateLimitInfo | null {
@@ -146,6 +152,8 @@ function parseRateLimitHeaders(
       return parseBraveHeaders(headers);
     case 'github':
       return parseGitHubHeaders(headers);
+    case 'github_search':
+      return parseGitHubSearchHeaders(headers);
     case 'reddit':
       return parseRedditHeaders(headers);
     case 'semantic_scholar':

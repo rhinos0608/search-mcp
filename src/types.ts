@@ -286,3 +286,51 @@ export interface NewsArticle {
   language: string | null;
   imageUrl: string | null;
 }
+
+// ── GitHub Repo Exploration ───────────────────────────────────────────────────
+
+export interface GitHubTreeEntry {
+  name: string;
+  path: string;
+  type: 'file' | 'dir' | 'symlink' | 'submodule';
+  size?: number;
+  sha?: string;
+  htmlUrl: string;
+  apiUrl: string;
+}
+
+export interface GitHubTreeResult {
+  entries: GitHubTreeEntry[];
+  truncated: boolean;
+}
+
+export interface GitHubFileResult {
+  name: string;
+  path: string;
+  size: number;
+  sha: string;
+  content: string;
+  encoding: 'utf-8' | 'base64';
+  htmlUrl: string;
+  apiUrl: string;
+  truncated: boolean;
+  isBinary: boolean;
+}
+
+export interface GitHubCodeResult {
+  url: string;
+  htmlUrl: string;
+  repo: string;
+  path: string;
+  name: string;
+  score: number;
+  textMatches?: {
+    fragment: string;
+    matches: { text: string; indices: [number, number][] }[];
+  }[];
+}
+
+export interface GitHubCodeSearchResult {
+  totalCount: number;
+  results: GitHubCodeResult[];
+}

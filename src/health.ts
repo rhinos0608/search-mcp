@@ -77,9 +77,12 @@ const OPTIONAL_CONFIG: Record<string, OptionalRule> = {
 };
 
 // Free tools — no config required
-const FREE_TOOLS = [
+export const FREE_TOOLS = [
   'web_read',
   'github_repo',
+  'github_repo_tree',
+  'github_repo_file',
+  'github_repo_search',
   'github_trending',
   'youtube_transcript',
   'reddit_search',
@@ -232,9 +235,9 @@ interface NetworkProbe {
   tools: string[];
 }
 
-function getNetworkProbes(cfg: SearchConfig): NetworkProbe[] {
+export function getNetworkProbes(cfg: SearchConfig): NetworkProbe[] {
   const probes: NetworkProbe[] = [
-    { label: 'github', url: 'https://api.github.com/rate_limit', tools: ['github_repo'] },
+    { label: 'github', url: 'https://api.github.com/rate_limit', tools: ['github_repo', 'github_repo_tree', 'github_repo_file', 'github_repo_search'] },
     {
       label: 'hackernews',
       url: 'https://hn.algolia.com/api/v1/search?query=test&hitsPerPage=1',
@@ -261,11 +264,14 @@ function getNetworkProbes(cfg: SearchConfig): NetworkProbe[] {
 
 // ── Rate limit → tool mapping ───────────────────────────────────────────────
 
-const RATE_LIMIT_TOOL_MAP: [string, RateLimitedBackend][] = [
+export const RATE_LIMIT_TOOL_MAP: [string, RateLimitedBackend][] = [
   ['web_search', 'brave'],
   ['reddit_search', 'reddit'],
   ['reddit_comments', 'reddit'],
   ['github_repo', 'github'],
+  ['github_repo_tree', 'github'],
+  ['github_repo_file', 'github'],
+  ['github_repo_search', 'github_search'],
   ['academic_search', 'semantic_scholar'],
 ];
 
