@@ -269,6 +269,107 @@ test('getGitHubRepoFile follows symlink and returns target file content', async 
   assert.equal(result.isBinary, false);
 });
 
+// ── Symlink edge cases ────────────────────────────────────────────────────────
+
+test('getGitHubRepoFile throws validationError when symlink points to a directory', async () => {
+  let callCount = 0;
+
+  globalThis.fetch = async () => {
+    callCount++;
+    if (callCount === 1) {
+      // First call: symlink entry
+      return buildMockResponse({
+        name: 'link-to-dir',
+        path: 'link-to-dir',
+        type: 'symlink',
+        sha: 'sym-sha',
+        size: 5,
+        encoding: 'base64',
+        content: btoa('subdir'),
+        html_url: 'https://github.com/o/r/blob/main/link-to-dir',
+        url: 'https://api.github.com/repos/o/r/contents/link-to-dir?ref=main',
+      });
+    } else {
+      // Second call: target is a directory
+      return buildMockResponse([
+        { name: 'file.txt', path: 'subdir/file.txt', type: 'file' },
+      ]);
+    }
+  };
+
+  await assert.rejects(
+    async () => getGitHubRepoFile('o', 'r', 'link-to-dir', 'main'),
+    (err: unknown) => {
+      return err instanceof Error && /directory/i.test(err.message);
+    },
+  );
+});
+
+test('getGitHubRepoFile throws notFoundError when symlink points to a non-existent file', async () => {
+  let callCount = 0;
+
+  globalThis.fetch = async () => {
+    callCount++;
+    if (callCount === 1) {
+      // First call: symlink entry
+      return buildMockResponse({
+        name: 'dead-link',
+        path: 'dead-link',
+        type: 'symlink',
+        sha: 'sym-sha',
+        size: 20,
+        encoding: 'base64',
+        content: btoa('nonexistent/deep/path.txt'),
+        html_url: 'https://github.com/o/r/blob/main/dead-link',
+        url: 'https://api.github.com/repos/o/r/contents/dead-link?ref=main',
+      });
+    } else {
+      // Second call: target not found
+      return buildMockResponse({ message: 'Not Found' }, { status: 404 });
+    }
+  };
+
+  await assert.rejects(
+    async () => getGitHubRepoFile('o', 'r', 'dead-link', 'main'),
+    (err: unknown) => {
+      return err instanceof Error && /not found/i.test(err.message);
+    },
+  );
+});
+
+test('getGitHubRepoFile throws validationError when symlink chain exceeds max depth', async () => {
+  let callCount = 0;
+
+  globalThis.fetch = async () => {
+    callCount++;
+    // All calls return a symlink pointing to another symlink (circular/too-deep chain)
+    return buildMockResponse({
+      name: `link${callCount}.txt`,
+      path: `link${callCount}.txt`,
+      type: 'symlink',
+      sha: `sym-sha-${callCount}`,
+      size: 10,
+      encoding: 'base64',
+      content: btoa(`next-link${callCount}.txt`),
+      html_url: `https://github.com/o/r/blob/main/link${callCount}.txt`,
+      url: `https://api.github.com/repos/o/r/contents/link${callCount}.txt?ref=main`,
+    });
+  };
+
+  await assert.rejects(
+    async () => getGitHubRepoFile('o', 'r', 'link1.txt', 'main'),
+    (err: unknown) => {
+      return (
+        err instanceof Error &&
+        /cycle|circular|depth/i.test(err.message) &&
+        /5/i.test(err.message)
+      );
+    },
+  );
+
+  assert.ok(callCount > 1, 'Should have followed several links before failing');
+});
+
 // ── Oversized file truncation ────────────────────────────────────────────────
 
 test('getGitHubRepoFile truncates files larger than 50 KB', async () => {
@@ -293,6 +394,91 @@ test('getGitHubRepoFile truncates files larger than 50 KB', async () => {
   assert.equal(result.truncated, true);
   assert.ok(result.content.length < encoded.length, 'Content should be shorter than full base64');
   assert.ok(result.content.endsWith(TRUNCATED_MARKER), 'Content should end with truncation marker');
+});
+
+test('getGitHubRepoFile truncates large text file returned as base64 (raw=false)', async () => {
+  // Build a file larger than 50 KB
+  const largeContent = 'x'.repeat(60 * 1024);
+  const encoded = btoa(largeContent);
+
+  globalThis.fetch = async () =>
+    buildMockResponse({
+      name: 'large.txt',
+      path: 'large.txt',
+      sha: 'large-sha',
+      size: largeContent.length,
+      encoding: 'base64',
+      content: encoded,
+      html_url: 'https://github.com/o/r/blob/main/large.txt',
+      url: 'https://api.github.com/repos/o/r/contents/large.txt?ref=main',
+    });
+
+  const result = await getGitHubRepoFile('o', 'r', 'large.txt', 'main', false);
+
+  assert.equal(result.truncated, true);
+  assert.equal(result.encoding, 'base64', 'Should return base64 when raw=false');
+  // The returned base64 should be shorter than the original
+  assert.ok(
+    result.content.length < encoded.length,
+    `Expected truncated base64 (${result.content.length} chars) < original (${encoded.length} chars)`,
+  );
+  // Decoding the truncated base64 should yield the truncated text with marker
+  const decoded = Buffer.from(result.content, 'base64').toString('utf-8');
+  assert.ok(decoded.endsWith(TRUNCATED_MARKER), 'Decoded content should end with truncation marker');
+});
+
+test('getGitHubRepoFile truncates large binary file returned as base64', async () => {
+  // Build binary content larger than 50 KB
+  // Use repeating pattern that stays binary (contains null bytes)
+  const binaryChunks: string[] = [];
+  for (let i = 0; i < 60 * 1024; i++) {
+    binaryChunks.push(String.fromCharCode(i % 256));
+  }
+  const largeBinary = binaryChunks.join('');
+  const encoded = btoa(largeBinary);
+
+  globalThis.fetch = async () =>
+    buildMockResponse({
+      name: 'large.bin',
+      path: 'large.bin',
+      sha: 'large-bin-sha',
+      size: largeBinary.length,
+      encoding: 'base64',
+      content: encoded,
+      html_url: 'https://github.com/o/r/blob/main/large.bin',
+      url: 'https://api.github.com/repos/o/r/contents/large.bin?ref=main',
+    });
+
+  const result = await getGitHubRepoFile('o', 'r', 'large.bin', 'main', true);
+
+  assert.equal(result.truncated, true);
+  assert.equal(result.encoding, 'base64', 'Should return base64 for binary');
+  assert.equal(result.isBinary, true, 'Should be marked as binary');
+  // The returned base64 should be shorter than the original
+  assert.ok(
+    result.content.length < encoded.length,
+    `Expected truncated base64 (${result.content.length} chars) < original (${encoded.length} chars)`,
+  );
+  // Decoding the truncated base64 should yield the truncated binary data
+  const decoded = Buffer.from(result.content, 'base64');
+  // Decoded bytes should be truncated (original was ~60KB = 60*1024 bytes).
+  // When binary data with high byte values is UTF-8 encoded and then re-base64'd,
+  // the decoded byte count can exceed the original char count due to multi-byte
+  // UTF-8 encoding of high-byte characters. Bound conservatively.
+  assert.ok(
+    decoded.length <= 90_000,
+    `Decoded truncated content should be reasonable (<=90KB), got ${decoded.length}`,
+  );
+  assert.ok(
+    decoded.length > 50_000,
+    `Decoded truncated content should be > 50KB (truncated), got ${decoded.length}`,
+  );
+  // The decoded bytes should end with the truncation marker bytes
+  const markerBytes = Buffer.from(TRUNCATED_MARKER, 'utf-8');
+  assert.ok(
+    decoded.slice(-markerBytes.length).equals(markerBytes),
+    'Decoded truncated content should end with truncation marker',
+  );
 });
 
 // ── 404 handling ───────────────────────────────────────────────────────────

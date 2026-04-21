@@ -237,7 +237,11 @@ interface NetworkProbe {
 
 export function getNetworkProbes(cfg: SearchConfig): NetworkProbe[] {
   const probes: NetworkProbe[] = [
-    { label: 'github', url: 'https://api.github.com/rate_limit', tools: ['github_repo', 'github_repo_tree', 'github_repo_file', 'github_repo_search'] },
+    {
+      label: 'github',
+      url: 'https://api.github.com/rate_limit',
+      tools: ['github_repo', 'github_repo_tree', 'github_repo_file', 'github_repo_search'],
+    },
     {
       label: 'hackernews',
       url: 'https://hn.algolia.com/api/v1/search?query=test&hitsPerPage=1',

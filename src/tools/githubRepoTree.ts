@@ -182,8 +182,7 @@ function normalizeTreeEntry(
         ? `${base}/tree/${encodeURIComponent(branch)}/${path}`
         : `${base}/blob/${encodeURIComponent(branch)}/${path}`;
   } else {
-    htmlUrl =
-      type === 'dir' ? `${base}/tree/main/${path}` : `${base}/blob/main/${path}`;
+    htmlUrl = type === 'dir' ? `${base}/tree/main/${path}` : `${base}/blob/main/${path}`;
   }
 
   const entry: GitHubTreeEntry = {
@@ -222,9 +221,7 @@ export async function getGitHubRepoTree(
 
   const safeOwner = encodeURIComponent(owner);
   const safeRepo = encodeURIComponent(repo);
-  const encodedPath = path
-    ? '/' + path.split('/').map(encodeURIComponent).join('/')
-    : '';
+  const encodedPath = path ? '/' + path.split('/').map(encodeURIComponent).join('/') : '';
 
   let truncated = false;
 
@@ -281,7 +278,11 @@ export async function getGitHubRepoTree(
   const { response, body } = await githubFetch(contentsUrl);
 
   if (!response.ok) {
-    handleGitHubError(response.status, response.statusText, `${owner}/${repo}/contents${encodedPath}`);
+    handleGitHubError(
+      response.status,
+      response.statusText,
+      `${owner}/${repo}/contents${encodedPath}`,
+    );
   }
 
   if (!Array.isArray(body)) {
@@ -291,7 +292,7 @@ export async function getGitHubRepoTree(
     );
   }
 
-  const entries: GitHubTreeEntry[] = (body as unknown[])
+  const entries: GitHubTreeEntry[] = body
     .map((item) => (isRecord(item) ? normalizeContentsEntry(item) : null))
     .filter((e): e is GitHubTreeEntry => e !== null);
 

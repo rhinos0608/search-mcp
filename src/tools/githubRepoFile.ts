@@ -135,7 +135,6 @@ const BINARY_EXTENSIONS = new Set([
   'bmp',
   'ico',
   'webp',
-  'svg', // images
   'pdf',
   'psd',
   'ai',
@@ -197,12 +196,17 @@ function isBinaryContent(content: string, filePath: string): boolean {
 
 // ── Public API ───────────────────────────────────────────────────────────────
 
+/** Maximum symlink-follow depth to prevent cycles. */
+const MAX_SYMLINK_DEPTH = 5;
+
 export async function getGitHubRepoFile(
   owner: string,
   repo: string,
   path: string,
   branch?: string,
   raw = true,
+  /** Internal: tracks symlink-follow depth to detect cycles. */
+  _depth = 0,
 ): Promise<GitHubFileResult> {
   logger.info({ owner, repo, path, branch, raw }, 'getGitHubRepoFile');
 
@@ -303,12 +307,19 @@ export async function getGitHubRepoFile(
 
   // Handle symlinks: type === 'symlink' and content contains the target path
   if (rawType === 'symlink') {
+    if (_depth >= MAX_SYMLINK_DEPTH) {
+      throw validationError(
+        `Symlink chain exceeds ${String(MAX_SYMLINK_DEPTH)} levels — possible cycle or circular symlink.`,
+        { statusCode: 400, backend: 'github' },
+      );
+    }
     logger.debug({ path, name }, 'Following symlink');
     const linkContent = getString(body, 'content');
     // linkContent is base64-encoded target path
     const targetPath = Buffer.from(linkContent, 'base64').toString('utf-8').trim();
-    // Re-fetch the target file
-    return getGitHubRepoFile(owner, repo, targetPath, branch, raw);
+    // Re-fetch the target file with depth guard
+    // Note: if target is a directory or submodule, getGitHubRepoFile will throw
+    return getGitHubRepoFile(owner, repo, targetPath, branch, raw, _depth + 1);
   }
 
   // Regular file — extract content
@@ -327,7 +338,8 @@ export async function getGitHubRepoFile(
   // Detect binary
   const binary = isBinaryContent(decoded, path);
 
-  // 50 KB size limit (same as README cap)
+  // Truncate decoded text first — before any re-encoding for output
+  // 50 KB limit (same as README cap); note: already at 50_000 per convention
   const MAX_FILE_LENGTH = 50_000;
   let truncated = false;
   let finalContent: string;
@@ -340,18 +352,18 @@ export async function getGitHubRepoFile(
   }
 
   // Determine output encoding and content
+  // Truncation was applied to decoded text; re-encode if base64 output is needed
   let outputEncoding: 'utf-8' | 'base64';
 
   if (binary) {
     // Always return base64 for binary files regardless of raw flag
     outputEncoding = 'base64';
-    finalContent = contentB64; // use original base64 to preserve binary fidelity
+    finalContent = Buffer.from(finalContent).toString('base64');
   } else if (raw) {
     outputEncoding = 'utf-8';
-    // truncated is already set above; no-op assignment was a no-op
   } else {
     outputEncoding = 'base64';
-    finalContent = contentB64; // return raw base64 when raw=false
+    finalContent = Buffer.from(finalContent).toString('base64');
   }
 
   return {

@@ -22,14 +22,14 @@ List the directory structure of a repository.
 
 **Parameters**
 
-| Name | Type | Required | Default | Description |
-|------|------|----------|---------|-------------|
-| `owner` | `string` | Yes | — | GitHub user or organisation name. Regex: `/^[a-zA-Z0-9](?:[a-zA-Z0-9._-]*[a-zA-Z0-9])?$/` |
-| `repo` | `string` | Yes | — | Repository name. Regex: `/^[a-zA-Z0-9._-]{1,100}$/` |
-| `path` | `string` | No | `""` | Directory path within the repo |
-| `branch` | `string` | No | omitted | Git ref (branch, tag, or commit SHA). When omitted, `?ref` is not sent and GitHub uses the default branch. |
-| `recursive` | `boolean` | No | `false` | If true, return the full recursive tree |
-| `limit` | `number` | No | `100` | Max items to return (1–500) |
+| Name        | Type      | Required | Default | Description                                                                                                |
+| ----------- | --------- | -------- | ------- | ---------------------------------------------------------------------------------------------------------- |
+| `owner`     | `string`  | Yes      | —       | GitHub user or organisation name. Regex: `/^[a-zA-Z0-9](?:[a-zA-Z0-9._-]*[a-zA-Z0-9])?$/`                  |
+| `repo`      | `string`  | Yes      | —       | Repository name. Regex: `/^[a-zA-Z0-9._-]{1,100}$/`                                                        |
+| `path`      | `string`  | No       | `""`    | Directory path within the repo                                                                             |
+| `branch`    | `string`  | No       | omitted | Git ref (branch, tag, or commit SHA). When omitted, `?ref` is not sent and GitHub uses the default branch. |
+| `recursive` | `boolean` | No       | `false` | If true, return the full recursive tree                                                                    |
+| `limit`     | `number`  | No       | `100`   | Max items to return (1–500)                                                                                |
 
 **Return shape**
 
@@ -38,19 +38,20 @@ interface GitHubTreeEntry {
   name: string;
   path: string;
   type: 'file' | 'dir' | 'symlink' | 'submodule';
-  size?: number;          // present for files, absent for directories
-  sha?: string;           // present for files and recursive git/tree entries; absent for directory entries from contents API
-  htmlUrl: string;        // browser URL
-  apiUrl: string;         // GitHub REST API URL for this item
+  size?: number; // present for files, absent for directories
+  sha?: string; // present for files and recursive git/tree entries; absent for directory entries from contents API
+  htmlUrl: string; // browser URL
+  apiUrl: string; // GitHub REST API URL for this item
 }
 
 interface GitHubTreeResult {
   entries: GitHubTreeEntry[];
-  truncated: boolean;     // true when GitHub's recursive git/trees response was truncated (not our limit truncation)
+  truncated: boolean; // true when GitHub's recursive git/trees response was truncated (not our limit truncation)
 }
 ```
 
 **API strategy**
+
 - `recursive=false` → `GET /repos/{owner}/{repo}/contents/{path}?ref={branch}` (omit `ref` when `branch` is not provided)
   - Returns an array of items. Each item has `name`, `path`, `type` (`"file" | "dir" | "symlink" | "submodule"`), `size` (files only), `html_url`, `url`.
   - Normalize: use `html_url` as `htmlUrl`, `url` as `apiUrl`. `sha` is present for files but not directories.
@@ -72,13 +73,13 @@ Read the raw content of a specific file.
 
 **Parameters**
 
-| Name | Type | Required | Default | Description |
-|------|------|----------|---------|-------------|
-| `owner` | `string` | Yes | — | GitHub user or organisation name. Regex: `/^[a-zA-Z0-9](?:[a-zA-Z0-9._-]*[a-zA-Z0-9])?$/` |
-| `repo` | `string` | Yes | — | Repository name. Regex: `/^[a-zA-Z0-9._-]{1,100}$/` |
-| `path` | `string` | Yes | — | File path within the repo |
-| `branch` | `string` | No | omitted | Git ref. When omitted, `?ref` is not sent. |
-| `raw` | `boolean` | No | `true` | `true` = decoded UTF-8 text; `false` = base64 |
+| Name     | Type      | Required | Default | Description                                                                               |
+| -------- | --------- | -------- | ------- | ----------------------------------------------------------------------------------------- |
+| `owner`  | `string`  | Yes      | —       | GitHub user or organisation name. Regex: `/^[a-zA-Z0-9](?:[a-zA-Z0-9._-]*[a-zA-Z0-9])?$/` |
+| `repo`   | `string`  | Yes      | —       | Repository name. Regex: `/^[a-zA-Z0-9._-]{1,100}$/`                                       |
+| `path`   | `string`  | Yes      | —       | File path within the repo                                                                 |
+| `branch` | `string`  | No       | omitted | Git ref. When omitted, `?ref` is not sent.                                                |
+| `raw`    | `boolean` | No       | `true`  | `true` = decoded UTF-8 text; `false` = base64                                             |
 
 **Return shape**
 
@@ -88,16 +89,17 @@ interface GitHubFileResult {
   path: string;
   size: number;
   sha: string;
-  content: string;      // decoded text when raw=true, base64 when raw=false
+  content: string; // decoded text when raw=true, base64 when raw=false
   encoding: 'utf-8' | 'base64';
   htmlUrl: string;
   apiUrl: string;
-  truncated: boolean;     // true when content exceeded our size guard
-  isBinary: boolean;      // true when the file appears to be binary
+  truncated: boolean; // true when content exceeded our size guard
+  isBinary: boolean; // true when the file appears to be binary
 }
 ```
 
 **API strategy**
+
 - `GET /repos/{owner}/{repo}/contents/{path}?ref={branch}` (omit `ref` when `branch` is not provided)
 - GitHub returns base64. Decode with `Buffer.from(content, 'base64').toString('utf-8')`.
 - Guard against oversized files: max decoded size 50 KB (same cap as README). If larger, return `truncated: true` + first 50 KB + `TRUNCATED_MARKER`.
@@ -113,38 +115,40 @@ Search code across GitHub (scoped to a repo, org, or globally).
 
 **Parameters**
 
-| Name | Type | Required | Default | Description |
-|------|------|----------|---------|-------------|
-| `query` | `string` | Yes | — | Search term (follows GitHub code-search syntax) |
-| `owner` | `string` | No | — | Narrow to a specific user or org |
-| `repo` | `string` | No | — | Narrow to a specific repo (requires `owner`) |
-| `language` | `string` | No | — | Filter by language (e.g. `"typescript"`) |
-| `path` | `string` | No | — | Filter to files under this path |
-| `limit` | `number` | No | `30` | Max results (1–100) |
+| Name       | Type     | Required | Default | Description                                     |
+| ---------- | -------- | -------- | ------- | ----------------------------------------------- |
+| `query`    | `string` | Yes      | —       | Search term (follows GitHub code-search syntax) |
+| `owner`    | `string` | No       | —       | Narrow to a specific user or org                |
+| `repo`     | `string` | No       | —       | Narrow to a specific repo (requires `owner`)    |
+| `language` | `string` | No       | —       | Filter by language (e.g. `"typescript"`)        |
+| `path`     | `string` | No       | —       | Filter to files under this path                 |
+| `limit`    | `number` | No       | `30`    | Max results (1–100)                             |
 
 **Return shape**
 
 ```ts
 interface GitHubCodeResult {
-  url: string;            // GitHub API URL for the item
-  htmlUrl: string;        // browser URL
-  repo: string;           // "owner/repo"
+  url: string; // GitHub API URL for the item
+  htmlUrl: string; // browser URL
+  repo: string; // "owner/repo"
   path: string;
-  name: string;           // filename
+  name: string; // filename
   score: number;
-  textMatches?: {         // code snippets with highlight positions (from GitHub's text-match metadata)
+  textMatches?: {
+    // code snippets with highlight positions (from GitHub's text-match metadata)
     fragment: string;
     matches: { text: string; indices: [number, number][] }[];
   }[];
 }
 
 interface GitHubCodeSearchResult {
-  totalCount: number;     // total matching results (may exceed results.length)
+  totalCount: number; // total matching results (may exceed results.length)
   results: GitHubCodeResult[];
 }
 ```
 
 **API strategy**
+
 - `GET /search/code?q={constructed_query}`
 - Construct the query string by appending qualifiers separated by spaces:
   - Base: `query` value
@@ -162,15 +166,16 @@ interface GitHubCodeSearchResult {
 
 ### New files
 
-| File | Purpose |
-|------|---------|
-| `src/tools/githubRepoTree.ts` | `getGitHubRepoTree` handler |
-| `src/tools/githubRepoFile.ts` | `getGitHubRepoFile` handler |
+| File                            | Purpose                       |
+| ------------------------------- | ----------------------------- |
+| `src/tools/githubRepoTree.ts`   | `getGitHubRepoTree` handler   |
+| `src/tools/githubRepoFile.ts`   | `getGitHubRepoFile` handler   |
 | `src/tools/githubRepoSearch.ts` | `getGitHubRepoSearch` handler |
 
 ### Reused infrastructure
 
 All three tools reuse the existing patterns established in `githubRepo.ts`:
+
 - `assertSafeUrl` + `safeResponseJson` from `src/httpGuards.ts`
 - `retryWithBackoff` from `src/retry.ts`
 - `assertRateLimitOk` + per-tool rate-limit tracker from `src/rateLimit.ts`
@@ -195,12 +200,14 @@ Each tool is registered in `src/server.ts` alongside the existing tools, followi
 
 **Zod validation for `owner` and `repo`:**
 Reuse the existing regex constraints from `github_repo` for consistency:
+
 - `owner`: `z.string().regex(/^[a-zA-Z0-9](?:[a-zA-Z0-9._-]*[a-zA-Z0-9])?$/)`
 - `repo`: `z.string().regex(/^[a-zA-Z0-9._-]{1,100}$/)`
 
 ### Types
 
 Add new interfaces to `src/types.ts`:
+
 - `GitHubTreeEntry`
 - `GitHubTreeResult`
 - `GitHubFileResult`
@@ -210,6 +217,7 @@ Add new interfaces to `src/types.ts`:
 ## Error Handling
 
 All tools follow the existing error-response contract:
+
 - 404 → `notFoundError` with the resource name
 - 403 / 429 → `rateLimitError` with `backend: 'github'` or `'github_search'`
 - Network / timeout → `unavailableError` with `backend: 'github'` or `'github_search'`
