@@ -6,6 +6,9 @@ import { webSearch } from './tools/webSearch.js';
 import { webRead } from './tools/webRead.js';
 import { getGitHubRepo } from './tools/githubRepo.js';
 import { getGitHubTrending } from './tools/githubTrending.js';
+import { getGitHubRepoTree } from './tools/githubRepoTree.js';
+import { getGitHubRepoFile } from './tools/githubRepoFile.js';
+import { getGitHubRepoSearch } from './tools/githubRepoSearch.js';
 import { getYouTubeTranscript } from './tools/youtubeTranscript.js';
 import { redditSearch } from './tools/redditSearch.js';
 import { redditComments } from './tools/redditComments.js';
@@ -245,6 +248,92 @@ export function createServer(): McpServer {
         return successResponse(result);
       } catch (err: unknown) {
         logger.error({ err, tool: 'github_trending' }, 'Tool failed');
+        return errorResponse(err);
+      }
+    },
+  );
+
+  // ── github_repo_tree ────────────────────────────────────────────────────
+  server.registerTool(
+    'github_repo_tree',
+    {
+      description:
+        'List the directory structure of a GitHub repository. Supports recursive tree listing and path-based browsing.',
+      inputSchema: {
+        owner: z.string().regex(/^[a-zA-Z0-9](?:[a-zA-Z0-9._-]*[a-zA-Z0-9])?$/).describe('GitHub username or organisation'),
+        repo: z.string().regex(/^[a-zA-Z0-9._-]{1,100}$/).describe('Repository name'),
+        path: z.string().optional().default('').describe('Directory path within the repo'),
+        branch: z.string().optional().describe('Git ref (branch, tag, or commit SHA)'),
+        recursive: z.boolean().optional().default(false).describe('Return full recursive tree'),
+        limit: z.number().int().min(1).max(500).optional().default(100).describe('Max items to return (1–500)'),
+      },
+    },
+    async ({ owner, repo, path, branch, recursive, limit }) => {
+      logger.info({ tool: 'github_repo_tree', owner, repo, path, recursive }, 'Tool invoked');
+      const start = Date.now();
+      try {
+        const data = await getGitHubRepoTree(owner, repo, path, branch, recursive, limit);
+        const result = makeResult('github_repo_tree', data, Date.now() - start);
+        return successResponse(result);
+      } catch (err: unknown) {
+        logger.error({ err, tool: 'github_repo_tree' }, 'Tool failed');
+        return errorResponse(err);
+      }
+    },
+  );
+
+  // ── github_repo_file ────────────────────────────────────────────────────
+  server.registerTool(
+    'github_repo_file',
+    {
+      description:
+        'Read the raw content of a specific file in a GitHub repository. Supports UTF-8 text and base64 output. Handles binary detection, submodules, and symlinks.',
+      inputSchema: {
+        owner: z.string().regex(/^[a-zA-Z0-9](?:[a-zA-Z0-9._-]*[a-zA-Z0-9])?$/).describe('GitHub username or organisation'),
+        repo: z.string().regex(/^[a-zA-Z0-9._-]{1,100}$/).describe('Repository name'),
+        path: z.string().describe('File path within the repo'),
+        branch: z.string().optional().describe('Git ref (branch, tag, or commit SHA)'),
+        raw: z.boolean().optional().default(true).describe('true = decoded UTF-8 text; false = base64'),
+      },
+    },
+    async ({ owner, repo, path, branch, raw }) => {
+      logger.info({ tool: 'github_repo_file', owner, repo, path }, 'Tool invoked');
+      const start = Date.now();
+      try {
+        const data = await getGitHubRepoFile(owner, repo, path, branch, raw);
+        const result = makeResult('github_repo_file', data, Date.now() - start);
+        return successResponse(result);
+      } catch (err: unknown) {
+        logger.error({ err, tool: 'github_repo_file' }, 'Tool failed');
+        return errorResponse(err);
+      }
+    },
+  );
+
+  // ── github_repo_search ────────────────────────────────────────────────────
+  server.registerTool(
+    'github_repo_search',
+    {
+      description:
+        'Search code across GitHub using the GitHub Search API. Supports repo-scoped, language, and path filtering. Results include code snippets with highlight positions.',
+      inputSchema: {
+        query: z.string().describe('Search term (GitHub code-search syntax)'),
+        owner: z.string().optional().describe('Narrow to a specific user or org'),
+        repo: z.string().optional().describe('Narrow to a specific repo (requires owner)'),
+        language: z.string().optional().describe('Filter by language (e.g. "typescript")'),
+        path: z.string().optional().describe('Filter to files under this path'),
+        limit: z.number().int().min(1).max(100).optional().default(30).describe('Max results (1–100)'),
+      },
+    },
+    async ({ query, owner, repo, language, path, limit }) => {
+      logger.info({ tool: 'github_repo_search', query, owner, repo }, 'Tool invoked');
+      const start = Date.now();
+      try {
+        const data = await getGitHubRepoSearch(query, owner, repo, language, path, limit);
+        const result = makeResult('github_repo_search', data, Date.now() - start);
+        return successResponse(result);
+      } catch (err: unknown) {
+        logger.error({ err, tool: 'github_repo_search' }, 'Tool failed');
         return errorResponse(err);
       }
     },
