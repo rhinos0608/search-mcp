@@ -225,7 +225,9 @@ export async function getGitHubRepoTree(
 
   const safeOwner = encodeURIComponent(owner);
   const safeRepo = encodeURIComponent(repo);
-  const encodedPath = path ? `/${encodeURIComponent(path)}` : '';
+  const encodedPath = path
+    ? '/' + path.split('/').map(encodeURIComponent).join('/')
+    : '';
 
   let truncated = false;
 

@@ -455,6 +455,42 @@ test('getGitHubRepoTree recursive with branch containing slashes encodes once in
   assert.ok(entry.htmlUrl.includes('feature%2Ftest'), `htmlUrl should have branch encoded once: ${entry.htmlUrl}`);
 });
 
+// ── Path segment encoding ────────────────────────────────────────────────────
+
+test('getGitHubRepoTree non-recursive encodes path segments individually preserving slashes', async () => {
+  const mockContents = [
+    {
+      name: 'file.ts',
+      path: 'src/lib/file.ts',
+      type: 'file',
+      size: 100,
+      sha: 'sha1',
+      html_url: 'https://github.com/o/r/blob/main/src/lib/file.ts',
+      url: 'https://api.github.com/repos/o/r/contents/src/lib/file.ts?ref=main',
+    },
+  ];
+
+  let fetchedUrl: string | undefined;
+
+  globalThis.fetch = async (url: string | URL | Request) => {
+    fetchedUrl = url.toString();
+    return buildMockResponse(mockContents);
+  };
+
+  await getGitHubRepoTree('owner', 'repo', 'src/lib', 'main', false);
+
+  // URL must contain "src/lib" with literal slashes, not "src%2Flib"
+  assert.ok(
+    fetchedUrl!.includes('src/lib'),
+    `Expected "src/lib" in URL but got: ${fetchedUrl}`,
+  );
+  // Verify slashes are NOT percent-encoded
+  assert.ok(
+    !fetchedUrl!.includes('src%2Flib'),
+    `Found "src%2Flib" (encoded slashes) in URL: ${fetchedUrl}`,
+  );
+});
+
 // ── Default limit ─────────────────────────────────────────────────────────
 
 test('getGitHubRepoTree defaults to limit 100', async () => {
