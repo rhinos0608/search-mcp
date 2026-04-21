@@ -107,8 +107,8 @@ test('RateLimitedBackend includes github_search', () => {
 
 // ── Health: FREE_TOOLS includes new GitHub tools ────────────────────────────
 
-test('FREE_TOOLS includes github_tree, github_file, github_code_search', () => {
-  const expected = ['github_tree', 'github_file', 'github_code_search'] as const;
+test('FREE_TOOLS includes github_repo_tree, github_repo_file, github_repo_search', () => {
+  const expected = ['github_repo_tree', 'github_repo_file', 'github_repo_search'] as const;
   for (const tool of expected) {
     assert.ok(
       (FREE_TOOLS as readonly string[]).includes(tool),
@@ -117,20 +117,39 @@ test('FREE_TOOLS includes github_tree, github_file, github_code_search', () => {
   }
 });
 
-// ── Health: RATE_LIMIT_TOOL_MAP includes GitHub search mapping ───────────────
+// ── Health: RATE_LIMIT_TOOL_MAP includes GitHub tools ───────────────────────
 
-test('RATE_LIMIT_TOOL_MAP includes github_code_search → github_search', () => {
-  const entry = RATE_LIMIT_TOOL_MAP.find(([tool]) => tool === 'github_code_search');
-  assert.ok(entry, 'RATE_LIMIT_TOOL_MAP should have an entry for github_code_search');
-  assert.equal(entry[1], 'github_search', 'github_code_search should map to github_search backend');
+test('RATE_LIMIT_TOOL_MAP includes github_repo_tree and github_repo_file mapping to github', () => {
+  const treeEntry = RATE_LIMIT_TOOL_MAP.find(([tool]) => tool === 'github_repo_tree');
+  assert.ok(treeEntry, 'RATE_LIMIT_TOOL_MAP should have an entry for github_repo_tree');
+  assert.equal(treeEntry[1], 'github', 'github_repo_tree should map to github backend');
+
+  const fileEntry = RATE_LIMIT_TOOL_MAP.find(([tool]) => tool === 'github_repo_file');
+  assert.ok(fileEntry, 'RATE_LIMIT_TOOL_MAP should have an entry for github_repo_file');
+  assert.equal(fileEntry[1], 'github', 'github_repo_file should map to github backend');
 });
 
-// ── Health: getNetworkProbes returns probe for github_search ─────────────────
+test('RATE_LIMIT_TOOL_MAP includes github_repo_search → github_search', () => {
+  const entry = RATE_LIMIT_TOOL_MAP.find(([tool]) => tool === 'github_repo_search');
+  assert.ok(entry, 'RATE_LIMIT_TOOL_MAP should have an entry for github_repo_search');
+  assert.equal(entry[1], 'github_search', 'github_repo_search should map to github_search backend');
+});
 
-test('getNetworkProbes returns a probe for github_code_search', () => {
+// ── Health: getNetworkProbes returns probe for github tools ─────────────────
+
+test('getNetworkProbes returns probes for all github tools', () => {
   const cfg = loadConfig();
   const probes = getNetworkProbes(cfg);
-  const githubProbe = probes.find((p: { tools: readonly string[] }) => p.tools.includes('github_code_search'));
-  assert.ok(githubProbe, 'getNetworkProbes should return a probe for github_code_search');
+  const githubProbe = probes.find((p: { tools: readonly string[] }) => p.tools.includes('github_repo'));
+  assert.ok(githubProbe, 'getNetworkProbes should return a probe for github_repo');
+
+  // Verify all GitHub tools are in the probe
+  const githubTools = ['github_repo', 'github_repo_tree', 'github_repo_file', 'github_repo_search'];
+  for (const tool of githubTools) {
+    assert.ok(
+      githubProbe.tools.includes(tool),
+      `probe should include ${tool}`,
+    );
+  }
   assert.ok(githubProbe.url.includes('api.github.com'), 'probe URL should use GitHub API');
 });
