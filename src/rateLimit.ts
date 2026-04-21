@@ -143,7 +143,7 @@ function parseSemanticScholarHeaders(headers: Headers): RateLimitInfo | null {
   };
 }
 
-function parseRateLimitHeaders(
+export function parseRateLimitHeaders(
   backend: RateLimitedBackend,
   headers: Headers,
 ): RateLimitInfo | null {
