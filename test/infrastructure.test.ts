@@ -134,7 +134,7 @@ test('parseGitHubSearchHeaders returns RateLimitInfo with backend github_search'
   assert.equal(result!.remaining, 42);
   assert.equal(result!.limit, 5000);
   // resetAt = resetEpochSec * 1000 + clockSkewMs (may have small clock skew)
-  assert.ok(result!.resetAt >= 1735689600000, `resetAt should be >= 1735689600000, got ${result!.resetAt}`);
+  assert.ok(result!.resetAt >= 1735689600000, 'resetAt should be >= 1735689600000, got: ' + result!.resetAt);
 });
 
 // ── Health: FREE_TOOLS includes new GitHub tools ────────────────────────────
@@ -144,7 +144,7 @@ test('FREE_TOOLS includes github_repo_tree, github_repo_file, github_repo_search
   for (const tool of expected) {
     assert.ok(
       (FREE_TOOLS as readonly string[]).includes(tool),
-      `${tool} should be in FREE_TOOLS`,
+      tool + ' should be in FREE_TOOLS',
     );
   }
 });
@@ -161,7 +161,7 @@ test('RATE_LIMIT_TOOL_MAP includes github_repo_tree and github_repo_file mapping
   assert.equal(fileEntry[1], 'github', 'github_repo_file should map to github backend');
 });
 
-test('RATE_LIMIT_TOOL_MAP includes github_repo_search → github_search', () => {
+test('RATE_LIMIT_TOOL_MAP includes github_repo_search to github_search', () => {
   const entry = RATE_LIMIT_TOOL_MAP.find(([tool]) => tool === 'github_repo_search');
   assert.ok(entry, 'RATE_LIMIT_TOOL_MAP should have an entry for github_repo_search');
   assert.equal(entry[1], 'github_search', 'github_repo_search should map to github_search backend');
@@ -183,7 +183,7 @@ test('configHealth returns healthy status for github_repo_tree, github_repo_file
 test('getNetworkProbes returns probes for all github tools', () => {
   const cfg = loadConfig();
   const probes = getNetworkProbes(cfg);
-  const githubProbe = probes.find((p: { tools: readonly string[] }) => p.tools.includes('github_repo'));
+  const githubProbe = probes.find((p) => p.tools.includes('github_repo'));
   assert.ok(githubProbe, 'getNetworkProbes should return a probe for github_repo');
 
   // Verify all GitHub tools are in the probe
@@ -191,7 +191,7 @@ test('getNetworkProbes returns probes for all github tools', () => {
   for (const tool of githubTools) {
     assert.ok(
       githubProbe.tools.includes(tool),
-      `probe should include ${tool}`,
+      'probe should include ' + tool,
     );
   }
   assert.ok(githubProbe.url.includes('api.github.com'), 'probe URL should use GitHub API');

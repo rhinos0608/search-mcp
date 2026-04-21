@@ -302,6 +302,7 @@ export interface GitHubTreeEntry {
 export interface GitHubTreeResult {
   entries: GitHubTreeEntry[];
   truncated: boolean;
+  warnings?: string[];
 }
 
 export interface GitHubFileResult {

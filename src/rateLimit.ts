@@ -19,7 +19,13 @@ export interface RateLimitInfo {
   backend: string;
 }
 
-export type RateLimitedBackend = 'brave' | 'github' | 'github_search' | 'reddit' | 'semantic_scholar' | 'arxiv';
+export type RateLimitedBackend =
+  | 'brave'
+  | 'github'
+  | 'github_search'
+  | 'reddit'
+  | 'semantic_scholar'
+  | 'arxiv';
 
 const LOW_REMAINING_THRESHOLD = 5;
 const MAX_SHORT_BACKOFF_MS = 5_000;
