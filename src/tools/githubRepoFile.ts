@@ -333,37 +333,43 @@ export async function getGitHubRepoFile(
   }
 
   // Decode base64
-  const decoded = Buffer.from(contentB64, 'base64').toString('utf-8');
+  const bytes = Buffer.from(contentB64, 'base64');
 
   // Detect binary
-  const binary = isBinaryContent(decoded, path);
+  const binary = isBinaryContent(bytes.toString('utf-8'), path);
 
-  // Truncate decoded text first — before any re-encoding for output
-  // 50 KB limit (same as README cap); note: already at 50_000 per convention
+  // Truncate at 50 KB limit
   const MAX_FILE_LENGTH = 50_000;
   let truncated = false;
   let finalContent: string;
-
-  if (decoded.length > MAX_FILE_LENGTH) {
-    truncated = true;
-    finalContent = decoded.slice(0, MAX_FILE_LENGTH) + TRUNCATED_MARKER;
-  } else {
-    finalContent = decoded;
-  }
-
-  // Determine output encoding and content
-  // Truncation was applied to decoded text; re-encode if base64 output is needed
   let outputEncoding: 'utf-8' | 'base64';
 
   if (binary) {
-    // Always return base64 for binary files regardless of raw flag
+    // Truncate at buffer level (base64-safe: multiple of 3 bytes)
     outputEncoding = 'base64';
-    finalContent = Buffer.from(finalContent).toString('base64');
-  } else if (raw) {
-    outputEncoding = 'utf-8';
+    if (bytes.length > MAX_FILE_LENGTH) {
+      truncated = true;
+      const truncLen = MAX_FILE_LENGTH - (MAX_FILE_LENGTH % 3);
+      finalContent = bytes.subarray(0, truncLen).toString('base64') + TRUNCATED_MARKER;
+    } else {
+      finalContent = contentB64;
+    }
   } else {
-    outputEncoding = 'base64';
-    finalContent = Buffer.from(finalContent).toString('base64');
+    // Text file: truncate at character level
+    const decoded = bytes.toString('utf-8');
+    if (decoded.length > MAX_FILE_LENGTH) {
+      truncated = true;
+      finalContent = decoded.slice(0, MAX_FILE_LENGTH) + TRUNCATED_MARKER;
+    } else {
+      finalContent = decoded;
+    }
+
+    if (raw) {
+      outputEncoding = 'utf-8';
+    } else {
+      outputEncoding = 'base64';
+      finalContent = Buffer.from(finalContent).toString('base64');
+    }
   }
 
   return {

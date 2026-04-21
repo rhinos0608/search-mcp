@@ -428,14 +428,14 @@ test('getGitHubRepoFile truncates large text file returned as base64 (raw=false)
 });
 
 test('getGitHubRepoFile truncates large binary file returned as base64', async () => {
-  // Build binary content larger than 50 KB
-  // Use repeating pattern that stays binary (contains null bytes)
-  const binaryChunks: string[] = [];
-  for (let i = 0; i < 60 * 1024; i++) {
-    binaryChunks.push(String.fromCharCode(i % 256));
+  // Build binary content larger than 50 KB using actual binary data (PNG header pattern)
+  const chunkSize = 60 * 1024;
+  const largeBinaryBuffer = Buffer.alloc(chunkSize);
+  for (let i = 0; i < chunkSize; i++) {
+    largeBinaryBuffer[i] = i % 256;
   }
-  const largeBinary = binaryChunks.join('');
-  const encoded = btoa(largeBinary);
+  const largeBinary = largeBinaryBuffer.toString('latin1');
+  const encoded = largeBinaryBuffer.toString('base64');
 
   globalThis.fetch = async () =>
     buildMockResponse({
@@ -459,25 +459,21 @@ test('getGitHubRepoFile truncates large binary file returned as base64', async (
     result.content.length < encoded.length,
     `Expected truncated base64 (${result.content.length} chars) < original (${encoded.length} chars)`,
   );
-  // Decoding the truncated base64 should yield the truncated binary data
-  const decoded = Buffer.from(result.content, 'base64');
-  // Decoded bytes should be truncated (original was ~60KB = 60*1024 bytes).
-  // When binary data with high byte values is UTF-8 encoded and then re-base64'd,
-  // the decoded byte count can exceed the original char count due to multi-byte
-  // UTF-8 encoding of high-byte characters. Bound conservatively.
-  assert.ok(
-    decoded.length <= 90_000,
-    `Decoded truncated content should be reasonable (<=90KB), got ${decoded.length}`,
+  // Remove the truncation marker to get the pure base64 content
+  const base64WithoutMarker = result.content.slice(0, -TRUNCATED_MARKER.length);
+  // Decoding the truncated base64 should yield the original bytes (up to truncation point)
+  const decoded = Buffer.from(base64WithoutMarker, 'base64');
+  // The decoded bytes should exactly match the original bytes up to the truncation point
+  const expectedTruncLen = 50_000 - (50_000 % 3);
+  assert.equal(
+    decoded.length,
+    expectedTruncLen,
+    `Expected decoded length ${expectedTruncLen}, got ${decoded.length}`,
   );
+  const originalSlice = largeBinaryBuffer.slice(0, expectedTruncLen);
   assert.ok(
-    decoded.length > 50_000,
-    `Decoded truncated content should be > 50KB (truncated), got ${decoded.length}`,
-  );
-  // The decoded bytes should end with the truncation marker bytes
-  const markerBytes = Buffer.from(TRUNCATED_MARKER, 'utf-8');
-  assert.ok(
-    decoded.slice(-markerBytes.length).equals(markerBytes),
-    'Decoded truncated content should end with truncation marker',
+    decoded.equals(originalSlice),
+    'Decoded bytes should match original bytes up to truncation point',
   );
 });
 
