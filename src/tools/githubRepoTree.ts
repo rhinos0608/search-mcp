@@ -99,42 +99,28 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
+function getString(obj: Record<string, unknown>, key: string): string {
+  const v = obj[key];
+  return typeof v === 'string' ? v : '';
+}
+
+function getStringOrNull(obj: Record<string, unknown>, key: string): string | null {
+  const v = obj[key];
+  return typeof v === 'string' ? v : null;
+}
+
+function getNumberOrUndefined(obj: Record<string, unknown>, key: string): number | undefined {
+  const v = obj[key];
+  return typeof v === 'number' ? v : undefined;
+}
+
 // ── Normalization helpers ────────────────────────────────────────────────────
-
-interface ContentsItem {
-  name: string;
-  path: string;
-  type: string;
-  size?: number;
-  sha?: string;
-  html_url?: string;
-  url?: string;
-}
-
-interface TreeItem {
-  path: string;
-  type: string;
-  mode?: string;
-  sha?: string;
-  size?: number;
-  url?: string;
-}
-
-// Cast from unknown (JSON value) to the typed API response shape.
-// The JSON has been parsed; we trust the structure matches the API contract.
-function asContentsItem(obj: unknown): ContentsItem {
-  return obj as ContentsItem;
-}
-
-function asTreeItem(obj: unknown): TreeItem {
-  return obj as TreeItem;
-}
 
 /**
  * Normalize a single item from the non-recursive contents API.
  */
-function normalizeContentsEntry(item: ContentsItem): GitHubTreeEntry {
-  const rawType = item.type;
+function normalizeContentsEntry(item: Record<string, unknown>): GitHubTreeEntry {
+  const rawType = getString(item, 'type');
   let type: GitHubTreeEntry['type'] = 'file';
   if (rawType === 'dir') type = 'dir';
   else if (rawType === 'symlink') type = 'symlink';
@@ -142,19 +128,20 @@ function normalizeContentsEntry(item: ContentsItem): GitHubTreeEntry {
   // default: 'file'
 
   const entry: GitHubTreeEntry = {
-    name: item.name,
-    path: item.path,
+    name: getString(item, 'name'),
+    path: getString(item, 'path'),
     type,
-    htmlUrl: item.html_url ?? '',
-    apiUrl: item.url ?? '',
+    htmlUrl: getStringOrNull(item, 'html_url') ?? '',
+    apiUrl: getStringOrNull(item, 'url') ?? '',
   };
 
-  // Only include optional fields when present
-  if (item.sha && typeof item.sha === 'string') {
-    entry.sha = item.sha;
+  const sha = getStringOrNull(item, 'sha');
+  if (sha !== null) {
+    entry.sha = sha;
   }
-  if (item.size !== undefined && typeof item.size === 'number') {
-    entry.size = item.size;
+  const size = getNumberOrUndefined(item, 'size');
+  if (size !== undefined) {
+    entry.size = size;
   }
 
   return entry;
@@ -164,13 +151,13 @@ function normalizeContentsEntry(item: ContentsItem): GitHubTreeEntry {
  * Normalize a single item from the recursive git/trees API.
  */
 function normalizeTreeEntry(
-  item: TreeItem,
+  item: Record<string, unknown>,
   owner: string,
   repo: string,
-  branch: string,
+  branch?: string,
 ): GitHubTreeEntry {
-  const rawType = item.type;
-  const mode = item.mode;
+  const rawType = getString(item, 'type');
+  const mode = getString(item, 'mode');
 
   let type: GitHubTreeEntry['type'] = 'file';
   // Symlinks arrive as "blob" with mode 120000
@@ -179,31 +166,41 @@ function normalizeTreeEntry(
   else if (rawType === 'commit') type = 'submodule';
   // default: 'file' (includes 'blob' and any unknown)
 
+  const path = getString(item, 'path');
+
   // name = last path segment
-  const segments = item.path.split('/');
+  const segments = path.split('/');
   const lastSegment = segments.length > 0 ? segments[segments.length - 1] : undefined;
-  const name = lastSegment ?? item.path;
+  const name = lastSegment ?? path;
 
   const base = `https://github.com/${owner}/${repo}`;
 
-  const htmlUrl =
-    type === 'dir'
-      ? `${base}/tree/${encodeURIComponent(branch)}/${item.path}`
-      : `${base}/blob/${encodeURIComponent(branch)}/${item.path}`;
+  let htmlUrl: string;
+  if (branch) {
+    htmlUrl =
+      type === 'dir'
+        ? `${base}/tree/${encodeURIComponent(branch)}/${path}`
+        : `${base}/blob/${encodeURIComponent(branch)}/${path}`;
+  } else {
+    htmlUrl =
+      type === 'dir' ? `${base}/tree/main/${path}` : `${base}/blob/main/${path}`;
+  }
 
   const entry: GitHubTreeEntry = {
     name,
-    path: item.path,
+    path,
     type,
     htmlUrl,
-    apiUrl: item.url ?? '',
+    apiUrl: getStringOrNull(item, 'url') ?? '',
   };
 
-  if (item.sha) {
-    entry.sha = item.sha;
+  const sha = getStringOrNull(item, 'sha');
+  if (sha !== null) {
+    entry.sha = sha;
   }
-  if (item.size !== undefined && typeof item.size === 'number') {
-    entry.size = item.size;
+  const size = getNumberOrUndefined(item, 'size');
+  if (size !== undefined) {
+    entry.size = size;
   }
 
   return entry;
@@ -255,8 +252,8 @@ export async function getGitHubRepoTree(
       });
     }
 
-    const tree = body.tree;
-    if (!Array.isArray(tree)) {
+    const rawTree = body.tree;
+    if (!Array.isArray(rawTree)) {
       throw unavailableError(`GitHub tree API missing array field "tree" for ${owner}/${repo}`, {
         backend: 'github',
       });
@@ -264,11 +261,9 @@ export async function getGitHubRepoTree(
 
     truncated = body.truncated === true;
 
-    const entries: GitHubTreeEntry[] = [];
-    for (const item of tree) {
-      if (!isRecord(item)) continue;
-      entries.push(normalizeTreeEntry(asTreeItem(item as unknown), owner, repo, ref));
-    }
+    const entries: GitHubTreeEntry[] = rawTree
+      .map((item) => (isRecord(item) ? normalizeTreeEntry(item, owner, repo, branch) : null))
+      .filter((e): e is GitHubTreeEntry => e !== null);
 
     const sliced = limit > 0 ? entries.slice(0, limit) : entries;
     return { entries: sliced, truncated };
@@ -296,11 +291,9 @@ export async function getGitHubRepoTree(
     );
   }
 
-  const entries: GitHubTreeEntry[] = [];
-  for (const item of body) {
-    if (!isRecord(item)) continue;
-    entries.push(normalizeContentsEntry(asContentsItem(item)));
-  }
+  const entries: GitHubTreeEntry[] = (body as unknown[])
+    .map((item) => (isRecord(item) ? normalizeContentsEntry(item) : null))
+    .filter((e): e is GitHubTreeEntry => e !== null);
 
   const sliced = limit > 0 ? entries.slice(0, limit) : entries;
   return { entries: sliced, truncated };
