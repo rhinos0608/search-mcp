@@ -260,12 +260,25 @@ export function createServer(): McpServer {
       description:
         'List the directory structure of a GitHub repository. Supports recursive tree listing and path-based browsing.',
       inputSchema: {
-        owner: z.string().regex(/^[a-zA-Z0-9](?:[a-zA-Z0-9._-]*[a-zA-Z0-9])?$/).describe('GitHub username or organisation'),
-        repo: z.string().regex(/^[a-zA-Z0-9._-]{1,100}$/).describe('Repository name'),
+        owner: z
+          .string()
+          .regex(/^[a-zA-Z0-9](?:[a-zA-Z0-9._-]*[a-zA-Z0-9])?$/)
+          .describe('GitHub username or organisation'),
+        repo: z
+          .string()
+          .regex(/^[a-zA-Z0-9._-]{1,100}$/)
+          .describe('Repository name'),
         path: z.string().optional().default('').describe('Directory path within the repo'),
         branch: z.string().optional().describe('Git ref (branch, tag, or commit SHA)'),
         recursive: z.boolean().optional().default(false).describe('Return full recursive tree'),
-        limit: z.number().int().min(1).max(500).optional().default(100).describe('Max items to return (1–500)'),
+        limit: z
+          .number()
+          .int()
+          .min(1)
+          .max(500)
+          .optional()
+          .default(100)
+          .describe('Max items to return (1–500)'),
       },
     },
     async ({ owner, repo, path, branch, recursive, limit }) => {
@@ -289,11 +302,21 @@ export function createServer(): McpServer {
       description:
         'Read the raw content of a specific file in a GitHub repository. Supports UTF-8 text and base64 output. Handles binary detection, submodules, and symlinks.',
       inputSchema: {
-        owner: z.string().regex(/^[a-zA-Z0-9](?:[a-zA-Z0-9._-]*[a-zA-Z0-9])?$/).describe('GitHub username or organisation'),
-        repo: z.string().regex(/^[a-zA-Z0-9._-]{1,100}$/).describe('Repository name'),
+        owner: z
+          .string()
+          .regex(/^[a-zA-Z0-9](?:[a-zA-Z0-9._-]*[a-zA-Z0-9])?$/)
+          .describe('GitHub username or organisation'),
+        repo: z
+          .string()
+          .regex(/^[a-zA-Z0-9._-]{1,100}$/)
+          .describe('Repository name'),
         path: z.string().describe('File path within the repo'),
         branch: z.string().optional().describe('Git ref (branch, tag, or commit SHA)'),
-        raw: z.boolean().optional().default(true).describe('true = decoded UTF-8 text; false = base64'),
+        raw: z
+          .boolean()
+          .optional()
+          .default(true)
+          .describe('true = decoded UTF-8 text; false = base64'),
       },
     },
     async ({ owner, repo, path, branch, raw }) => {
@@ -322,7 +345,14 @@ export function createServer(): McpServer {
         repo: z.string().optional().describe('Narrow to a specific repo (requires owner)'),
         language: z.string().optional().describe('Filter by language (e.g. "typescript")'),
         path: z.string().optional().describe('Filter to files under this path'),
-        limit: z.number().int().min(1).max(100).optional().default(30).describe('Max results (1–100)'),
+        limit: z
+          .number()
+          .int()
+          .min(1)
+          .max(100)
+          .optional()
+          .default(30)
+          .describe('Max results (1–100)'),
       },
     },
     async ({ query, owner, repo, language, path, limit }) => {

@@ -16,12 +16,7 @@ import { logger } from '../logger.js';
 import { assertSafeUrl, safeResponseJson } from '../httpGuards.js';
 import { retryWithBackoff } from '../retry.js';
 import { assertRateLimitOk, getTracker } from '../rateLimit.js';
-import {
-  rateLimitError,
-  notFoundError,
-  unavailableError,
-  timeoutError,
-} from '../errors.js';
+import { rateLimitError, notFoundError, unavailableError, timeoutError } from '../errors.js';
 import type { GitHubCodeResult, GitHubCodeSearchResult } from '../types.js';
 
 const GITHUB_API = 'https://api.github.com';
@@ -263,8 +258,7 @@ export async function getGitHubRepoSearch(
     await assertRateLimitOk('github_search');
 
     const pageSize = Math.min(100, clampedLimit - results.length);
-    const searchUrl =
-      `${GITHUB_API}/search/code?q=${encodedQuery}&per_page=${String(pageSize)}&page=${String(page)}`;
+    const searchUrl = `${GITHUB_API}/search/code?q=${encodedQuery}&per_page=${String(pageSize)}&page=${String(page)}`;
 
     logger.debug({ searchUrl }, 'Fetching code search page');
 
