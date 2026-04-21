@@ -182,15 +182,14 @@ function normalizeTreeEntry(
   // name = last path segment
   const segments = item.path.split('/');
   const lastSegment = segments.length > 0 ? segments[segments.length - 1] : undefined;
-const name = lastSegment ?? item.path;
+  const name = lastSegment ?? item.path;
 
   const base = `https://github.com/${owner}/${repo}`;
-  const encodedBranch = encodeURIComponent(branch);
 
   const htmlUrl =
     type === 'dir'
-      ? `${base}/tree/${encodedBranch}/${item.path}`
-      : `${base}/blob/${encodedBranch}/${item.path}`;
+      ? `${base}/tree/${encodeURIComponent(branch)}/${item.path}`
+      : `${base}/blob/${encodeURIComponent(branch)}/${item.path}`;
 
   const entry: GitHubTreeEntry = {
     name,
@@ -218,7 +217,7 @@ export async function getGitHubRepoTree(
   path?: string,
   branch?: string,
   recursive?: boolean,
-  limit?: number,
+  limit = 100,
 ): Promise<GitHubTreeResult> {
   logger.info({ owner, repo, path, branch, recursive, limit }, 'getGitHubRepoTree');
 
@@ -227,14 +226,13 @@ export async function getGitHubRepoTree(
   const safeOwner = encodeURIComponent(owner);
   const safeRepo = encodeURIComponent(repo);
   const encodedPath = path ? `/${encodeURIComponent(path)}` : '';
-  const encodedBranch = branch ? encodeURIComponent(branch) : '';
 
   let truncated = false;
 
   if (recursive) {
     // ── Recursive path: git/trees/{ref}?recursive=1 ─────────────────────────
-    const ref = encodedBranch || 'main';
-    const treeUrl = `${GITHUB_API}/repos/${safeOwner}/${safeRepo}/git/trees/${ref}?recursive=1`;
+    const ref = branch ?? 'HEAD';
+    const treeUrl = `${GITHUB_API}/repos/${safeOwner}/${safeRepo}/git/trees/${encodeURIComponent(ref)}?recursive=1`;
 
     logger.debug({ treeUrl }, 'Fetching recursive tree');
 
@@ -270,12 +268,13 @@ export async function getGitHubRepoTree(
       entries.push(normalizeTreeEntry(asTreeItem(item as unknown), owner, repo, ref));
     }
 
-    const sliced = limit !== undefined && limit > 0 ? entries.slice(0, limit) : entries;
+    const sliced = limit > 0 ? entries.slice(0, limit) : entries;
     return { entries: sliced, truncated };
   }
 
   // ── Non-recursive path: /repos/{owner}/{repo}/contents/{path}?ref={branch} ─
 
+  const encodedBranch = branch ? encodeURIComponent(branch) : '';
   const contentsUrl = `${GITHUB_API}/repos/${safeOwner}/${safeRepo}/contents${encodedPath}${
     encodedBranch ? `?ref=${encodedBranch}` : ''
   }`;
@@ -301,6 +300,6 @@ export async function getGitHubRepoTree(
     entries.push(normalizeContentsEntry(asContentsItem(item)));
   }
 
-  const sliced = limit !== undefined && limit > 0 ? entries.slice(0, limit) : entries;
+  const sliced = limit > 0 ? entries.slice(0, limit) : entries;
   return { entries: sliced, truncated };
 }

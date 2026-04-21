@@ -418,3 +418,67 @@ test('getGitHubRepoTree non-recursive maps submodule type', async () => {
   assert.equal(result.entries.length, 1);
   assert.equal(result.entries[0]!.type, 'submodule');
 });
+
+// ── Branch with special characters ─────────────────────────────────────────
+
+test('getGitHubRepoTree recursive with branch containing slashes encodes once in htmlUrl', async () => {
+  const mockTree = {
+    tree: [
+      {
+        path: 'src/index.ts',
+        type: 'blob',
+        mode: '100644',
+        sha: 'sha1',
+        size: 100,
+        url: 'https://api.github.com/repos/o/r/git/blobs/sha1',
+      },
+    ],
+    truncated: false,
+  };
+
+  let fetchedUrl: string | undefined;
+
+  globalThis.fetch = async (url: string | URL | Request) => {
+    fetchedUrl = url.toString();
+    return buildMockResponse(mockTree);
+  };
+
+  const result = await getGitHubRepoTree('o', 'r', undefined, 'feature/test', true);
+
+  // API URL should have the branch encoded once
+  assert.ok(fetchedUrl!.includes('feature%2Ftest'), `Expected branch to be encoded once in API URL, got: ${fetchedUrl}`);
+  // The ref should not be double-encoded (would appear as %252F)
+  assert.ok(!fetchedUrl!.includes('%252F'), `Branch was double-encoded in API URL: ${fetchedUrl}`);
+
+  // htmlUrl should have branch encoded once (feature%2Ftest, not feature/test)
+  const entry = result.entries[0]!;
+  assert.ok(entry.htmlUrl.includes('feature%2Ftest'), `htmlUrl should have branch encoded once: ${entry.htmlUrl}`);
+});
+
+// ── Default limit ─────────────────────────────────────────────────────────
+
+test('getGitHubRepoTree defaults to limit 100', async () => {
+  // Create 150 entries to exceed the default limit
+  const manyEntries = Array.from({ length: 150 }, (_, i) => ({
+    path: `file${i}.txt`,
+    type: 'blob',
+    mode: '100644',
+    sha: `sha${i}`,
+    size: i + 1,
+    url: `url${i}`,
+  }));
+
+  const mockTree = {
+    tree: manyEntries,
+    truncated: false,
+  };
+
+  globalThis.fetch = async () => buildMockResponse(mockTree);
+
+  const result = await getGitHubRepoTree('o', 'r', undefined, 'main', true);
+
+  // Should only return 100 entries (the default limit), not all 150
+  assert.equal(result.entries.length, 100);
+  assert.equal(result.entries[0]!.path, 'file0.txt');
+  assert.equal(result.entries[99]!.path, 'file99.txt');
+});
