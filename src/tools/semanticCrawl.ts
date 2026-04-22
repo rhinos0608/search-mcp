@@ -1,6 +1,7 @@
 import { logger } from '../logger.js';
 import { unavailableError, networkError, parseError } from '../errors.js';
 import { retryWithBackoff } from '../retry.js';
+import { assertSafeUrl, safeResponseJson } from '../httpGuards.js';
 
 interface EmbedRequest {
   texts: string[];
@@ -29,6 +30,8 @@ export async function embedTexts(
   }
 
   const endpoint = `${baseUrl.replace(/\/+$/, '')}/embed`;
+  assertSafeUrl(endpoint);
+
   const body: EmbedRequest = { texts, mode, dimensions };
 
   const headers: Record<string, string> = {
@@ -66,9 +69,9 @@ export async function embedTexts(
       );
     }
 
-    raw = await response.json();
+    raw = await safeResponseJson(response, endpoint);
   } catch (err) {
-    if (err instanceof Error && (err.name === 'AbortError' || err.name === 'TimeoutError')) {
+    if (err instanceof Error && err.name === 'AbortError') {
       throw networkError('Embedding sidecar request timed out after 60 seconds');
     }
     throw err;
@@ -83,7 +86,7 @@ export async function embedTexts(
     throw parseError('Embedding sidecar response missing embeddings array');
   }
 
-  if (data.truncatedIndices.length > 0) {
+  if (Array.isArray(data.truncatedIndices) && data.truncatedIndices.length > 0) {
     logger.warn(
       { truncatedIndices: data.truncatedIndices },
       'Some chunks were truncated by the embedding model',
