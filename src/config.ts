@@ -28,6 +28,11 @@ export interface RedditConfig {
   oauthConfigValid: boolean;
 }
 
+export interface Crawl4aiConfig {
+  baseUrl: string;
+  apiToken: string;
+}
+
 export interface SearchConfig {
   searchBackend: SearchBackend;
   brave: { apiKey: string };
@@ -39,6 +44,7 @@ export interface SearchConfig {
   youtube: { apiKey: string };
   stackexchange: { apiKey: string };
   reddit: RedditConfig;
+  crawl4ai: Crawl4aiConfig;
 }
 
 const DEFAULTS: SearchConfig = {
@@ -58,6 +64,7 @@ const DEFAULTS: SearchConfig = {
     oauthEnabled: false,
     oauthConfigValid: true,
   },
+  crawl4ai: { baseUrl: '', apiToken: '' },
 };
 
 const VALID_BACKENDS = new Set<string>(['brave', 'searxng']);
@@ -86,8 +93,9 @@ function decryptConfigFile(filePath: string, password: string): SearchConfig {
   return JSON.parse(decrypted.toString('utf8')) as SearchConfig;
 }
 
-type EnvConfig = Omit<Partial<SearchConfig>, 'reddit'> & {
+type EnvConfig = Omit<Partial<SearchConfig>, 'reddit' | 'crawl4ai'> & {
   reddit?: Partial<RedditConfig>;
+  crawl4ai?: Partial<Crawl4aiConfig>;
 };
 
 function loadFromEnv(): EnvConfig {
@@ -155,6 +163,15 @@ function loadFromEnv(): EnvConfig {
     cfg.reddit = redditCfg;
   }
 
+  const crawl4aiUrl = process.env.CRAWL4AI_BASE_URL;
+  const crawl4aiToken = process.env.CRAWL4AI_API_TOKEN;
+  if (crawl4aiUrl !== undefined || crawl4aiToken !== undefined) {
+    cfg.crawl4ai = {
+      baseUrl: crawl4aiUrl ?? '',
+      apiToken: crawl4aiToken ?? '',
+    };
+  }
+
   return cfg;
 }
 
@@ -219,6 +236,14 @@ export function loadConfig(): SearchConfig {
         DEFAULTS.stackexchange.apiKey,
     },
     reddit: resolveRedditConfig(envConfig.reddit, fileConfig.reddit),
+    crawl4ai: {
+      baseUrl:
+        envConfig.crawl4ai?.baseUrl ?? fileConfig.crawl4ai?.baseUrl ?? DEFAULTS.crawl4ai.baseUrl,
+      apiToken:
+        envConfig.crawl4ai?.apiToken ??
+        fileConfig.crawl4ai?.apiToken ??
+        DEFAULTS.crawl4ai.apiToken,
+    },
   };
 
   if (!cached.reddit.oauthConfigValid) {
