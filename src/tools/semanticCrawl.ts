@@ -2,6 +2,10 @@ import { logger } from '../logger.js';
 import { unavailableError, networkError, parseError } from '../errors.js';
 import { retryWithBackoff } from '../retry.js';
 import { assertSafeUrl, safeResponseJson } from '../httpGuards.js';
+import { webCrawl, type WebCrawlOptions } from './webCrawl.js';
+import { chunkMarkdown } from '../chunking.js';
+import type { SemanticCrawlResult, SemanticCrawlChunk } from '../types.js';
+import type { Crawl4aiConfig } from '../config.js';
 
 interface EmbedRequest {
   texts: string[];
@@ -94,4 +98,135 @@ export async function embedTexts(
   }
 
   return data.embeddings;
+}
+
+const MAX_CHUNKS_SOFT = 2_000;
+const MAX_CHUNKS_HARD = 5_000;
+
+export interface SemanticCrawlOptions {
+  url: string;
+  query: string;
+  topK: number;
+  strategy: 'bfs' | 'dfs';
+  maxDepth: number;
+  maxPages: number;
+  includeExternalLinks: boolean;
+}
+
+export async function semanticCrawl(
+  opts: SemanticCrawlOptions,
+  crawl4aiCfg: Crawl4aiConfig,
+  embeddingBaseUrl: string,
+  embeddingApiToken: string,
+  embeddingDimensions: number,
+): Promise<SemanticCrawlResult> {
+  // 1. Crawl
+  const crawlOpts: WebCrawlOptions = {
+    strategy: opts.strategy,
+    maxDepth: opts.maxDepth,
+    maxPages: opts.maxPages,
+    includeExternalLinks: opts.includeExternalLinks,
+  };
+  const crawlResult = await webCrawl(opts.url, crawl4aiCfg.baseUrl, crawl4aiCfg.apiToken, crawlOpts);
+
+  // 2. Chunk
+  const allChunks: SemanticCrawlChunk[] = [];
+  for (const page of crawlResult.pages) {
+    if (!page.success || !page.markdown) continue;
+    const chunks = chunkMarkdown(page.markdown, page.url);
+    allChunks.push(
+      ...chunks.map((c) => ({
+        text: c.content,
+        url: c.url,
+        section: c.section,
+        score: 0,
+        charOffset: c.charOffset,
+        chunkIndex: c.chunkIndex,
+        totalChunks: c.totalChunks,
+      })),
+    );
+  }
+
+  // 3. Chunk safety check
+  const warnings: string[] = [];
+  if (allChunks.length > MAX_CHUNKS_HARD) {
+    throw new Error(
+      `Produced ${String(allChunks.length)} chunks, exceeding hard cap of ${String(MAX_CHUNKS_HARD)}. Reduce maxPages or increase chunk size.`,
+    );
+  }
+  if (allChunks.length > MAX_CHUNKS_SOFT) {
+    warnings.push(
+      `Produced ${String(allChunks.length)} chunks, exceeding soft cap of ${String(MAX_CHUNKS_SOFT)}. Embedding may be slower.`,
+    );
+  }
+
+  if (allChunks.length === 0) {
+    return {
+      seedUrl: opts.url,
+      query: opts.query,
+      pagesCrawled: crawlResult.totalPages,
+      totalChunks: 0,
+      successfulPages: crawlResult.successfulPages,
+      chunks: [],
+    };
+  }
+
+  // 4. Embed chunks
+  const chunkTexts = allChunks.map((c) => c.text);
+  const chunkEmbeddings = await embedTexts(
+    embeddingBaseUrl,
+    embeddingApiToken,
+    chunkTexts,
+    'document',
+    embeddingDimensions,
+  );
+
+  // 5. Embed query
+  const queryEmbeddings = await embedTexts(
+    embeddingBaseUrl,
+    embeddingApiToken,
+    [opts.query],
+    'query',
+    embeddingDimensions,
+  );
+  const queryEmbedding = queryEmbeddings[0];
+  if (!queryEmbedding) {
+    throw new Error('Embedding sidecar returned empty query embedding');
+  }
+
+  // 6. Rank
+  for (let i = 0; i < allChunks.length; i++) {
+    const chunk = allChunks[i];
+    const emb = chunkEmbeddings[i];
+    if (!chunk || emb === undefined) continue;
+    chunk.score = cosineSimilarity(queryEmbedding, emb);
+  }
+  allChunks.sort((a, b) => b.score - a.score);
+
+  // 7. Return topK
+  const topChunks = allChunks.slice(0, opts.topK);
+
+  return {
+    seedUrl: opts.url,
+    query: opts.query,
+    pagesCrawled: crawlResult.totalPages,
+    totalChunks: allChunks.length,
+    successfulPages: crawlResult.successfulPages,
+    chunks: topChunks,
+  };
+}
+
+function cosineSimilarity(a: number[], b: number[]): number {
+  let dot = 0;
+  let normA = 0;
+  let normB = 0;
+  for (let i = 0; i < a.length; i++) {
+    const ai = a[i] ?? 0;
+    const bi = b[i] ?? 0;
+    dot += ai * bi;
+    normA += ai * ai;
+    normB += bi * bi;
+  }
+  const denom = Math.sqrt(normA) * Math.sqrt(normB);
+  return denom === 0 ? 0 : dot / denom;
 }
