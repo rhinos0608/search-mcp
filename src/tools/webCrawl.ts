@@ -83,22 +83,21 @@ export async function webCrawl(
 
   const endpoint = `${baseUrl.replace(/\/+$/, '')}/crawl`;
 
-  const crawlerConfig: Record<string, unknown> = {
-    headless: true,
-    remove_overlay_elements: true,
+  const crawlerConfigParams: Record<string, unknown> = {
+    deep_crawl_strategy: {
+      type: opts.strategy === 'bfs' ? 'BFSDeepCrawlStrategy' : 'DFSDeepCrawlStrategy',
+      params: {
+        max_depth: opts.maxDepth,
+        max_pages: opts.maxPages,
+        include_external: opts.includeExternalLinks,
+      },
+    },
   };
-  if (opts.maxDepth > 1) {
-    crawlerConfig.deep_crawl_config = {
-      strategy: opts.strategy,
-      max_depth: opts.maxDepth,
-      max_pages: opts.maxPages,
-      filter_external_links: !opts.includeExternalLinks,
-    };
-  }
 
   const body = {
     urls: [url],
-    crawler_config: crawlerConfig,
+    browser_config: { type: 'BrowserConfig', params: { headless: true } },
+    crawler_config: { type: 'CrawlerRunConfig', params: crawlerConfigParams },
   };
 
   const headers: Record<string, string> = {

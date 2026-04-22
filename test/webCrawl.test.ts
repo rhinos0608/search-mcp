@@ -160,9 +160,9 @@ test('webCrawl sets Authorization header when apiToken is non-empty', async () =
   assert.equal(capturedHeaders.get('Authorization'), 'Bearer my-secret-token');
 });
 
-// ── Test 9: Deep crawl config sent when maxDepth > 1 ─────────────────────────
+// ── Test 9: Deep crawl strategy always sent ─────────────────────────────────
 
-test('webCrawl sends deep_crawl_config in request body when maxDepth > 1', async () => {
+test('webCrawl sends deep_crawl_strategy in request body', async () => {
   let capturedBody: unknown = null;
 
   globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -180,10 +180,22 @@ test('webCrawl sends deep_crawl_config in request body when maxDepth > 1', async
   await webCrawl('https://example.com', 'https://crawl4ai.example.com', '', deepOpts);
 
   assert.ok(capturedBody);
-  const body = capturedBody as { crawler_config: { deep_crawl_config: Record<string, unknown> } };
-  assert.ok(body.crawler_config.deep_crawl_config);
-  assert.equal(body.crawler_config.deep_crawl_config.strategy, 'bfs');
-  assert.equal(body.crawler_config.deep_crawl_config.max_depth, 3);
-  assert.equal(body.crawler_config.deep_crawl_config.max_pages, 20);
-  assert.equal(body.crawler_config.deep_crawl_config.filter_external_links, true);
+  const body = capturedBody as {
+    browser_config: { type: string; params: Record<string, unknown> };
+    crawler_config: {
+      type: string;
+      params: { deep_crawl_strategy: { type: string; params: Record<string, unknown> } };
+    };
+  };
+  // browser_config uses {type, params} wrapper
+  assert.equal(body.browser_config.type, 'BrowserConfig');
+  assert.equal(body.browser_config.params.headless, true);
+  // crawler_config uses {type, params} wrapper
+  assert.equal(body.crawler_config.type, 'CrawlerRunConfig');
+  const deepStrategy = body.crawler_config.params.deep_crawl_strategy;
+  assert.ok(deepStrategy);
+  assert.equal(deepStrategy.type, 'BFSDeepCrawlStrategy');
+  assert.equal(deepStrategy.params.max_depth, 3);
+  assert.equal(deepStrategy.params.max_pages, 20);
+  assert.equal(deepStrategy.params.include_external, false);
 });

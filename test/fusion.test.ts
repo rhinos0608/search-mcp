@@ -181,3 +181,60 @@ test('rrfMerge getId: collision → last ranking metadata wins', () => {
     `Expected rrfScore ≈ ${2 / 61}, got ${merged[0]!.rrfScore}`,
   );
 });
+
+test('rrfMerge getId: same ID within one ranking but different keyFn → merged by getId', () => {
+  // keyFn dedupes within each ranking; getId merges across rankings.
+  // Same ID with different keyFn values → both survive intra-ranking dedup,
+  // then getId merges them into one entry.
+  const rankings = [
+    [{ id: 'a', url: 'x' }, { id: 'a', url: 'y' }], // same getId, different keyFn
+    [{ id: 'b', url: 'z' }],
+  ];
+  const merged = rrfMerge(rankings, {
+    k: 60,
+    keyFn: r => r.url,
+    getId: r => r.id,
+  });
+  // After intra-ranking pass: both 'a' entries survive (different URLs = different keyFn values)
+  // After cross-ranking merge by getId: 'a' entries merge (same ID), first item wins → 1 'a'
+  // + 'b' = 2 items total
+  assert.equal(merged.length, 2, `Expected 2 results, got ${merged.length}`);
+
+  const a = merged.find(m => m.item.id === 'a');
+  assert.ok(a, 'Expected a in merged results');
+  // Within the same ranking, first item wins (last-ranking metadata only applies across rankings)
+  assert.equal(a!.item.url, 'x', 'Expected first a entry (url=x) to survive');
+  // RRF score = 1/(60+1) + 1/(60+2) since both 'a' entries contribute
+  assert.ok(
+    Math.abs(a!.rrfScore - (1 / 61 + 1 / 62)) < 1e-9,
+    `Expected a rrfScore ≈ ${1 / 61 + 1 / 62}, got ${a!.rrfScore}`,
+  );
+
+  const b = merged.find(m => m.item.id === 'b');
+  assert.ok(b, 'Expected b in merged results');
+  assert.ok(
+    Math.abs(b!.rrfScore - 1 / 61) < 1e-9,
+    `Expected b rrfScore ≈ ${1 / 61}, got ${b!.rrfScore}`,
+  );
+});
+
+test('rrfMerge getId: same keyFn within one ranking → intra-ranking dedup', () => {
+  // keyFn dedupes within each ranking: same URL means one entry kept (first wins)
+  const rankings = [
+    [{ id: 'a', url: 'x' }, { id: 'b', url: 'x' }], // same URL, different IDs
+    [{ id: 'c', url: 'z' }],
+  ];
+  const merged = rrfMerge(rankings, {
+    k: 60,
+    keyFn: r => r.url,
+    getId: r => r.id,
+  });
+  // Intra-ranking dedup by keyFn: first 'x' entry kept, second discarded
+  // Cross-ranking merge: 'x' + 'z' = 2 items (different getId values, no cross-rank merge)
+  assert.equal(merged.length, 2, `Expected 2 results, got ${merged.length}`);
+  assert.ok(merged.every(m => m.item.url === 'x' || m.item.url === 'z'), 'Expected x and z');
+  assert.ok(
+    Math.abs(merged[0]!.rrfScore - 1 / 61) < 1e-9,
+    `Expected first score ≈ ${1 / 61}, got ${merged[0]!.rrfScore}`,
+  );
+});

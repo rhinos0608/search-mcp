@@ -244,18 +244,19 @@ export async function webCrawl(
 
   const body = {
     urls: [url],
+    browser_config: { type: 'BrowserConfig', params: { headless: true } },
     crawler_config: {
-      headless: true,
-      remove_overlay_elements: true,
-      deep_crawl_config:
-        opts.maxDepth > 1
-          ? {
-              strategy: opts.strategy,
-              max_depth: opts.maxDepth,
-              max_pages: opts.maxPages,
-              filter_external_links: !opts.includeExternalLinks,
-            }
-          : undefined,
+      type: 'CrawlerRunConfig',
+      params: {
+        deep_crawl_strategy: {
+          type: opts.strategy === 'bfs' ? 'BFSDeepCrawlStrategy' : 'DFSDeepCrawlStrategy',
+          params: {
+            max_depth: opts.maxDepth,
+            max_pages: opts.maxPages,
+            include_external: opts.includeExternalLinks,
+          },
+        },
+      },
     },
   };
 
