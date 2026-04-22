@@ -6,6 +6,7 @@ import { unavailableError, timeoutError } from '../errors.js';
 import type { HackerNewsItem } from '../types.js';
 import { rrfMerge } from '../utils/fusion.js';
 import { multiSignalRescore, extractHNSignals } from '../utils/rescore.js';
+import { loadConfig } from '../config.js';
 
 const HN_ALGOLIA_URL = 'https://hn.algolia.com/api/v1';
 const USER_AGENT = 'search-mcp/1.0';
@@ -169,12 +170,7 @@ export async function hackernewsSearch(
     rrfScore: m.rrfScore,
     signals: allSignals[i] ?? {},
   }));
-  const rescoreWeights = {
-    rrfAnchor: 0.5,
-    recency: 0.15,
-    engagement: 0.2,
-    commentEngagement: 0.15,
-  };
+  const rescoreWeights = loadConfig().rescoreWeights.hackernewsSearch;
   const rescored = multiSignalRescore(signaled, rescoreWeights, limit);
   results = rescored.map(r => r.item);
 

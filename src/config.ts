@@ -18,6 +18,49 @@ const PKG_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 
 export type SearchBackend = 'brave' | 'searxng';
 
+export interface RescoreWeights {
+  rrfAnchor: number;
+  recency?: number;
+  citations?: number;
+  engagement?: number;
+  commentEngagement?: number;
+  venue?: number;
+  hasDeepLinks?: number;
+  [key: string]: number | undefined;
+}
+
+export interface RescoreConfig {
+  webSearch: RescoreWeights;
+  academicSearch: RescoreWeights;
+  hackernewsSearch: RescoreWeights;
+  redditSearch: RescoreWeights;
+}
+
+function validateRescoreWeights(weights: RescoreWeights, toolName: string): void {
+  const knownKeys = ['recency', 'citations', 'engagement', 'commentEngagement', 'venue', 'hasDeepLinks'] as const;
+  const otherWeights = knownKeys
+    .map((k) => weights[k])
+    .filter((v): v is number => v !== undefined);
+  const maxOther = otherWeights.length > 0 ? Math.max(...otherWeights) : 0;
+  if (weights.rrfAnchor < maxOther) {
+    logger.warn(
+      { tool: toolName, rrfAnchor: weights.rrfAnchor, maxOther },
+      'Rescore weights warning: rrfAnchor should dominate any single other signal',
+    );
+  }
+}
+
+const DEFAULT_RESCORE_WEIGHTS: RescoreConfig = {
+  webSearch: { rrfAnchor: 0.5, recency: 0.2, hasDeepLinks: 0.05 },
+  academicSearch: { rrfAnchor: 0.5, recency: 0.05, citations: 0.3, venue: 0.15 },
+  hackernewsSearch: { rrfAnchor: 0.5, recency: 0.15, engagement: 0.2, commentEngagement: 0.15 },
+  redditSearch: { rrfAnchor: 0.5, recency: 0.1, engagement: 0.25, commentEngagement: 0.15 },
+};
+
+export interface GitHubConfig {
+  token: string;
+}
+
 export interface RedditConfig {
   clientId: string;
   clientSecret: string;
@@ -43,11 +86,13 @@ export interface SearchConfig {
   patentsview: { apiKey: string };
   youtube: { apiKey: string };
   stackexchange: { apiKey: string };
+  github: GitHubConfig;
   reddit: RedditConfig;
   crawl4ai: Crawl4aiConfig;
+  rescoreWeights: RescoreConfig;
 }
 
-const DEFAULTS: SearchConfig = {
+const DEFAULTS: Omit<SearchConfig, 'rescoreWeights'> = {
   searchBackend: 'searxng',
   brave: { apiKey: '' },
   searxng: { baseUrl: '' },
@@ -57,6 +102,7 @@ const DEFAULTS: SearchConfig = {
   patentsview: { apiKey: '' },
   youtube: { apiKey: '' },
   stackexchange: { apiKey: '' },
+  github: { token: '' },
   reddit: {
     clientId: '',
     clientSecret: '',
@@ -93,9 +139,10 @@ function decryptConfigFile(filePath: string, password: string): SearchConfig {
   return JSON.parse(decrypted.toString('utf8')) as SearchConfig;
 }
 
-type EnvConfig = Omit<Partial<SearchConfig>, 'reddit' | 'crawl4ai'> & {
+type EnvConfig = Omit<Partial<SearchConfig>, 'reddit' | 'crawl4ai' | 'github'> & {
   reddit?: Partial<RedditConfig>;
   crawl4ai?: Partial<Crawl4aiConfig>;
+  github?: Partial<GitHubConfig>;
 };
 
 function loadFromEnv(): EnvConfig {
@@ -148,6 +195,11 @@ function loadFromEnv(): EnvConfig {
     cfg.stackexchange = { apiKey: seKey };
   }
 
+  const githubToken = process.env.GITHUB_TOKEN;
+  if (githubToken) {
+    cfg.github = { token: githubToken };
+  }
+
   const redditClientId = process.env.REDDIT_CLIENT_ID;
   const redditClientSecret = process.env.REDDIT_CLIENT_SECRET;
   const redditUserAgent = process.env.REDDIT_USER_AGENT;
@@ -188,9 +240,16 @@ export function loadConfig(): SearchConfig {
   if (existsSync(encPath) && configKey) {
     try {
       fileConfig = decryptConfigFile(encPath, configKey);
-      logger.info('Loaded encrypted config from config.enc');
+      logger.info({ hasToken: fileConfig.github?.token ? true : false }, 'Loaded encrypted config from config.enc');
     } catch (err) {
       logger.warn({ err }, 'Failed to decrypt config.enc — falling back to env vars');
+    }
+  } else {
+    if (!existsSync(encPath)) {
+      logger.debug('No config.enc found');
+    }
+    if (!configKey) {
+      logger.debug('No SEARCH_MCP_CONFIG_KEY env var set');
     }
   }
 
@@ -235,6 +294,9 @@ export function loadConfig(): SearchConfig {
         fileConfig.stackexchange?.apiKey ??
         DEFAULTS.stackexchange.apiKey,
     },
+    github: {
+      token: envConfig.github?.token ?? fileConfig.github?.token ?? DEFAULTS.github.token,
+    },
     reddit: resolveRedditConfig(envConfig.reddit, fileConfig.reddit),
     crawl4ai: {
       baseUrl:
@@ -244,7 +306,13 @@ export function loadConfig(): SearchConfig {
         fileConfig.crawl4ai?.apiToken ??
         DEFAULTS.crawl4ai.apiToken,
     },
+    rescoreWeights: DEFAULT_RESCORE_WEIGHTS,
   };
+
+  // Validate weights
+  for (const [tool, weights] of Object.entries(cached.rescoreWeights)) {
+    validateRescoreWeights(weights as RescoreWeights, tool);
+  }
 
   if (!cached.reddit.oauthConfigValid) {
     logger.warn(

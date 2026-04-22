@@ -13,6 +13,7 @@ import {
 import { parseRedditSearchListing } from './redditSearchParser.js';
 import { rrfMerge } from '../utils/fusion.js';
 import { multiSignalRescore, extractRedditSignals } from '../utils/rescore.js';
+import { loadConfig } from '../config.js';
 
 const cache = new ToolCache<RedditPost[]>({ maxSize: 100, ttlMs: 10 * 60 * 1000 });
 
@@ -144,12 +145,7 @@ export async function redditSearch(
     rrfScore: m.rrfScore,
     signals: allSignals[i] ?? {},
   }));
-  const rescoreWeights = {
-    rrfAnchor: 0.5,
-    recency: 0.1,
-    engagement: 0.25,
-    commentEngagement: 0.15,
-  };
+  const rescoreWeights = loadConfig().rescoreWeights.redditSearch;
   const rescored = multiSignalRescore(signaled, rescoreWeights, limit);
   results = rescored.map(r => r.item);
 

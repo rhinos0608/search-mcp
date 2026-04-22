@@ -123,11 +123,7 @@ export async function searchWithBackends(
     signals: allSignals[i] ?? {},
   }));
 
-  const rescoreWeights = {
-    rrfAnchor: 0.5,
-    recency: 0.2,
-    hasDeepLinks: 0.05,
-  };
+  const rescoreWeights = loadConfig().rescoreWeights.webSearch;
 
   const rescored = multiSignalRescore(signaled, rescoreWeights, limit);
 

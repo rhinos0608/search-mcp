@@ -39,7 +39,7 @@ export function minMaxNormalize(values: number[]): number[] {
 
 export function multiSignalRescore<T>(
   items: RrfResultWithSignals<T>[],
-  weights: Record<string, number>,
+  weights: Partial<Record<string, number>>,
   limit: number,
 ): ScoredResult<T>[] {
   const rrfScores = items.map(i => i.rrfScore);

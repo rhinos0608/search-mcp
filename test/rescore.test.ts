@@ -11,6 +11,7 @@ import {
   extractHNSignals,
   extractRedditSignals,
 } from '../src/utils/rescore.js';
+import { loadConfig, resetConfig } from '../src/config.js';
 
 // --- applyRecencyDecay ---
 
@@ -222,4 +223,30 @@ test('extractRedditSignals top mode: engagement omitted', () => {
   const s0 = signals[0]!;
   assert.equal('engagement' in s0, false);
   assert.ok(s0.commentEngagement! > 0, `expected commentEngagement > 0, got ${s0.commentEngagement}`);
+});
+
+// --- loadConfig rescore weights ---
+
+test('loadConfig returns default rescore weights', () => {
+  resetConfig();
+  const config = loadConfig();
+  assert.equal(config.rescoreWeights.webSearch.rrfAnchor, 0.5);
+  assert.equal(config.rescoreWeights.academicSearch.citations, 0.3);
+  assert.equal(config.rescoreWeights.hackernewsSearch.engagement, 0.2);
+  assert.equal(config.rescoreWeights.redditSearch.commentEngagement, 0.15);
+});
+
+test('loadConfig rescore weights pass guardrail (rrfAnchor >= maxOther)', () => {
+  resetConfig();
+  const config = loadConfig();
+  for (const [tool, weights] of Object.entries(config.rescoreWeights)) {
+    const otherWeights = (Object.entries(weights) as [string, number][])
+      .filter(([k]) => k !== 'rrfAnchor')
+      .map(([, v]) => v);
+    const maxOther = otherWeights.length > 0 ? Math.max(...otherWeights) : 0;
+    assert.ok(
+      weights.rrfAnchor >= maxOther,
+      `Tool "${tool}": rrfAnchor (${weights.rrfAnchor}) should be >= maxOther (${maxOther})`,
+    );
+  }
 });

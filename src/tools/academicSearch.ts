@@ -12,6 +12,7 @@ import { assertRateLimitOk, getTracker } from '../rateLimit.js';
 import type { AcademicPaper } from '../types.js';
 import { rrfMerge } from '../utils/fusion.js';
 import { multiSignalRescore, extractAcademicSignals } from '../utils/rescore.js';
+import { loadConfig } from '../config.js';
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -63,12 +64,7 @@ export function normalizeFirstAuthor(author: string): string {
   return parts[parts.length - 1] ?? s;
 }
 
-const rescoreWeights = {
-  rrfAnchor: 0.5,
-  recency: 0.05,
-  citations: 0.3,
-  venue: 0.15,
-};
+const rescoreWeights = loadConfig().rescoreWeights.academicSearch;
 
 // ── XML helpers (regex-based, no parser dependency) ──────────────────────────
 
