@@ -1,10 +1,15 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import type { SearchResult, AcademicPaper, HackerNewsItem, RedditPost } from '../src/types.js';
 import {
   applyRecencyDecay,
   applyLogTransform,
   minMaxNormalize,
   multiSignalRescore,
+  extractWebSearchSignals,
+  extractAcademicSignals,
+  extractHNSignals,
+  extractRedditSignals,
 } from '../src/utils/rescore.js';
 
 // --- applyRecencyDecay ---
@@ -126,4 +131,95 @@ test('multiSignalRescore all equal signals → stable sort', () => {
   assert.equal(result[0]!.item, 'first');
   assert.equal(result[1]!.item, 'second');
   assert.equal(result[2]!.item, 'third');
+});
+
+// --- extractWebSearchSignals ---
+
+test('extractWebSearchSignals: recency from age, hasDeepLinks', () => {
+  const results: SearchResult[] = [
+    { title: 'a', url: 'http://a', description: 'a', position: 1, domain: 'a.com', source: 'brave', age: '2 days ago', extraSnippet: null, deepLinks: [{ title: 'a', url: 'b' }] },
+    { title: 'b', url: 'http://b', description: 'b', position: 2, domain: 'b.com', source: 'brave', age: '14 days ago', extraSnippet: null, deepLinks: null },
+  ];
+  const signals = extractWebSearchSignals(results);
+  assert.equal(signals.length, 2);
+  const s0 = signals[0]!;
+  const s1 = signals[1]!;
+  assert.ok(s0.recency! > 0, `expected recency > 0, got ${s0.recency}`);
+  assert.equal(s0.hasDeepLinks, 1);
+  assert.ok(s1.recency! >= 0);
+  assert.equal(s1.hasDeepLinks, 0);
+});
+
+test('extractWebSearchSignals: missing age → recency = 0', () => {
+  const results: SearchResult[] = [
+    { title: 'a', url: 'http://a', description: 'a', position: 1, domain: 'a.com', source: 'brave', age: null, extraSnippet: null, deepLinks: null },
+  ];
+  const signals = extractWebSearchSignals(results);
+  assert.equal(signals.length, 1);
+  assert.equal(signals[0]!.recency, 0);
+});
+
+// --- extractAcademicSignals ---
+
+test('extractAcademicSignals: citations, venue, recency', () => {
+  const papers: AcademicPaper[] = [
+    { title: 'a', authors: [], abstract: '', url: '', year: 2024, venue: 'NeurIPS', citationCount: 100, source: 'arxiv', doi: null, pdfUrl: null },
+    { title: 'b', authors: [], abstract: '', url: '', year: 2020, venue: null, citationCount: 10, source: 'arxiv', doi: null, pdfUrl: null },
+  ];
+  const signals = extractAcademicSignals(papers, 2026);
+  assert.equal(signals.length, 2);
+  const s0 = signals[0]!;
+  assert.ok(s0.citations! > 0, `expected citations > 0, got ${s0.citations}`);
+  assert.equal(s0.venue, 1);
+  assert.ok(s0.recency! > 0, `expected recency > 0, got ${s0.recency}`);
+});
+
+test('extractAcademicSignals: missing venue → venue = 0', () => {
+  const papers: AcademicPaper[] = [
+    { title: 'a', authors: [], abstract: '', url: '', year: 2024, venue: null, citationCount: 0, source: 'arxiv', doi: null, pdfUrl: null },
+  ];
+  const signals = extractAcademicSignals(papers, 2026);
+  assert.equal(signals.length, 1);
+  assert.equal(signals[0]!.venue, 0);
+});
+
+// --- extractHNSignals ---
+
+test('extractHNSignals relevance mode: all signals present', () => {
+  const items: HackerNewsItem[] = [
+    { id: 1, title: 'a', url: 'http://a', author: 'a', points: 100, numComments: 50, createdAt: '2025-01-01', storyText: null, type: 'story', objectId: '1' },
+    { id: 2, title: 'b', url: 'http://b', author: 'b', points: 10, numComments: 5, createdAt: '2024-01-01', storyText: null, type: 'story', objectId: '2' },
+  ];
+  const signals = extractHNSignals(items, 'relevance');
+  assert.equal(signals.length, 2);
+  const s0 = signals[0]!;
+  assert.ok(s0.recency! > 0, `expected recency > 0, got ${s0.recency}`);
+  assert.ok(s0.engagement! > 0, `expected engagement > 0, got ${s0.engagement}`);
+  assert.ok(s0.commentEngagement! > 0, `expected commentEngagement > 0, got ${s0.commentEngagement}`);
+});
+
+test('extractHNSignals date mode: recency omitted', () => {
+  const items: HackerNewsItem[] = [
+    { id: 1, title: 'a', url: 'http://a', author: 'a', points: 100, numComments: 50, createdAt: '2025-01-01', storyText: null, type: 'story', objectId: '1' },
+    { id: 2, title: 'b', url: 'http://b', author: 'b', points: 10, numComments: 5, createdAt: '2024-01-01', storyText: null, type: 'story', objectId: '2' },
+  ];
+  const signals = extractHNSignals(items, 'date');
+  assert.equal(signals.length, 2);
+  const s0 = signals[0]!;
+  assert.equal('recency' in s0, false);
+  assert.ok(s0.engagement! > 0, `expected engagement > 0, got ${s0.engagement}`);
+});
+
+// --- extractRedditSignals ---
+
+test('extractRedditSignals top mode: engagement omitted', () => {
+  const posts: RedditPost[] = [
+    { title: 'a', url: 'http://a', selftext: '', score: 100, numComments: 50, subreddit: 'a', author: 'a', createdUtc: 1700000000, permalink: '/r/a/1', isVideo: false },
+    { title: 'b', url: 'http://b', selftext: '', score: 10, numComments: 5, subreddit: 'b', author: 'b', createdUtc: 1600000000, permalink: '/r/b/2', isVideo: false },
+  ];
+  const signals = extractRedditSignals(posts, 'top');
+  assert.equal(signals.length, 2);
+  const s0 = signals[0]!;
+  assert.equal('engagement' in s0, false);
+  assert.ok(s0.commentEngagement! > 0, `expected commentEngagement > 0, got ${s0.commentEngagement}`);
 });
