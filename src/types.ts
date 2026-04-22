@@ -316,6 +316,18 @@ export interface GitHubFileResult {
   apiUrl: string;
   truncated: boolean;
   isBinary: boolean;
+  /** Total number of lines in the file (text only). */
+  totalLines: number;
+  /** 0-based line offset of this chunk. */
+  lineOffset: number;
+  /** Max lines requested, or null when not specified. */
+  lineLimit: number | null;
+  /** True when there are more lines/bytes after this chunk. */
+  hasMore: boolean;
+  /** 0-based byte offset of this chunk, or null. */
+  byteOffset: number | null;
+  /** Max bytes requested, or null. */
+  byteLimit: number | null;
 }
 
 export interface GitHubCodeResult {

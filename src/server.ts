@@ -24,6 +24,7 @@ import { npmSearch } from './tools/npmSearch.js';
 import { pypiSearch } from './tools/pypiSearch.js';
 import { newsSearch } from './tools/newsSearch.js';
 import { webCrawl } from './tools/webCrawl.js';
+import { webRead } from './tools/webRead.js';
 import { isToolError } from './errors.js';
 import type { RateLimitInfo } from './rateLimit.js';
 import type { ToolResult } from './types.js';
@@ -187,15 +188,43 @@ export function createServer(): McpServer {
       },
     },
     async ({ url, strategy, maxDepth, maxPages, includeExternalLinks }) => {
-      logger.info({ tool: 'web_read' }, 'Tool invoked (crawl4ai)');
+      logger.info({ tool: 'web_read' }, 'Tool invoked');
       const start = Date.now();
       try {
-        const data = await webCrawl(url, cfg.crawl4ai.baseUrl, cfg.crawl4ai.apiToken, {
-          strategy,
-          maxDepth,
-          maxPages,
-          includeExternalLinks,
-        });
+        // Prefer crawl4ai if configured; otherwise fall back to Readability-based fetch
+        let data: unknown;
+        if (cfg.crawl4ai.baseUrl) {
+          data = await webCrawl(url, cfg.crawl4ai.baseUrl, cfg.crawl4ai.apiToken, {
+            strategy,
+            maxDepth,
+            maxPages,
+            includeExternalLinks,
+          });
+        } else {
+          logger.debug('crawl4ai not configured — falling back to webRead (Readability)');
+          const article = await webRead(url);
+          // Normalize to the same shape as webCrawl for the tool result
+          data = {
+            seedUrl: url,
+            strategy,
+            maxDepth,
+            maxPages,
+            totalPages: 1,
+            successfulPages: 1,
+            pages: [
+              {
+                url,
+                success: true,
+                markdown: article.textContent,
+                title: article.title,
+                description: article.description,
+                links: [],
+                statusCode: null,
+                errorMessage: null,
+              },
+            ],
+          };
+        }
         const result = makeResult('web_read', data, Date.now() - start);
         return successResponse(result);
       } catch (err: unknown) {
@@ -332,7 +361,7 @@ export function createServer(): McpServer {
     'github_repo_file',
     {
       description:
-        'Read the raw content of a specific file in a GitHub repository. Supports UTF-8 text and base64 output. Handles binary detection, submodules, and symlinks.',
+        'Read the raw content of a specific file in a GitHub repository. Supports UTF-8 text and base64 output. Handles binary detection, submodules, and symlinks. For large files, use offset/limit to read specific line ranges, or byteOffset/byteLimit for byte-level slicing.',
       inputSchema: {
         owner: z
           .string()
@@ -349,13 +378,47 @@ export function createServer(): McpServer {
           .optional()
           .default(true)
           .describe('true = decoded UTF-8 text; false = base64'),
+        offset: z
+          .number()
+          .int()
+          .min(0)
+          .optional()
+          .describe('Line offset (0-based). Read from this line number. Requires raw=true.'),
+        limit: z
+          .number()
+          .int()
+          .min(1)
+          .optional()
+          .describe('Maximum number of lines to return. Requires raw=true.'),
+        byteOffset: z
+          .number()
+          .int()
+          .min(0)
+          .optional()
+          .describe('Byte offset (0-based). Read from this byte position via raw.githubusercontent.com Range header. Requires raw=true.'),
+        byteLimit: z
+          .number()
+          .int()
+          .min(1)
+          .optional()
+          .describe('Maximum number of bytes to return. Requires raw=true.'),
       },
     },
-    async ({ owner, repo, path, branch, raw }) => {
-      logger.info({ tool: 'github_repo_file', owner, repo, path }, 'Tool invoked');
+    async ({ owner, repo, path, branch, raw, offset, limit, byteOffset, byteLimit }) => {
+      logger.info({ tool: 'github_repo_file', owner, repo, path, offset, limit, byteOffset, byteLimit }, 'Tool invoked');
       const start = Date.now();
       try {
-        const data = await getGitHubRepoFile(owner, repo, path, branch, raw);
+        const data = await getGitHubRepoFile(
+          owner,
+          repo,
+          path,
+          branch,
+          raw,
+          offset,
+          limit,
+          byteOffset,
+          byteLimit,
+        );
         const result = makeResult('github_repo_file', data, Date.now() - start);
         return successResponse(result);
       } catch (err: unknown) {

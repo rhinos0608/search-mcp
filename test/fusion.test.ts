@@ -238,3 +238,19 @@ test('rrfMerge getId: same keyFn within one ranking → intra-ranking dedup', ()
     `Expected first score ≈ ${1 / 61}, got ${merged[0]!.rrfScore}`,
   );
 });
+
+test('rrfMerge getId: backward compat — without getId, behaves like before', () => {
+  // When getId is absent, keyFn is used for ALL deduplication (backward compatible)
+  const rankings = [
+    [{ id: 'a', url: 'x' }, { id: 'a', url: 'y' }], // same ID, different URLs
+    [{ id: 'a', url: 'z' }], // same ID, different URL
+  ];
+  const merged = rrfMerge(rankings, {
+    k: 60,
+    keyFn: r => r.url,
+    // No getId provided — should use keyFn for ALL dedup
+  });
+  // Without getId, keyFn is used for both intra- and cross-ranking dedup
+  // All three URLs are different, so no dedup happens
+  assert.equal(merged.length, 3, `Expected 3 results, got ${merged.length}`);
+});

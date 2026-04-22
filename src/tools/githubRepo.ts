@@ -1,4 +1,5 @@
 import { logger } from '../logger.js';
+import { loadConfig } from '../config.js';
 import { assertSafeUrl, safeResponseJson, TRUNCATED_MARKER } from '../httpGuards.js';
 import { ToolCache, cacheKey } from '../cache.js';
 import { retryWithBackoff } from '../retry.js';
@@ -16,7 +17,7 @@ function buildHeaders(): Record<string, string> {
     'User-Agent': 'search-mcp/1.0',
     'X-GitHub-Api-Version': '2022-11-28',
   };
-  const token = process.env.GITHUB_TOKEN;
+  const token = loadConfig().github.token;
   if (token) {
     headers.Authorization = `Bearer ${token}`;
   }

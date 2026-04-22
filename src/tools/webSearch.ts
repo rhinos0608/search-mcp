@@ -105,10 +105,6 @@ export async function searchWithBackends(
     );
   }
 
-  if (valid.length === 1) {
-    return (valid[0] ?? []).slice(0, limit);
-  }
-
   const merged = rrfMerge(valid, {
     k: 60,
     keyFn: (r) => normalizeUrl(r.url),

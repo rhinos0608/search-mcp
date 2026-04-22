@@ -67,6 +67,12 @@ test('GitHubFileResult has required fields including isBinary', () => {
     apiUrl: 'https://api.github.com/repos/example/repo/contents/README.md',
     truncated: false,
     isBinary: false,
+    totalLines: 1,
+    lineOffset: 0,
+    lineLimit: null,
+    hasMore: false,
+    byteOffset: null,
+    byteLimit: null,
   };
   assert.equal(file.name, 'README.md');
   assert.equal(file.encoding, 'utf-8');

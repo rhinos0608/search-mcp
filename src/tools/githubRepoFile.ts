@@ -6,9 +6,12 @@
  * - Decode base64 content, detect binary, truncate at 50 KB limit
  * - Follow symlinks by re-fetching the target path
  * - Reject directories and submodules
+ * - Supports line-range slicing (offset + limit) and byte-range slicing
+ *   (byteOffset + byteLimit) via raw.githubusercontent.com with Range header
  */
 
 import { logger } from '../logger.js';
+import { loadConfig } from '../config.js';
 import { assertSafeUrl, safeResponseJson, TRUNCATED_MARKER } from '../httpGuards.js';
 import { retryWithBackoff } from '../retry.js';
 import { assertRateLimitOk, getTracker } from '../rateLimit.js';
@@ -31,7 +34,7 @@ function buildHeaders(): Record<string, string> {
     'User-Agent': 'search-mcp/1.0',
     'X-GitHub-Api-Version': '2022-11-28',
   };
-  const token = process.env.GITHUB_TOKEN;
+  const token = loadConfig().github.token;
   if (token) {
     headers.Authorization = `Bearer ${token}`;
   }
@@ -194,10 +197,144 @@ function isBinaryContent(content: string, filePath: string): boolean {
   return BINARY_EXTENSIONS.has(ext);
 }
 
+// ── Raw content fetch (raw.githubusercontent.com) ───────────────────────────
+
+interface RawFetchResult {
+  content: string;
+  status: number;
+  totalBytes: number | null;
+  rangeStart: number | null;
+  rangeEnd: number | null;
+}
+
+/**
+ * Fetch file content from raw.githubusercontent.com.
+ * Supports HTTP Range headers for byte-level slicing.
+ */
+async function fetchRawContent(
+  owner: string,
+  repo: string,
+  path: string,
+  branch?: string,
+  byteOffset?: number,
+  byteLimit?: number,
+): Promise<RawFetchResult> {
+  const encodedPath = '/' + path.split('/').map(encodeURIComponent).join('/');
+  const url = branch
+    ? `https://raw.githubusercontent.com/${owner}/${repo}/${encodeURIComponent(branch)}${encodedPath}`
+    : `https://raw.githubusercontent.com/${owner}/${repo}/HEAD${encodedPath}`;
+
+  assertSafeUrl(url);
+
+  const headers: Record<string, string> = {
+    'User-Agent': 'search-mcp/1.0',
+  };
+  const token = loadConfig().github.token;
+  if (token) {
+    headers.Authorization = `Bearer ${token}`;
+  }
+
+  if (byteOffset !== undefined && byteLimit !== undefined) {
+    const end = byteOffset + byteLimit - 1;
+    headers.Range = `bytes=${String(byteOffset)}-${String(end)}`;
+  } else if (byteOffset !== undefined) {
+    headers.Range = `bytes=${String(byteOffset)}-`;
+  }
+
+  return retryWithBackoff(
+    async () => {
+      const controller = new AbortController();
+      const t = setTimeout(() => {
+        controller.abort();
+      }, 30_000);
+
+      try {
+        const response = await fetch(url, { headers, signal: controller.signal });
+        const text = await response.text();
+
+        // Parse Content-Range for total file size
+        let totalBytes: number | null = null;
+        const contentRange = response.headers.get('content-range');
+        if (contentRange) {
+          const match = /bytes \d+-\d+\/(\d+)/.exec(contentRange);
+          if (match?.[1]) {
+            totalBytes = parseInt(match[1], 10);
+          }
+        }
+
+        let rangeStart: number | null = null;
+        let rangeEnd: number | null = null;
+        if (contentRange) {
+          const match = /bytes (\d+)-(\d+)\//.exec(contentRange);
+          if (match) {
+            const [, startStr, endStr] = match;
+            rangeStart = parseInt(startStr ?? '0', 10);
+            rangeEnd = parseInt(endStr ?? '0', 10);
+          }
+        }
+
+        if (response.status === 404) {
+          throw notFoundError(`GitHub file "${path}" not found`, { statusCode: 404, backend: 'github' });
+        }
+        if (!response.ok && response.status !== 206) {
+          throw unavailableError(
+            `raw.githubusercontent.com returned HTTP ${String(response.status)} for "${path}"`,
+            { statusCode: response.status, backend: 'github' },
+          );
+        }
+
+        return { content: text, status: response.status, totalBytes, rangeStart, rangeEnd };
+      } catch (err) {
+        const error = err instanceof Error ? err : new Error(String(err));
+        if (error.name === 'AbortError') {
+          throw timeoutError(`raw.githubusercontent.com request timed out after 30 seconds`, {
+            backend: 'github',
+            cause: err,
+          });
+        }
+        throw err;
+      } finally {
+        clearTimeout(t);
+      }
+    },
+    { label: 'github-raw', maxAttempts: 3 },
+  );
+}
+
+// ── Line-range helpers ──────────────────────────────────────────────────────
+
+/** Split text into lines (handles both \n and \r\n, strips trailing empty). */
+function splitLines(text: string): string[] {
+  if (text === '') return [];
+  const lines = text.split(/\r?\n/);
+  // Remove trailing empty string caused by trailing newline
+  if (lines.length > 0 && lines[lines.length - 1] === '') {
+    lines.pop();
+  }
+  return lines;
+}
+
+/** Apply line offset/limit and return sliced text + metadata. */
+function applyLineRange(
+  text: string,
+  offset: number,
+  limit: number | undefined,
+): { text: string; totalLines: number; hasMore: boolean } {
+  const lines = splitLines(text);
+  const totalLines = lines.length;
+  const start = Math.max(0, offset);
+  const end = limit !== undefined ? Math.min(totalLines, start + limit) : totalLines;
+  const sliced = lines.slice(start, end);
+  return { text: sliced.join('\n'), totalLines, hasMore: end < totalLines };
+}
+
 // ── Public API ───────────────────────────────────────────────────────────────
 
 /** Maximum symlink-follow depth to prevent cycles. */
 const MAX_SYMLINK_DEPTH = 5;
+
+/** Text output limit per chunk (bytes/chars). */
+const MAX_FILE_LENGTH = 50_000;
 
 export async function getGitHubRepoFile(
   owner: string,
@@ -205,10 +342,53 @@ export async function getGitHubRepoFile(
   path: string,
   branch?: string,
   raw = true,
+  offset?: number,
+  limit?: number,
+  byteOffset?: number,
+  byteLimit?: number,
   /** Internal: tracks symlink-follow depth to detect cycles. */
   _depth = 0,
 ): Promise<GitHubFileResult> {
-  logger.info({ owner, repo, path, branch, raw }, 'getGitHubRepoFile');
+  logger.info({ owner, repo, path, branch, raw, offset, limit, byteOffset, byteLimit }, 'getGitHubRepoFile');
+
+  // ── Parameter validation ────────────────────────────────────────────────
+
+  const hasLineRange = offset !== undefined || limit !== undefined;
+  const hasByteRange = byteOffset !== undefined || byteLimit !== undefined;
+
+  if (hasLineRange && hasByteRange) {
+    throw validationError(
+      `Cannot specify both line ranges (offset/limit) and byte ranges (byteOffset/byteLimit). Use one or the other.`,
+      { statusCode: 400, backend: 'github' },
+    );
+  }
+
+  if (hasLineRange && !raw) {
+    throw validationError(
+      `Line ranges (offset/limit) require raw=true (UTF-8 text). Base64 output cannot be line-sliced.`,
+      { statusCode: 400, backend: 'github' },
+    );
+  }
+
+  if (hasByteRange && !raw) {
+    throw validationError(
+      `Byte ranges (byteOffset/byteLimit) require raw=true (UTF-8 text). Base64 output cannot be byte-sliced.`,
+      { statusCode: 400, backend: 'github' },
+    );
+  }
+
+  if (offset !== undefined && offset < 0) {
+    throw validationError(`offset must be >= 0`, { statusCode: 400, backend: 'github' });
+  }
+  if (limit !== undefined && limit < 1) {
+    throw validationError(`limit must be >= 1`, { statusCode: 400, backend: 'github' });
+  }
+  if (byteOffset !== undefined && byteOffset < 0) {
+    throw validationError(`byteOffset must be >= 0`, { statusCode: 400, backend: 'github' });
+  }
+  if (byteLimit !== undefined && byteLimit < 1) {
+    throw validationError(`byteLimit must be >= 1`, { statusCode: 400, backend: 'github' });
+  }
 
   await assertRateLimitOk('github');
 
@@ -221,7 +401,7 @@ export async function getGitHubRepoFile(
     encodedBranch ? `?ref=${encodedBranch}` : ''
   }`;
 
-  logger.debug({ contentsUrl }, 'Fetching file content');
+  logger.debug({ contentsUrl }, 'Fetching file metadata');
 
   const { response, body } = await githubFetch(contentsUrl);
 
@@ -251,6 +431,12 @@ export async function getGitHubRepoFile(
           errorText.includes('lfs') ||
           errorText.includes('LFS'))
       ) {
+        // File too large for GitHub API — fall back to raw.githubusercontent.com
+        // if line ranges or byte ranges are requested, otherwise keep the existing error
+        if (hasLineRange || hasByteRange) {
+          logger.debug({ path, size: 'large' }, 'Falling back to raw.githubusercontent.com for range request');
+          return fetchRawAndNormalize(owner, repo, path, branch, raw, offset, limit, byteOffset, byteLimit);
+        }
         const rawUrl = branch
           ? `https://raw.githubusercontent.com/${owner}/${repo}/${encodeURIComponent(branch)}${encodedPath}`
           : `https://raw.githubusercontent.com/${owner}/${repo}/HEAD${encodedPath}`;
@@ -319,7 +505,18 @@ export async function getGitHubRepoFile(
     const targetPath = Buffer.from(linkContent, 'base64').toString('utf-8').trim();
     // Re-fetch the target file with depth guard
     // Note: if target is a directory or submodule, getGitHubRepoFile will throw
-    return getGitHubRepoFile(owner, repo, targetPath, branch, raw, _depth + 1);
+    return getGitHubRepoFile(
+      owner,
+      repo,
+      targetPath,
+      branch,
+      raw,
+      offset,
+      limit,
+      byteOffset,
+      byteLimit,
+      _depth + 1,
+    );
   }
 
   // Regular file — extract content
@@ -338,39 +535,79 @@ export async function getGitHubRepoFile(
   // Detect binary
   const binary = isBinaryContent(bytes.toString('utf-8'), path);
 
-  // Truncate at 50 KB limit
-  const MAX_FILE_LENGTH = 50_000;
+  if (binary) {
+    if (hasLineRange || hasByteRange) {
+      throw validationError(
+        `Line ranges and byte ranges are not supported for binary files.`,
+        { statusCode: 400, backend: 'github' },
+      );
+    }
+    return normalizeBinaryContent(name, path, size, sha, bytes, htmlUrl, apiUrl);
+  }
+
+  // Text file
+  const decoded = bytes.toString('utf-8');
+
+  // Apply line ranges
+  if (hasLineRange) {
+    const effectiveOffset = offset ?? 0;
+    const { text: sliced, totalLines, hasMore } = applyLineRange(decoded, effectiveOffset, limit);
+
+    let finalContent = sliced;
+    let truncated = false;
+
+    // Apply max length after line slicing
+    if (finalContent.length > MAX_FILE_LENGTH) {
+      truncated = true;
+      finalContent = finalContent.slice(0, MAX_FILE_LENGTH) + TRUNCATED_MARKER;
+    }
+
+    return {
+      name,
+      path,
+      size,
+      sha,
+      content: finalContent,
+      encoding: 'utf-8',
+      htmlUrl,
+      apiUrl,
+      truncated,
+      isBinary: false,
+      totalLines,
+      lineOffset: effectiveOffset,
+      lineLimit: limit ?? null,
+      hasMore,
+      byteOffset: null,
+      byteLimit: null,
+    };
+  }
+
+  // Apply byte ranges (fallback to raw.githubusercontent.com even for API-sized files
+  // because GitHub API doesn't support byte ranges)
+  if (hasByteRange) {
+    return fetchRawAndNormalize(owner, repo, path, branch, raw, offset, limit, byteOffset, byteLimit);
+  }
+
+  // Default path: no ranges specified
   let truncated = false;
   let finalContent: string;
   let outputEncoding: 'utf-8' | 'base64';
 
-  if (binary) {
-    // Truncate at buffer level (base64-safe: multiple of 3 bytes)
-    outputEncoding = 'base64';
-    if (bytes.length > MAX_FILE_LENGTH) {
-      truncated = true;
-      const truncLen = MAX_FILE_LENGTH - (MAX_FILE_LENGTH % 3);
-      finalContent = bytes.subarray(0, truncLen).toString('base64') + TRUNCATED_MARKER;
-    } else {
-      finalContent = contentB64;
-    }
+  if (decoded.length > MAX_FILE_LENGTH) {
+    truncated = true;
+    finalContent = decoded.slice(0, MAX_FILE_LENGTH) + TRUNCATED_MARKER;
   } else {
-    // Text file: truncate at character level
-    const decoded = bytes.toString('utf-8');
-    if (decoded.length > MAX_FILE_LENGTH) {
-      truncated = true;
-      finalContent = decoded.slice(0, MAX_FILE_LENGTH) + TRUNCATED_MARKER;
-    } else {
-      finalContent = decoded;
-    }
-
-    if (raw) {
-      outputEncoding = 'utf-8';
-    } else {
-      outputEncoding = 'base64';
-      finalContent = Buffer.from(finalContent).toString('base64');
-    }
+    finalContent = decoded;
   }
+
+  if (raw) {
+    outputEncoding = 'utf-8';
+  } else {
+    outputEncoding = 'base64';
+    finalContent = Buffer.from(finalContent).toString('base64');
+  }
+
+  const totalLines = splitLines(decoded).length;
 
   return {
     name,
@@ -382,6 +619,162 @@ export async function getGitHubRepoFile(
     htmlUrl,
     apiUrl,
     truncated,
-    isBinary: binary,
+    isBinary: false,
+    totalLines,
+    lineOffset: 0,
+    lineLimit: null,
+    hasMore: truncated,
+    byteOffset: null,
+    byteLimit: null,
+  };
+}
+
+// ── Helpers for content normalization ───────────────────────────────────────
+
+function normalizeBinaryContent(
+  name: string,
+  path: string,
+  size: number,
+  sha: string,
+  bytes: Buffer,
+  htmlUrl: string,
+  apiUrl: string,
+): GitHubFileResult {
+  // Truncate at buffer level (base64-safe: multiple of 3 bytes)
+  const truncLen = MAX_FILE_LENGTH - (MAX_FILE_LENGTH % 3);
+  const truncated = bytes.length > MAX_FILE_LENGTH;
+  const finalContent = truncated
+    ? bytes.subarray(0, truncLen).toString('base64') + TRUNCATED_MARKER
+    : bytes.toString('base64');
+
+  return {
+    name,
+    path,
+    size,
+    sha,
+    content: finalContent,
+    encoding: 'base64',
+    htmlUrl,
+    apiUrl,
+    truncated,
+    isBinary: true,
+    totalLines: 0,
+    lineOffset: 0,
+    lineLimit: null,
+    hasMore: truncated,
+    byteOffset: null,
+    byteLimit: null,
+  };
+}
+
+/**
+ * Fetch from raw.githubusercontent.com and normalize.
+ * Used for:
+ * - Byte-range requests (GitHub API doesn't support HTTP Range)
+ * - Line-range requests on files >1MB (GitHub API returns 403)
+ */
+async function fetchRawAndNormalize(
+  owner: string,
+  repo: string,
+  path: string,
+  branch?: string,
+  raw = true,
+  offset?: number,
+  limit?: number,
+  byteOffset?: number,
+  byteLimit?: number,
+): Promise<GitHubFileResult> {
+  const hasLineRange = offset !== undefined || limit !== undefined;
+
+  const { content, totalBytes, rangeEnd } = await fetchRawContent(
+    owner,
+    repo,
+    path,
+    branch,
+    byteOffset,
+    byteLimit,
+  );
+
+  // Detect binary
+  const binary = isBinaryContent(content, path);
+
+  if (binary) {
+    throw validationError(
+      `Line ranges and byte ranges are not supported for binary files.`,
+      { statusCode: 400, backend: 'github' },
+    );
+  }
+
+  // For byte ranges, count total lines in the fetched chunk
+  const lines = splitLines(content);
+  const totalLines = lines.length;
+
+  let finalContent: string;
+  let truncated = false;
+
+  const encodedPath = '/' + path.split('/').map(encodeURIComponent).join('/');
+  const htmlUrl = branch
+    ? `https://github.com/${owner}/${repo}/blob/${encodeURIComponent(branch)}${encodedPath}`
+    : `https://github.com/${owner}/${repo}/blob/HEAD${encodedPath}`;
+
+  if (hasLineRange) {
+    const effectiveOffset = offset ?? 0;
+    const { text: sliced, totalLines: fileTotalLines, hasMore } = applyLineRange(content, effectiveOffset, limit);
+
+    let text = sliced;
+    if (text.length > MAX_FILE_LENGTH) {
+      truncated = true;
+      text = text.slice(0, MAX_FILE_LENGTH) + TRUNCATED_MARKER;
+    }
+
+    finalContent = text;
+
+    return {
+      name: path.split('/').pop() ?? path,
+      path,
+      size: totalBytes ?? Buffer.byteLength(content, 'utf-8'),
+      sha: '',
+      content: finalContent,
+      encoding: 'utf-8',
+      htmlUrl,
+      apiUrl: '',
+      truncated,
+      isBinary: false,
+      totalLines: fileTotalLines,
+      lineOffset: effectiveOffset,
+      lineLimit: limit ?? null,
+      hasMore,
+      byteOffset: null,
+      byteLimit: null,
+    };
+  }
+
+  // Byte range path
+  if (content.length > MAX_FILE_LENGTH) {
+    truncated = true;
+    finalContent = content.slice(0, MAX_FILE_LENGTH) + TRUNCATED_MARKER;
+  } else {
+    finalContent = content;
+  }
+
+  const hasMore = totalBytes !== null && rangeEnd !== null ? rangeEnd < totalBytes - 1 : false;
+
+  return {
+    name: path.split('/').pop() ?? path,
+    path,
+    size: totalBytes ?? Buffer.byteLength(content, 'utf-8'),
+    sha: '',
+    content: raw ? finalContent : Buffer.from(finalContent).toString('base64'),
+    encoding: raw ? 'utf-8' : 'base64',
+    htmlUrl,
+    apiUrl: '',
+    truncated,
+    isBinary: false,
+    totalLines,
+    lineOffset: 0,
+    lineLimit: null,
+    hasMore,
+    byteOffset: byteOffset ?? null,
+    byteLimit: byteLimit ?? null,
   };
 }

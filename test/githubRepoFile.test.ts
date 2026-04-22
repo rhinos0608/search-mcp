@@ -598,3 +598,292 @@ test('getGitHubRepoFile encodes special characters in path', async () => {
     `Expected encoded path in URL but got: ${fetchedUrl}`,
   );
 });
+
+// ── Line range tests ─────────────────────────────────────────────────────────
+
+test('getGitHubRepoFile slices lines with offset and limit', async () => {
+  const lines = ['line0', 'line1', 'line2', 'line3', 'line4', 'line5'];
+  const content = lines.join('\n');
+
+  globalThis.fetch = async () =>
+    buildMockResponse({
+      name: 'file.txt',
+      path: 'file.txt',
+      sha: 'sha1',
+      size: content.length,
+      encoding: 'base64',
+      content: btoa(content),
+      html_url: 'https://github.com/o/r/blob/main/file.txt',
+      url: 'https://api.github.com/repos/o/r/contents/file.txt?ref=main',
+    });
+
+  const result = await getGitHubRepoFile('o', 'r', 'file.txt', 'main', true, 2, 3);
+
+  assert.equal(result.content, 'line2\nline3\nline4');
+  assert.equal(result.totalLines, 6);
+  assert.equal(result.lineOffset, 2);
+  assert.equal(result.lineLimit, 3);
+  assert.equal(result.hasMore, true);
+  assert.equal(result.encoding, 'utf-8');
+});
+
+test('getGitHubRepoFile reads from offset to end when limit is omitted', async () => {
+  const content = 'a\nb\nc\nd\ne';
+
+  globalThis.fetch = async () =>
+    buildMockResponse({
+      name: 'file.txt',
+      path: 'file.txt',
+      sha: 'sha1',
+      size: content.length,
+      encoding: 'base64',
+      content: btoa(content),
+      html_url: 'https://github.com/o/r/blob/main/file.txt',
+      url: 'https://api.github.com/repos/o/r/contents/file.txt?ref=main',
+    });
+
+  const result = await getGitHubRepoFile('o', 'r', 'file.txt', 'main', true, 3);
+
+  assert.equal(result.content, 'd\ne');
+  assert.equal(result.totalLines, 5);
+  assert.equal(result.lineOffset, 3);
+  assert.equal(result.lineLimit, null);
+  assert.equal(result.hasMore, false);
+});
+
+test('getGitHubRepoFile reads first N lines when only limit is specified', async () => {
+  const content = 'a\nb\nc\nd\ne';
+
+  globalThis.fetch = async () =>
+    buildMockResponse({
+      name: 'file.txt',
+      path: 'file.txt',
+      sha: 'sha1',
+      size: content.length,
+      encoding: 'base64',
+      content: btoa(content),
+      html_url: 'https://github.com/o/r/blob/main/file.txt',
+      url: 'https://api.github.com/repos/o/r/contents/file.txt?ref=main',
+    });
+
+  const result = await getGitHubRepoFile('o', 'r', 'file.txt', 'main', true, undefined, 2);
+
+  assert.equal(result.content, 'a\nb');
+  assert.equal(result.totalLines, 5);
+  assert.equal(result.lineOffset, 0);
+  assert.equal(result.lineLimit, 2);
+  assert.equal(result.hasMore, true);
+});
+
+test('getGitHubRepoFile returns empty content when offset exceeds total lines', async () => {
+  const content = 'a\nb';
+
+  globalThis.fetch = async () =>
+    buildMockResponse({
+      name: 'file.txt',
+      path: 'file.txt',
+      sha: 'sha1',
+      size: content.length,
+      encoding: 'base64',
+      content: btoa(content),
+      html_url: 'https://github.com/o/r/blob/main/file.txt',
+      url: 'https://api.github.com/repos/o/r/contents/file.txt?ref=main',
+    });
+
+  const result = await getGitHubRepoFile('o', 'r', 'file.txt', 'main', true, 10, 5);
+
+  assert.equal(result.content, '');
+  assert.equal(result.totalLines, 2);
+  assert.equal(result.lineOffset, 10);
+  assert.equal(result.lineLimit, 5);
+  assert.equal(result.hasMore, false);
+});
+
+test('getGitHubRepoFile handles CRLF line endings in line ranges', async () => {
+  const content = 'line0\r\nline1\r\nline2\r\nline3';
+
+  globalThis.fetch = async () =>
+    buildMockResponse({
+      name: 'file.txt',
+      path: 'file.txt',
+      sha: 'sha1',
+      size: content.length,
+      encoding: 'base64',
+      content: btoa(content),
+      html_url: 'https://github.com/o/r/blob/main/file.txt',
+      url: 'https://api.github.com/repos/o/r/contents/file.txt?ref=main',
+    });
+
+  const result = await getGitHubRepoFile('o', 'r', 'file.txt', 'main', true, 1, 2);
+
+  // Should normalize to LF in output
+  assert.equal(result.content, 'line1\nline2');
+  assert.equal(result.totalLines, 4);
+});
+
+test('getGitHubRepoFile throws validationError for line range with raw=false', async () => {
+  await assert.rejects(
+    async () => getGitHubRepoFile('o', 'r', 'file.txt', 'main', false, 0, 10),
+    (err: unknown) => {
+      return err instanceof Error && /line ranges/i.test(err.message) && /raw=true/i.test(err.message);
+    },
+  );
+});
+
+test('getGitHubRepoFile throws validationError when both line and byte ranges specified', async () => {
+  await assert.rejects(
+    async () => getGitHubRepoFile('o', 'r', 'file.txt', 'main', true, 0, 10, 0, 100),
+    (err: unknown) => {
+      return (
+        err instanceof Error && /both/i.test(err.message) && /line ranges/i.test(err.message)
+      );
+    },
+  );
+});
+
+test('getGitHubRepoFile throws validationError for negative offset', async () => {
+  await assert.rejects(
+    async () => getGitHubRepoFile('o', 'r', 'file.txt', 'main', true, -1, 10),
+    (err: unknown) => {
+      return err instanceof Error && /offset must be/i.test(err.message);
+    },
+  );
+});
+
+// ── Byte range tests ─────────────────────────────────────────────────────────
+
+test('getGitHubRepoFile fetches byte range via raw.githubusercontent.com', async () => {
+  let fetchedUrl: string | undefined;
+  let fetchedHeaders: Headers | undefined;
+
+  globalThis.fetch = async (url: string | URL | Request, init?: RequestInit) => {
+    const urlStr = url.toString();
+    if (urlStr.includes('api.github.com')) {
+      return buildMockResponse({
+        name: 'file.txt',
+        path: 'file.txt',
+        sha: 'sha1',
+        size: 100,
+        encoding: 'base64',
+        content: btoa('abcdefghijklmnopqrstuvwxyz'),
+        html_url: 'https://github.com/o/r/blob/main/file.txt',
+        url: 'https://api.github.com/repos/o/r/contents/file.txt?ref=main',
+      });
+    }
+    // raw.githubusercontent.com call
+    fetchedUrl = urlStr;
+    fetchedHeaders = new Headers(init?.headers);
+    return new Response('klmnopqrst', {
+      status: 206,
+      statusText: 'Partial Content',
+      headers: {
+        'content-range': 'bytes 10-19/100',
+        'content-type': 'text/plain; charset=utf-8',
+      },
+    });
+  };
+
+  const result = await getGitHubRepoFile('o', 'r', 'file.txt', 'main', true, undefined, undefined, 10, 10);
+
+  assert.ok(fetchedUrl!.includes('raw.githubusercontent.com'));
+  assert.equal(fetchedHeaders!.get('Range'), 'bytes=10-19');
+  assert.equal(result.content, 'klmnopqrst');
+  assert.equal(result.byteOffset, 10);
+  assert.equal(result.byteLimit, 10);
+  assert.equal(result.hasMore, true); // 19 < 99 (totalBytes - 1)
+  assert.equal(result.totalLines, 1); // 'klmnopqrst' has no newline
+});
+
+test('getGitHubRepoFile byte range with only byteOffset sends open-ended Range', async () => {
+  let fetchedHeaders: Headers | undefined;
+
+  globalThis.fetch = async (url: string | URL | Request, init?: RequestInit) => {
+    const urlStr = url.toString();
+    if (urlStr.includes('api.github.com')) {
+      return buildMockResponse({
+        name: 'file.txt',
+        path: 'file.txt',
+        sha: 'sha1',
+        size: 100,
+        encoding: 'base64',
+        content: btoa('abcdefghijklmnopqrstuvwxyz'),
+        html_url: 'https://github.com/o/r/blob/main/file.txt',
+        url: 'https://api.github.com/repos/o/r/contents/file.txt?ref=main',
+      });
+    }
+    fetchedHeaders = new Headers(init?.headers);
+    return new Response('klmnopqrstuvwxyz', {
+      status: 206,
+      statusText: 'Partial Content',
+      headers: {
+        'content-range': 'bytes 10-/100',
+        'content-type': 'text/plain; charset=utf-8',
+      },
+    });
+  };
+
+  await getGitHubRepoFile('o', 'r', 'file.txt', 'main', true, undefined, undefined, 10, undefined);
+
+  assert.equal(fetchedHeaders!.get('Range'), 'bytes=10-');
+});
+
+// ── Large file fallback for line ranges ─────────────────────────────────────
+
+test('getGitHubRepoFile falls back to raw.githubusercontent.com for line range on 403 large file', async () => {
+  let callCount = 0;
+
+  globalThis.fetch = async (url: string | URL | Request) => {
+    callCount++;
+    const urlStr = url.toString();
+    if (urlStr.includes('api.github.com')) {
+      return new Response(JSON.stringify({ message: 'This file is too large' }), {
+        status: 403,
+        statusText: 'Forbidden',
+        headers: { 'content-type': 'application/json' },
+      });
+    }
+    // raw.githubusercontent.com fallback
+    return new Response('line0\nline1\nline2\nline3\nline4', {
+      status: 200,
+      statusText: 'OK',
+      headers: { 'content-type': 'text/plain; charset=utf-8' },
+    });
+  };
+
+  const result = await getGitHubRepoFile('o', 'r', 'large.txt', 'main', true, 1, 3);
+
+  // 3 calls: initial API fetch, re-fetch for 403 error text, raw.githubusercontent.com fallback
+  assert.equal(callCount, 3);
+  assert.equal(result.content, 'line1\nline2\nline3');
+  assert.equal(result.totalLines, 5);
+  assert.equal(result.lineOffset, 1);
+  assert.equal(result.hasMore, true);
+});
+
+// ── Metadata fields ──────────────────────────────────────────────────────────
+
+test('getGitHubRepoFile includes totalLines and hasMore for default read', async () => {
+  const content = 'line1\nline2\nline3';
+
+  globalThis.fetch = async () =>
+    buildMockResponse({
+      name: 'file.txt',
+      path: 'file.txt',
+      sha: 'sha1',
+      size: content.length,
+      encoding: 'base64',
+      content: btoa(content),
+      html_url: 'https://github.com/o/r/blob/main/file.txt',
+      url: 'https://api.github.com/repos/o/r/contents/file.txt?ref=main',
+    });
+
+  const result = await getGitHubRepoFile('o', 'r', 'file.txt', 'main', true);
+
+  assert.equal(result.totalLines, 3);
+  assert.equal(result.lineOffset, 0);
+  assert.equal(result.lineLimit, null);
+  assert.equal(result.hasMore, false);
+  assert.equal(result.byteOffset, null);
+  assert.equal(result.byteLimit, null);
+  assert.equal(result.truncated, false);
+});
