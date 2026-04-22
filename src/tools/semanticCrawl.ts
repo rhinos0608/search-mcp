@@ -171,24 +171,12 @@ export async function semanticCrawl(
     };
   }
 
-  // 4. Embed chunks
+  // 4. Embed chunks and query in parallel
   const chunkTexts = allChunks.map((c) => c.text);
-  const chunkEmbeddings = await embedTexts(
-    embeddingBaseUrl,
-    embeddingApiToken,
-    chunkTexts,
-    'document',
-    embeddingDimensions,
-  );
-
-  // 5. Embed query
-  const queryEmbeddings = await embedTexts(
-    embeddingBaseUrl,
-    embeddingApiToken,
-    [opts.query],
-    'query',
-    embeddingDimensions,
-  );
+  const [chunkEmbeddings, queryEmbeddings] = await Promise.all([
+    embedTexts(embeddingBaseUrl, embeddingApiToken, chunkTexts, 'document', embeddingDimensions),
+    embedTexts(embeddingBaseUrl, embeddingApiToken, [opts.query], 'query', embeddingDimensions),
+  ]);
   const queryEmbedding = queryEmbeddings[0];
   if (!queryEmbedding) {
     throw new Error('Embedding sidecar returned empty query embedding');
