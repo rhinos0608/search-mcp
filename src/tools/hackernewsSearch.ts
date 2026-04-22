@@ -4,6 +4,8 @@ import { ToolCache, cacheKey } from '../cache.js';
 import { retryWithBackoff } from '../retry.js';
 import { unavailableError, timeoutError } from '../errors.js';
 import type { HackerNewsItem } from '../types.js';
+import { rrfMerge } from '../utils/fusion.js';
+import { multiSignalRescore, extractHNSignals } from '../utils/rescore.js';
 
 const HN_ALGOLIA_URL = 'https://hn.algolia.com/api/v1';
 const USER_AGENT = 'search-mcp/1.0';
@@ -120,7 +122,7 @@ export async function hackernewsSearch(
     throw new Error('Unexpected HN Algolia API response: missing hits array');
   }
 
-  const results: HackerNewsItem[] = (hits as unknown[])
+  let results: HackerNewsItem[] = (hits as unknown[])
     .map((hit) => {
       if (typeof hit !== 'object' || hit === null) return null;
       const h = hit as Record<string, unknown>;
@@ -157,8 +159,24 @@ export async function hackernewsSearch(
     .filter(
       (item): item is HackerNewsItem =>
         item !== null && (Boolean(item.title) || Boolean(item.storyText)),
-    )
-    .slice(0, limit);
+    );
+
+  // Single-source RRF + rescoring
+  const merged = rrfMerge([results], { k: 60 });
+  const allSignals = extractHNSignals(results, sort);
+  const signaled = merged.map((m, i) => ({
+    item: m.item,
+    rrfScore: m.rrfScore,
+    signals: allSignals[i] ?? {},
+  }));
+  const rescoreWeights = {
+    rrfAnchor: 0.5,
+    recency: 0.15,
+    engagement: 0.2,
+    commentEngagement: 0.15,
+  };
+  const rescored = multiSignalRescore(signaled, rescoreWeights, limit);
+  results = rescored.map(r => r.item);
 
   cache.set(key, results);
   logger.debug({ resultCount: results.length }, 'HN search complete');
