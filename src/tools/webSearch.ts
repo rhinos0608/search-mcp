@@ -2,6 +2,7 @@ import { logger } from '../logger.js';
 import { loadConfig, type SearchBackend } from '../config.js';
 import { braveSearch } from './braveSearch.js';
 import { searxngSearch } from './searxngSearch.js';
+import { normalizeUrl, rrfMerge } from '../utils/fusion.js';
 import type { SearchResult } from '../types.js';
 
 // ── Fallback order ───────────────────────────────────────────────────────────
@@ -24,14 +25,97 @@ async function runBackend(
   query: string,
   limit: number,
   safeSearch: 'strict' | 'moderate' | 'off',
+  deps: WebSearchDeps,
 ): Promise<SearchResult[]> {
   const cfg = loadConfig();
   switch (backend) {
     case 'brave':
-      return braveSearch(query, cfg.brave.apiKey, limit, safeSearch);
+      return deps.braveSearch(query, cfg.brave.apiKey, limit, safeSearch);
     case 'searxng':
-      return searxngSearch(query, cfg.searxng.baseUrl, limit, safeSearch);
+      return deps.searxngSearch(query, cfg.searxng.baseUrl, limit, safeSearch);
   }
+}
+
+// ── Dependency injection ─────────────────────────────────────────────────────
+
+export interface WebSearchDeps {
+  braveSearch: typeof import('./braveSearch.js').braveSearch;
+  searxngSearch: typeof import('./searxngSearch.js').searxngSearch;
+}
+
+// ── Core search with fusion ──────────────────────────────────────────────────
+
+export async function searchWithBackends(
+  query: string,
+  limit: number,
+  safeSearch: 'strict' | 'moderate' | 'off',
+  deps: WebSearchDeps,
+  overrideBackends?: SearchBackend[],
+): Promise<SearchResult[]> {
+  const cfg = loadConfig();
+  const primary = cfg.searchBackend;
+
+  const backends =
+    overrideBackends ??
+    [primary, ...FALLBACK_ORDER.filter((b) => b !== primary)];
+
+  const errors: string[] = [];
+
+  const available = overrideBackends
+    ? backends
+    : backends.filter((b) => {
+        if (!backendAvailable(b)) {
+          logger.debug({ backend: b }, 'Skipping unavailable backend');
+          return false;
+        }
+        return true;
+      });
+
+  const promises = available.map(async (backend) => {
+    try {
+      const results = await runBackend(
+        backend,
+        query,
+        limit * 2,
+        safeSearch,
+        deps,
+      );
+      return { backend, results };
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      logger.warn({ backend, err: msg }, 'Search backend failed');
+      errors.push(`${backend}: ${msg}`);
+      throw err;
+    }
+  });
+
+  const settled = await Promise.allSettled(promises);
+  const valid: SearchResult[][] = [];
+
+  for (const s of settled) {
+    if (s.status === 'fulfilled') {
+      valid.push(s.value.results);
+    }
+  }
+
+  if (valid.length === 0) {
+    throw new Error(
+      `All search backends failed. Ensure at least one backend is configured (BRAVE_API_KEY or SEARXNG_BASE_URL).\n${errors.join('\n')}`,
+    );
+  }
+
+  if (valid.length === 1) {
+    return (valid[0] ?? []).slice(0, limit);
+  }
+
+  const merged = rrfMerge(valid, {
+    k: 60,
+    keyFn: (r) => normalizeUrl(r.url),
+  });
+
+  return merged
+    .slice(0, limit)
+    .map((m) => m.item);
 }
 
 // ── Public API ───────────────────────────────────────────────────────────────
@@ -41,29 +125,8 @@ export async function webSearch(
   limit = 10,
   safeSearch: 'strict' | 'moderate' | 'off' = 'moderate',
 ): Promise<SearchResult[]> {
-  const cfg = loadConfig();
-  const primary = cfg.searchBackend;
-
-  // Build ordered list: primary first, then remaining fallbacks
-  const backends = [primary, ...FALLBACK_ORDER.filter((b) => b !== primary)];
-  const errors: string[] = [];
-
-  for (const backend of backends) {
-    if (!backendAvailable(backend)) {
-      logger.debug({ backend }, 'Skipping unavailable backend');
-      continue;
-    }
-
-    try {
-      return await runBackend(backend, query, limit, safeSearch);
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      logger.warn({ backend, err: msg }, 'Search backend failed, trying next');
-      errors.push(`${backend}: ${msg}`);
-    }
-  }
-
-  throw new Error(
-    `All search backends failed. Ensure at least one backend is configured (BRAVE_API_KEY or SEARXNG_BASE_URL).\n${errors.join('\n')}`,
-  );
+  return searchWithBackends(query, limit, safeSearch, {
+    braveSearch,
+    searxngSearch,
+  });
 }
