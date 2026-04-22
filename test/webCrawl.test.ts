@@ -59,7 +59,7 @@ test('webCrawl returns markdown string unchanged when API returns markdown as a 
 
 // ── Test 3: Markdown object shape ─────────────────────────────────────────────
 
-test('webCrawl prefers fit_markdown over raw_markdown when markdown is an object', async () => {
+test('webCrawl prefers raw_markdown over fit_markdown when markdown is an object', async () => {
   globalThis.fetch = async () =>
     buildMockResponse({
       result: {
@@ -72,7 +72,7 @@ test('webCrawl prefers fit_markdown over raw_markdown when markdown is an object
   const result = await webCrawl('https://example.com', 'https://crawl4ai.example.com', '', defaultOpts);
 
   assert.ok(result.pages[0]);
-  assert.equal(result.pages[0].markdown, '# Fit');
+  assert.equal(result.pages[0].markdown, '# Raw');
 });
 
 // ── Test 4: Deep crawl response with results array ────────────────────────────
