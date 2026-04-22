@@ -26,6 +26,7 @@ interface Crawl4aiPage {
     external?: { href?: string; text?: string }[];
   } | null;
   error_message?: string | null;
+  status_code?: number;
 }
 
 interface Crawl4aiResponse {
@@ -38,7 +39,8 @@ interface Crawl4aiResponse {
 function extractMarkdown(raw: Crawl4aiPage['markdown']): string {
   if (typeof raw === 'string') return raw;
   if (raw !== null && raw !== undefined && typeof raw === 'object') {
-    return raw.fit_markdown ?? raw.raw_markdown ?? '';
+    // v0.8.x: prefer raw_markdown (full content), fall back to fit_markdown
+    return raw.raw_markdown ?? raw.fit_markdown ?? '';
   }
   return '';
 }
@@ -60,7 +62,7 @@ function normalizePage(page: Crawl4aiPage): CrawlPageResult {
     title: page.metadata?.title ?? null,
     description: page.metadata?.description ?? null,
     links: [...internalLinks, ...externalLinks],
-    statusCode: page.metadata?.status_code ?? null,
+    statusCode: page.status_code ?? null,
     errorMessage: page.error_message ?? null,
   };
 }
@@ -80,7 +82,6 @@ export async function webCrawl(
   }
 
   const endpoint = `${baseUrl.replace(/\/+$/, '')}/crawl`;
-  assertSafeUrl(endpoint);
 
   const crawlerConfig: Record<string, unknown> = {
     headless: true,

@@ -4,6 +4,7 @@ import {
   searchWithBackends,
   type WebSearchDeps,
 } from '../src/tools/webSearch.js';
+import { resetConfig } from '../src/config.js';
 import type { SearchResult } from '../src/types.js';
 
 function makeResult(url: string, position: number): SearchResult {
@@ -19,6 +20,35 @@ function makeResult(url: string, position: number): SearchResult {
     deepLinks: null,
   };
 }
+
+test('skips unconfigured backends when overrideBackends is omitted', async () => {
+  const origBrave = process.env.BRAVE_API_KEY;
+  const origSearx = process.env.SEARXNG_BASE_URL;
+
+  try {
+    process.env.BRAVE_API_KEY = 'test-key';
+    delete process.env.SEARXNG_BASE_URL;
+    resetConfig();
+
+    const deps: WebSearchDeps = {
+      braveSearch: async () => [makeResult('https://example.com/x', 1)],
+      searxngSearch: async () => {
+        throw new Error('should not be called');
+      },
+    };
+
+    const results = await searchWithBackends('query', 1, 'moderate', deps);
+
+    assert.equal(results.length, 1);
+    assert.equal(results[0]!.url, 'https://example.com/x');
+  } finally {
+    if (origBrave !== undefined) process.env.BRAVE_API_KEY = origBrave;
+    else delete process.env.BRAVE_API_KEY;
+    if (origSearx !== undefined) process.env.SEARXNG_BASE_URL = origSearx;
+    else delete process.env.SEARXNG_BASE_URL;
+    resetConfig();
+  }
+});
 
 test('merges and dedupes results from both backends', async () => {
   const a = makeResult('https://example.com/a', 1);
@@ -37,7 +67,9 @@ test('merges and dedupes results from both backends', async () => {
 
   assert.equal(results.length, 2);
   assert.equal(results[0]!.url, b.url, 'b should be first (RRF winner via both lists)');
+  assert.equal(results[0]!.position, 1, 'position should be remapped after fusion');
   assert.equal(results[1]!.url, a.url, 'a should be second');
+  assert.equal(results[1]!.position, 2, 'position should be remapped after fusion');
 });
 
 test('returns surviving results when one backend fails', async () => {
@@ -97,4 +129,8 @@ test('limits results to requested count', async () => {
   ]);
 
   assert.equal(results.length, 2);
+  assert.equal(results[0]!.url, r1.url);
+  assert.equal(results[0]!.position, 1);
+  assert.equal(results[1]!.url, r4.url);
+  assert.equal(results[1]!.position, 2);
 });

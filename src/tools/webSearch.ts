@@ -76,7 +76,7 @@ export async function searchWithBackends(
       const results = await runBackend(
         backend,
         query,
-        limit * 2,
+        limit,
         safeSearch,
         deps,
       );
@@ -115,7 +115,7 @@ export async function searchWithBackends(
 
   return merged
     .slice(0, limit)
-    .map((m) => m.item);
+    .map((m, i) => ({ ...m.item, position: i + 1 }));
 }
 
 // ── Public API ───────────────────────────────────────────────────────────────

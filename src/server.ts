@@ -3,7 +3,6 @@ import { z } from 'zod/v4';
 import { logger } from './logger.js';
 import { loadConfig } from './config.js';
 import { webSearch } from './tools/webSearch.js';
-import { webRead } from './tools/webRead.js';
 import { getGitHubRepo } from './tools/githubRepo.js';
 import { getGitHubTrending } from './tools/githubTrending.js';
 import { getGitHubRepoTree } from './tools/githubRepoTree.js';
@@ -149,23 +148,54 @@ export function createServer(): McpServer {
     },
   );
 
-  // ── web_read ──────────────────────────────────────────────────────────────
+  // ── web_read (crawl4ai) ────────────────────────────────────────────────────
   server.registerTool(
     'web_read',
     {
       description:
-        'Fetch and parse a web page, extracting its article content as both HTML and plain text. Uses Mozilla Readability with automatic fallback to raw DOM text extraction. Returns metadata (title, description, image, published date) when available.',
+        'Fetch and parse a web page via crawl4ai headless browser. Handles JavaScript-rendered SPAs, React/Vue apps, consent popups, and shadow DOM. Returns clean LLM-ready Markdown with title, description, and extracted links. [DEPRECATED] Use web_crawl for deep crawling support.',
       inputSchema: {
         url: z
           .url()
           .describe('The fully-qualified URL of the page to read (must include https://)'),
+        strategy: z
+          .enum(['bfs', 'dfs'])
+          .optional()
+          .default('bfs')
+          .describe('Crawl strategy (default bfs)'),
+        maxDepth: z
+          .number()
+          .int()
+          .min(1)
+          .max(5)
+          .optional()
+          .default(1)
+          .describe('Max link depth to follow (1–5, default 1 = single page)'),
+        maxPages: z
+          .number()
+          .int()
+          .min(1)
+          .max(100)
+          .optional()
+          .default(1)
+          .describe('Max pages to crawl (1–100, default 1)'),
+        includeExternalLinks: z
+          .boolean()
+          .optional()
+          .default(false)
+          .describe('Follow external domain links (default false)'),
       },
     },
-    async ({ url }) => {
-      logger.info({ tool: 'web_read' }, 'Tool invoked');
+    async ({ url, strategy, maxDepth, maxPages, includeExternalLinks }) => {
+      logger.info({ tool: 'web_read' }, 'Tool invoked (crawl4ai)');
       const start = Date.now();
       try {
-        const data = await webRead(url);
+        const data = await webCrawl(url, cfg.crawl4ai.baseUrl, cfg.crawl4ai.apiToken, {
+          strategy,
+          maxDepth,
+          maxPages,
+          includeExternalLinks,
+        });
         const result = makeResult('web_read', data, Date.now() - start);
         return successResponse(result);
       } catch (err: unknown) {
