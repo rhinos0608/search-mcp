@@ -7,7 +7,12 @@ import {
 import { resetConfig } from '../src/config.js';
 import type { SearchResult } from '../src/types.js';
 
-function makeResult(url: string, position: number): SearchResult {
+function makeResult(
+  url: string,
+  position: number,
+  age: string | null = null,
+  deepLinks: { title: string; url: string }[] | null = null,
+): SearchResult {
   return {
     title: `title-${url}`,
     url,
@@ -15,9 +20,9 @@ function makeResult(url: string, position: number): SearchResult {
     position,
     domain: new URL(url).hostname,
     source: 'brave',
-    age: null,
+    age,
     extraSnippet: null,
-    deepLinks: null,
+    deepLinks,
   };
 }
 
@@ -133,4 +138,30 @@ test('limits results to requested count', async () => {
   assert.equal(results[0]!.position, 1);
   assert.equal(results[1]!.url, r4.url);
   assert.equal(results[1]!.position, 2);
+});
+
+test('searchWithBackends with rescoring: fresher results bubble up', async () => {
+  // Arrange backends so RRF is tied, letting recency break the tie
+  const braveResults: SearchResult[] = [
+    makeResult('https://example.com/old', 1, '30 days ago'),
+    makeResult('https://example.com/new', 2, '1 day ago'),
+  ];
+  const searxResults: SearchResult[] = [
+    makeResult('https://example.com/new', 1, '1 day ago'),
+    makeResult('https://example.com/old', 2, '30 days ago'),
+  ];
+
+  const results = await searchWithBackends(
+    'test',
+    2,
+    'moderate',
+    {
+      braveSearch: async () => braveResults,
+      searxngSearch: async () => searxResults,
+    },
+    ['brave', 'searxng'],
+  );
+
+  // With rescoring, newer result should outrank older one
+  assert.equal(results[0]!.url, 'https://example.com/new');
 });

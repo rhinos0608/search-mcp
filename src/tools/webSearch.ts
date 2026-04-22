@@ -3,6 +3,7 @@ import { loadConfig, type SearchBackend } from '../config.js';
 import { braveSearch } from './braveSearch.js';
 import { searxngSearch } from './searxngSearch.js';
 import { normalizeUrl, rrfMerge } from '../utils/fusion.js';
+import { multiSignalRescore, extractWebSearchSignals } from '../utils/rescore.js';
 import type { SearchResult } from '../types.js';
 
 // ── Fallback order ───────────────────────────────────────────────────────────
@@ -113,9 +114,27 @@ export async function searchWithBackends(
     keyFn: (r) => normalizeUrl(r.url),
   });
 
-  return merged
-    .slice(0, limit)
-    .map((m, i) => ({ ...m.item, position: i + 1 }));
+  const allItems = merged.map((m) => m.item);
+  const allSignals = extractWebSearchSignals(allItems);
+
+  const signaled = merged.map((m, i) => ({
+    item: m.item,
+    rrfScore: m.rrfScore,
+    signals: allSignals[i] ?? {},
+  }));
+
+  const rescoreWeights = {
+    rrfAnchor: 0.5,
+    recency: 0.2,
+    hasDeepLinks: 0.05,
+  };
+
+  const rescored = multiSignalRescore(signaled, rescoreWeights, limit);
+
+  return rescored.map((r, i) => ({
+    ...r.item,
+    position: i + 1,
+  }));
 }
 
 // ── Public API ───────────────────────────────────────────────────────────────
