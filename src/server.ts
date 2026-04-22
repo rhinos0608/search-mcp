@@ -24,6 +24,7 @@ import { stackoverflowSearch } from './tools/stackoverflowSearch.js';
 import { npmSearch } from './tools/npmSearch.js';
 import { pypiSearch } from './tools/pypiSearch.js';
 import { newsSearch } from './tools/newsSearch.js';
+import { webCrawl } from './tools/webCrawl.js';
 import { isToolError } from './errors.js';
 import type { RateLimitInfo } from './rateLimit.js';
 import type { ToolResult } from './types.js';
@@ -1090,6 +1091,72 @@ export function createServer(): McpServer {
       }
     },
   );
+
+  // ── web_crawl ────────────────────────────────────────────────────────────
+  if (!gated.has('web_crawl'))
+    server.registerTool(
+      'web_crawl',
+      {
+        description:
+          'Crawl a URL using a headless Playwright browser (via a crawl4ai sidecar). ' +
+          'Unlike web_read, this handles JavaScript-rendered SPAs, React/Vue apps, consent popups, and shadow DOM. ' +
+          'Returns clean LLM-ready Markdown with title, description, and extracted links for each crawled page. ' +
+          'Supports deep crawling across multiple pages. Requires CRAWL4AI_BASE_URL env var (self-hosted Docker sidecar).',
+        inputSchema: {
+          url: z.url().describe('Seed URL to start crawling from'),
+          strategy: z
+            .enum(['bfs', 'dfs'])
+            .optional()
+            .default('bfs')
+            .describe(
+              'Crawl strategy: bfs (breadth-first, good for shallow wide coverage) | ' +
+                'dfs (depth-first, good for deeply nested docs)',
+            ),
+          maxDepth: z
+            .number()
+            .int()
+            .min(1)
+            .max(5)
+            .optional()
+            .default(1)
+            .describe(
+              'Maximum link depth to follow from seed URL (1–5, default 1 = single page only)',
+            ),
+          maxPages: z
+            .number()
+            .int()
+            .min(1)
+            .max(100)
+            .optional()
+            .default(1)
+            .describe('Maximum number of pages to crawl (1–100, default 1)'),
+          includeExternalLinks: z
+            .boolean()
+            .optional()
+            .default(false)
+            .describe(
+              'Follow links to external domains (default false — stays on seed domain)',
+            ),
+        },
+      },
+      async ({ url, strategy, maxDepth, maxPages, includeExternalLinks }) => {
+        logger.info({ tool: 'web_crawl', url, strategy, maxDepth, maxPages }, 'Tool invoked');
+        const start = Date.now();
+        try {
+          const data = await webCrawl(url, cfg.crawl4ai.baseUrl, cfg.crawl4ai.apiToken, {
+            strategy,
+            maxDepth,
+            maxPages,
+            includeExternalLinks,
+          });
+          const result = makeResult('web_crawl', data, Date.now() - start);
+          return successResponse(result);
+        } catch (err: unknown) {
+          logger.error({ err, tool: 'web_crawl' }, 'Tool failed');
+          return errorResponse(err);
+        }
+      },
+    );
 
   // ── health_check ──────────────────────────────────────────────────────
   server.registerTool(
