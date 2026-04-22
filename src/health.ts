@@ -58,6 +58,11 @@ const GATED_TOOLS: Record<string, GateRule> = {
     remediation:
       'Set CRAWL4AI_BASE_URL to point at a running crawl4ai sidecar (e.g. http://localhost:11235). Run: docker run -d -p 11235:11235 unclecode/crawl4ai:latest',
   },
+  semantic_crawl: {
+    check: (cfg) => cfg.crawl4ai.baseUrl.length > 0 && cfg.embeddingSidecar.baseUrl.length > 0,
+    remediation:
+      'Set CRAWL4AI_BASE_URL and EMBEDDING_SIDECAR_BASE_URL. The embedding sidecar requires a running crawl4ai sidecar.',
+  },
 };
 
 // ── Optional config (works without, degraded) ──────────────────────────────
@@ -272,7 +277,15 @@ export function getNetworkProbes(cfg: SearchConfig): NetworkProbe[] {
     probes.push({
       label: 'crawl4ai',
       url: `${cfg.crawl4ai.baseUrl.replace(/\/+$/, '')}/health`,
-      tools: ['web_crawl'],
+      tools: ['web_crawl', 'semantic_crawl'],
+    });
+  }
+
+  if (cfg.embeddingSidecar.baseUrl.length > 0) {
+    probes.push({
+      label: 'embedding-sidecar',
+      url: `${cfg.embeddingSidecar.baseUrl.replace(/\/+$/, '')}/health`,
+      tools: ['semantic_crawl'],
     });
   }
 
