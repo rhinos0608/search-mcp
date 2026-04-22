@@ -28,8 +28,7 @@ interface SectionNode extends Section {
 
 export function chunkMarkdown(markdown: string, url: string): MarkdownChunk[] {
   const lines = markdown.split('\n');
-  const sections = parseSections(lines);
-  const pageTitle = sections.find((s) => s.depth === 1)?.heading ?? null;
+  const { sections, pageTitle } = parseSections(lines);
 
   // Build section nodes with chains
   const nodes: SectionNode[] = [];
@@ -38,8 +37,13 @@ export function chunkMarkdown(markdown: string, url: string): MarkdownChunk[] {
   for (const section of sections) {
     if (section.depth === 1) continue;
 
-    while (parentStack.length > 0 && parentStack[parentStack.length - 1]!.depth >= section.depth) {
-      parentStack.pop();
+    while (parentStack.length > 0) {
+      const last = parentStack[parentStack.length - 1];
+      if (last && last.depth >= section.depth) {
+        parentStack.pop();
+      } else {
+        break;
+      }
     }
 
     const chain = buildChain(pageTitle, section, parentStack);
@@ -61,10 +65,13 @@ export function chunkMarkdown(markdown: string, url: string): MarkdownChunk[] {
   let allChunks: MarkdownChunk[] = [];
   for (const group of groups) {
     const groupContent = group.map((n) => n.contentLines.join('\n')).join('\n\n').trim();
-    const groupChain = group[group.length - 1]!.chain;
+    const groupChain = group.at(-1)?.chain ?? '';
     const chunks = splitGroup(groupContent, groupChain, url, pageTitle);
     allChunks = allChunks.concat(chunks);
   }
+
+  // Post-process to ensure floor invariant
+  allChunks = postProcessChunks(allChunks);
 
   // Annotate global indices
   return allChunks.map((c, i) => ({
@@ -78,88 +85,106 @@ function estimateTokens(text: string): number {
   return Math.ceil(text.length / TOKEN_RATIO);
 }
 
-function parseSections(lines: string[]): Section[] {
+function parseSections(lines: string[]): { sections: Section[]; pageTitle: string | null } {
   const sections: Section[] = [];
   let current: Section | null = null;
+  let inCodeFence = false;
+  let pageTitle: string | null = null;
 
   for (const line of lines) {
-    const m = HEADING_RE.exec(line);
+    // Toggle code fence state
+    if (line.trimStart().startsWith('```')) {
+      inCodeFence = !inCodeFence;
+    }
+
+    const m = !inCodeFence ? HEADING_RE.exec(line) : null;
+
     if (m) {
-      const depth = m[1]!.length;
-      const heading = m[2]!.trim();
-      if (current) sections.push(current);
-      current = { depth, heading, contentLines: [] };
-    } else if (current) {
+      const depth = (m[1] ?? '').length;
+      const heading = (m[2] ?? '').trim();
+
+      if (depth === 1) {
+        if (pageTitle === null) {
+          pageTitle = heading;
+          if (current) {
+            sections.push(current);
+          }
+          // Synthetic section to capture content under this H1
+          current = { depth: 2, heading: '', contentLines: [] };
+        } else {
+          // Subsequent H1s are treated as regular content
+          current?.contentLines.push(line);
+        }
+      } else {
+        if (current) {
+          sections.push(current);
+        }
+        current = { depth, heading, contentLines: [] };
+      }
+    } else {
+      current ??= { depth: 2, heading: '', contentLines: [] };
       current.contentLines.push(line);
     }
   }
-  if (current) sections.push(current);
-  return sections;
+
+  if (current) {
+    sections.push(current);
+  }
+
+  return { sections, pageTitle };
 }
 
 function buildChain(pageTitle: string | null, section: Section, parentStack: Section[]): string {
   const parts: string[] = [];
   if (pageTitle) parts.push(`# ${pageTitle}`);
   for (const parent of parentStack) {
-    parts.push(`${'#'.repeat(parent.depth)} ${parent.heading}`);
+    parts.push(parent.heading ? `${'#'.repeat(parent.depth)} ${parent.heading}` : '#'.repeat(parent.depth));
   }
-  parts.push(`${'#'.repeat(section.depth)} ${section.heading}`);
+  parts.push(section.heading ? `${'#'.repeat(section.depth)} ${section.heading}` : '#'.repeat(section.depth));
   return parts.join(' > ');
 }
 
 function mergeShortSections(nodes: SectionNode[]): SectionNode[][] {
-  const groups: SectionNode[][] = [];
-  let currentGroup: SectionNode[] = [];
+  if (nodes.length === 0) return [];
 
-  for (let i = 0; i < nodes.length; i++) {
-    const node = nodes[i]!;
+  const groups: SectionNode[][] = nodes.map((n) => [n]);
 
-    // If depth changes, finalize current group before starting new one
-    if (currentGroup.length > 0 && node.depth !== currentGroup[0]!.depth) {
-      finalizeGroup(currentGroup, groups);
-      currentGroup = [];
+  let i = 0;
+  while (i < groups.length) {
+    const group = groups[i];
+    if (!group) {
+      i++;
+      continue;
+    }
+    const tokens = group.reduce((sum, n) => sum + n.tokens, 0);
+    if (tokens >= MIN_TOKENS) {
+      i++;
+      continue;
     }
 
-    currentGroup.push(node);
-    const groupTokens = currentGroup.reduce((sum, n) => sum + n.tokens, 0);
-    const nextNode = nodes[i + 1];
-
-    if (groupTokens >= MIN_TOKENS) {
-      groups.push(currentGroup);
-      currentGroup = [];
-    } else if (!nextNode || nextNode.depth !== currentGroup[0]!.depth) {
-      // No more same-depth siblings to chain into; finalize now
-      finalizeGroup(currentGroup, groups);
-      currentGroup = [];
+    if (i + 1 < groups.length) {
+      // Merge forward into next group
+      const nextGroup = groups[i + 1];
+      if (nextGroup) {
+        groups[i + 1] = group.concat(nextGroup);
+      }
+      groups.splice(i, 1);
+      // Stay at same i to check the merged group
+    } else if (i > 0) {
+      // Merge backward into previous group
+      const prevGroup = groups[i - 1];
+      if (prevGroup) {
+        groups[i - 1] = prevGroup.concat(group);
+      }
+      groups.splice(i, 1);
+      break;
+    } else {
+      // Only group and it's sub-floor; keep it
+      i++;
     }
-  }
-
-  if (currentGroup.length > 0) {
-    finalizeGroup(currentGroup, groups);
   }
 
   return groups;
-}
-
-function finalizeGroup(group: SectionNode[], groups: SectionNode[][]): void {
-  const groupTokens = group.reduce((sum, n) => sum + n.tokens, 0);
-
-  if (groupTokens >= MIN_TOKENS) {
-    groups.push(group);
-    return;
-  }
-
-  // Try to merge backward into previous group of same depth
-  if (groups.length > 0) {
-    const lastGroup = groups[groups.length - 1]!;
-    if (lastGroup[0]!.depth === group[0]!.depth) {
-      groups[groups.length - 1] = lastGroup.concat(group);
-      return;
-    }
-  }
-
-  // Entire document (or this sibling group) is one chunk
-  groups.push(group);
 }
 
 function splitGroup(content: string, chain: string, url: string, pageTitle: string | null): MarkdownChunk[] {
@@ -279,19 +304,26 @@ function extractAtomicUnits(content: string): AtomicUnit[] {
   let charOffset = 0;
 
   while (i < lines.length) {
-    const line = lines[i]!;
+    const line = lines[i];
+    if (line === undefined) break;
 
     // Code fence
     if (line.trimStart().startsWith('```')) {
       const start = charOffset;
       i++;
       charOffset += line.length + 1;
-      while (i < lines.length && !lines[i]!.trimStart().startsWith('```')) {
-        charOffset += lines[i]!.length + 1;
+      while (i < lines.length) {
+        const innerLine = lines[i];
+        if (innerLine === undefined) break;
+        if (innerLine.trimStart().startsWith('```')) break;
+        charOffset += innerLine.length + 1;
         i++;
       }
       if (i < lines.length) {
-        charOffset += lines[i]!.length + 1;
+        const closeLine = lines[i];
+        if (closeLine !== undefined) {
+          charOffset += closeLine.length + 1;
+        }
         i++;
       }
       units.push({ start, end: charOffset });
@@ -301,8 +333,10 @@ function extractAtomicUnits(content: string): AtomicUnit[] {
     // Table
     if (line.trimStart().startsWith('|')) {
       const start = charOffset;
-      while (i < lines.length && lines[i]!.trimStart().startsWith('|')) {
-        charOffset += lines[i]!.length + 1;
+      while (i < lines.length) {
+        const tableLine = lines[i];
+        if (!tableLine?.trimStart().startsWith('|')) break;
+        charOffset += tableLine.length + 1;
         i++;
       }
       units.push({ start, end: charOffset });
@@ -312,11 +346,11 @@ function extractAtomicUnits(content: string): AtomicUnit[] {
     // Indented code block
     if (line.startsWith('    ') || line.startsWith('\t')) {
       const start = charOffset;
-      while (
-        i < lines.length &&
-        (lines[i]!.startsWith('    ') || lines[i]!.startsWith('\t') || lines[i]!.length === 0)
-      ) {
-        charOffset += lines[i]!.length + 1;
+      while (i < lines.length) {
+        const codeLine = lines[i];
+        if (codeLine === undefined) break;
+        if (!codeLine.startsWith('    ') && !codeLine.startsWith('\t') && codeLine.length > 0) break;
+        charOffset += codeLine.length + 1;
         i++;
       }
       units.push({ start, end: charOffset });
@@ -344,7 +378,62 @@ function snapToSentenceBoundary(content: string, rawStart: number, splitPos: num
     }
     pos++;
   }
-  return splitPos;
+  // No sentence boundary found; keep the raw overlap
+  return rawStart;
+}
+
+function postProcessChunks(chunks: MarkdownChunk[]): MarkdownChunk[] {
+  if (chunks.length <= 1) return chunks;
+
+  const result: MarkdownChunk[] = [];
+
+  for (let i = 0; i < chunks.length; i++) {
+    const chunk = chunks[i];
+    if (!chunk) continue;
+    if (chunk.tokenEstimate >= MIN_TOKENS) {
+      result.push(chunk);
+      continue;
+    }
+
+    // Sub-floor chunk
+    if (result.length > 0) {
+      // Merge backward into previous chunk
+      const prev = result.at(-1);
+      if (prev) {
+        const mergedContent = prev.content + '\n\n' + chunk.content;
+        result[result.length - 1] = {
+          ...prev,
+          content: mergedContent,
+          tokenEstimate: estimateTokens(mergedContent),
+        };
+      } else {
+        result.push(chunk);
+      }
+    } else if (i + 1 < chunks.length) {
+      // Merge forward into next chunk
+      const next = chunks[i + 1];
+      if (next) {
+        const mergedContent = chunk.content + '\n\n' + next.content;
+        result.push({
+          ...chunk,
+          content: mergedContent,
+          tokenEstimate: estimateTokens(mergedContent),
+          totalChunks: 0,
+        });
+        i++; // skip next since we consumed it
+      } else {
+        result.push(chunk);
+      }
+    } else {
+      result.push(chunk);
+    }
+  }
+
+  return result.map((c, idx) => ({
+    ...c,
+    chunkIndex: idx,
+    totalChunks: result.length,
+  }));
 }
 
 function createChunk(
