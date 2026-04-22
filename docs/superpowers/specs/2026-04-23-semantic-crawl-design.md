@@ -123,7 +123,9 @@ interface MarkdownChunk {
 ```
 
 - `texts`: all texts in one batch. **Max recommended: 512**. Empty array `[]` → `200` with `"embeddings": []`.
-- `mode`: `"document"` for chunk embeddings, `"query"` for the user query.
+- `mode`: `"document"` for chunk embeddings, `"query"` for the user query. **This triggers asymmetric prompt formatting inside the sidecar,** which is how the model distinguishes indexing from retrieval:
+  - Query mode: `task: search result | query: {content}`
+  - Document mode: `title: {title | "none"} | text: {content}` (title is passed separately when available)
 - `dimensions`: MRL output size. **Default 256** (good balance of quality vs. memory).
 
 **Response body:**
@@ -160,6 +162,8 @@ interface MarkdownChunk {
 - `GET /metrics` → Prometheus-style text for latency p50/p99, queue depth, total requests
 
 **Note on JSON serialization:** `embeddings` are `float32` vectors serialized as JSON numbers (IEEE 64-bit double precision). Callers building large in-memory vector stores should cast to `Float32Array` after deserialization.
+
+**Note on precision:** EmbeddingGemma activations do **not** support `float16`. The sidecar must use `float32` or `bfloat16`. Hardware that defaults to `float16` (some mobile GPUs) will silently produce garbage embeddings. The sidecar should enforce `float32` at load time and fail fast with a clear error if the runtime attempts `float16`.
 
 ## MCP Tool Contract
 
@@ -227,6 +231,9 @@ interface MarkdownChunk {
 | `EMBEDDING_SIDECAR_BASE_URL` | Yes (for registration) | — | Base URL of the embedding sidecar |
 | `EMBEDDING_SIDECAR_API_TOKEN` | No | — | Bearer token for sidecar auth |
 | `EMBEDDING_DIMENSIONS` | No | `256` | Default MRL output dimension |
+| `EMBEDDING_QUANTIZATION` | No | — | *(Future)* Quantization level for sidecar: `q8_0`, `q4_0`, or `none` |
+
+**Note on quantization:** EmbeddingGemma Q8_0 scores 69.49 MTEB English at 768d (vs. 69.67 full precision) — a 0.18 point loss for a ~50% memory reduction. Q4_0 trades more quality for further reduction. This is not implemented in v1 but the config placeholder ensures the env var namespace is reserved.
 
 ### Gating
 
