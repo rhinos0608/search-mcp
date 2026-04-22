@@ -277,7 +277,7 @@ export function getNetworkProbes(cfg: SearchConfig): NetworkProbe[] {
     probes.push({
       label: 'crawl4ai',
       url: `${cfg.crawl4ai.baseUrl.replace(/\/+$/, '')}/health`,
-      tools: ['web_crawl'],
+      tools: ['web_crawl', 'semantic_crawl'],
     });
   }
 
