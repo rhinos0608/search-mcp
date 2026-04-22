@@ -25,6 +25,7 @@ import { pypiSearch } from './tools/pypiSearch.js';
 import { newsSearch } from './tools/newsSearch.js';
 import { webCrawl } from './tools/webCrawl.js';
 import { webRead } from './tools/webRead.js';
+import { semanticCrawl } from './tools/semanticCrawl.js';
 import { isToolError } from './errors.js';
 import type { RateLimitInfo } from './rateLimit.js';
 import type { ToolResult } from './types.js';
@@ -1246,6 +1247,57 @@ export function createServer(): McpServer {
           return successResponse(result);
         } catch (err: unknown) {
           logger.error({ err, tool: 'web_crawl' }, 'Tool failed');
+          return errorResponse(err);
+        }
+      },
+    );
+
+  // ── semantic_crawl ──────────────────────────────────────────────────────
+  if (!gated.has('semantic_crawl'))
+    server.registerTool(
+      'semantic_crawl',
+      {
+        description:
+          'Crawl a website and return the most semantically relevant passages for a specific query. ' +
+          'Uses EmbeddingGemma (300M, local) to chunk, embed, and rank content by similarity — ' +
+          'returning dense signal instead of raw pages.\n\n' +
+          'USE THIS TOOL when you need to:\n' +
+          '- Find specific information within a large documentation site, codebase reference, or multi-page resource\n' +
+          '- Answer "how does X handle Y" or "where does X explain Z" against a known URL\n' +
+          '- Research a specific topic across an entire domain without reading every page\n' +
+          '- Any query of the form "in [site/docs], find [concept/answer]"\n\n' +
+          'PREFER web_crawl instead when you need full page content, are summarising an entire site, or have no specific query to answer.\n' +
+          "PREFER web_search when you don't have a target URL.",
+        inputSchema: {
+          url: z.url().describe('Seed URL to start crawling from'),
+          query: z.string().describe('The semantic search query — what are you looking for?'),
+          topK: z.number().int().min(1).max(50).optional().default(10)
+            .describe('Number of most-relevant chunks to return (1–50, default 10)'),
+          strategy: z.enum(['bfs', 'dfs']).optional().default('bfs')
+            .describe('Crawl strategy: bfs (breadth-first) | dfs (depth-first)'),
+          maxDepth: z.number().int().min(1).max(5).optional().default(2)
+            .describe('Maximum link depth (1–5, default 2)'),
+          maxPages: z.number().int().min(1).max(100).optional().default(20)
+            .describe('Maximum pages to crawl (1–100, default 20)'),
+          includeExternalLinks: z.boolean().optional().default(false)
+            .describe('Follow external domain links (default false)'),
+        },
+      },
+      async ({ url, query, topK, strategy, maxDepth, maxPages, includeExternalLinks }) => {
+        logger.info({ tool: 'semantic_crawl', url, query, topK }, 'Tool invoked');
+        const start = Date.now();
+        try {
+          const data = await semanticCrawl(
+            { url, query, topK, strategy, maxDepth, maxPages, includeExternalLinks },
+            cfg.crawl4ai,
+            cfg.embeddingSidecar.baseUrl,
+            cfg.embeddingSidecar.apiToken,
+            cfg.embeddingSidecar.dimensions,
+          );
+          const result = makeResult('semantic_crawl', data, Date.now() - start);
+          return successResponse(result);
+        } catch (err: unknown) {
+          logger.error({ err, tool: 'semantic_crawl' }, 'Tool failed');
           return errorResponse(err);
         }
       },
