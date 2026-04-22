@@ -29,7 +29,7 @@ export function minMaxNormalize(values: number[]): number[] {
   const max = Math.max(...values);
   const range = max - min;
   if (range === 0) {
-    return new Array(values.length).fill(0);
+    return new Array<number>(values.length).fill(0);
   }
   return values.map(v => (v - min) / range);
 }
