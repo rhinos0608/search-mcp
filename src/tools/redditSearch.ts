@@ -11,6 +11,8 @@ import {
   type RedditClientOptions,
 } from './redditClient.js';
 import { parseRedditSearchListing } from './redditSearchParser.js';
+import { rrfMerge } from '../utils/fusion.js';
+import { multiSignalRescore, extractRedditSignals } from '../utils/rescore.js';
 
 const cache = new ToolCache<RedditPost[]>({ maxSize: 100, ttlMs: 10 * 60 * 1000 });
 
@@ -127,7 +129,29 @@ export async function redditSearch(
   );
 
   const json: unknown = await safeResponseJson(response.response, response.url);
-  const results = parseRedditSearchListing(json);
+  let results = parseRedditSearchListing(json);
+
+  // Single-source RRF + rescoring
+  const rescoreSort: 'relevance' | 'date' | 'top' =
+    effectiveSort === 'new' ? 'date' :
+    effectiveSort === 'hot' || effectiveSort === 'top' ? 'top' :
+    'relevance'; // covers 'relevance' and 'comments'
+
+  const merged = rrfMerge([[...results]], { k: 60 });
+  const allSignals = extractRedditSignals(results, rescoreSort);
+  const signaled = merged.map((m, i) => ({
+    item: m.item,
+    rrfScore: m.rrfScore,
+    signals: allSignals[i] ?? {},
+  }));
+  const rescoreWeights = {
+    rrfAnchor: 0.5,
+    recency: 0.1,
+    engagement: 0.25,
+    commentEngagement: 0.15,
+  };
+  const rescored = multiSignalRescore(signaled, rescoreWeights, limit);
+  results = rescored.map(r => r.item);
 
   cache.set(key, results);
   logger.debug({ resultCount: results.length }, 'Reddit search complete');
