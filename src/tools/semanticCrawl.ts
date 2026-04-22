@@ -148,15 +148,15 @@ export async function semanticCrawl(
   }
 
   // 3. Chunk safety check
-  const warnings: string[] = [];
   if (allChunks.length > MAX_CHUNKS_HARD) {
     throw new Error(
       `Produced ${String(allChunks.length)} chunks, exceeding hard cap of ${String(MAX_CHUNKS_HARD)}. Reduce maxPages or increase chunk size.`,
     );
   }
   if (allChunks.length > MAX_CHUNKS_SOFT) {
-    warnings.push(
-      `Produced ${String(allChunks.length)} chunks, exceeding soft cap of ${String(MAX_CHUNKS_SOFT)}. Embedding may be slower.`,
+    logger.warn(
+      { chunkCount: allChunks.length, softCap: MAX_CHUNKS_SOFT },
+      'Chunk count exceeds soft cap; embedding may be slower',
     );
   }
 
