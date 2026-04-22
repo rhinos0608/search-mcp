@@ -12,7 +12,8 @@ export function parseAgeToDays(ageStr: string | null | undefined): number | null
   const trimmed = ageStr.trim();
 
   // "X days ago", "X weeks ago", "X hours ago"
-  const relativeMatch = trimmed.match(/^(\d+(?:\.\d+)?)\s+(day|days|week|weeks|hour|hours)\s+ago$/i);
+  const relativeRe = /^(\d+(?:\.\d+)?)\s+(day|days|week|weeks|hour|hours)\s+ago$/i;
+  const relativeMatch = relativeRe.exec(trimmed);
   if (relativeMatch) {
     const rawValue = relativeMatch[1];
     const rawUnit = relativeMatch[2];
