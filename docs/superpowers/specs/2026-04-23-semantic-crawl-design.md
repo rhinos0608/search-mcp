@@ -13,7 +13,7 @@ The key insight driving this feature: a 50-page crawl at ~2k tokens per page pro
 
 - Return ranked, relevant text chunks from a crawled domain instead of full pages.
 - Be a genuine differentiator in the MCP ecosystem — no existing tool packages "crawl + semantic retrieval" as a single-shot operation.
-- Maintain acceptable latency: Playwright crawl + embedding 500 chunks should be well under 30 seconds for a local model.
+- Maintain acceptable latency: Playwright crawl + embedding 500 chunks should be well under 30 seconds for a local model under median conditions. This assumes crawl4ai parallelises page loads; if pages are loaded serially the crawl phase alone may exceed 30s. Treat 30s as a median-case target, not a p95 SLO.
 - Keep the architecture consistent with the existing crawl4ai sidecar pattern.
 
 ## Non-Goals
@@ -85,6 +85,7 @@ When a section exceeds **~400 tokens** and is not an atomic unit:
 1. **First priority:** split at the nearest blank line that is **outside** an atomic unit.
 2. **Second priority:** if no suitable blank line exists, split at the next sentence boundary (`. ` or `\n`).
 3. **Overlap:** 20% of chunk size, but snap the overlap start to the next sentence boundary — never mid-sentence.
+4. **Overlap inherits section label:** A chunk created from overlap text still carries the section heading chain of the *original* boundary, not the overlap region. The overlap is content context, not a semantic boundary.
 
 ### Two-pass totalChunks annotation
 
@@ -237,6 +238,12 @@ Add `semantic_crawl` to the health probe system:
 - Config layer: checks `EMBEDDING_SIDECAR_BASE_URL` and `CRAWL4AI_BASE_URL`.
 - Network probe: pings `GET /health` on the sidecar.
 
+### Chunk memory safety
+
+With `maxPages: 100` and dense documentation, thousands of chunks are possible. To prevent OOM in the embedding step:
+- **Soft cap:** If total chunks exceed 2,000, emit a warning and proceed. The sidecar handles internal batching, so the consumer is not blocked.
+- **Hard cap:** If total chunks exceed 5,000, return an error with remediation: "Reduce maxPages or increase chunk size."
+
 ## Error Handling
 
 | Scenario | Behavior |
@@ -258,7 +265,7 @@ Add `semantic_crawl` to the health probe system:
 
 - Persistent index: crawl once, query multiple times (session state / caching).
 - Streaming chunks during crawl.
-- Adjacent chunk reassembly: when a retrieved chunk looks mid-explanation, fetch `chunkIndex-1` and `chunkIndex+1` for context.
+- Adjacent chunk reassembly: when a retrieved chunk looks mid-explanation, fetch `chunkIndex-1` and `chunkIndex+1` for context. **Note:** Even in v1, callers can reconstruct context manually using `chunkIndex` and `totalChunks` — these fields are already present in the output.
 - Multi-query support: rank chunks against multiple queries and return the best match per query.
 
 ## Open Questions (none remaining)
