@@ -105,7 +105,7 @@ export async function webCrawl(
     'User-Agent': 'search-mcp/1.0',
   };
   if (apiToken) {
-    headers['Authorization'] = `Bearer ${apiToken}`;
+    headers.Authorization = `Bearer ${apiToken}`;
   }
 
   let raw: unknown;
