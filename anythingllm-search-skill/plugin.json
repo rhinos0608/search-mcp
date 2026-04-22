@@ -1,6 +1,0 @@
-{
-  "name": "Search MCP",
-  "hubId": "anythingllm-search-skill",
-  "description": "Web search, web reading, GitHub, YouTube, Reddit, Twitter/X, Product Hunt, patents, podcasts, academic research, Hacker News, Stack Overflow, npm, PyPI, and news via an MCP search server.",
-  "version": "1.0.0"
-}
