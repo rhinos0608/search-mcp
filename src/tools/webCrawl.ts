@@ -82,21 +82,22 @@ export async function webCrawl(
   const endpoint = `${baseUrl.replace(/\/+$/, '')}/crawl`;
   assertSafeUrl(endpoint);
 
+  const crawlerConfig: Record<string, unknown> = {
+    headless: true,
+    remove_overlay_elements: true,
+  };
+  if (opts.maxDepth > 1) {
+    crawlerConfig.deep_crawl_config = {
+      strategy: opts.strategy,
+      max_depth: opts.maxDepth,
+      max_pages: opts.maxPages,
+      filter_external_links: !opts.includeExternalLinks,
+    };
+  }
+
   const body = {
     urls: [url],
-    crawler_config: {
-      headless: true,
-      remove_overlay_elements: true,
-      deep_crawl_config:
-        opts.maxDepth > 1
-          ? {
-              strategy: opts.strategy,
-              max_depth: opts.maxDepth,
-              max_pages: opts.maxPages,
-              filter_external_links: !opts.includeExternalLinks,
-            }
-          : undefined,
-    },
+    crawler_config: crawlerConfig,
   };
 
   const headers: Record<string, string> = {
@@ -133,7 +134,15 @@ export async function webCrawl(
       );
     }
 
+    // safeResponseJson enforces a 10MB cap as a guard against runaway responses.
+    // The maxPages limit (1-100) keeps deep-crawl responses well below this in practice.
     raw = await safeResponseJson(response, endpoint);
+
+    if (raw === null || typeof raw !== 'object') {
+      throw parseError(
+        `crawl4ai returned an unexpected response type (expected object, got ${typeof raw}). Check that the sidecar is running the correct version.`,
+      );
+    }
   } catch (err) {
     if (err instanceof Error && (err.name === 'AbortError' || err.name === 'TimeoutError')) {
       throw networkError(`crawl4ai request timed out after 120 seconds for "${url}"`);
@@ -150,8 +159,9 @@ export async function webCrawl(
   } else if (data.result !== undefined) {
     pages = [normalizePage(data.result)];
   } else {
+    const serverErr = typeof data.error === 'string' ? ` (server error: ${data.error})` : '';
     throw parseError(
-      `crawl4ai returned an unexpected response shape. Check that the sidecar version is v0.7.x or v0.8.x.`,
+      `crawl4ai returned an unexpected response shape${serverErr}. Check that the sidecar version is v0.7.x or v0.8.x.`,
     );
   }
 
