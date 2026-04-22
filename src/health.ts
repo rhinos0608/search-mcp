@@ -53,6 +53,11 @@ const GATED_TOOLS: Record<string, GateRule> = {
     check: (cfg) => cfg.listennotes.apiKey.length > 0,
     remediation: 'Set LISTENNOTES_API_KEY environment variable.',
   },
+  web_crawl: {
+    check: (cfg) => cfg.crawl4ai.baseUrl.length > 0,
+    remediation:
+      'Set CRAWL4AI_BASE_URL to point at a running crawl4ai sidecar (e.g. http://localhost:11235). Run: docker run -d -p 11235:11235 unclecode/crawl4ai:latest',
+  },
 };
 
 // ── Optional config (works without, degraded) ──────────────────────────────
@@ -260,6 +265,14 @@ export function getNetworkProbes(cfg: SearchConfig): NetworkProbe[] {
       label: 'searxng',
       url: `${cfg.searxng.baseUrl.replace(/\/+$/, '')}/healthz`,
       tools: ['web_search'],
+    });
+  }
+
+  if (cfg.crawl4ai.baseUrl.length > 0) {
+    probes.push({
+      label: 'crawl4ai',
+      url: `${cfg.crawl4ai.baseUrl.replace(/\/+$/, '')}/health`,
+      tools: ['web_crawl'],
     });
   }
 
