@@ -335,3 +335,26 @@ export interface GitHubCodeSearchResult {
   totalCount: number;
   results: GitHubCodeResult[];
 }
+
+// ── Crawl4AI ───────────────────────────────────────────────────────────────
+
+export interface CrawlPageResult {
+  url: string;
+  success: boolean;
+  markdown: string;
+  title: string | null;
+  description: string | null;
+  links: { href: string; text: string }[];
+  statusCode: number | null;
+  errorMessage: string | null;
+}
+
+export interface WebCrawlResult {
+  seedUrl: string;
+  strategy: 'bfs' | 'dfs';
+  maxDepth: number;
+  maxPages: number;
+  pages: CrawlPageResult[];
+  totalPages: number;
+  successfulPages: number;
+}
