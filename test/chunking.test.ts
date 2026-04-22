@@ -46,11 +46,19 @@ describe('chunkMarkdown', () => {
     assert.strictEqual(chunks[0].pageTitle, 'My Page');
   });
 
-  it('annotates totalChunks correctly', () => {
-    const md = `# Title\n\n## One\n\nContent one.\n\n## Two\n\nContent two.`;
+  it('annotates totalChunks per section', () => {
+    const longText = 'Word '.repeat(500);
+    const md = `# Title\n\n## One\n\n${longText}\n\n## Two\n\n${longText}`;
     const chunks = chunkMarkdown(md, 'https://example.com');
-    for (const c of chunks) {
-      assert.strictEqual(c.totalChunks, chunks.length);
+    const sectionOne = chunks.filter((c) => c.section.includes('One'));
+    const sectionTwo = chunks.filter((c) => c.section.includes('Two'));
+    assert.ok(sectionOne.length > 1, 'Section One should split into multiple chunks');
+    assert.ok(sectionTwo.length > 1, 'Section Two should split into multiple chunks');
+    for (const c of sectionOne) {
+      assert.strictEqual(c.totalChunks, sectionOne.length);
+    }
+    for (const c of sectionTwo) {
+      assert.strictEqual(c.totalChunks, sectionTwo.length);
     }
   });
 
@@ -61,6 +69,15 @@ describe('chunkMarkdown', () => {
     assert.ok(codeChunk);
     assert.ok(codeChunk!.content.includes('# This is a comment'));
     assert.strictEqual(codeChunk!.totalChunks, 1); // should not be split
+  });
+
+  it('does not split on H4+ headings', () => {
+    const md = `# Title\n\n## Section A\n\nContent A.\n\n#### H4 Heading\n\nMore content under A.\n\n### Sub B\n\nContent B.`;
+    const chunks = chunkMarkdown(md, 'https://example.com');
+    const sectionA = chunks.find((c) => c.section.includes('Section A'));
+    assert.ok(sectionA);
+    assert.ok(sectionA!.content.includes('H4 Heading'));
+    assert.ok(sectionA!.content.includes('More content under A.'));
   });
 
   it('preserves content before the first heading', () => {

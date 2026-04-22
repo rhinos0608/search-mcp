@@ -63,22 +63,19 @@ export function chunkMarkdown(markdown: string, url: string): MarkdownChunk[] {
 
   // Split groups into chunks
   const allChunks: MarkdownChunk[] = [];
+  let runningOffset = 0;
   for (const group of groups) {
     const groupContent = group.map((n) => n.contentLines.join('\n')).join('\n\n').trim();
     const groupChain = group.at(-1)?.chain ?? '';
-    const chunks = splitGroup(groupContent, groupChain, url, pageTitle);
+    const chunks = splitGroup(groupContent, groupChain, url, pageTitle, runningOffset);
+    runningOffset += groupContent.length + 2; // +2 for the '\n\n' joiner
     allChunks.push(...chunks);
   }
 
   // Post-process to ensure floor invariant
   const processed = postProcessChunks(allChunks);
 
-  // Annotate global indices
-  return processed.map((c, i) => ({
-    ...c,
-    chunkIndex: i,
-    totalChunks: processed.length,
-  }));
+  return processed;
 }
 
 function estimateTokens(text: string): number {
@@ -102,24 +99,25 @@ function parseSections(lines: string[]): { sections: Section[]; pageTitle: strin
     if (m) {
       const depth = (m[1] ?? '').length;
       const heading = (m[2] ?? '').trim();
-
       if (depth === 1) {
         if (pageTitle === null) {
           pageTitle = heading;
           if (current) {
             sections.push(current);
           }
-          // Synthetic section to capture content under this H1
           current = { depth: 2, heading: '', contentLines: [] };
         } else {
-          // Subsequent H1s are treated as regular content
           current?.contentLines.push(line);
         }
-      } else {
+      } else if (depth <= 3) {
         if (current) {
           sections.push(current);
         }
         current = { depth, heading, contentLines: [] };
+      } else {
+        // H4+ — treat as content, not a boundary
+        current ??= { depth: 2, heading: '', contentLines: [] };
+        current.contentLines.push(line);
       }
     } else {
       current ??= { depth: 2, heading: '', contentLines: [] };
@@ -187,13 +185,13 @@ function mergeShortSections(nodes: SectionNode[]): SectionNode[][] {
   return groups;
 }
 
-function splitGroup(content: string, chain: string, url: string, pageTitle: string | null): MarkdownChunk[] {
+function splitGroup(content: string, chain: string, url: string, pageTitle: string | null, baseOffset = 0): MarkdownChunk[] {
   const trimmed = content.trim();
   if (trimmed.length === 0) return [];
 
   const tokens = estimateTokens(trimmed);
   if (tokens <= MAX_TOKENS) {
-    return [createChunk(trimmed, chain, url, pageTitle, 0, 1, 0)];
+    return [createChunk(trimmed, chain, url, pageTitle, 0, 1, baseOffset)];
   }
 
   const maxChars = MAX_TOKENS * TOKEN_RATIO;
@@ -208,7 +206,7 @@ function splitGroup(content: string, chain: string, url: string, pageTitle: stri
     if (remaining <= maxChars) {
       const text = trimmed.slice(start).trim();
       if (text.length > 0) {
-        chunks.push(createChunk(text, chain, url, pageTitle, chunks.length, 0, charOffset));
+        chunks.push(createChunk(text, chain, url, pageTitle, chunks.length, 0, baseOffset + charOffset));
       }
       break;
     }
@@ -222,7 +220,7 @@ function splitGroup(content: string, chain: string, url: string, pageTitle: stri
 
     const chunkText = trimmed.slice(start, splitPos).trim();
     if (chunkText.length > 0) {
-      chunks.push(createChunk(chunkText, chain, url, pageTitle, chunks.length, 0, charOffset));
+      chunks.push(createChunk(chunkText, chain, url, pageTitle, chunks.length, 0, baseOffset + charOffset));
     }
 
     // Calculate overlap
@@ -251,7 +249,12 @@ function splitGroup(content: string, chain: string, url: string, pageTitle: stri
     charOffset = start;
   }
 
-  return chunks;
+  // Two-pass: annotate per-section indices
+  return chunks.map((c, i) => ({
+    ...c,
+    chunkIndex: i,
+    totalChunks: chunks.length,
+  }));
 }
 
 function findSplitPosition(content: string, start: number, maxChars: number, units: AtomicUnit[], unitIdx: number): number {
@@ -437,6 +440,8 @@ function postProcessChunks(chunks: MarkdownChunk[]): MarkdownChunk[] {
           ...prev,
           content: mergedContent,
           tokenEstimate: estimateTokens(mergedContent),
+          chunkIndex: 0,
+          totalChunks: 1,
         };
       } else {
         result.push(chunk);
@@ -450,7 +455,8 @@ function postProcessChunks(chunks: MarkdownChunk[]): MarkdownChunk[] {
           ...chunk,
           content: mergedContent,
           tokenEstimate: estimateTokens(mergedContent),
-          totalChunks: 0,
+          chunkIndex: 0,
+          totalChunks: 1,
         });
         i++; // skip next since we consumed it
       } else {
@@ -461,11 +467,7 @@ function postProcessChunks(chunks: MarkdownChunk[]): MarkdownChunk[] {
     }
   }
 
-  return result.map((c, idx) => ({
-    ...c,
-    chunkIndex: idx,
-    totalChunks: result.length,
-  }));
+  return result;
 }
 
 function createChunk(

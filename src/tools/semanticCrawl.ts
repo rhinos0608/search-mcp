@@ -48,7 +48,7 @@ export async function embedTexts(
 
   let raw: unknown;
   try {
-    const response = await retryWithBackoff(
+    let response = await retryWithBackoff(
       () =>
         fetch(endpoint, {
           method: 'POST',
@@ -59,14 +59,20 @@ export async function embedTexts(
       { label: 'embedding-sidecar', maxAttempts: 2, initialDelayMs: 500 },
     );
 
+    if (response.status === 503) {
+      const retryAfter = response.headers.get('retry-after');
+      const delayMs = Math.min(parseInt(retryAfter ?? '5', 10) * 1000, 30_000);
+      logger.warn({ delayMs }, 'Embedding sidecar returned 503, retrying after delay');
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
+      response = await fetch(endpoint, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(body),
+        signal: AbortSignal.timeout(60_000),
+      });
+    }
+
     if (!response.ok) {
-      if (response.status === 503) {
-        const retryAfter = response.headers.get('retry-after');
-        throw unavailableError(
-          `Embedding sidecar returned 503 (model loading). Retry after ${retryAfter ?? 'unknown'} seconds.`,
-          { statusCode: 503 },
-        );
-      }
       throw networkError(
         `Embedding sidecar returned HTTP ${String(response.status)}`,
         { statusCode: response.status },
