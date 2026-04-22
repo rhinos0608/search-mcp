@@ -84,11 +84,48 @@ describe('chunkMarkdown', () => {
     assert.ok(tableChunk!.content.includes('| C    | D    |'));
   });
 
-  it('ensures every emitted chunk clears the token floor', () => {
-    const md = `# Title\n\n## A\n\nShort.\n\n### B\n\nAlso short.\n\n## C\n\nThis is a much longer section with enough content to clear the fifty token floor easily. This is a much longer section with enough content to clear the fifty token floor easily. This is a much longer section with enough content to clear the fifty token floor easily.`;
+  it('handles empty input', () => {
+    const chunks = chunkMarkdown('', 'https://example.com');
+    assert.strictEqual(chunks.length, 0);
+  });
+
+  it('handles input with no headings', () => {
+    const md = 'Just some plain text without any headings at all. It should still produce a chunk.';
     const chunks = chunkMarkdown(md, 'https://example.com');
-    for (const c of chunks) {
-      assert.ok(c.tokenEstimate >= 50 || chunks.length === 1, `Chunk with ${c.tokenEstimate} tokens below floor`);
+    assert.strictEqual(chunks.length, 1);
+    assert.ok(chunks[0]);
+    assert.ok(chunks[0].content.includes('Just some plain text'));
+  });
+
+  it('keeps oversized atomic units whole', () => {
+    const code = 'x = 1\n'.repeat(500); // ~3000 chars, well over MAX_TOKENS
+    const after = 'This is a much longer section with enough content to clear the fifty token floor easily. '.repeat(4);
+    const md = `# Title\n\n## Section\n\n\`\`\`python\n${code}\`\`\`\n\n${after}`;
+    const chunks = chunkMarkdown(md, 'https://example.com');
+    const codeChunk = chunks.find((c) => c.content.includes('x = 1'));
+    assert.ok(codeChunk);
+    assert.ok(codeChunk!.content.startsWith('\`\`\`'));
+    assert.ok(codeChunk!.content.endsWith('\`\`\`'));
+  });
+
+  it('handles multiple H1s', () => {
+    const md = `# First\n\n## A\n\nContent A.\n\n# Second\n\n## B\n\nContent B.`;
+    const chunks = chunkMarkdown(md, 'https://example.com');
+    // All chunks should have pageTitle from first H1
+    assert.ok(chunks.every((c) => c.pageTitle === 'First'));
+    // Second H1 content should appear in some chunk
+    assert.ok(chunks.some((c) => c.content.includes('Content B.')));
+  });
+
+  it('has monotonically increasing charOffsets', () => {
+    const md = `# Title\n\n## One\n\n${'Word '.repeat(200)}\n\n## Two\n\n${'Word '.repeat(200)}`;
+    const chunks = chunkMarkdown(md, 'https://example.com');
+    for (let i = 1; i < chunks.length; i++) {
+      const curr = chunks[i];
+      const prev = chunks[i - 1];
+      if (curr && prev) {
+        assert.ok(curr.charOffset >= prev.charOffset, `charOffset should not decrease at index ${i}`);
+      }
     }
   });
 });

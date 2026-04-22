@@ -62,22 +62,22 @@ export function chunkMarkdown(markdown: string, url: string): MarkdownChunk[] {
   const groups = mergeShortSections(nodes);
 
   // Split groups into chunks
-  let allChunks: MarkdownChunk[] = [];
+  const allChunks: MarkdownChunk[] = [];
   for (const group of groups) {
     const groupContent = group.map((n) => n.contentLines.join('\n')).join('\n\n').trim();
     const groupChain = group.at(-1)?.chain ?? '';
     const chunks = splitGroup(groupContent, groupChain, url, pageTitle);
-    allChunks = allChunks.concat(chunks);
+    allChunks.push(...chunks);
   }
 
   // Post-process to ensure floor invariant
-  allChunks = postProcessChunks(allChunks);
+  const processed = postProcessChunks(allChunks);
 
   // Annotate global indices
-  return allChunks.map((c, i) => ({
+  return processed.map((c, i) => ({
     ...c,
     chunkIndex: i,
-    totalChunks: allChunks.length,
+    totalChunks: processed.length,
   }));
 }
 
@@ -197,9 +197,11 @@ function splitGroup(content: string, chain: string, url: string, pageTitle: stri
   }
 
   const maxChars = MAX_TOKENS * TOKEN_RATIO;
+  const units = extractAtomicUnits(trimmed);
   const chunks: MarkdownChunk[] = [];
   let start = 0;
   let charOffset = 0;
+  const unitIdx = 0;
 
   while (start < trimmed.length) {
     const remaining = trimmed.length - start;
@@ -211,7 +213,7 @@ function splitGroup(content: string, chain: string, url: string, pageTitle: stri
       break;
     }
 
-    let splitPos = findSplitPosition(trimmed, start, maxChars);
+    let splitPos = findSplitPosition(trimmed, start, maxChars, units, unitIdx);
 
     // Ensure we make progress
     if (splitPos <= start) {
@@ -228,12 +230,23 @@ function splitGroup(content: string, chain: string, url: string, pageTitle: stri
     let nextStart = splitPos - overlapSize;
     if (nextStart < start) nextStart = start;
 
-    // Snap overlap start to next sentence boundary
+    // Snap overlap start to next sentence boundary, but never inside an atomic unit
     nextStart = snapToSentenceBoundary(trimmed, nextStart, splitPos);
     if (nextStart >= splitPos || nextStart <= start) {
       nextStart = splitPos;
+    } else {
+      // Ensure overlap start is not inside an atomic unit
+      const unitIdxAtStart = findUnitIndex(nextStart, units);
+      if (unitIdxAtStart !== -1) {
+        const unit = units[unitIdxAtStart];
+        if (unit && nextStart >= unit.start && nextStart < unit.end) {
+          nextStart = unit.end;
+          if (nextStart >= splitPos) {
+            nextStart = splitPos;
+          }
+        }
+      }
     }
-
     start = nextStart;
     charOffset = start;
   }
@@ -241,17 +254,22 @@ function splitGroup(content: string, chain: string, url: string, pageTitle: stri
   return chunks;
 }
 
-function findSplitPosition(content: string, start: number, maxChars: number): number {
+function findSplitPosition(content: string, start: number, maxChars: number, units: AtomicUnit[], unitIdx: number): number {
   const target = start + maxChars;
   if (target >= content.length) return content.length;
 
-  const units = extractAtomicUnits(content);
+  // Advance unitIdx to first unit that could overlap the search range
+  while (unitIdx < units.length) {
+    const u = units[unitIdx];
+    if (!u || u.end > start) break;
+    unitIdx++;
+  }
 
   // Search backward for blank line outside atomic unit
   let pos = target;
   while (pos > start) {
     if (content[pos] === '\n' && content[pos + 1] === '\n') {
-      if (!isInAtomicUnit(pos, units)) {
+      if (!isInAtomicUnit(pos, units, unitIdx)) {
         return pos + 1;
       }
     }
@@ -265,12 +283,12 @@ function findSplitPosition(content: string, start: number, maxChars: number): nu
       (content[pos] === '.' || content[pos] === '?' || content[pos] === '!') &&
       content[pos + 1] === ' '
     ) {
-      if (!isInAtomicUnit(pos, units)) {
+      if (!isInAtomicUnit(pos, units, unitIdx)) {
         return pos + 2;
       }
     }
     if (content[pos] === '\n' && content[pos + 1] !== '\n') {
-      if (!isInAtomicUnit(pos, units)) {
+      if (!isInAtomicUnit(pos, units, unitIdx)) {
         return pos + 1;
       }
     }
@@ -279,15 +297,29 @@ function findSplitPosition(content: string, start: number, maxChars: number): nu
 
   // Fallback: force split at target, but outside atomic unit
   pos = target;
-  while (pos < content.length && isInAtomicUnit(pos, units)) {
+  while (pos < content.length && isInAtomicUnit(pos, units, unitIdx)) {
     pos++;
   }
   return pos;
 }
 
-function isInAtomicUnit(pos: number, units: AtomicUnit[]): boolean {
-  for (const u of units) {
+function findUnitIndex(pos: number, units: AtomicUnit[]): number {
+  for (let i = 0; i < units.length; i++) {
+    const u = units[i];
+    if (u && pos >= u.start && pos < u.end) return i;
+  }
+  return -1;
+}
+
+function isInAtomicUnit(pos: number, units: AtomicUnit[], unitIdx: number): boolean {
+  // Fast path: advance pointer to relevant unit, then check
+  let i = unitIdx;
+  while (i < units.length) {
+    const u = units[i];
+    if (!u) break;
+    if (pos < u.start) break;
     if (pos >= u.start && pos < u.end) return true;
+    i++;
   }
   return false;
 }
