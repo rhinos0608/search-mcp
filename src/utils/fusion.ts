@@ -1,17 +1,17 @@
+const TRACKING = new Set([
+  'utm_source',
+  'utm_medium',
+  'utm_campaign',
+  'utm_term',
+  'utm_content',
+  'fbclid',
+  'gclid',
+  'ref',
+  'source',
+]);
+
 /** Strip common tracking and advertising query parameters from a URL. */
 function stripTrackingParams(urlStr: string): string {
-  const TRACKING = new Set([
-    'utm_source',
-    'utm_medium',
-    'utm_campaign',
-    'utm_term',
-    'utm_content',
-    'fbclid',
-    'gclid',
-    'ref',
-    'source',
-  ]);
-
   try {
     const url = new URL(urlStr);
     for (const key of [...url.searchParams.keys()]) {
