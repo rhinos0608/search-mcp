@@ -68,10 +68,14 @@ export interface RrfMergeResult<T> {
  * @param opts.k    RRF constant (default 60).
  * @param opts.keyFn Dedupe key per item (default normalizeUrl applied to
  *                   a `{ url: string }` property — callers should override).
+ * @param opts.getId Optional cross-source canonical ID. When provided,
+ *                   used as the dedup key instead of keyFn. Items with the
+ *                   same getId across rankings get summed RRF scores, and
+ *                   last-ranking metadata wins on collision.
  */
 export function rrfMerge<T>(
   rankings: T[][],
-  opts?: { k?: number; keyFn?: (item: T) => string },
+  opts?: { k?: number; keyFn?: (item: T) => string; getId?: (item: T) => string },
 ): RrfMergeResult<T>[] {
   const k = opts?.k ?? 60;
 
@@ -83,19 +87,21 @@ export function rrfMerge<T>(
   };
 
   const keyFn = opts?.keyFn ?? defaultKeyFn;
+  const dedupFn = opts?.getId ?? keyFn;
   const scores = new Map<string, { item: T; score: number }>();
 
   for (const ranking of rankings) {
     for (let i = 0; i < ranking.length; i++) {
       const item = ranking[i];
       if (!item) continue;
-      const key = keyFn(item);
+      const key = dedupFn(item);
       const rank = i + 1; // 1-indexed
       const reciprocal = 1 / (k + rank);
 
       const existing = scores.get(key);
       if (existing) {
         existing.score += reciprocal;
+        existing.item = item; // last ranking metadata wins
       } else {
         scores.set(key, { item, score: reciprocal });
       }
