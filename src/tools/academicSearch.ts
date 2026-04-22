@@ -10,6 +10,8 @@ import { retryWithBackoff } from '../retry.js';
 import { ToolError, unavailableError, timeoutError, parseError } from '../errors.js';
 import { assertRateLimitOk, getTracker } from '../rateLimit.js';
 import type { AcademicPaper } from '../types.js';
+import { rrfMerge } from '../utils/fusion.js';
+import { multiSignalRescore, extractAcademicSignals } from '../utils/rescore.js';
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -35,6 +37,38 @@ async function arxivCourtesyWait(): Promise<void> {
     });
   }
 }
+
+// ── Normalization helpers ──────────────────────────────────────────────────────
+
+export function normalizeTitle(title: string): string {
+  return title
+    .normalize('NFC')
+    .toLowerCase()
+    .replace(/\\[a-zA-Z]+\{([^}]*)\}/g, '$1') // strip LaTeX commands, keep inner text
+    .replace(/\$[^$]*\$/g, '') // strip math mode
+    .replace(/[^a-z0-9\s]/g, '') // strip punctuation
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+export function normalizeFirstAuthor(author: string): string {
+  const s = author.toLowerCase().trim();
+  // "Smith, J. A." → "smith"
+  if (s.includes(',')) {
+    const commaMatch = /^([^,]+)/.exec(s);
+    if (commaMatch?.[1] !== undefined) return commaMatch[1].trim();
+  }
+  // "J. A. Smith" → "smith" (last word)
+  const parts = s.split(/\s+/);
+  return parts[parts.length - 1] ?? s;
+}
+
+const rescoreWeights = {
+  rrfAnchor: 0.5,
+  recency: 0.05,
+  citations: 0.3,
+  venue: 0.15,
+};
 
 // ── XML helpers (regex-based, no parser dependency) ──────────────────────────
 
@@ -443,30 +477,66 @@ export async function academicSearch(
   } else if (source === 'semantic_scholar') {
     allPapers = await searchSemanticScholar(query, limit, yearFrom);
   } else {
-    // Sequential: ArXiv first (free, generous limits), then Semantic Scholar
-    // to enrich with citation counts and venue data. Avoids hammering both
-    // free APIs simultaneously.
-    try {
-      const arxivPapers = await searchArxiv(query, limit, yearFrom);
-      allPapers.push(...arxivPapers);
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : String(err);
+    const [arxivResult, ssResult] = await Promise.allSettled([
+      searchArxiv(query, limit, yearFrom),
+      searchSemanticScholar(query, limit, yearFrom),
+    ]);
+
+    if (arxivResult.status === 'rejected') {
+      const msg = arxivResult.reason instanceof Error ? arxivResult.reason.message : String(arxivResult.reason);
       warnings.push(`ArXiv search failed: ${msg}`);
       logger.warn({ backend: 'arxiv', error: msg }, 'ArXiv search failed');
     }
 
-    try {
-      const ssPapers = await searchSemanticScholar(query, limit, yearFrom);
-      allPapers.push(...ssPapers);
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : String(err);
+    if (ssResult.status === 'rejected') {
+      const msg = ssResult.reason instanceof Error ? ssResult.reason.message : String(ssResult.reason);
       warnings.push(`Semantic Scholar search failed: ${msg}`);
       logger.warn({ backend: 'semantic_scholar', error: msg }, 'Semantic Scholar search failed');
     }
 
-    // If both failed, throw so the caller gets an error
-    if (allPapers.length === 0 && warnings.length >= 2) {
+    const arxivPapers = arxivResult.status === 'fulfilled' ? arxivResult.value : [];
+    const ssPapers = ssResult.status === 'fulfilled' ? ssResult.value : [];
+
+    if (arxivPapers.length === 0 && ssPapers.length === 0) {
       throw unavailableError(`Both ArXiv and Semantic Scholar APIs failed. ${warnings.join('. ')}`);
+    }
+
+    if (arxivPapers.length === 0 || ssPapers.length === 0) {
+      // Only one source succeeded — fall through to existing dedup + sort pipeline
+      allPapers = [...arxivPapers, ...ssPapers];
+    } else {
+      // Both succeeded — RRF merge + multi-signal rescoring
+      const merged = rrfMerge([arxivPapers, ssPapers], {
+        keyFn: (p) => p.url,
+        getId: (p) => {
+          if (p.doi) return p.doi.toLowerCase().trim();
+          return normalizeTitle(p.title) + '|' + normalizeFirstAuthor(p.authors[0] ?? '');
+        },
+      });
+
+      const currentYear = new Date().getFullYear();
+      const signals = extractAcademicSignals(
+        merged.map((m) => m.item),
+        currentYear,
+      );
+      const signaled = merged.map((m, i) => {
+        const signal = signals[i];
+        if (signal === undefined) {
+          throw new Error('Signal extraction returned fewer entries than expected');
+        }
+        return {
+          item: m.item,
+          rrfScore: m.rrfScore,
+          signals: signal,
+        };
+      });
+
+      const rescored = multiSignalRescore(signaled, rescoreWeights, limit);
+      const results = rescored.map((r) => r.item);
+
+      cache.set(key, results);
+      logger.debug({ resultCount: results.length, warnings }, 'Academic search complete');
+      return { papers: results, warnings };
     }
   }
 
