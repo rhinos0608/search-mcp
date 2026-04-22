@@ -166,10 +166,10 @@ function loadFromEnv(): EnvConfig {
   const crawl4aiUrl = process.env.CRAWL4AI_BASE_URL;
   const crawl4aiToken = process.env.CRAWL4AI_API_TOKEN;
   if (crawl4aiUrl !== undefined || crawl4aiToken !== undefined) {
-    cfg.crawl4ai = {
-      baseUrl: crawl4aiUrl ?? '',
-      apiToken: crawl4aiToken ?? '',
-    };
+    const crawl4aiCfg: Partial<Crawl4aiConfig> = {};
+    if (crawl4aiUrl !== undefined) crawl4aiCfg.baseUrl = crawl4aiUrl;
+    if (crawl4aiToken !== undefined) crawl4aiCfg.apiToken = crawl4aiToken;
+    cfg.crawl4ai = crawl4aiCfg;
   }
 
   return cfg;

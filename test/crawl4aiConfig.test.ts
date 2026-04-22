@@ -3,7 +3,11 @@ import assert from 'node:assert/strict';
 
 import { loadConfig, resetConfig } from '../src/config.js';
 
-const CRAWL4AI_ENV_KEYS = ['CRAWL4AI_BASE_URL', 'CRAWL4AI_API_TOKEN'] as const;
+const CRAWL4AI_ENV_KEYS = [
+  'CRAWL4AI_BASE_URL',
+  'CRAWL4AI_API_TOKEN',
+  'SEARCH_MCP_CONFIG_KEY',
+] as const;
 
 const saved = new Map<string, string | undefined>();
 
@@ -60,6 +64,24 @@ test('loadConfig picks up both CRAWL4AI_BASE_URL and CRAWL4AI_API_TOKEN from env
 
   assert.equal(cfg.crawl4ai.baseUrl, 'http://crawl4ai.internal:11235');
   assert.equal(cfg.crawl4ai.apiToken, 'my-api-token');
+});
+
+test('loadConfig uses default apiToken when only CRAWL4AI_BASE_URL is set', () => {
+  process.env.CRAWL4AI_BASE_URL = 'http://localhost:11235';
+  // CRAWL4AI_API_TOKEN is intentionally not set
+
+  const cfg = loadConfig();
+
+  assert.equal(cfg.crawl4ai.baseUrl, 'http://localhost:11235');
+  assert.equal(cfg.crawl4ai.apiToken, '', 'apiToken should fall back to default empty string');
+});
+
+test('loadConfig accepts empty-string CRAWL4AI_BASE_URL', () => {
+  process.env.CRAWL4AI_BASE_URL = '';
+
+  const cfg = loadConfig();
+
+  assert.equal(cfg.crawl4ai.baseUrl, '');
 });
 
 test('resetConfig allows crawl4ai config to be re-read from env on next loadConfig', () => {
