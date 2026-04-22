@@ -370,3 +370,27 @@ export interface WebCrawlResult {
   totalPages: number;
   successfulPages: number;
 }
+
+// ── Semantic Crawl ────────────────────────────────────────────────────────
+
+export interface SemanticCrawlChunk {
+  text: string;
+  url: string;
+  section: string;
+  /** Cosine similarity score (0–1, higher = more relevant). */
+  score: number;
+  /** 0-based character offset in the source page text. */
+  charOffset: number;
+  chunkIndex: number;
+  totalChunks: number;
+}
+
+export interface SemanticCrawlResult {
+  seedUrl: string;
+  query: string;
+  /** Total pages attempted in the crawl (includes failed pages). */
+  pagesCrawled: number;
+  totalChunks: number;
+  successfulPages: number;
+  chunks: SemanticCrawlChunk[];
+}
