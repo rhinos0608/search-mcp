@@ -76,6 +76,12 @@ export interface Crawl4aiConfig {
   apiToken: string;
 }
 
+export interface EmbeddingSidecarConfig {
+  baseUrl: string;
+  apiToken: string;
+  dimensions: number;
+}
+
 export interface SearchConfig {
   searchBackend: SearchBackend;
   brave: { apiKey: string };
@@ -89,6 +95,7 @@ export interface SearchConfig {
   github: GitHubConfig;
   reddit: RedditConfig;
   crawl4ai: Crawl4aiConfig;
+  embeddingSidecar: EmbeddingSidecarConfig;
   rescoreWeights: RescoreConfig;
 }
 
@@ -111,6 +118,7 @@ const DEFAULTS: Omit<SearchConfig, 'rescoreWeights'> = {
     oauthConfigValid: true,
   },
   crawl4ai: { baseUrl: '', apiToken: '' },
+  embeddingSidecar: { baseUrl: '', apiToken: '', dimensions: 256 },
 };
 
 const VALID_BACKENDS = new Set<string>(['brave', 'searxng']);
@@ -139,10 +147,11 @@ function decryptConfigFile(filePath: string, password: string): SearchConfig {
   return JSON.parse(decrypted.toString('utf8')) as SearchConfig;
 }
 
-type EnvConfig = Omit<Partial<SearchConfig>, 'reddit' | 'crawl4ai' | 'github'> & {
+type EnvConfig = Omit<Partial<SearchConfig>, 'reddit' | 'crawl4ai' | 'github' | 'embeddingSidecar'> & {
   reddit?: Partial<RedditConfig>;
   crawl4ai?: Partial<Crawl4aiConfig>;
   github?: Partial<GitHubConfig>;
+  embeddingSidecar?: Partial<EmbeddingSidecarConfig>;
 };
 
 function loadFromEnv(): EnvConfig {
@@ -222,6 +231,22 @@ function loadFromEnv(): EnvConfig {
     if (crawl4aiUrl !== undefined) crawl4aiCfg.baseUrl = crawl4aiUrl;
     if (crawl4aiToken !== undefined) crawl4aiCfg.apiToken = crawl4aiToken;
     cfg.crawl4ai = crawl4aiCfg;
+  }
+
+  const embeddingSidecarUrl = process.env.EMBEDDING_SIDECAR_BASE_URL;
+  const embeddingSidecarToken = process.env.EMBEDDING_SIDECAR_API_TOKEN;
+  const embeddingDimensions = process.env.EMBEDDING_DIMENSIONS;
+  if (embeddingSidecarUrl !== undefined || embeddingSidecarToken !== undefined || embeddingDimensions !== undefined) {
+    const esc: Partial<EmbeddingSidecarConfig> = {};
+    if (embeddingSidecarUrl !== undefined) esc.baseUrl = embeddingSidecarUrl;
+    if (embeddingSidecarToken !== undefined) esc.apiToken = embeddingSidecarToken;
+    if (embeddingDimensions !== undefined) {
+      const dims = Number(embeddingDimensions);
+      if ([128, 256, 512, 768].includes(dims)) {
+        esc.dimensions = dims;
+      }
+    }
+    cfg.embeddingSidecar = esc;
   }
 
   return cfg;
@@ -305,6 +330,11 @@ export function loadConfig(): SearchConfig {
         envConfig.crawl4ai?.apiToken ??
         fileConfig.crawl4ai?.apiToken ??
         DEFAULTS.crawl4ai.apiToken,
+    },
+    embeddingSidecar: {
+      baseUrl: envConfig.embeddingSidecar?.baseUrl ?? fileConfig.embeddingSidecar?.baseUrl ?? DEFAULTS.embeddingSidecar.baseUrl,
+      apiToken: envConfig.embeddingSidecar?.apiToken ?? fileConfig.embeddingSidecar?.apiToken ?? DEFAULTS.embeddingSidecar.apiToken,
+      dimensions: envConfig.embeddingSidecar?.dimensions ?? fileConfig.embeddingSidecar?.dimensions ?? DEFAULTS.embeddingSidecar.dimensions,
     },
     rescoreWeights: DEFAULT_RESCORE_WEIGHTS,
   };
