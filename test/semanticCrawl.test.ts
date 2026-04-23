@@ -4,9 +4,10 @@ import {
   semanticCrawl,
   isBorderline,
   applyReranking,
+  embedAndRank,
   type SemanticCrawlOptions,
 } from '../src/tools/semanticCrawl.js';
-import type { SemanticCrawlChunk, SemanticCrawlResult } from '../src/types.js';
+import type { SemanticCrawlChunk, SemanticCrawlResult, CorpusChunk } from '../src/types.js';
 import type { Crawl4aiConfig } from '../src/config.js';
 import { rrfMerge } from '../src/utils/fusion.js';
 
@@ -271,5 +272,25 @@ describe('RRF fusion', () => {
     const scoreA = fused.find((r) => r.item.url === 'a')?.rrfScore ?? 0;
     const scoreB = fused.find((r) => r.item.url === 'b')?.rrfScore ?? 0;
     assert.strictEqual(scoreA, scoreB, 'Items appearing once each should have equal RRF scores');
+  });
+});
+
+describe('embedAndRank', () => {
+  it('throws when precomputedEmbeddings length does not match chunk count', async () => {
+    const chunks: CorpusChunk[] = [
+      { text: 'chunk one', url: 'https://example.com', section: '## A', charOffset: 0, chunkIndex: 0, totalChunks: 1 },
+      { text: 'chunk two', url: 'https://example.com', section: '## B', charOffset: 0, chunkIndex: 1, totalChunks: 2 },
+    ];
+    await assert.rejects(
+      () => embedAndRank(chunks, {
+        query: 'test',
+        topK: 5,
+        embeddingBaseUrl: '',
+        embeddingApiToken: '',
+        embeddingDimensions: 4,
+        precomputedEmbeddings: [[0.1, 0.2, 0.3, 0.4]], // length 1, but chunks has 2
+      }),
+      (err: Error) => err.message.includes('does not match deduped chunk count'),
+    );
   });
 });
