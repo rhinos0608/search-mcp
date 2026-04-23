@@ -119,6 +119,7 @@ export function extractElementsFromMarkdown(markdown: string): ContentElement[] 
     }
 
     // Image on its own line
+    IMAGE_RE.lastIndex = 0;
     if (IMAGE_RE.test(trimmed)) {
       let m: RegExpExecArray | null;
       IMAGE_RE.lastIndex = 0;

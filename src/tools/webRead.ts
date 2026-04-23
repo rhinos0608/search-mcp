@@ -146,14 +146,17 @@ export async function webRead(url: string): Promise<ArticleResult> {
         textContent = textContent.slice(0, MAX_CONTENT_LENGTH) + TRUNCATED_MARKER;
       }
 
-      const elements = (() => {
+      let elements: import('../types.js').ContentElement[] | undefined;
+      try {
         const articleDom = new JSDOM(content, { url });
         try {
-          return extractElementsFromHtml(articleDom.window.document);
+          elements = extractElementsFromHtml(articleDom.window.document);
         } finally {
           articleDom.window.close();
         }
-      })();
+      } catch {
+        elements = undefined;
+      }
 
       result = {
         title: article.title ?? metadata.title,
@@ -166,7 +169,7 @@ export async function webRead(url: string): Promise<ArticleResult> {
         description: metadata.description,
         publishedDate: metadata.publishedDate,
         image: metadata.image,
-        elements,
+        ...(elements !== undefined && elements.length > 0 && { elements }),
       };
     } else {
       readabilityDom.window.close();
@@ -191,7 +194,12 @@ export async function webRead(url: string): Promise<ArticleResult> {
           textContent = textContent.slice(0, MAX_CONTENT_LENGTH) + TRUNCATED_MARKER;
         }
 
-        const elements = extractElementsFromHtml(fallbackDom.window.document);
+        let elements: import('../types.js').ContentElement[] | undefined;
+        try {
+          elements = extractElementsFromHtml(fallbackDom.window.document);
+        } catch {
+          elements = undefined;
+        }
 
         result = {
           title: metadata.title,
@@ -204,7 +212,7 @@ export async function webRead(url: string): Promise<ArticleResult> {
           description: metadata.description,
           publishedDate: metadata.publishedDate,
           image: metadata.image,
-          elements,
+          ...(elements !== undefined && elements.length > 0 && { elements }),
         };
       } finally {
         fallbackDom.window.close();

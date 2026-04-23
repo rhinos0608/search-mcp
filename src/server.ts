@@ -150,6 +150,7 @@ function readabilityFallbackResult(
         links: [],
         statusCode: null,
         errorMessage: null,
+        ...(article.elements !== undefined && article.elements.length > 0 && { elements: article.elements }),
       },
     ],
   };
