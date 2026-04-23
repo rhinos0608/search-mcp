@@ -56,9 +56,7 @@ export async function searchWithBackends(
   const cfg = loadConfig();
   const primary = cfg.searchBackend;
 
-  const backends =
-    overrideBackends ??
-    [primary, ...FALLBACK_ORDER.filter((b) => b !== primary)];
+  const backends = overrideBackends ?? [primary, ...FALLBACK_ORDER.filter((b) => b !== primary)];
 
   const errors: string[] = [];
 
@@ -74,13 +72,7 @@ export async function searchWithBackends(
 
   const promises = available.map(async (backend) => {
     try {
-      const results = await runBackend(
-        backend,
-        query,
-        limit,
-        safeSearch,
-        deps,
-      );
+      const results = await runBackend(backend, query, limit, safeSearch, deps);
       return { backend, results };
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);

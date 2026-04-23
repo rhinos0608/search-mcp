@@ -1,57 +1,6 @@
-const TRACKING = new Set([
-  'utm_source',
-  'utm_medium',
-  'utm_campaign',
-  'utm_term',
-  'utm_content',
-  'fbclid',
-  'gclid',
-  'ref',
-  'source',
-]);
+import { normalizeUrl } from './url.js';
 
-/** Strip common tracking and advertising query parameters from a URL. */
-function stripTrackingParams(urlStr: string): string {
-  try {
-    const url = new URL(urlStr);
-    for (const key of [...url.searchParams.keys()]) {
-      if (TRACKING.has(key)) url.searchParams.delete(key);
-    }
-    return url.toString();
-  } catch {
-    return urlStr;
-  }
-}
-
-/**
- * Normalize a URL for deduplication comparison.
- *
- * - Strip trailing slashes from the pathname.
- * - Strip 'www.' prefix from hostname.
- * - Strip common tracking parameters.
- * - Lower-case hostname.
- *
- * If the URL is malformed, returns the original string unchanged so data
- * is never silently dropped during fusion.
- */
-export function normalizeUrl(original: string): string {
-  try {
-    const stripped = stripTrackingParams(original);
-    const url = new URL(stripped);
-    let hostname = url.hostname.toLowerCase();
-    if (hostname.startsWith('www.')) hostname = hostname.slice(4);
-    url.hostname = hostname;
-    url.pathname = url.pathname.replace(/\/+$/, '');
-    // URL constructor normalizes empty pathname back to '/' for origin-only URLs;
-    // return origin directly when the path collapses to root.
-    if (url.pathname === '/' && !url.search && !url.hash) {
-      return url.origin;
-    }
-    return url.toString();
-  } catch {
-    return original;
-  }
-}
+export { normalizeUrl };
 
 export interface RrfMergeResult<T> {
   item: T;
@@ -140,5 +89,5 @@ export function rrfMerge<T>(
 
   return [...scores.values()]
     .sort((a, b) => b.score - a.score)
-    .map(v => ({ item: v.item, rrfScore: v.score }));
+    .map((v) => ({ item: v.item, rrfScore: v.score }));
 }

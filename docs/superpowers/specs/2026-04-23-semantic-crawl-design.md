@@ -7,6 +7,8 @@
 
 `semantic_crawl` is a new MCP tool that crawls a website and returns the most semantically relevant passages for a specific query, rather than full page documents. It uses a lightweight Python embedding sidecar (mirroring the existing crawl4ai sidecar pattern) running Google's EmbeddingGemma-300M to embed chunked content and rank it by cosine similarity.
 
+> **Sidecar spec:** The full embedding sidecar specification (HTTP contract, model details, Docker reference, HF auth requirements) lives in `docs/superpowers/specs/2026-04-23-embedding-sidecar.md`. This document focuses on the MCP tool contract and TypeScript implementation.
+
 The key insight driving this feature: a 50-page crawl at ~2k tokens per page produces ~100k tokens of raw markdown that an LLM must process wholesale, most of it irrelevant. Semantic chunking + retrieval moves the filtering earlier in the pipeline — we return dense signal instead of raw bulk.
 
 ## Goals
@@ -30,20 +32,21 @@ The key insight driving this feature: a 50-page crawl at ~2k tokens per page pro
 1. Crawl pages via crawl4ai (existing `webCrawl` function)
 2. Extract structured text from each page's markdown
 3. Chunk text using markdown-aware strategy (see Chunking Strategy)
-4. Send all chunk texts to Python embedding sidecar in ONE batched request
-5. Embed the query in a separate `mode: "query"` call
-6. Compute cosine similarity between query embedding and all chunk embeddings
-7. Return topK chunks with full provenance
+4. **Deduplicate** chunks by normalized text to prevent boilerplate navigation/footer duplicates from dominating topK
+5. Embed chunk texts in batched requests (max 512 per batch) with document-mode prefixing
+6. Embed the query in a separate `mode: "query"` call
+7. Compute cosine similarity between query embedding and all chunk embeddings
+8. Return topK chunks with full provenance
 ```
 
 ### Components
 
-| Component | Location | Purpose |
-|---|---|---|
-| `semanticCrawl` handler | `src/tools/semanticCrawl.ts` | Orchestrates the full pipeline |
-| `chunkMarkdown` | `src/chunking.ts` | Markdown-aware chunking |
-| Embedding sidecar | External Python service | Loads EmbeddingGemma, exposes `/embed` |
-| Sidecar registration | `src/server.ts` | New tool registration + gating |
+| Component               | Location                     | Purpose                                |
+| ----------------------- | ---------------------------- | -------------------------------------- |
+| `semanticCrawl` handler | `src/tools/semanticCrawl.ts` | Orchestrates the full pipeline         |
+| `chunkMarkdown`         | `src/chunking.ts`            | Markdown-aware chunking                |
+| Embedding sidecar       | External Python service      | Loads EmbeddingGemma, exposes `/embed` |
+| Sidecar registration    | `src/server.ts`              | New tool registration + gating         |
 
 ## Chunking Strategy
 
@@ -84,8 +87,8 @@ When a section exceeds **~400 tokens** and is not an atomic unit:
 
 1. **First priority:** split at the nearest blank line that is **outside** an atomic unit.
 2. **Second priority:** if no suitable blank line exists, split at the next sentence boundary (`. ` or `\n`).
-3. **Overlap:** 20% of chunk size, but snap the overlap start to the next sentence boundary — never mid-sentence.
-4. **Overlap inherits section label:** A chunk created from overlap text still carries the section heading chain of the *original* boundary, not the overlap region. The overlap is content context, not a semantic boundary.
+3. **Overlap:** 20% of chunk size. Snap the overlap start by searching **backward** from the split position for the sentence boundary that produces overlap closest to the target 20%. This avoids the bug where the first boundary in the window produces a tiny overlap.
+4. **Overlap inherits section label:** A chunk created from overlap text still carries the section heading chain of the _original_ boundary, not the overlap region. The overlap is content context, not a semantic boundary.
 
 ### Two-pass totalChunks annotation
 
@@ -97,14 +100,14 @@ When a section exceeds **~400 tokens** and is not an atomic unit:
 
 ```typescript
 interface MarkdownChunk {
-  content: string;        // chunk text
-  section: string;      // "# Page Title > ## Installation > ### Python"
-  url: string;            // source page URL
-  pageTitle: string | null;      // H1 title, or null if page has no headings
-  chunkIndex: number;     // position within this section path
-  totalChunks: number;    // total sub-chunks in this section path
-  tokenEstimate: number;  // approximate token count
-  charOffset: number;      // character offset within the source page
+  content: string; // chunk text
+  section: string; // "# Page Title > ## Installation > ### Python"
+  url: string; // source page URL
+  pageTitle: string | null; // H1 title, or null if page has no headings
+  chunkIndex: number; // position within this section path
+  totalChunks: number; // total sub-chunks in this section path
+  tokenEstimate: number; // approximate token count
+  charOffset: number; // character offset within the source page
 }
 ```
 
@@ -117,24 +120,24 @@ interface MarkdownChunk {
 ```json
 {
   "texts": ["chunk1 text", "chunk2 text", "..."],
+  "titles": ["Section One", "Section Two"],
   "mode": "document" | "query",
   "dimensions": 768 | 512 | 256 | 128
 }
 ```
 
-- `texts`: all texts in one batch. **Max recommended: 512**. Empty array `[]` → `200` with `"embeddings": []`.
-- `mode`: `"document"` for chunk embeddings, `"query"` for the user query. **This triggers asymmetric prompt formatting inside the sidecar,** which is how the model distinguishes indexing from retrieval:
+- `texts` (required): all texts in one batch. **Max recommended: 512**. Empty array `[]` → `200` with `"embeddings": []`.
+- `titles` (optional): Array of strings, same length as `texts`. Used for document-mode prefixing (`title: {title} | text: {content}`). If omitted or shorter than `texts`, missing entries default to `"none"`.
+- `mode` (required): `"document"` for chunk embeddings, `"query"` for the user query. **This triggers asymmetric prompt formatting inside the sidecar,** which is how the model distinguishes indexing from retrieval:
   - Query mode: `task: search result | query: {content}`
   - Document mode: `title: {title | "none"} | text: {content}` (title is passed separately when available)
-- `dimensions`: MRL output size. **Default 256** (good balance of quality vs. memory).
+- `dimensions` (optional): MRL output size. **Default 256** (good balance of quality vs. memory).
 
 **Response body:**
 
 ```json
 {
-  "embeddings": [
-    [0.023, -0.041, 0.012, "..."]
-  ],
+  "embeddings": [[0.023, -0.041, 0.012, "..."]],
   "model": "google/embedding-gemma-300m",
   "modelRevision": "abc1234",
   "dimensions": 256,
@@ -150,11 +153,11 @@ interface MarkdownChunk {
 
 **Error contract:**
 
-| Status | Meaning |
-|---|---|
-| `400` | Invalid `mode`, `dimensions`, or non-array `texts` |
-| `503` | Model not loaded yet. `Retry-After: <seconds>` header (integer seconds) |
-| `500` | Internal error |
+| Status | Meaning                                                                 |
+| ------ | ----------------------------------------------------------------------- |
+| `400`  | Invalid `mode`, `dimensions`, or non-array `texts`                      |
+| `503`  | Model not loaded yet. `Retry-After: <seconds>` header (integer seconds) |
+| `500`  | Internal error                                                          |
 
 **Additional endpoints:**
 
@@ -174,6 +177,7 @@ interface MarkdownChunk {
 > Crawl a website and return the most semantically relevant passages for a specific query. Uses EmbeddingGemma (300M, local) to chunk, embed, and rank content by similarity — returning dense signal instead of raw pages.
 >
 > USE THIS TOOL when you need to:
+>
 > - Find specific information within a large documentation site, codebase reference, or multi-page resource
 > - Answer "how does X handle Y" or "where does X explain Z" against a known URL
 > - Research a specific topic across an entire domain without reading every page
@@ -213,11 +217,11 @@ interface MarkdownChunk {
   chunks: Array<{
     text: string;
     url: string;
-    section: string;            // heading chain
-    score: number;                 // cosine similarity, 0-1
+    section: string; // heading chain
+    score: number; // cosine similarity, 0-1
     charOffset: number;
-    chunkIndex: number;            // position within section
-    totalChunks: number;           // total in this section path
+    chunkIndex: number; // position within section
+    totalChunks: number; // total in this section path
   }>;
 }
 ```
@@ -226,12 +230,12 @@ interface MarkdownChunk {
 
 ### New env vars
 
-| Env Var | Required | Default | Description |
-|---|---|---|---|
-| `EMBEDDING_SIDECAR_BASE_URL` | Yes (for registration) | — | Base URL of the embedding sidecar |
-| `EMBEDDING_SIDECAR_API_TOKEN` | No | — | Bearer token for sidecar auth |
-| `EMBEDDING_DIMENSIONS` | No | `256` | Default MRL output dimension |
-| `EMBEDDING_QUANTIZATION` | No | — | *(Future)* Quantization level for sidecar: `q8_0`, `q4_0`, or `none` |
+| Env Var                       | Required               | Default | Description                                                          |
+| ----------------------------- | ---------------------- | ------- | -------------------------------------------------------------------- |
+| `EMBEDDING_SIDECAR_BASE_URL`  | Yes (for registration) | —       | Base URL of the embedding sidecar                                    |
+| `EMBEDDING_SIDECAR_API_TOKEN` | No                     | —       | Bearer token for sidecar auth                                        |
+| `EMBEDDING_DIMENSIONS`        | No                     | `256`   | Default MRL output dimension                                         |
+| `EMBEDDING_QUANTIZATION`      | No                     | —       | _(Future)_ Quantization level for sidecar: `q8_0`, `q4_0`, or `none` |
 
 **Note on quantization:** EmbeddingGemma Q8_0 scores 69.49 MTEB English at 768d (vs. 69.67 full precision) — a 0.18 point loss for a ~50% memory reduction. Q4_0 trades more quality for further reduction. This is not implemented in v1 but the config placeholder ensures the env var namespace is reserved.
 
@@ -242,30 +246,33 @@ interface MarkdownChunk {
 ### Health check
 
 Add `semantic_crawl` to the health probe system:
+
 - Config layer: checks `EMBEDDING_SIDECAR_BASE_URL` and `CRAWL4AI_BASE_URL`.
 - Network probe: pings `GET /health` on the sidecar.
 
 ### Chunk memory safety
 
 With `maxPages: 100` and dense documentation, thousands of chunks are possible. To prevent OOM in the embedding step:
+
+- **Deduplication:** Before embedding, chunks are deduplicated by normalized text (trim, lowercase, collapse whitespace). This prevents boilerplate navigation/footer content across pages from producing duplicate high-scoring entries.
 - **Soft cap:** If total chunks exceed 2,000, emit a warning and proceed. The sidecar handles internal batching, so the consumer is not blocked.
 - **Hard cap:** If total chunks exceed 5,000, return an error with remediation: "Reduce maxPages or increase chunk size."
 
 ## Error Handling
 
-| Scenario | Behavior |
-|---|---|
-| Crawl fails entirely | Return error response with `isError: true` |
-| Some pages fail | Continue with successful pages, include warning |
-| Sidecar unreachable | `unavailableError` with remediation |
-| Sidecar returns 503 | Retry once after `Retry-After`, then fail |
-| All chunks truncated | Return empty chunks array with warning |
-| No chunks produced | Return empty result with `pagesCrawled: N`, `totalChunks: 0` |
+| Scenario             | Behavior                                                     |
+| -------------------- | ------------------------------------------------------------ |
+| Crawl fails entirely | Return error response with `isError: true`                   |
+| Some pages fail      | Continue with successful pages, include warning              |
+| Sidecar unreachable  | `unavailableError` with remediation                          |
+| Sidecar returns 503  | Retry once after `Retry-After`, then fail                    |
+| All chunks truncated | Return empty chunks array with warning                       |
+| No chunks produced   | Return empty result with `pagesCrawled: N`, `totalChunks: 0` |
 
 ## Testing Strategy
 
-1. **Unit tests for `chunkMarkdown`** — feed known markdown, assert chunk boundaries, atomic unit preservation, merge-forward behavior, and totalChunks correctness.
-2. **Integration tests for sidecar contract** — mock the sidecar HTTP server, verify batching, normalization, error handling.
+1. **Unit tests for `chunkMarkdown`** — 18 tests covering chunk boundaries, atomic unit preservation, merge-forward/backward behavior, ancestor heading tracking, sentence-snapped overlap, code-fence heading immunity, content before first heading, multiple H1s, H4+ as content, and monotonically increasing charOffsets.
+2. **Integration tests for sidecar contract** — mock the sidecar HTTP server, verify batching, deduplication, normalization, error handling.
 3. **End-to-end test** — use a small static site (e.g., a local HTTP server with 3 pages), crawl it, query it, assert relevant chunk is in topK.
 
 ## Future Work (out of scope for v1)

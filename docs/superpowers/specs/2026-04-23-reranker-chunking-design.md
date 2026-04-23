@@ -45,10 +45,10 @@ Bi-encoder (existing)          Cross-encoder (new)
 
 ### New files
 
-| File | Purpose |
-|---|---|
+| File                  | Purpose                                  |
+| --------------------- | ---------------------------------------- |
 | `src/utils/rerank.ts` | Generic cross-encoder re-ranking utility |
-| `test/rerank.test.ts` | Unit tests |
+| `test/rerank.test.ts` | Unit tests                               |
 
 ### Model
 
@@ -66,13 +66,13 @@ Bi-encoder (existing)          Cross-encoder (new)
 export async function rerank(
   query: string,
   documents: string[],
-  options?: { topK?: number; maxLength?: number }
-): Promise<RerankResult[]>
+  options?: { topK?: number; maxLength?: number },
+): Promise<RerankResult[]>;
 
 export interface RerankResult {
-  index: number;        // original index in input array
-  score: number;        // cross-encoder relevance score
-  document: string;     // passthrough of input document text
+  index: number; // original index in input array
+  score: number; // cross-encoder relevance score
+  document: string; // passthrough of input document text
 }
 ```
 
@@ -120,6 +120,7 @@ AFTER:
 ```
 
 Specifically:
+
 1. After the existing cosine similarity sort, take top-30 instead of topK.
 2. Extract the text from each of the 30 candidates.
 3. Call `rerank(query, texts, { topK: params.topK })`.
@@ -137,15 +138,18 @@ The `topK` parameter on the tool schema stays the same — users don't need to k
 Extend `isBoilerplate()` in `src/chunking.ts` with additional heuristics:
 
 **New heuristic: Repeated navigation patterns**
+
 - If >50% of lines in a chunk contain `>` separated link text (breadcrumb patterns like `Home > Docs > API`), mark as boilerplate.
 - Regex: `/>?\s*\[.+?\]\(.+?\)\s*>?\s*$/` — matches lines that are primarily markdown links separated by `>`.
 
 **New heuristic: High repetition across chunks**
+
 - After chunking all sections from a page, compute a set of "suspect" chunks: those that have >60% line overlap with at least 2 other chunks from the same page. These are likely repeated nav elements that appear in multiple sections.
 - Implementation: For each chunk, compute a normalized line set. Compare against other chunks' line sets. If Jaccard similarity > 0.6 with 2+ other chunks, flag as boilerplate.
 - This catches nav menus that are structurally embedded in the content (not in a separate `<nav>` tag).
 
 **New heuristic: Short-line + link-heavy refinement**
+
 - Current: avg words/line < 4 with >5 non-empty lines.
 - Tighten: if avg words/line < 3 AND >30% of lines are pure link lines (markdown link is >80% of line content), mark as boilerplate. This catches sidebar-style link lists that just barely miss the current threshold.
 
@@ -209,41 +213,42 @@ URL
 
 ### Re-ranker tests (`test/rerank.test.ts`)
 
-| Test | What it verifies |
-|---|---|
-| Re-ranks relevant doc above irrelevant | Query "python web framework" ranks Flask doc above cooking recipe |
-| Preserves document text in output | `result.document` matches input |
-| topK parameter works | Returns exactly K results |
-| Empty documents returns empty | No crash on empty input |
-| Single document returns single result | Edge case |
-| Score ordering is descending | Scores are monotonically decreasing |
-| Model not found throws CONFIGURATION_ERROR | Missing model file gives clear error |
+| Test                                       | What it verifies                                                  |
+| ------------------------------------------ | ----------------------------------------------------------------- |
+| Re-ranks relevant doc above irrelevant     | Query "python web framework" ranks Flask doc above cooking recipe |
+| Preserves document text in output          | `result.document` matches input                                   |
+| topK parameter works                       | Returns exactly K results                                         |
+| Empty documents returns empty              | No crash on empty input                                           |
+| Single document returns single result      | Edge case                                                         |
+| Score ordering is descending               | Scores are monotonically decreasing                               |
+| Model not found throws CONFIGURATION_ERROR | Missing model file gives clear error                              |
 
 Note: Re-ranker tests require the ONNX model file. Tests will be skipped in CI if model is absent (conditional describe block).
 
 ### Chunking tests (additions to `test/chunking.test.ts`)
 
-| Test | What it verifies |
-|---|---|
-| Breadcrumb nav is filtered | `Home > Docs > API > ...` pattern chunk is removed |
-| Sidebar link list filtered | Chunk with >80% link lines is removed |
+| Test                                  | What it verifies                                              |
+| ------------------------------------- | ------------------------------------------------------------- |
+| Breadcrumb nav is filtered            | `Home > Docs > API > ...` pattern chunk is removed            |
+| Sidebar link list filtered            | Chunk with >80% link lines is removed                         |
 | Repeated nav across sections filtered | Same nav block appearing in multiple sections is deduplicated |
-| Content with moderate links preserved | Article with inline links is NOT filtered |
-| Tightened short-line heuristic | Chunks with avg <3 words/line + >30% pure links are filtered |
+| Content with moderate links preserved | Article with inline links is NOT filtered                     |
+| Tightened short-line heuristic        | Chunks with avg <3 words/line + >30% pure links are filtered  |
 
 ### Semantic coherence tests (integration tests in `test/semanticCrawl.test.ts`)
 
-| Test | What it verifies |
-|---|---|
-| Off-topic chunk excluded | A chunk about "cookie policy" on a Python docs page is excluded |
-| On-topic borderline chunk preserved | A chunk about "Python installation" on a Python docs page is preserved |
-| Non-borderline chunks unaffected | Chunks with low link density pass through regardless of centroid distance |
+| Test                                | What it verifies                                                          |
+| ----------------------------------- | ------------------------------------------------------------------------- |
+| Off-topic chunk excluded            | A chunk about "cookie policy" on a Python docs page is excluded           |
+| On-topic borderline chunk preserved | A chunk about "Python installation" on a Python docs page is preserved    |
+| Non-borderline chunks unaffected    | Chunks with low link density pass through regardless of centroid distance |
 
 ## Configuration
 
 No new config parameters for users. The re-ranker is always-on when the model file is present. The chunking improvements are always-on.
 
 Internal constants (not user-facing):
+
 - `RERANK_CANDIDATES = 30` — number of bi-encoder candidates to re-rank
 - `RERANK_BATCH_SIZE = 32` — ONNX inference batch size
 - `RERANK_MAX_TOKENS = 512` — max tokens per query-doc pair
@@ -253,10 +258,10 @@ Internal constants (not user-facing):
 
 ## Error Handling
 
-| Error | Handling |
-|---|---|
-| ONNX model file missing | `CONFIGURATION_ERROR` — clear message, suggests reinstall |
-| ONNX inference crash | `TOOL_EXECUTION_ERROR` — sanitized, no tensor shapes |
-| Tokenizer load failure | `TOOL_EXECUTION_ERROR` |
-| Empty candidates after re-ranking | Return empty results (not an error) |
-| Semantic check on unembedded chunk | Defensive: skip the check (chunk passes through) |
+| Error                              | Handling                                                  |
+| ---------------------------------- | --------------------------------------------------------- |
+| ONNX model file missing            | `CONFIGURATION_ERROR` — clear message, suggests reinstall |
+| ONNX inference crash               | `TOOL_EXECUTION_ERROR` — sanitized, no tensor shapes      |
+| Tokenizer load failure             | `TOOL_EXECUTION_ERROR`                                    |
+| Empty candidates after re-ranking  | Return empty results (not an error)                       |
+| Semantic check on unembedded chunk | Defensive: skip the check (chunk passes through)          |

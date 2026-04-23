@@ -37,10 +37,15 @@ export interface RescoreConfig {
 }
 
 function validateRescoreWeights(weights: RescoreWeights, toolName: string): void {
-  const knownKeys = ['recency', 'citations', 'engagement', 'commentEngagement', 'venue', 'hasDeepLinks'] as const;
-  const otherWeights = knownKeys
-    .map((k) => weights[k])
-    .filter((v): v is number => v !== undefined);
+  const knownKeys = [
+    'recency',
+    'citations',
+    'engagement',
+    'commentEngagement',
+    'venue',
+    'hasDeepLinks',
+  ] as const;
+  const otherWeights = knownKeys.map((k) => weights[k]).filter((v): v is number => v !== undefined);
   const maxOther = otherWeights.length > 0 ? Math.max(...otherWeights) : 0;
   if (weights.rrfAnchor < maxOther) {
     logger.warn(
@@ -154,7 +159,10 @@ function decryptConfigFile(filePath: string, password: string): SearchConfig {
   return JSON.parse(decrypted.toString('utf8')) as SearchConfig;
 }
 
-type EnvConfig = Omit<Partial<SearchConfig>, 'reddit' | 'crawl4ai' | 'github' | 'embeddingSidecar' | 'semanticCrawl'> & {
+type EnvConfig = Omit<
+  Partial<SearchConfig>,
+  'reddit' | 'crawl4ai' | 'github' | 'embeddingSidecar' | 'semanticCrawl'
+> & {
   reddit?: Partial<RedditConfig>;
   crawl4ai?: Partial<Crawl4aiConfig>;
   github?: Partial<GitHubConfig>;
@@ -244,7 +252,11 @@ function loadFromEnv(): EnvConfig {
   const embeddingSidecarUrl = process.env.EMBEDDING_SIDECAR_BASE_URL;
   const embeddingSidecarToken = process.env.EMBEDDING_SIDECAR_API_TOKEN;
   const embeddingDimensions = process.env.EMBEDDING_DIMENSIONS;
-  if (embeddingSidecarUrl !== undefined || embeddingSidecarToken !== undefined || embeddingDimensions !== undefined) {
+  if (
+    embeddingSidecarUrl !== undefined ||
+    embeddingSidecarToken !== undefined ||
+    embeddingDimensions !== undefined
+  ) {
     const esc: Partial<EmbeddingSidecarConfig> = {};
     if (embeddingSidecarUrl !== undefined) esc.baseUrl = embeddingSidecarUrl;
     if (embeddingSidecarToken !== undefined) esc.apiToken = embeddingSidecarToken;
@@ -288,7 +300,10 @@ export function loadConfig(): SearchConfig {
   if (existsSync(encPath) && configKey) {
     try {
       fileConfig = decryptConfigFile(encPath, configKey);
-      logger.info({ hasToken: fileConfig.github?.token ? true : false }, 'Loaded encrypted config from config.enc');
+      logger.info(
+        { hasToken: fileConfig.github?.token ? true : false },
+        'Loaded encrypted config from config.enc',
+      );
     } catch (err) {
       logger.warn({ err }, 'Failed to decrypt config.enc — falling back to env vars');
     }
@@ -350,18 +365,31 @@ export function loadConfig(): SearchConfig {
       baseUrl:
         envConfig.crawl4ai?.baseUrl ?? fileConfig.crawl4ai?.baseUrl ?? DEFAULTS.crawl4ai.baseUrl,
       apiToken:
-        envConfig.crawl4ai?.apiToken ??
-        fileConfig.crawl4ai?.apiToken ??
-        DEFAULTS.crawl4ai.apiToken,
+        envConfig.crawl4ai?.apiToken ?? fileConfig.crawl4ai?.apiToken ?? DEFAULTS.crawl4ai.apiToken,
     },
     embeddingSidecar: {
-      baseUrl: envConfig.embeddingSidecar?.baseUrl ?? fileConfig.embeddingSidecar?.baseUrl ?? DEFAULTS.embeddingSidecar.baseUrl,
-      apiToken: envConfig.embeddingSidecar?.apiToken ?? fileConfig.embeddingSidecar?.apiToken ?? DEFAULTS.embeddingSidecar.apiToken,
-      dimensions: envConfig.embeddingSidecar?.dimensions ?? fileConfig.embeddingSidecar?.dimensions ?? DEFAULTS.embeddingSidecar.dimensions,
+      baseUrl:
+        envConfig.embeddingSidecar?.baseUrl ??
+        fileConfig.embeddingSidecar?.baseUrl ??
+        DEFAULTS.embeddingSidecar.baseUrl,
+      apiToken:
+        envConfig.embeddingSidecar?.apiToken ??
+        fileConfig.embeddingSidecar?.apiToken ??
+        DEFAULTS.embeddingSidecar.apiToken,
+      dimensions:
+        envConfig.embeddingSidecar?.dimensions ??
+        fileConfig.embeddingSidecar?.dimensions ??
+        DEFAULTS.embeddingSidecar.dimensions,
     },
     semanticCrawl: {
-      defaultMaxBytes: envConfig.semanticCrawl?.defaultMaxBytes ?? fileConfig.semanticCrawl?.defaultMaxBytes ?? DEFAULTS.semanticCrawl.defaultMaxBytes,
-      maxMaxBytes: envConfig.semanticCrawl?.maxMaxBytes ?? fileConfig.semanticCrawl?.maxMaxBytes ?? DEFAULTS.semanticCrawl.maxMaxBytes,
+      defaultMaxBytes:
+        envConfig.semanticCrawl?.defaultMaxBytes ??
+        fileConfig.semanticCrawl?.defaultMaxBytes ??
+        DEFAULTS.semanticCrawl.defaultMaxBytes,
+      maxMaxBytes:
+        envConfig.semanticCrawl?.maxMaxBytes ??
+        fileConfig.semanticCrawl?.maxMaxBytes ??
+        DEFAULTS.semanticCrawl.maxMaxBytes,
     },
     rescoreWeights: DEFAULT_RESCORE_WEIGHTS,
   };

@@ -5,7 +5,10 @@ import { webCrawl } from '../src/tools/webCrawl.js';
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
-function buildMockResponse(body: unknown, init?: { status?: number; statusText?: string }): Response {
+function buildMockResponse(
+  body: unknown,
+  init?: { status?: number; statusText?: string },
+): Response {
   return new Response(JSON.stringify(body), {
     status: init?.status ?? 200,
     statusText: init?.statusText ?? 'OK',
@@ -51,7 +54,12 @@ test('webCrawl returns markdown string unchanged when API returns markdown as a 
       },
     });
 
-  const result = await webCrawl('https://example.com', 'https://crawl4ai.example.com', '', defaultOpts);
+  const result = await webCrawl(
+    'https://example.com',
+    'https://crawl4ai.example.com',
+    '',
+    defaultOpts,
+  );
 
   assert.ok(result.pages[0]);
   assert.equal(result.pages[0].markdown, '# Hello');
@@ -59,7 +67,7 @@ test('webCrawl returns markdown string unchanged when API returns markdown as a 
 
 // ── Test 3: Markdown object shape ─────────────────────────────────────────────
 
-test('webCrawl prefers raw_markdown over fit_markdown when markdown is an object', async () => {
+test('webCrawl prefers fit_markdown over raw_markdown when markdown is an object', async () => {
   globalThis.fetch = async () =>
     buildMockResponse({
       result: {
@@ -69,10 +77,15 @@ test('webCrawl prefers raw_markdown over fit_markdown when markdown is an object
       },
     });
 
-  const result = await webCrawl('https://example.com', 'https://crawl4ai.example.com', '', defaultOpts);
+  const result = await webCrawl(
+    'https://example.com',
+    'https://crawl4ai.example.com',
+    '',
+    defaultOpts,
+  );
 
   assert.ok(result.pages[0]);
-  assert.equal(result.pages[0].markdown, '# Raw');
+  assert.equal(result.pages[0].markdown, '# Fit');
 });
 
 // ── Test 4: Deep crawl response with results array ────────────────────────────
@@ -154,7 +167,12 @@ test('webCrawl sets Authorization header when apiToken is non-empty', async () =
     });
   };
 
-  await webCrawl('https://example.com', 'https://crawl4ai.example.com', 'my-secret-token', defaultOpts);
+  await webCrawl(
+    'https://example.com',
+    'https://crawl4ai.example.com',
+    'my-secret-token',
+    defaultOpts,
+  );
 
   assert.ok(capturedHeaders);
   assert.equal(capturedHeaders.get('Authorization'), 'Bearer my-secret-token');

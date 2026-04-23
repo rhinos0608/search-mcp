@@ -27,7 +27,7 @@ test('normalizeUrl returns raw URL on malformed input', () => {
 
 test('normalizeUrl handles root path with trailing slash', () => {
   const result = normalizeUrl('https://www.example.com/');
-  assert.equal(result, 'https://example.com');
+  assert.equal(result, 'https://example.com/');
 });
 
 // --- rrfMerge ---

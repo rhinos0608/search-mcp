@@ -12,19 +12,20 @@
 
 ## File Map
 
-| File | Action | Responsibility |
-|---|---|---|
-| `src/config.ts` | Modify | Add `crawl4ai` config block + env loading |
-| `src/types.ts` | Modify | Add `CrawlPageResult`, `WebCrawlResult` interfaces |
-| `src/tools/webCrawl.ts` | Create | HTTP client + crawl4ai API logic |
-| `src/health.ts` | Modify | Gate `web_crawl` on `CRAWL4AI_BASE_URL`; add network probe |
-| `src/server.ts` | Modify | Register `web_crawl` tool (gated) |
+| File                    | Action | Responsibility                                             |
+| ----------------------- | ------ | ---------------------------------------------------------- |
+| `src/config.ts`         | Modify | Add `crawl4ai` config block + env loading                  |
+| `src/types.ts`          | Modify | Add `CrawlPageResult`, `WebCrawlResult` interfaces         |
+| `src/tools/webCrawl.ts` | Create | HTTP client + crawl4ai API logic                           |
+| `src/health.ts`         | Modify | Gate `web_crawl` on `CRAWL4AI_BASE_URL`; add network probe |
+| `src/server.ts`         | Modify | Register `web_crawl` tool (gated)                          |
 
 ---
 
 ## Task 1: Add crawl4ai to `SearchConfig`
 
 **Files:**
+
 - Modify: `src/config.ts`
 
 - [ ] **Step 1: Add the `Crawl4aiConfig` interface and extend `SearchConfig`**
@@ -41,7 +42,7 @@ export interface Crawl4aiConfig {
 Then inside `SearchConfig` (currently ends at `reddit: RedditConfig;`), append:
 
 ```typescript
-  crawl4ai: Crawl4aiConfig;
+crawl4ai: Crawl4aiConfig;
 ```
 
 - [ ] **Step 2: Add defaults**
@@ -57,14 +58,14 @@ Inside the `DEFAULTS` object after the `reddit` block:
 At the end of `loadFromEnv()`, before `return cfg;`:
 
 ```typescript
-  const crawl4aiUrl = process.env.CRAWL4AI_BASE_URL;
-  const crawl4aiToken = process.env.CRAWL4AI_API_TOKEN;
-  if (crawl4aiUrl !== undefined || crawl4aiToken !== undefined) {
-    cfg.crawl4ai = {
-      baseUrl: crawl4aiUrl ?? '',
-      apiToken: crawl4aiToken ?? '',
-    };
-  }
+const crawl4aiUrl = process.env.CRAWL4AI_BASE_URL;
+const crawl4aiToken = process.env.CRAWL4AI_API_TOKEN;
+if (crawl4aiUrl !== undefined || crawl4aiToken !== undefined) {
+  cfg.crawl4ai = {
+    baseUrl: crawl4aiUrl ?? '',
+    apiToken: crawl4aiToken ?? '',
+  };
+}
 ```
 
 Also add `crawl4ai?: Crawl4aiConfig;` to the `EnvConfig` type (the `Omit<Partial<SearchConfig>, 'reddit'>` union — since `crawl4ai` is a simple object, it is already covered by `Partial<SearchConfig>` once the field exists in `SearchConfig`; no extra work needed).
@@ -104,6 +105,7 @@ git commit -m "feat: add crawl4ai config (CRAWL4AI_BASE_URL, CRAWL4AI_API_TOKEN)
 ## Task 2: Add response types to `src/types.ts`
 
 **Files:**
+
 - Modify: `src/types.ts`
 
 - [ ] **Step 1: Append crawl4ai types at the end of the file**
@@ -153,6 +155,7 @@ git commit -m "feat: add CrawlPageResult and WebCrawlResult types"
 ## Task 3: Implement `src/tools/webCrawl.ts`
 
 **Files:**
+
 - Create: `src/tools/webCrawl.ts`
 
 - [ ] **Step 1: Create the file**
@@ -288,10 +291,9 @@ export async function webCrawl(
           { statusCode: response.status },
         );
       }
-      throw networkError(
-        `crawl4ai returned HTTP ${String(response.status)} for "${url}"`,
-        { statusCode: response.status },
-      );
+      throw networkError(`crawl4ai returned HTTP ${String(response.status)} for "${url}"`, {
+        statusCode: response.status,
+      });
     }
 
     raw = await safeResponseJson(response, endpoint);
@@ -316,10 +318,7 @@ export async function webCrawl(
     );
   }
 
-  logger.debug(
-    { url, totalPages: pages.length, strategy: opts.strategy },
-    'web_crawl complete',
-  );
+  logger.debug({ url, totalPages: pages.length, strategy: opts.strategy }, 'web_crawl complete');
 
   return {
     seedUrl: url,
@@ -353,6 +352,7 @@ git commit -m "feat: implement webCrawl HTTP client for crawl4ai sidecar"
 ## Task 4: Gate `web_crawl` in `src/health.ts`
 
 **Files:**
+
 - Modify: `src/health.ts`
 
 - [ ] **Step 1: Add `web_crawl` to `GATED_TOOLS`**
@@ -372,13 +372,13 @@ In `src/health.ts`, inside the `GATED_TOOLS` object (after the last entry, `podc
 In `getNetworkProbes()`, after the SearXNG conditional block:
 
 ```typescript
-  if (cfg.crawl4ai.baseUrl.length > 0) {
-    probes.push({
-      label: 'crawl4ai',
-      url: `${cfg.crawl4ai.baseUrl.replace(/\/+$/, '')}/health`,
-      tools: ['web_crawl'],
-    });
-  }
+if (cfg.crawl4ai.baseUrl.length > 0) {
+  probes.push({
+    label: 'crawl4ai',
+    url: `${cfg.crawl4ai.baseUrl.replace(/\/+$/, '')}/health`,
+    tools: ['web_crawl'],
+  });
+}
 ```
 
 - [ ] **Step 3: Typecheck**
@@ -401,6 +401,7 @@ git commit -m "feat: gate web_crawl on CRAWL4AI_BASE_URL, add health probe"
 ## Task 5: Register `web_crawl` in `src/server.ts`
 
 **Files:**
+
 - Modify: `src/server.ts`
 
 - [ ] **Step 1: Add the import**
@@ -416,69 +417,69 @@ import { webCrawl } from './tools/webCrawl.js';
 After the `// ── news_search` block and before the `// ── health_check` block (around line 1093), add:
 
 ```typescript
-  // ── web_crawl ────────────────────────────────────────────────────────────
-  if (!gated.has('web_crawl'))
-    server.registerTool(
-      'web_crawl',
-      {
-        description:
-          'Crawl a URL using a headless Playwright browser (via a crawl4ai sidecar). ' +
-          'Unlike web_read, this handles JavaScript-rendered SPAs, React/Vue apps, consent popups, and shadow DOM. ' +
-          'Returns clean LLM-ready Markdown with title, description, and extracted links for each crawled page. ' +
-          'Supports deep crawling across multiple pages. Requires CRAWL4AI_BASE_URL env var (self-hosted Docker sidecar).',
-        inputSchema: {
-          url: z.url().describe('Seed URL to start crawling from'),
-          strategy: z
-            .enum(['bfs', 'dfs'])
-            .optional()
-            .default('bfs')
-            .describe(
-              'Crawl strategy: bfs (breadth-first, good for shallow wide coverage) | ' +
-                'dfs (depth-first, good for deeply nested docs)',
-            ),
-          maxDepth: z
-            .number()
-            .int()
-            .min(1)
-            .max(5)
-            .optional()
-            .default(1)
-            .describe(
-              'Maximum link depth to follow from seed URL (1–5, default 1 = single page only)',
-            ),
-          maxPages: z
-            .number()
-            .int()
-            .min(1)
-            .max(100)
-            .optional()
-            .default(1)
-            .describe('Maximum number of pages to crawl (1–100, default 1)'),
-          includeExternalLinks: z
-            .boolean()
-            .optional()
-            .default(false)
-            .describe('Follow links to external domains (default false — stays on seed domain)'),
-        },
+// ── web_crawl ────────────────────────────────────────────────────────────
+if (!gated.has('web_crawl'))
+  server.registerTool(
+    'web_crawl',
+    {
+      description:
+        'Crawl a URL using a headless Playwright browser (via a crawl4ai sidecar). ' +
+        'Unlike web_read, this handles JavaScript-rendered SPAs, React/Vue apps, consent popups, and shadow DOM. ' +
+        'Returns clean LLM-ready Markdown with title, description, and extracted links for each crawled page. ' +
+        'Supports deep crawling across multiple pages. Requires CRAWL4AI_BASE_URL env var (self-hosted Docker sidecar).',
+      inputSchema: {
+        url: z.url().describe('Seed URL to start crawling from'),
+        strategy: z
+          .enum(['bfs', 'dfs'])
+          .optional()
+          .default('bfs')
+          .describe(
+            'Crawl strategy: bfs (breadth-first, good for shallow wide coverage) | ' +
+              'dfs (depth-first, good for deeply nested docs)',
+          ),
+        maxDepth: z
+          .number()
+          .int()
+          .min(1)
+          .max(5)
+          .optional()
+          .default(1)
+          .describe(
+            'Maximum link depth to follow from seed URL (1–5, default 1 = single page only)',
+          ),
+        maxPages: z
+          .number()
+          .int()
+          .min(1)
+          .max(100)
+          .optional()
+          .default(1)
+          .describe('Maximum number of pages to crawl (1–100, default 1)'),
+        includeExternalLinks: z
+          .boolean()
+          .optional()
+          .default(false)
+          .describe('Follow links to external domains (default false — stays on seed domain)'),
       },
-      async ({ url, strategy, maxDepth, maxPages, includeExternalLinks }) => {
-        logger.info({ tool: 'web_crawl', url, strategy, maxDepth, maxPages }, 'Tool invoked');
-        const start = Date.now();
-        try {
-          const data = await webCrawl(url, cfg.crawl4ai.baseUrl, cfg.crawl4ai.apiToken, {
-            strategy,
-            maxDepth,
-            maxPages,
-            includeExternalLinks,
-          });
-          const result = makeResult('web_crawl', data, Date.now() - start);
-          return successResponse(result);
-        } catch (err: unknown) {
-          logger.error({ err, tool: 'web_crawl' }, 'Tool failed');
-          return errorResponse(err);
-        }
-      },
-    );
+    },
+    async ({ url, strategy, maxDepth, maxPages, includeExternalLinks }) => {
+      logger.info({ tool: 'web_crawl', url, strategy, maxDepth, maxPages }, 'Tool invoked');
+      const start = Date.now();
+      try {
+        const data = await webCrawl(url, cfg.crawl4ai.baseUrl, cfg.crawl4ai.apiToken, {
+          strategy,
+          maxDepth,
+          maxPages,
+          includeExternalLinks,
+        });
+        const result = makeResult('web_crawl', data, Date.now() - start);
+        return successResponse(result);
+      } catch (err: unknown) {
+        logger.error({ err, tool: 'web_crawl' }, 'Tool failed');
+        return errorResponse(err);
+      }
+    },
+  );
 ```
 
 - [ ] **Step 3: Typecheck**
@@ -533,6 +534,7 @@ import('./dist/health.js').then(({ configHealth }) => {
 ```
 
 Expected output:
+
 ```json
 {
   "status": "unconfigured",
@@ -618,6 +620,7 @@ The `extractMarkdown` helper in `webCrawl.ts` handles both `string` and `{ fit_m
 ## Self-Review
 
 **Spec coverage:**
+
 - ✅ Self-hosted HTTP API integration (Docker sidecar)
 - ✅ Env-var config pattern (CRAWL4AI_BASE_URL, CRAWL4AI_API_TOKEN)
 - ✅ Gated tool registration (not registered when unconfigured)
@@ -630,6 +633,7 @@ The `extractMarkdown` helper in `webCrawl.ts` handles both `string` and `{ fit_m
 - ✅ `retryWithBackoff` with 120s timeout for slow renders
 
 **Type consistency check:**
+
 - `webCrawl()` returns `Promise<WebCrawlResult>` — defined in Task 2, used in Task 3 and Task 5 ✅
 - `cfg.crawl4ai.baseUrl` and `cfg.crawl4ai.apiToken` — defined in Task 1, used in Task 5 ✅
 - `gated.has('web_crawl')` — gate key matches `GATED_TOOLS` entry in Task 4 ✅

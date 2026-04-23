@@ -74,20 +74,25 @@ export function assertSafeUrl(url: string): void {
   }
 }
 
-/** Maximum response body size in bytes (10 MB). */
-const MAX_RESPONSE_BYTES = 10 * 1024 * 1024;
+/** Maximum response body size in bytes (50 MB). */
+const MAX_RESPONSE_BYTES = 50 * 1024 * 1024;
 
 /**
  * Read the response body as text, enforcing a size limit.
- * Throws if the response exceeds MAX_RESPONSE_BYTES.
+ * Throws if the response exceeds the limit (default MAX_RESPONSE_BYTES).
  */
-export async function safeResponseText(response: Response, url: string): Promise<string> {
+export async function safeResponseText(
+  response: Response,
+  url: string,
+  maxBytes?: number,
+): Promise<string> {
+  const limit = maxBytes ?? MAX_RESPONSE_BYTES;
   const contentLength = response.headers.get('content-length');
   if (contentLength !== null) {
     const len = parseInt(contentLength, 10);
-    if (!isNaN(len) && len > MAX_RESPONSE_BYTES) {
+    if (!isNaN(len) && len > limit) {
       throw new Error(
-        `Response from "${url}" is too large (${String(len)} bytes, max ${String(MAX_RESPONSE_BYTES)})`,
+        `Response from "${url}" is too large (${String(len)} bytes, max ${String(limit)})`,
       );
     }
   }
@@ -106,13 +111,11 @@ export async function safeResponseText(response: Response, url: string): Promise
     const { done, value } = await reader.read();
     if (done) break;
     totalBytes += value.byteLength;
-    if (totalBytes > MAX_RESPONSE_BYTES) {
+    if (totalBytes > limit) {
       reader.cancel().catch(() => {
         /* discard */
       });
-      throw new Error(
-        `Response from "${url}" exceeded size limit (>${String(MAX_RESPONSE_BYTES)} bytes)`,
-      );
+      throw new Error(`Response from "${url}" exceeded size limit (>${String(limit)} bytes)`);
     }
     chunks.push(value);
   }
@@ -129,8 +132,12 @@ export async function safeResponseText(response: Response, url: string): Promise
 /**
  * Read the response body as JSON, enforcing a size limit.
  */
-export async function safeResponseJson(response: Response, url: string): Promise<unknown> {
-  const text = await safeResponseText(response, url);
+export async function safeResponseJson(
+  response: Response,
+  url: string,
+  maxBytes?: number,
+): Promise<unknown> {
+  const text = await safeResponseText(response, url, maxBytes);
   return JSON.parse(text) as unknown;
 }
 

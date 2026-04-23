@@ -15,7 +15,7 @@ export function isSitemapIndex(xml: string): boolean {
  * Uses regex extraction — the sitemap schema is unambiguous for <loc> tags.
  * Decodes XML entities (e.g. &amp; → &).
  */
-export async function parseSitemap(xml: string): Promise<string[]> {
+export function parseSitemap(xml: string): string[] {
   if (!xml || xml.trim().length === 0) return [];
 
   const urls: string[] = [];

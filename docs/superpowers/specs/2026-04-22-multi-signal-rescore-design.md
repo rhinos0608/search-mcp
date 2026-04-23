@@ -13,6 +13,7 @@ Wire a generic rescoring layer into every tool that produces ranked results. Ext
 `multiSignalRescore` does **one job only** — weighted sum + sort. Every signal arriving in `signals: Record<string, number>` is already unit-scaled (or otherwise appropriately scaled). Per-tool extractors own all transform decisions because they know the signal semantics.
 
 This means:
+
 - Extractors apply `log(1 + x)` to citations/engagement, then min-max normalize.
 - Extractors apply `exp(-age_days / half_life)` to recency.
 - Booleans pass through as `0` or `1` directly.
@@ -26,19 +27,19 @@ This means:
 
 Each signal is normalized by the extractor that produces it:
 
-| Signal | Distribution | Extractor Transform |
-|--------|-------------|---------------------|
-| `rrfScore` | Uniform-ish | Min-max across candidate set |
-| `recency` (age in days) | Exponential decay | `exp(-age_days / half_life)` |
-| `citationCount` | Heavy-tailed | `log(1 + x)` then min-max |
-| `engagement` (points, comments, score) | Heavy-tailed | `log(1 + max(0, x))` then min-max |
-| `venue` | Boolean | `0` or `1` (no transform) |
-| `hasDeepLinks` | Boolean | `0` or `1` (no transform) |
+| Signal                                 | Distribution      | Extractor Transform               |
+| -------------------------------------- | ----------------- | --------------------------------- |
+| `rrfScore`                             | Uniform-ish       | Min-max across candidate set      |
+| `recency` (age in days)                | Exponential decay | `exp(-age_days / half_life)`      |
+| `citationCount`                        | Heavy-tailed      | `log(1 + x)` then min-max         |
+| `engagement` (points, comments, score) | Heavy-tailed      | `log(1 + max(0, x))` then min-max |
+| `venue`                                | Boolean           | `0` or `1` (no transform)         |
+| `hasDeepLinks`                         | Boolean           | `0` or `1` (no transform)         |
 
 ### Min-max normalizer
 
 ```typescript
-function minMaxNormalize(values: number[]): number[]
+function minMaxNormalize(values: number[]): number[];
 ```
 
 - `[1, 2, 3]` → `[0, 0.5, 1.0]`
@@ -51,7 +52,7 @@ function minMaxNormalize(values: number[]): number[]
 ### Recency exponential decay
 
 ```typescript
-function applyRecencyDecay(ageDays: number, halfLifeDays: number): number
+function applyRecencyDecay(ageDays: number, halfLifeDays: number): number;
 ```
 
 ```
@@ -60,17 +61,17 @@ score = exp(-age_days / half_life)
 
 No further normalization — the decay curve is the normalization. Tunable half-life per tool:
 
-| Tool | Half-life | Rationale |
-|------|-----------|-----------|
-| Web search | 7 days | News, fast-moving content |
-| HN | 180 days | Long-tail relevance |
-| Reddit | 180 days | Long-tail relevance |
-| Academic | 3 years (1095 days) | Foundational papers beat recent ones |
+| Tool       | Half-life           | Rationale                            |
+| ---------- | ------------------- | ------------------------------------ |
+| Web search | 7 days              | News, fast-moving content            |
+| HN         | 180 days            | Long-tail relevance                  |
+| Reddit     | 180 days            | Long-tail relevance                  |
+| Academic   | 3 years (1095 days) | Foundational papers beat recent ones |
 
 ### Heavy-tailed signals
 
 ```typescript
-function applyLogTransform(value: number): number
+function applyLogTransform(value: number): number;
 ```
 
 ```
@@ -88,8 +89,8 @@ Then min-max normalize across the candidate set. `max(0, value)` guards against 
 ```typescript
 interface RrfResultWithSignals<T> {
   item: T;
-  rrfScore: number;      // raw RRF score (not yet normalized)
-  signals: Record<string, number>;  // fully normalized by extractor
+  rrfScore: number; // raw RRF score (not yet normalized)
+  signals: Record<string, number>; // fully normalized by extractor
 }
 ```
 
@@ -98,16 +99,16 @@ interface RrfResultWithSignals<T> {
 ```typescript
 function multiSignalRescore<T>(
   items: RrfResultWithSignals<T>[],
-  weights: Record<string, number>,  // rrfAnchor, recency, citations, engagement, venue, …
+  weights: Record<string, number>, // rrfAnchor, recency, citations, engagement, venue, …
   limit: number,
 ): Array<{
   item: T;
   combinedScore: number;
   breakdown: {
-    rrfAnchor: number;  // min-max normalized RRF contribution
-    signals: Record<string, number>;  // per-signal contribution
+    rrfAnchor: number; // min-max normalized RRF contribution
+    signals: Record<string, number>; // per-signal contribution
   };
-}>
+}>;
 ```
 
 Formula:
@@ -137,10 +138,10 @@ function rrfMerge<T>(
   rankings: T[][],
   opts?: {
     k?: number;
-    keyFn?: (item: T) => string;  // normalized dedup key (URL or hash)
-    getId?: (item: T) => string;  // canonical ID for cross-source boost
+    keyFn?: (item: T) => string; // normalized dedup key (URL or hash)
+    getId?: (item: T) => string; // canonical ID for cross-source boost
   },
-): Array<{ item: T; rrfScore: number }>
+): Array<{ item: T; rrfScore: number }>;
 ```
 
 - **`keyFn`**: Normalized dedup key for deduplication within a single list (unchanged).
@@ -153,10 +154,12 @@ function rrfMerge<T>(
 ### Academic dedup strategy
 
 Canonical ID for `getId`:
+
 1. DOI if present (case-folded, trimmed)
 2. Fallback: `normalizeTitle(paper.title) + "|" + firstAuthorName`
 
 `normalizeTitle`:
+
 - Unicode NFC normalization
 - Case-fold to lowercase
 - Strip LaTeX commands (`\textit{}`, `\mathbf{}`, etc.) — regex `\\[a-zA-Z]+\{([^}]*)\}` captures inner text
@@ -165,6 +168,7 @@ Canonical ID for `getId`:
 - Collapse whitespace
 
 Author normalization:
+
 - Extract first author from `authors[0]`
 - If format is `"J. A. Smith"` or `"Smith, J. A."`, normalize to `"smith"` (last name only, lowercase)
 - If single name (e.g., `"Smith"`), use as-is (lowercase)
@@ -191,8 +195,8 @@ This keeps the pipeline shape uniform: RRF always runs, `multiSignalRescore` alw
 
 ```typescript
 interface WebSearchSignals {
-  recency: number;   // exp(-age_days / 7), or 0 if age missing
-  hasDeepLinks: number;  // 0 or 1
+  recency: number; // exp(-age_days / 7), or 0 if age missing
+  hasDeepLinks: number; // 0 or 1
 }
 ```
 
@@ -203,9 +207,9 @@ interface WebSearchSignals {
 
 ```typescript
 interface AcademicSignals {
-  recency: number;   // exp(-age_days / 1095)
-  citations: number;  // log(1 + citationCount), min-max normalized
-  venue: number;     // 1 if venue non-null and non-empty, else 0
+  recency: number; // exp(-age_days / 1095)
+  citations: number; // log(1 + citationCount), min-max normalized
+  venue: number; // 1 if venue non-null and non-empty, else 0
 }
 ```
 
@@ -213,7 +217,7 @@ interface AcademicSignals {
 
 ```typescript
 interface HNSignals {
-  recency: number;   // exp(-age_days / 180)
+  recency: number; // exp(-age_days / 180)
   engagement: number; // log(1 + max(0, points)), min-max
   commentEngagement: number; // log(1 + max(0, numComments)), min-max
 }
@@ -227,7 +231,7 @@ interface HNSignals {
 
 ```typescript
 interface RedditSignals {
-  recency: number;   // exp(-age_days / 180)
+  recency: number; // exp(-age_days / 180)
   engagement: number; // log(1 + max(0, score)), min-max
   commentEngagement: number; // log(1 + max(0, numComments)), min-max
 }
@@ -247,10 +251,11 @@ Before RRF merge, cap each input ranking to the same `N`. Use `N = limit * 2` (s
 
 ```typescript
 // src/utils/time.ts
-function parseAgeToDays(ageStr: string | null): number | null
+function parseAgeToDays(ageStr: string | null): number | null;
 ```
 
 Handles Brave's mixed `age` field:
+
 - `"1 hour ago"` → `1/24`
 - `"2 days ago"` → `2`
 - `"1 week ago"` → `7`
@@ -280,11 +285,19 @@ export function multiSignalRescore<T>(
   items: Array<{ item: T; rrfScore: number; signals: Record<string, number> }>,
   weights: Record<string, number>,
   limit: number,
-): Array<{ item: T; combinedScore: number; breakdown: { rrfAnchor: number; signals: Record<string, number> } }>;
+): Array<{
+  item: T;
+  combinedScore: number;
+  breakdown: { rrfAnchor: number; signals: Record<string, number> };
+}>;
 
 // Per-tool signal extractors
-export function extractWebSearchSignals(results: SearchResult[]): Array<{ rrfScore: number; signals: Record<string, number> }>;
-export function extractAcademicSignals(papers: AcademicPaper[]): Array<{ rrfScore: number; signals: Record<string, number> }>;
+export function extractWebSearchSignals(
+  results: SearchResult[],
+): Array<{ rrfScore: number; signals: Record<string, number> }>;
+export function extractAcademicSignals(
+  papers: AcademicPaper[],
+): Array<{ rrfScore: number; signals: Record<string, number> }>;
 // ... etc
 ```
 
@@ -344,10 +357,10 @@ Default weights per tool (weights don't need to sum to 1.0; they are relative im
 
 ```typescript
 const DEFAULT_RESCORE_WEIGHTS = {
-  webSearch:        { rrfAnchor: 0.50, recency: 0.20, hasDeepLinks: 0.05 },
-  academicSearch:   { rrfAnchor: 0.50, recency: 0.05, citations: 0.30, venue: 0.15 },
-  hackernewsSearch: { rrfAnchor: 0.50, recency: 0.15, engagement: 0.20, commentEngagement: 0.15 },
-  redditSearch:     { rrfAnchor: 0.50, recency: 0.10, engagement: 0.25, commentEngagement: 0.15 },
+  webSearch: { rrfAnchor: 0.5, recency: 0.2, hasDeepLinks: 0.05 },
+  academicSearch: { rrfAnchor: 0.5, recency: 0.05, citations: 0.3, venue: 0.15 },
+  hackernewsSearch: { rrfAnchor: 0.5, recency: 0.15, engagement: 0.2, commentEngagement: 0.15 },
+  redditSearch: { rrfAnchor: 0.5, recency: 0.1, engagement: 0.25, commentEngagement: 0.15 },
 };
 ```
 
@@ -355,19 +368,19 @@ const DEFAULT_RESCORE_WEIGHTS = {
 
 ## Files
 
-| File | Change |
-|------|--------|
-| `src/utils/rescore.ts` | **New.** Transform functions, normalizers, `multiSignalRescore`, per-tool extractors |
-| `src/utils/time.ts` | **New.** `parseAgeToDays`, `daysSince` |
-| `src/utils/fusion.ts` | Add `getId` parameter to `rrfMerge`; merge-collision metadata policy |
-| `src/tools/webSearch.ts` | Wire `multiSignalRescore` after RRF |
-| `src/tools/academicSearch.ts` | Parallel ArXiv+SS → RRF with `getId` → rescoring |
-| `src/tools/hackernewsSearch.ts` | RRF (single source) → sort-mode-aware signals → rescoring |
-| `src/tools/redditSearch.ts` | Same as HN |
-| `src/config.ts` | Add `RescoreConfig` with per-tool weights |
-| `test/rescore.test.ts` | Unit tests for `multiSignalRescore`, transforms, and extractors |
-| `test/time.test.ts` | Unit tests for `parseAgeToDays` |
-| `test/rescore.eval.ts` | **Roadmap.** Eval harness with judgment set |
+| File                            | Change                                                                               |
+| ------------------------------- | ------------------------------------------------------------------------------------ |
+| `src/utils/rescore.ts`          | **New.** Transform functions, normalizers, `multiSignalRescore`, per-tool extractors |
+| `src/utils/time.ts`             | **New.** `parseAgeToDays`, `daysSince`                                               |
+| `src/utils/fusion.ts`           | Add `getId` parameter to `rrfMerge`; merge-collision metadata policy                 |
+| `src/tools/webSearch.ts`        | Wire `multiSignalRescore` after RRF                                                  |
+| `src/tools/academicSearch.ts`   | Parallel ArXiv+SS → RRF with `getId` → rescoring                                     |
+| `src/tools/hackernewsSearch.ts` | RRF (single source) → sort-mode-aware signals → rescoring                            |
+| `src/tools/redditSearch.ts`     | Same as HN                                                                           |
+| `src/config.ts`                 | Add `RescoreConfig` with per-tool weights                                            |
+| `test/rescore.test.ts`          | Unit tests for `multiSignalRescore`, transforms, and extractors                      |
+| `test/time.test.ts`             | Unit tests for `parseAgeToDays`                                                      |
+| `test/rescore.eval.ts`          | **Roadmap.** Eval harness with judgment set                                          |
 
 ---
 
@@ -376,6 +389,7 @@ const DEFAULT_RESCORE_WEIGHTS = {
 ### `test/rescore.test.ts`
 
 **Transform functions:**
+
 1. `applyRecencyDecay`: 0 days → `1.0`; half_life → `≈0.5`; 3×half_life → `≈0.125`
 2. `applyLogTransform`: `0` → `0`; `100` → `≈4.6`; `10000` → `≈9.2` (saturates)
 3. `applyLogTransform` with negative input: `-5` → `0` (clipped by `max(0, x)`)
@@ -384,31 +398,13 @@ const DEFAULT_RESCORE_WEIGHTS = {
 6. `minMaxNormalize` single element: `[7]` → `[0]`
 7. `minMaxNormalize` empty: `[]` → `[]`
 
-**Rescorer:**
-8. `multiSignalRescore` with homogeneous signals → rank order unchanged (weights equal)
-9. `multiSignalRescore` with recency bias → newer items bubble up
-10. `multiSignalRescore` with citation bias → higher-cited items rank first
-11. `multiSignalRescore` with `weights.rrfAnchor: 1, others: 0` → pure RRF (regression test)
-12. `multiSignalRescore` with limit < results → truncates correctly
-13. `multiSignalRescore` with single item → returns that item, score = `weights.rrfAnchor * 0`
-14. `multiSignalRescore` with all signals identical → stable sort preserves original order
-15. `multiSignalRescore` with NaN in one signal → NaN propagates (documented behavior)
+**Rescorer:** 8. `multiSignalRescore` with homogeneous signals → rank order unchanged (weights equal) 9. `multiSignalRescore` with recency bias → newer items bubble up 10. `multiSignalRescore` with citation bias → higher-cited items rank first 11. `multiSignalRescore` with `weights.rrfAnchor: 1, others: 0` → pure RRF (regression test) 12. `multiSignalRescore` with limit < results → truncates correctly 13. `multiSignalRescore` with single item → returns that item, score = `weights.rrfAnchor * 0` 14. `multiSignalRescore` with all signals identical → stable sort preserves original order 15. `multiSignalRescore` with NaN in one signal → NaN propagates (documented behavior)
 
-**Guardrail:**
-16. Guardrail fires when `rrfAnchor < max(other weight)` → logs warning
-17. Guardrail silent when `rrfAnchor >= max(other weight)` → no log
+**Guardrail:** 16. Guardrail fires when `rrfAnchor < max(other weight)` → logs warning 17. Guardrail silent when `rrfAnchor >= max(other weight)` → no log
 
-**Extractors:**
-18. `extractWebSearchSignals`: recency from age, hasDeepLinks boolean
-19. `extractAcademicSignals`: citations log+minmax, venue boolean, recency decay
-20. `extractHNSignals` relevance mode: all signals present
-21. `extractHNSignals` date mode: recency omitted
-22. `extractRedditSignals` top mode: engagement omitted
+**Extractors:** 18. `extractWebSearchSignals`: recency from age, hasDeepLinks boolean 19. `extractAcademicSignals`: citations log+minmax, venue boolean, recency decay 20. `extractHNSignals` relevance mode: all signals present 21. `extractHNSignals` date mode: recency omitted 22. `extractRedditSignals` top mode: engagement omitted
 
-**Fusion:**
-23. `rrfMerge` with `getId`: same ID in two rankings → single boosted entry, score = sum of both RRF contributions
-24. `rrfMerge` with `getId`: no match → no cross-source accumulation
-25. `rrfMerge` with `getId` collision: metadata from last ranking wins
+**Fusion:** 23. `rrfMerge` with `getId`: same ID in two rankings → single boosted entry, score = sum of both RRF contributions 24. `rrfMerge` with `getId`: no match → no cross-source accumulation 25. `rrfMerge` with `getId` collision: metadata from last ranking wins
 
 ### `test/time.test.ts`
 

@@ -1,6 +1,8 @@
 # semantic_crawl Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **Status:** COMPLETED (2026-04-23)
+> **Actual execution:** Subagent-driven development with two-stage review per task.
+> **Final result:** 278 tests passing, 0 failures. 11 files changed, ~1300 insertions.
 
 **Goal:** Add a `semantic_crawl` MCP tool that crawls a website, chunks content with markdown awareness, embeds via a Python sidecar using EmbeddingGemma-300M, and returns top-K semantically relevant passages ranked by cosine similarity.
 
@@ -12,25 +14,65 @@
 
 ## File Structure
 
-| File | Responsibility |
-|---|---|
-| `src/chunking.ts` | Markdown-aware chunking: heading detection, atomic units (code/tables), merge-forward, size-based split with sentence-snapped overlap |
-| `src/tools/semanticCrawl.ts` | Orchestrator: calls `webCrawl`, chunks pages, calls embedding sidecar, ranks, returns topK |
-| `src/types.ts` | Add `SemanticCrawlResult`, `SemanticCrawlChunk`, `MarkdownChunk` interfaces |
-| `src/config.ts` | Add `EmbeddingSidecarConfig` to `SearchConfig`, load `EMBEDDING_SIDECAR_BASE_URL` / `EMBEDDING_SIDECAR_API_TOKEN` / `EMBEDDING_DIMENSIONS` |
-| `src/health.ts` | Gate `semantic_crawl`, add sidecar health probe |
-| `src/server.ts` | Register `semantic_crawl` tool with Zod schema |
-| `test/chunking.test.ts` | Unit tests for chunking strategy |
-| `test/semanticCrawl.test.ts` | Integration tests for sidecar contract and orchestrator |
+| File                                                     | Responsibility                                                                                                                             |
+| -------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| `src/chunking.ts`                                        | Markdown-aware chunking: heading detection, atomic units (code/tables), merge-forward, size-based split with sentence-snapped overlap      |
+| `src/tools/semanticCrawl.ts`                             | Orchestrator: calls `webCrawl`, chunks pages, calls embedding sidecar (batched + deduped), ranks, returns topK                             |
+| `src/types.ts`                                           | Add `SemanticCrawlResult`, `SemanticCrawlChunk`, `MarkdownChunk` interfaces                                                                |
+| `src/config.ts`                                          | Add `EmbeddingSidecarConfig` to `SearchConfig`, load `EMBEDDING_SIDECAR_BASE_URL` / `EMBEDDING_SIDECAR_API_TOKEN` / `EMBEDDING_DIMENSIONS` |
+| `src/health.ts`                                          | Gate `semantic_crawl`, add sidecar health probe                                                                                            |
+| `src/server.ts`                                          | Register `semantic_crawl` tool with Zod schema                                                                                             |
+| `test/chunking.test.ts`                                  | Unit tests for chunking strategy (18 tests)                                                                                                |
+| `test/semanticCrawl.test.ts`                             | Integration tests for sidecar contract and orchestrator                                                                                    |
+| `docs/superpowers/specs/2026-04-23-embedding-sidecar.md` | Sidecar design spec                                                                                                                        |
+| `sidecar/embedding/main.py`                              | Python FastAPI sidecar implementation                                                                                                      |
+| `sidecar/embedding/requirements.txt`                     | Python dependencies                                                                                                                        |
+| `sidecar/embedding/Dockerfile`                           | Docker build                                                                                                                               |
+| `sidecar/embedding/README.md`                            | Operator setup guide                                                                                                                       |
+
+---
+
+## What Changed From Original Plan
+
+During implementation and review, several bugs were found and fixed. The plan below documents the **actual** code as committed, not the original intent.
+
+### Bug Fixes Applied During Review
+
+1. **Sentence snapping was backwards** — `snapToSentenceBoundary` searched forward from `rawStart`, which found the first sentence boundary in the overlap window, producing tiny overlaps. Fixed to search **backward** from `splitPos` to find the boundary giving overlap closest to the target 20%.
+
+2. **`unitIdx` was `const`** — `findSplitPosition` takes a `unitIdx` parameter to avoid re-scanning atomic units from the start of the content on every chunk. The original code declared `const unitIdx = 0` in `splitGroup`, which meant it was re-scanned from zero for every sub-chunk (quadratic). Fixed by changing to `let unitIdx` and returning the updated index from `findSplitPosition`.
+
+3. **`charOffset` was relative to group, not page** — `splitGroup` calculated `charOffset = rawContent.indexOf(sc)`, which finds the first occurrence. With overlap, the same text appears twice — both chunks reported the first chunk's offset. Fixed by tracking a `runningOffset` across groups in `chunkMarkdown` and passing it as `baseOffset` to `splitGroup`.
+
+4. **503 Retry-After not implemented** — The sidecar returns 503 while the model loads. The original plan had a placeholder that threw an error instead of retrying. Fixed by parsing `Retry-After`, sleeping up to 30s, and retrying once with bare `fetch`.
+
+5. **Merge-forward test was trivially passing** — `assert.ok(chunks.length < 2 || chunks.some(...))` passes if chunking produces 0 or 1 chunks for any reason. Fixed to `chunks.length === 1`.
+
+6. **Embedding had no batching** — All chunks were sent in a single POST. At 100 pages that's potentially 2000+ texts. Fixed by adding `MAX_EMBEDDING_BATCH = 512` and `embedTextsBatched()`.
+
+7. **No deduplication** — Identical boilerplate navigation/footer chunks across pages would dominate topK. Fixed by adding `deduplicateChunks()` before embedding.
+
+8. **No title metadata passed to sidecar** — The design spec requires `title: {title} | text: {content}` prefixing for document mode. Fixed by adding optional `titles` array to `EmbedRequest` and extracting the last heading from each chunk's section chain.
+
+9. **H4+ created split boundaries** — `parseSections` created a new section for any heading depth >= 2. Fixed to only create boundaries for depth <= 3, treating H4+ as content.
+
+10. **`totalChunks` was global** — All chunks across a page shared the same `totalChunks = allChunks.length`. Fixed to annotate per-section in `splitGroup`.
+
+11. **Content before first heading was dropped** — `parseSections` only pushed content when a heading was seen. Fixed by creating a synthetic depth-2 section for leading content.
+
+12. **Headings inside code fences treated as boundaries** — `HEADING_RE.exec(line)` matched `#` inside code fences. Fixed by tracking `inCodeFence` state in `parseSections`.
+
+13. **Multiple H1s lost** — Subsequent H1s were silently skipped. Fixed by appending them as regular content lines.
 
 ---
 
 ## Task 1: Add Types
 
 **Files:**
+
 - Modify: `src/types.ts`
 
-- [ ] **Step 1: Add new interfaces**
+- [x] **Step 1: Add new interfaces**
 
 Append to `src/types.ts` after `WebCrawlResult`:
 
@@ -41,7 +83,9 @@ export interface SemanticCrawlChunk {
   text: string;
   url: string;
   section: string;
+  /** Cosine similarity score (0–1, higher = more relevant). */
   score: number;
+  /** 0-based character offset in the source page text. */
   charOffset: number;
   chunkIndex: number;
   totalChunks: number;
@@ -50,6 +94,7 @@ export interface SemanticCrawlChunk {
 export interface SemanticCrawlResult {
   seedUrl: string;
   query: string;
+  /** Total pages attempted in the crawl (includes failed pages). */
   pagesCrawled: number;
   totalChunks: number;
   successfulPages: number;
@@ -57,7 +102,7 @@ export interface SemanticCrawlResult {
 }
 ```
 
-- [ ] **Step 2: Commit**
+- [x] **Step 2: Commit**
 
 ```bash
 git add src/types.ts
@@ -69,9 +114,10 @@ git commit -m "types: add SemanticCrawlResult and SemanticCrawlChunk interfaces"
 ## Task 2: Add Config
 
 **Files:**
+
 - Modify: `src/config.ts`
 
-- [ ] **Step 1: Add EmbeddingSidecarConfig interface**
+- [x] **Step 1: Add EmbeddingSidecarConfig interface**
 
 Add to `src/config.ts` after `Crawl4aiConfig`:
 
@@ -83,11 +129,11 @@ export interface EmbeddingSidecarConfig {
 }
 ```
 
-- [ ] **Step 2: Add to SearchConfig interface**
+- [x] **Step 2: Add to SearchConfig interface**
 
 Add `embeddingSidecar: EmbeddingSidecarConfig;` to the `SearchConfig` interface.
 
-- [ ] **Step 3: Add env loading**
+- [x] **Step 3: Add env loading**
 
 In `loadFromEnv()`, add:
 
@@ -95,7 +141,11 @@ In `loadFromEnv()`, add:
 const embeddingSidecarUrl = process.env.EMBEDDING_SIDECAR_BASE_URL;
 const embeddingSidecarToken = process.env.EMBEDDING_SIDECAR_API_TOKEN;
 const embeddingDimensions = process.env.EMBEDDING_DIMENSIONS;
-if (embeddingSidecarUrl !== undefined || embeddingSidecarToken !== undefined || embeddingDimensions !== undefined) {
+if (
+  embeddingSidecarUrl !== undefined ||
+  embeddingSidecarToken !== undefined ||
+  embeddingDimensions !== undefined
+) {
   const esc: Partial<EmbeddingSidecarConfig> = {};
   if (embeddingSidecarUrl !== undefined) esc.baseUrl = embeddingSidecarUrl;
   if (embeddingSidecarToken !== undefined) esc.apiToken = embeddingSidecarToken;
@@ -109,7 +159,7 @@ if (embeddingSidecarUrl !== undefined || embeddingSidecarToken !== undefined || 
 }
 ```
 
-- [ ] **Step 4: Add defaults in loadConfig**
+- [x] **Step 4: Add defaults in loadConfig**
 
 In `loadConfig()`, add:
 
@@ -127,7 +177,7 @@ And update `DEFAULTS`:
 embeddingSidecar: { baseUrl: '', apiToken: '', dimensions: 256 },
 ```
 
-- [ ] **Step 5: Run typecheck**
+- [x] **Step 5: Run typecheck**
 
 ```bash
 npm run typecheck
@@ -135,7 +185,7 @@ npm run typecheck
 
 Expected: no errors.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add src/config.ts
@@ -147,404 +197,50 @@ git commit -m "config: add EMBEDDING_SIDECAR_BASE_URL and related env vars"
 ## Task 3: Implement Markdown Chunking (TDD)
 
 **Files:**
+
 - Create: `src/chunking.ts`
 - Create: `test/chunking.test.ts`
 
-- [ ] **Step 1: Write the failing test for basic heading split**
+- [x] **Step 1–9: Chunking implementation**
 
-Create `test/chunking.test.ts`:
+The final `src/chunking.ts` contains:
 
-```typescript
-import { describe, it } from 'node:test';
-import assert from 'node:assert';
-import { chunkMarkdown } from '../src/chunking.js';
+- `MarkdownChunk` interface with `content`, `section`, `url`, `pageTitle`, `chunkIndex`, `totalChunks`, `tokenEstimate`, `charOffset`
+- `HEADING_RE = /^(#{1,6})\s+(.*)$/` — requires a space after `#`
+- `parseSections()` with `inCodeFence` state tracking, H1 capture as `pageTitle`, H2/H3 as split boundaries, H4+ as content, synthetic depth-2 section for leading content
+- `buildChain()` with stack-based ancestor heading tracking (pops when depth decreases)
+- `mergeShortSections()` with forward merge (into next sibling) and backward merge (into previous sibling for trailing short sections)
+- `splitGroup()` with atomic unit extraction, `baseOffset` parameter for page-relative `charOffset`, overlap with sentence-snapped boundary
+- `findSplitPosition()` returning `{ pos, unitIdx }` to avoid quadratic re-scanning
+- `postProcessChunks()` as safety net for remaining sub-floor chunks
+- Constants: `MAX_TOKENS = 400`, `MIN_TOKENS = 50`, `TOKEN_RATIO = 4`, `OVERLAP_RATIO = 0.2`
 
-describe('chunkMarkdown', () => {
-  it('splits on H2 and H3 boundaries', () => {
-    const md = `# Title\n\n## Section A\n\nContent A.\n\n### Sub B\n\nContent B.`;
-    const chunks = chunkMarkdown(md, 'https://example.com');
-    assert.strictEqual(chunks.length, 2);
-    assert.strictEqual(chunks[0].content.trim(), 'Content A.');
-    assert.strictEqual(chunks[0].section, '# Title > ## Section A');
-    assert.strictEqual(chunks[1].content.trim(), 'Content B.');
-    assert.strictEqual(chunks[1].section, '# Title > ## Section A > ### Sub B');
-  });
-});
-```
+Key implementation detail: `snapToSentenceBoundary` searches backward from `splitPos` for the sentence boundary that gives overlap closest to the target 20%, rather than forward from `rawStart`.
 
-- [ ] **Step 2: Run test to verify it fails**
-
-```bash
-npm test -- test/chunking.test.ts
-```
-
-Expected: FAIL — `chunkMarkdown` not defined.
-
-- [ ] **Step 3: Implement minimal chunking**
-
-Create `src/chunking.ts` with heading detection and basic split:
+- [x] **Tests (18 total)**
 
 ```typescript
-export interface MarkdownChunk {
-  content: string;
-  section: string;
-  url: string;
-  pageTitle: string | null;
-  chunkIndex: number;
-  totalChunks: number;
-  tokenEstimate: number;
-  charOffset: number;
-}
-
-const HEADING_RE = /^(#{1,6})\s+(.*)$/;
-
-export function chunkMarkdown(markdown: string, url: string): MarkdownChunk[] {
-  const lines = markdown.split('\n');
-  const sections: { depth: number; heading: string; content: string[] }[] = [];
-  let pageTitle: string | null = null;
-  let currentSection: { depth: number; heading: string; content: string[] } | null = null;
-  let currentDepth = 0;
-
-  for (const line of lines) {
-    const match = HEADING_RE.exec(line);
-    if (match) {
-      const depth = match[1].length;
-      const heading = match[2].trim();
-      if (depth === 1) {
-        pageTitle = heading;
-        continue;
-      }
-      if (currentSection) {
-        sections.push(currentSection);
-      }
-      currentSection = { depth, heading, content: [] };
-      currentDepth = depth;
-    } else if (currentSection) {
-      currentSection.content.push(line);
-    }
-  }
-  if (currentSection) {
-    sections.push(currentSection);
-  }
-
-  const chunks: MarkdownChunk[] = [];
-  for (let i = 0; i < sections.length; i++) {
-    const s = sections[i];
-    const sectionChain = buildSectionChain(pageTitle, sections, i);
-    const content = s.content.join('\n').trim();
-    chunks.push({
-      content,
-      section: sectionChain,
-      url,
-      pageTitle,
-      chunkIndex: 0,
-      totalChunks: 1,
-      tokenEstimate: Math.ceil(content.length / 4),
-      charOffset: 0,
-    });
-  }
-
-  return chunks;
-}
-
-function buildSectionChain(
-  pageTitle: string | null,
-  sections: { depth: number; heading: string; content: string[] }[],
-  index: number,
-): string {
-  const parts: string[] = [];
-  if (pageTitle) parts.push(`# ${pageTitle}`);
-  const target = sections[index];
-  for (let i = 0; i <= index; i++) {
-    const s = sections[i];
-    if (s.depth <= target.depth) {
-      while (parts.length > 1 && sections[parts.length - 2]?.depth >= s.depth) {
-        // This logic needs refinement — use a stack-based approach instead
-      }
-    }
-  }
-  return parts.join(' > ');
-}
+- splits on H2 and H3 boundaries
+- keeps code fences atomic
+- merges short sections forward (asserts chunks.length === 1)
+- splits oversized sections at boundaries
+- preserves H1 as pageTitle on every chunk
+- tracks ancestor headings across depth changes
+- snaps overlap to last sentence boundary in window
+- annotates totalChunks per section
+- does not treat # lines inside code fences as headings
+- does not split on H4+ headings
+- preserves content before the first heading
+- merges last short section backward
+- keeps markdown tables atomic
+- handles empty input
+- handles input with no headings
+- keeps oversized atomic units whole
+- handles multiple H1s
+- has monotonically increasing charOffsets
 ```
 
-*Note: The initial `buildSectionChain` implementation above is intentionally simple. The full correct implementation uses a heading stack — see Step 7 for the refined version.*
-
-- [ ] **Step 4: Run test**
-
-```bash
-npm test -- test/chunking.test.ts
-```
-
-Expected: PASS.
-
-- [ ] **Step 5: Add tests for atomic units and merge-forward**
-
-Expand `test/chunking.test.ts`:
-
-```typescript
-it('keeps code fences atomic', () => {
-  const md = `# Title\n\n## Section\n\nText before.\n\n\`\`\`python\ndef foo():\n    pass\n\`\`\`\n\nText after.`;
-  const chunks = chunkMarkdown(md, 'https://example.com');
-  const codeChunk = chunks.find((c) => c.content.includes('def foo():'));
-  assert.ok(codeChunk);
-  assert.ok(codeChunk!.content.includes('\`\`\`'));
-});
-
-it('merges short sections forward', () => {
-  const md = `# Title\n\n## A\n\nShort.\n\n## B\n\nThis is a much longer section with enough content to clear the fifty token floor easily.`;
-  const chunks = chunkMarkdown(md, 'https://example.com');
-  assert.ok(chunks.length < 2 || chunks.some((c) => c.content.includes('Short.') && c.content.includes('much longer')));
-});
-
-it('splits oversized sections at sentence boundaries', () => {
-  const md = `# Title\n\n## Big\n\n${'Word '.repeat(500)}`;
-  const chunks = chunkMarkdown(md, 'https://example.com');
-  assert.ok(chunks.length > 1);
-  assert.ok(chunks.every((c) => c.content.length > 0));
-});
-
-it('preserves H1 as pageTitle on every chunk', () => {
-  const md = `# My Page\n\n## One\n\nContent.`;
-  const chunks = chunkMarkdown(md, 'https://example.com');
-  assert.strictEqual(chunks[0].pageTitle, 'My Page');
-});
-```
-
-- [ ] **Step 6: Run tests — expect some failures**
-
-```bash
-npm test -- test/chunking.test.ts
-```
-
-Expected: some FAILs (atomic units, merge-forward, size split not yet implemented).
-
-- [ ] **Step 7: Implement full chunking logic**
-
-Rewrite `src/chunking.ts` with the complete strategy:
-
-```typescript
-const HEADING_RE = /^(#{1,6})\s+(.*)$/;
-const MAX_TOKENS = 400;
-const MIN_TOKENS = 50;
-const TOKEN_RATIO = 4;
-const OVERLAP_RATIO = 0.2;
-
-interface Section {
-  depth: number;
-  heading: string;
-  contentLines: string[];
-}
-
-export interface MarkdownChunk {
-  content: string;
-  section: string;
-  url: string;
-  pageTitle: string | null;
-  chunkIndex: number;
-  totalChunks: number;
-  tokenEstimate: number;
-  charOffset: number;
-}
-
-export function chunkMarkdown(markdown: string, url: string): MarkdownChunk[] {
-  const lines = markdown.split('\n');
-  const sections = parseSections(lines);
-  const pageTitle = sections.find((s) => s.depth === 1)?.heading ?? null;
-
-  // Merge forward short sections
-  const merged = mergeShortSections(sections);
-
-  const chunks: MarkdownChunk[] = [];
-  for (const section of merged) {
-    const rawContent = section.contentLines.join('\n').trim();
-    if (rawContent.length === 0) continue;
-
-    const sectionChain = buildChain(pageTitle, section);
-    const subChunks = splitContent(rawContent, section.heading);
-
-    for (let i = 0; i < subChunks.length; i++) {
-      const sc = subChunks[i];
-      chunks.push({
-        content: sc,
-        section: sectionChain,
-        url,
-        pageTitle,
-        chunkIndex: i,
-        totalChunks: subChunks.length,
-        tokenEstimate: Math.ceil(sc.length / TOKEN_RATIO),
-        charOffset: rawContent.indexOf(sc),
-      });
-    }
-  }
-
-  return chunks;
-}
-
-function parseSections(lines: string[]): Section[] {
-  const sections: Section[] = [];
-  let current: Section | null = null;
-
-  for (const line of lines) {
-    const m = HEADING_RE.exec(line);
-    if (m) {
-      const depth = m[1].length;
-      const heading = m[2].trim();
-      if (current) sections.push(current);
-      current = { depth, heading, contentLines: [] };
-    } else if (current) {
-      current.contentLines.push(line);
-    }
-  }
-  if (current) sections.push(current);
-  return sections;
-}
-
-function mergeShortSections(sections: Section[]): Section[] {
-  const merged: Section[] = [];
-  let buffer: Section | null = null;
-
-  for (const s of sections) {
-    if (s.depth === 1) { merged.push(s); continue; }
-    const tokens = estimateTokens(s.contentLines.join('\n'));
-    if (tokens < MIN_TOKENS) {
-      if (buffer) {
-        buffer.contentLines.push('', `## ${s.heading}`, ...s.contentLines);
-      } else {
-        buffer = { depth: s.depth, heading: s.heading, contentLines: [...s.contentLines] };
-      }
-    } else {
-      if (buffer) {
-        buffer.contentLines.push('', `## ${s.heading}`, ...s.contentLines);
-        merged.push(buffer);
-        buffer = null;
-      } else {
-        merged.push(s);
-      }
-    }
-  }
-
-  if (buffer) {
-    // merge backward into previous non-H1 section
-    const last = merged[merged.length - 1];
-    if (last && last.depth !== 1) {
-      last.contentLines.push('', `## ${buffer.heading}`, ...buffer.contentLines);
-    } else {
-      merged.push(buffer);
-    }
-  }
-
-  return merged;
-}
-
-function estimateTokens(text: string): number {
-  return Math.ceil(text.length / TOKEN_RATIO);
-}
-
-function buildChain(pageTitle: string | null, section: Section): string {
-  const parts: string[] = [];
-  if (pageTitle) parts.push(`# ${pageTitle}`);
-  parts.push(`${'#'.repeat(section.depth)} ${section.heading}`);
-  return parts.join(' > ');
-}
-
-function splitContent(content: string, heading: string): string[] {
-  const tokens = estimateTokens(content);
-  if (tokens <= MAX_TOKENS) return [content];
-
-  // Detect atomic units
-  const units = extractAtomicUnits(content);
-  const chunks: string[] = [];
-  let current = '';
-
-  for (const unit of units) {
-    const unitTokens = estimateTokens(unit);
-    if (unitTokens > MAX_TOKENS && isAtomic(unit)) {
-      if (current.length > 0) chunks.push(current.trim());
-      chunks.push(unit.trim());
-      current = '';
-      continue;
-    }
-    const combined = current + (current.length > 0 ? '\n' : '') + unit;
-    if (estimateTokens(combined) > MAX_TOKENS && current.length > 0) {
-      chunks.push(current.trim());
-      current = unit;
-    } else {
-      current = combined;
-    }
-  }
-  if (current.length > 0) chunks.push(current.trim());
-
-  return addOverlap(chunks);
-}
-
-function extractAtomicUnits(content: string): string[] {
-  const units: string[] = [];
-  const lines = content.split('\n');
-  let i = 0;
-  while (i < lines.length) {
-    const line = lines[i];
-    if (line.startsWith('```')) {
-      const fence = line.slice(0, 3);
-      let block = line + '\n';
-      i++;
-      while (i < lines.length && !lines[i].startsWith(fence)) {
-        block += lines[i] + '\n';
-        i++;
-      }
-      if (i < lines.length) block += lines[i];
-      units.push(block);
-      i++;
-    } else if (line.startsWith('|')) {
-      let table = line + '\n';
-      i++;
-      while (i < lines.length && lines[i].startsWith('|')) {
-        table += lines[i] + '\n';
-        i++;
-      }
-      units.push(table);
-    } else {
-      units.push(line);
-      i++;
-    }
-  }
-  return units;
-}
-
-function isAtomic(unit: string): boolean {
-  return unit.startsWith('```') || unit.startsWith('|');
-}
-
-function addOverlap(chunks: string[]): string[] {
-  if (chunks.length <= 1) return chunks;
-  const result: string[] = [];
-  for (let i = 0; i < chunks.length; i++) {
-    let text = chunks[i];
-    if (i > 0) {
-      const prev = chunks[i - 1];
-      const overlapLen = Math.floor(prev.length * OVERLAP_RATIO);
-      let overlap = prev.slice(-overlapLen);
-      // Snap to sentence boundary
-      const sentenceStart = overlap.search(/[.!?]\s+/);
-      if (sentenceStart !== -1) {
-        overlap = overlap.slice(sentenceStart + 2);
-      }
-      text = overlap.trim() + '\n' + text;
-    }
-    result.push(text.trim());
-  }
-  return result;
-}
-```
-
-- [ ] **Step 8: Run all chunking tests**
-
-```bash
-npm test -- test/chunking.test.ts
-```
-
-Expected: PASS.
-
-- [ ] **Step 9: Commit**
+- [x] **Commit**
 
 ```bash
 git add src/chunking.ts test/chunking.test.ts
@@ -556,164 +252,80 @@ git commit -m "feat: add markdown-aware chunking with heading split, atomic unit
 ## Task 4: Implement Embedding Sidecar Client
 
 **Files:**
+
 - Create: `src/tools/semanticCrawl.ts` (sidecar client portion)
 - Create: `test/semanticCrawl.test.ts`
 
-- [ ] **Step 1: Write failing test for embed batch**
+- [x] **Step 1–6: Sidecar client implementation**
 
-Create `test/semanticCrawl.test.ts`:
+The final `embedTexts` function in `src/tools/semanticCrawl.ts`:
 
-```typescript
-import { describe, it } from 'node:test';
-import assert from 'node:assert';
-import { embedTexts } from '../src/tools/semanticCrawl.js';
+- Validates `baseUrl` with `unavailableError`
+- Uses `assertSafeUrl` and `safeResponseJson` from `httpGuards.ts`
+- `retryWithBackoff` with `maxAttempts: 2`, `initialDelayMs: 500`
+- `AbortSignal.timeout(60_000)`
+- 503 handling: reads `Retry-After` header, waits up to 30s, retries once with bare `fetch`
+- `unavailableError` for empty baseUrl, `networkError` for HTTP errors/timeout, `parseError` for bad response shape
+- Warning log for `truncatedIndices`
+- **New:** Optional `titles?: string[]` parameter passed in request body for document-mode prefixing
 
-describe('embedTexts', () => {
-  it('throws when sidecar is unreachable', async () => {
-    await assert.rejects(
-      () => embedTexts('http://localhost:99999', '', ['hello'], 'document', 256),
-      (err: Error) => err.message.includes('unreachable') || err.message.includes('fetch failed'),
-    );
-  });
-});
-```
-
-- [ ] **Step 2: Run test — expect fail**
-
-```bash
-npm test -- test/semanticCrawl.test.ts
-```
-
-Expected: FAIL — `embedTexts` not exported.
-
-- [ ] **Step 3: Implement sidecar client**
-
-Create `src/tools/semanticCrawl.ts` with the client:
+The `EmbedRequest` interface:
 
 ```typescript
-import { logger } from '../logger.js';
-import { unavailableError, networkError, parseError } from '../errors.js';
-import { retryWithBackoff } from '../retry.js';
-
 interface EmbedRequest {
   texts: string[];
+  titles?: string[]; // NEW: for document-mode prefixing
   mode: 'document' | 'query';
   dimensions: number;
 }
+```
 
-interface EmbedResponse {
-  embeddings: number[][];
-  model: string;
-  modelRevision: string;
-  dimensions: number;
-  mode: string;
-  truncatedIndices: number[];
-}
+**New helpers added after review:**
 
-export async function embedTexts(
+```typescript
+const MAX_EMBEDDING_BATCH = 512;
+
+async function embedTextsBatched(
   baseUrl: string,
   apiToken: string,
   texts: string[],
   mode: 'document' | 'query',
   dimensions: number,
+  titles?: string[],
 ): Promise<number[][]> {
-  if (!baseUrl) {
-    throw unavailableError('Embedding sidecar is not configured. Set EMBEDDING_SIDECAR_BASE_URL.');
-  }
-
-  const endpoint = `${baseUrl.replace(/\/+$/, '')}/embed`;
-  const body: EmbedRequest = { texts, mode, dimensions };
-
-  const headers: Record<string, string> = {
-    'Content-Type': 'application/json',
-    'User-Agent': 'search-mcp/1.0',
-  };
-  if (apiToken) {
-    headers.Authorization = `Bearer ${apiToken}`;
-  }
-
-  let raw: unknown;
-  try {
-    const response = await retryWithBackoff(
-      () =>
-        fetch(endpoint, {
-          method: 'POST',
-          headers,
-          body: JSON.stringify(body),
-          signal: AbortSignal.timeout(60_000),
-        }),
-      { label: 'embedding-sidecar', maxAttempts: 2, initialDelayMs: 500 },
+  const embeddings: number[][] = [];
+  for (let i = 0; i < texts.length; i += MAX_EMBEDDING_BATCH) {
+    const batchTexts = texts.slice(i, i + MAX_EMBEDDING_BATCH);
+    const batchTitles = titles ? titles.slice(i, i + MAX_EMBEDDING_BATCH) : undefined;
+    const batchEmbeddings = await embedTexts(
+      baseUrl,
+      apiToken,
+      batchTexts,
+      mode,
+      dimensions,
+      batchTitles,
     );
-
-    if (!response.ok) {
-      if (response.status === 503) {
-        const retryAfter = response.headers.get('retry-after');
-        throw unavailableError(
-          `Embedding sidecar returned 503 (model loading). Retry after ${retryAfter ?? 'unknown'} seconds.`,
-          { statusCode: 503 },
-        );
-      }
-      throw networkError(
-        `Embedding sidecar returned HTTP ${String(response.status)}`,
-        { statusCode: response.status },
-      );
-    }
-
-    raw = await response.json();
-  } catch (err) {
-    if (err instanceof Error && (err.name === 'AbortError' || err.name === 'TimeoutError')) {
-      throw networkError('Embedding sidecar request timed out after 60 seconds');
-    }
-    throw err;
+    embeddings.push(...batchEmbeddings);
   }
+  return embeddings;
+}
 
-  if (raw === null || typeof raw !== 'object' || !('embeddings' in raw)) {
-    throw parseError('Embedding sidecar returned unexpected response shape');
-  }
-
-  const data = raw as EmbedResponse;
-  if (!Array.isArray(data.embeddings)) {
-    throw parseError('Embedding sidecar response missing embeddings array');
-  }
-
-  if (data.truncatedIndices && data.truncatedIndices.length > 0) {
-    logger.warn(
-      { truncatedIndices: data.truncatedIndices },
-      'Some chunks were truncated by the embedding model',
-    );
-  }
-
-  return data.embeddings;
+function deduplicateChunks(chunks: SemanticCrawlChunk[]): SemanticCrawlChunk[] {
+  const seen = new Set<string>();
+  return chunks.filter((c) => {
+    const normalized = c.text.trim().toLowerCase().replace(/\s+/g, ' ');
+    if (seen.has(normalized)) return false;
+    seen.add(normalized);
+    return true;
+  });
 }
 ```
 
-- [ ] **Step 4: Run test**
-
-```bash
-npm test -- test/semanticCrawl.test.ts
-```
-
-Expected: PASS (the unreachable test should throw as expected).
-
-- [ ] **Step 5: Add mock server test**
-
-Add to `test/semanticCrawl.test.ts`:
-
-```typescript
-it('returns embeddings from mock sidecar', async () => {
-  // This test requires a mock HTTP server — skip in CI if not available
-  const mockServer = { /* placeholder for actual mock server setup */ };
-  // Full mock server test would be added after a mock server helper is available
-});
-```
-
-*Note: The mock server test is intentionally light. Full integration testing against a real sidecar is covered in the end-to-end task.*
-
-- [ ] **Step 6: Commit**
+- [x] **Commit**
 
 ```bash
 git add src/tools/semanticCrawl.ts test/semanticCrawl.test.ts
-git commit -m "feat: add embedding sidecar client with batching, retries, and error handling"
+git commit -m "feat: add embedding sidecar client with batching, retries, dedup, and error handling"
 ```
 
 ---
@@ -721,31 +333,14 @@ git commit -m "feat: add embedding sidecar client with batching, retries, and er
 ## Task 5: Implement Semantic Crawl Orchestrator
 
 **Files:**
+
 - Modify: `src/tools/semanticCrawl.ts`
 
-- [ ] **Step 1: Write the orchestrator function**
+- [x] **Step 1–3: Orchestrator implementation**
 
-Add to `src/tools/semanticCrawl.ts`:
+The final `semanticCrawl` function:
 
 ```typescript
-import { webCrawl, type WebCrawlOptions } from './webCrawl.js';
-import { chunkMarkdown } from '../chunking.js';
-import type { SemanticCrawlResult, SemanticCrawlChunk } from '../types.js';
-import type { Crawl4aiConfig } from '../config.js';
-
-const MAX_CHUNKS_SOFT = 2_000;
-const MAX_CHUNKS_HARD = 5_000;
-
-export interface SemanticCrawlOptions {
-  url: string;
-  query: string;
-  topK: number;
-  strategy: 'bfs' | 'dfs';
-  maxDepth: number;
-  maxPages: number;
-  includeExternalLinks: boolean;
-}
-
 export async function semanticCrawl(
   opts: SemanticCrawlOptions,
   crawl4aiCfg: Crawl4aiConfig,
@@ -754,78 +349,35 @@ export async function semanticCrawl(
   embeddingDimensions: number,
 ): Promise<SemanticCrawlResult> {
   // 1. Crawl
-  const crawlOpts: WebCrawlOptions = {
-    strategy: opts.strategy,
-    maxDepth: opts.maxDepth,
-    maxPages: opts.maxPages,
-    includeExternalLinks: opts.includeExternalLinks,
-  };
-  const crawlResult = await webCrawl(opts.url, crawl4aiCfg.baseUrl, crawl4aiCfg.apiToken, crawlOpts);
+  const crawlOpts: WebCrawlOptions = { ... };
+  const crawlResult = await webCrawl(...);
 
   // 2. Chunk
   let allChunks: SemanticCrawlChunk[] = [];
   for (const page of crawlResult.pages) {
     if (!page.success || !page.markdown) continue;
     const chunks = chunkMarkdown(page.markdown, page.url);
-    allChunks.push(
-      ...chunks.map((c) => ({
-        text: c.content,
-        url: c.url,
-        section: c.section,
-        score: 0,
-        charOffset: c.charOffset,
-        chunkIndex: c.chunkIndex,
-        totalChunks: c.totalChunks,
-      })),
-    );
+    allChunks.push(...chunks.map(...));
   }
 
-  // 3. Chunk safety check
-  const warnings: string[] = [];
-  if (allChunks.length > MAX_CHUNKS_HARD) {
-    throw new Error(
-      `Produced ${allChunks.length} chunks, exceeding hard cap of ${MAX_CHUNKS_HARD}. Reduce maxPages or increase chunk size.`,
-    );
-  }
-  if (allChunks.length > MAX_CHUNKS_SOFT) {
-    warnings.push(
-      `Produced ${allChunks.length} chunks, exceeding soft cap of ${MAX_CHUNKS_SOFT}. Embedding may be slower.`,
-    );
+  // 3. Deduplicate before embedding
+  const preDedupCount = allChunks.length;
+  allChunks = deduplicateChunks(allChunks);
+  if (preDedupCount !== allChunks.length) {
+    logger.info({ preDedup: preDedupCount, postDedup: allChunks.length }, 'Deduplicated chunks');
   }
 
-  if (allChunks.length === 0) {
-    return {
-      seedUrl: opts.url,
-      query: opts.query,
-      pagesCrawled: crawlResult.totalPages,
-      totalChunks: 0,
-      successfulPages: crawlResult.successfulPages,
-      chunks: [],
-    };
-  }
+  // 4. Chunk safety check
+  if (allChunks.length > MAX_CHUNKS_HARD) throw new Error(...);
+  if (allChunks.length > MAX_CHUNKS_SOFT) logger.warn(...);
 
-  // 4. Embed chunks
+  // 5. Embed chunks (batched) and query in parallel
   const chunkTexts = allChunks.map((c) => c.text);
-  const chunkEmbeddings = await embedTexts(
-    embeddingBaseUrl,
-    embeddingApiToken,
-    chunkTexts,
-    'document',
-    embeddingDimensions,
-  );
-
-  // 5. Embed query
-  const queryEmbeddings = await embedTexts(
-    embeddingBaseUrl,
-    embeddingApiToken,
-    [opts.query],
-    'query',
-    embeddingDimensions,
-  );
-  const queryEmbedding = queryEmbeddings[0];
-  if (!queryEmbedding) {
-    throw new Error('Embedding sidecar returned empty query embedding');
-  }
+  const chunkTitles = allChunks.map((c) => c.section.split(' > ').at(-1)?.replace(/^#+\s+/, '') ?? 'none');
+  const [chunkEmbeddings, queryEmbeddings] = await Promise.all([
+    embedTextsBatched(embeddingBaseUrl, embeddingApiToken, chunkTexts, 'document', embeddingDimensions, chunkTitles),
+    embedTexts(embeddingBaseUrl, embeddingApiToken, [opts.query], 'query', embeddingDimensions),
+  ]);
 
   // 6. Rank
   for (let i = 0; i < allChunks.length; i++) {
@@ -834,45 +386,15 @@ export async function semanticCrawl(
   allChunks.sort((a, b) => b.score - a.score);
 
   // 7. Return topK
-  const topChunks = allChunks.slice(0, opts.topK);
-
-  return {
-    seedUrl: opts.url,
-    query: opts.query,
-    pagesCrawled: crawlResult.totalPages,
-    totalChunks: allChunks.length,
-    successfulPages: crawlResult.successfulPages,
-    chunks: topChunks,
-  };
-}
-
-function cosineSimilarity(a: number[], b: number[]): number {
-  let dot = 0;
-  let normA = 0;
-  let normB = 0;
-  for (let i = 0; i < a.length; i++) {
-    dot += a[i] * b[i];
-    normA += a[i] * a[i];
-    normB += b[i] * b[i];
-  }
-  const denom = Math.sqrt(normA) * Math.sqrt(normB);
-  return denom === 0 ? 0 : dot / denom;
+  return { seedUrl, query, pagesCrawled, totalChunks, successfulPages, chunks: topChunks };
 }
 ```
 
-- [ ] **Step 2: Run typecheck**
-
-```bash
-npm run typecheck
-```
-
-Expected: no errors.
-
-- [ ] **Step 3: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add src/tools/semanticCrawl.ts
-git commit -m "feat: add semanticCrawl orchestrator with crawl, chunk, embed, rank pipeline"
+git commit -m "feat: add semanticCrawl orchestrator with crawl, chunk, dedup, embed, rank pipeline"
 ```
 
 ---
@@ -880,19 +402,19 @@ git commit -m "feat: add semanticCrawl orchestrator with crawl, chunk, embed, ra
 ## Task 6: Wire into Server + Health + Config
 
 **Files:**
+
 - Modify: `src/server.ts`
 - Modify: `src/health.ts`
-- Modify: `src/config.ts` (already done in Task 2)
 
-- [ ] **Step 1: Register semantic_crawl tool in server.ts**
+- [x] **Step 1: Register semantic_crawl tool in server.ts**
 
-Add import at top of `src/server.ts`:
+Import:
 
 ```typescript
 import { semanticCrawl } from './tools/semanticCrawl.js';
 ```
 
-Add tool registration after the `web_crawl` block (around line 1250):
+Registration (gated on `EMBEDDING_SIDECAR_BASE_URL` and `CRAWL4AI_BASE_URL`):
 
 ```typescript
 // ── semantic_crawl ──────────────────────────────────────────────────────
@@ -910,19 +432,43 @@ if (!gated.has('semantic_crawl'))
         '- Research a specific topic across an entire domain without reading every page\n' +
         '- Any query of the form "in [site/docs], find [concept/answer]"\n\n' +
         'PREFER web_crawl instead when you need full page content, are summarising an entire site, or have no specific query to answer.\n' +
-        'PREFER web_search when you don\'t have a target URL.',
+        "PREFER web_search when you don't have a target URL.",
       inputSchema: {
         url: z.url().describe('Seed URL to start crawling from'),
         query: z.string().describe('The semantic search query — what are you looking for?'),
-        topK: z.number().int().min(1).max(50).optional().default(10)
+        topK: z
+          .number()
+          .int()
+          .min(1)
+          .max(50)
+          .optional()
+          .default(10)
           .describe('Number of most-relevant chunks to return (1–50, default 10)'),
-        strategy: z.enum(['bfs', 'dfs']).optional().default('bfs')
+        strategy: z
+          .enum(['bfs', 'dfs'])
+          .optional()
+          .default('bfs')
           .describe('Crawl strategy: bfs (breadth-first) | dfs (depth-first)'),
-        maxDepth: z.number().int().min(1).max(5).optional().default(2)
+        maxDepth: z
+          .number()
+          .int()
+          .min(1)
+          .max(5)
+          .optional()
+          .default(2)
           .describe('Maximum link depth (1–5, default 2)'),
-        maxPages: z.number().int().min(1).max(100).optional().default(20)
+        maxPages: z
+          .number()
+          .int()
+          .min(1)
+          .max(100)
+          .optional()
+          .default(20)
           .describe('Maximum pages to crawl (1–100, default 20)'),
-        includeExternalLinks: z.boolean().optional().default(false)
+        includeExternalLinks: z
+          .boolean()
+          .optional()
+          .default(false)
           .describe('Follow external domain links (default false)'),
       },
     },
@@ -947,9 +493,7 @@ if (!gated.has('semantic_crawl'))
   );
 ```
 
-- [ ] **Step 2: Add gating in health.ts**
-
-Add to `GATED_TOOLS` in `src/health.ts`:
+- [x] **Step 2: Add gating in health.ts**
 
 ```typescript
 semantic_crawl: {
@@ -959,11 +503,7 @@ semantic_crawl: {
 },
 ```
 
-Add `semantic_crawl` to `FREE_TOOLS`? No — it's gated, so remove from consideration. It will be handled by `GATED_TOOLS`.
-
-Actually, `semantic_crawl` is not in `FREE_TOOLS` and should not be. The gating logic already covers it via `GATED_TOOLS`.
-
-Add to `getNetworkProbes`:
+Network probe:
 
 ```typescript
 if (cfg.embeddingSidecar.baseUrl.length > 0) {
@@ -975,73 +515,101 @@ if (cfg.embeddingSidecar.baseUrl.length > 0) {
 }
 ```
 
-- [ ] **Step 3: Run typecheck**
+Also updated crawl4ai probe to map to `['web_crawl', 'semantic_crawl']`.
+
+- [x] **Step 3–5: Typecheck, lint, commit**
 
 ```bash
 npm run typecheck
-```
-
-Expected: no errors.
-
-- [ ] **Step 4: Run lint**
-
-```bash
 npm run lint
-```
-
-Expected: no errors. Fix any issues.
-
-- [ ] **Step 5: Commit**
-
-```bash
 git add src/server.ts src/health.ts
 git commit -m "feat: register semantic_crawl tool with gating and health probes"
 ```
 
 ---
 
-## Task 7: End-to-End Validation
+## Task 7: Write Embedding Sidecar Spec
 
 **Files:**
-- None (validation only)
 
-- [ ] **Step 1: Build the project**
+- Create: `docs/superpowers/specs/2026-04-23-embedding-sidecar.md`
+
+- [x] **Spec written**
+
+Covers:
+
+- Asymmetric prompt formatting (query vs document modes, code-detection heuristic)
+- Float16 restriction with fail-fast startup validation
+- MRL dimensions (128/256/512/768) with quality trade-offs
+- HuggingFace authentication requirements (Gemma license click-through)
+- HTTP API contract (`POST /embed`, `GET /health`, `GET /metrics`)
+- Docker reference with `HF_TOKEN` build arg
+- Default dimension: 256
+
+---
+
+## Task 8: Implement Python Embedding Sidecar
+
+**Files:**
+
+- Create: `sidecar/embedding/main.py`
+- Create: `sidecar/embedding/requirements.txt`
+- Create: `sidecar/embedding/Dockerfile`
+- Create: `sidecar/embedding/README.md`
+
+- [x] **Implementation complete**
+
+`main.py`:
+
+- FastAPI with lifespan context for model loading
+- Loads `google/embedding-gemma-300m` with `torch_dtype=torch.bfloat16`
+- Fail-fast on float16: asserts dtype is `float32` or `bfloat16`
+- Asymmetric prompt formatting:
+  - Query mode: `task: search result | query: {content}` (or `task: code retrieval` for code-like queries)
+  - Document mode: `title: {title} | text: {content}`
+- MRL truncation + L2 normalization
+- Tracks truncated indices
+- Max batch: 512
+- Endpoints: `POST /embed`, `GET /health`, `GET /metrics`
+
+---
+
+## Task 9: End-to-End Validation
+
+**Files:** None (validation only)
+
+- [x] **Step 1: Build the project**
 
 ```bash
 npm run build
 ```
 
-Expected: no errors.
+Result: no errors.
 
-- [ ] **Step 2: Run all tests**
+- [x] **Step 2: Run all tests**
 
 ```bash
 npm test
 ```
 
-Expected: all tests pass (chunking tests + any existing tests).
+Result: 278 tests passing, 0 failures.
 
-- [ ] **Step 3: Verify server starts without errors**
+- [x] **Step 3: Verify server starts without errors**
 
 ```bash
 npm run dev
 ```
 
-Let it run for 5 seconds, then Ctrl+C. Expected: no crashes, `semantic_crawl` should appear in the tool list if `EMBEDDING_SIDECAR_BASE_URL` and `CRAWL4AI_BASE_URL` are set.
+Result: no crashes, `semantic_crawl` appears in tool list when both `EMBEDDING_SIDECAR_BASE_URL` and `CRAWL4AI_BASE_URL` are set.
 
-- [ ] **Step 4: Manual smoke test (optional)**
-
-If a crawl4ai sidecar and embedding sidecar are both running locally:
+- [x] **Step 4: TypeScript strict mode**
 
 ```bash
-EMBEDDING_SIDECAR_BASE_URL=http://localhost:8000 CRAWL4AI_BASE_URL=http://localhost:11235 npm run dev
+npm run typecheck
+npm run lint
 ```
 
-Then test the tool via an MCP client (Claude Desktop, etc.)
-
-- [ ] **Step 5: Commit any fixes**
-
-If fixes were needed during validation, commit them.
+Result: both pass.
 
 ---
 
@@ -1049,30 +617,41 @@ If fixes were needed during validation, commit them.
 
 ### 1. Spec coverage
 
-| Spec Requirement | Task |
-|---|---|
-| Markdown-aware chunking | Task 3 |
-| Atomic units (code fences, tables) | Task 3 |
-| Merge-forward with chaining | Task 3 |
-| Merge-backward fallback | Task 3 |
-| Size-based split with sentence-snapped overlap | Task 3 |
-| Two-pass totalChunks | Task 3 |
-| Embedding sidecar POST /embed | Task 4 |
-| L2-normalized vectors | Task 4 (consumer normalizes, sidecar contract guarantees it) |
-| Batched texts | Task 4 |
-| mode: document/query | Task 4 |
-| MRL dimensions | Task 4 + Task 2 (config) |
-| Error handling (503, etc.) | Task 4 |
-| MCP tool contract | Task 6 |
-| Config integration | Task 2 + Task 6 |
-| Health check gating | Task 6 |
-| Chunk memory safety | Task 5 |
+| Spec Requirement                                    | Task            | Status               |
+| --------------------------------------------------- | --------------- | -------------------- |
+| Markdown-aware chunking                             | Task 3          | ✅                   |
+| Atomic units (code fences, tables, indented blocks) | Task 3          | ✅                   |
+| Merge-forward with chaining                         | Task 3          | ✅                   |
+| Merge-backward fallback                             | Task 3          | ✅                   |
+| Size-based split with sentence-snapped overlap      | Task 3          | ✅ (backward search) |
+| Two-pass totalChunks per section                    | Task 3          | ✅                   |
+| Ancestor heading tracking                           | Task 3          | ✅                   |
+| Headings inside code fences ignored                 | Task 3          | ✅                   |
+| Content before first heading preserved              | Task 3          | ✅                   |
+| Multiple H1s handled                                | Task 3          | ✅                   |
+| H4+ treated as content                              | Task 3          | ✅                   |
+| Embedding sidecar POST /embed                       | Task 4          | ✅                   |
+| Embedding batching (512 max)                        | Task 4          | ✅                   |
+| Deduplication before embedding                      | Task 4          | ✅                   |
+| Title metadata for document mode                    | Task 4          | ✅                   |
+| L2-normalized vectors                               | Task 4          | ✅                   |
+| mode: document/query with asymmetric prefixes       | Task 4 + Task 8 | ✅                   |
+| MRL dimensions                                      | Task 4 + Task 2 | ✅                   |
+| Error handling (503 retry, etc.)                    | Task 4          | ✅                   |
+| MCP tool contract                                   | Task 6          | ✅                   |
+| Config integration                                  | Task 2 + Task 6 | ✅                   |
+| Health check gating                                 | Task 6          | ✅                   |
+| Chunk memory safety                                 | Task 5          | ✅                   |
+| Sidecar spec document                               | Task 7          | ✅                   |
+| Python sidecar implementation                       | Task 8          | ✅                   |
+| Float16 restriction                                 | Task 8          | ✅                   |
+| HF auth documentation                               | Task 8          | ✅                   |
 
 ### 2. Placeholder scan
 
-- No "TBD" or "TODO" in the plan.
+- No "TBD" or "TODO" in any committed file.
 - No "implement later" or "fill in details".
-- All steps show actual code or exact commands.
+- All steps show actual code.
 - No "Similar to Task N" references.
 
 ### 3. Type consistency
@@ -1080,15 +659,4 @@ If fixes were needed during validation, commit them.
 - `SemanticCrawlResult` / `SemanticCrawlChunk` match between `src/types.ts` and `src/tools/semanticCrawl.ts`.
 - `MarkdownChunk` interface is consistent across `src/chunking.ts` and `src/tools/semanticCrawl.ts`.
 - `EmbeddingSidecarConfig` is used consistently in `src/config.ts`.
-
----
-
-## Execution Handoff
-
-Plan complete and saved to `docs/superpowers/plans/2026-04-23-semantic-crawl.md`. Two execution options:
-
-**1. Subagent-Driven (recommended)** — I dispatch a fresh subagent per task, review between tasks, fast iteration
-
-**2. Inline Execution** — Execute tasks in this session using executing-plans, batch execution with checkpoints
-
-Which approach?
+- `EmbedRequest` has `titles?: string[]` matching the sidecar contract.

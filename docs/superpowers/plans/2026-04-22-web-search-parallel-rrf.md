@@ -12,18 +12,19 @@
 
 ## File Structure
 
-| File | Responsibility |
-|------|---------------|
-| `src/utils/fusion.ts` | `normalizeUrl`, `rrfMerge` — pure utility, zero deps on other src files |
-| `test/fusion.test.ts` | Unit tests for normalizeUrl and rrfMerge |
+| File                     | Responsibility                                                                                   |
+| ------------------------ | ------------------------------------------------------------------------------------------------ |
+| `src/utils/fusion.ts`    | `normalizeUrl`, `rrfMerge` — pure utility, zero deps on other src files                          |
+| `test/fusion.test.ts`    | Unit tests for normalizeUrl and rrfMerge                                                         |
 | `src/tools/webSearch.ts` | Parallel fan-out and fallback to rrfMerge; exports internal `searchWithBackends` for testability |
-| `test/webSearch.test.ts` | Mock-based unit tests for webSearch under single/dual/failure scenarios |
+| `test/webSearch.test.ts` | Mock-based unit tests for webSearch under single/dual/failure scenarios                          |
 
 ---
 
 ### Task 1: Write normalization and fusion utilities
 
 **Files:**
+
 - Create: `src/utils/fusion.ts`
 - Test: `test/fusion.test.ts`
 
@@ -51,7 +52,10 @@ test('normalizeUrl strips trailing slash and www', () => {
 
 test('normalizeUrl lower-cases hostname', () => {
   const result = normalizeUrl('https://EXAMPLE.COM/path');
-  assert.ok(result.startsWith('https://example.com/'), `Expected lowercase hostname, got ${result}`);
+  assert.ok(
+    result.startsWith('https://example.com/'),
+    `Expected lowercase hostname, got ${result}`,
+  );
 });
 
 test('normalizeUrl returns raw URL on malformed input', () => {
@@ -71,11 +75,14 @@ test('rrfMerge with two rankings produces correct RRF scores', () => {
     [{ url: 'a' }, { url: 'b' }],
     [{ url: 'b' }, { url: 'c' }],
   ];
-  const merged = rrfMerge(rankings as unknown as any[][], { k: 60, keyFn: r => (r as { url: string }).url });
+  const merged = rrfMerge(rankings as unknown as any[][], {
+    k: 60,
+    keyFn: (r) => (r as { url: string }).url,
+  });
   assert.equal(merged.length, 3, `Expected 3 results, got ${merged.length}`);
 
   // score(b) = 1/(60+1) + 1/(60+1) = 2/61; score(a) = 1/61; score(c) = 1/62
-  const b = merged.find(m => (m.item as { url: string }).url === 'b');
+  const b = merged.find((m) => (m.item as { url: string }).url === 'b');
   assert.ok(b, 'Expected b in merged results');
   assert.equal(merged[0].item.url, 'b', 'Expected b first (highest RRF score)');
   assert.ok(
@@ -83,14 +90,14 @@ test('rrfMerge with two rankings produces correct RRF scores', () => {
     `Expected b rrfScore ≈ ${2 / 61}, got ${b.rrfScore}`,
   );
 
-  const a = merged.find(m => (m.item as { url: string }).url === 'a');
+  const a = merged.find((m) => (m.item as { url: string }).url === 'a');
   assert.ok(a, 'Expected a in merged results');
   assert.ok(
     Math.abs(a.rrfScore - 1 / 61) < 1e-9,
     `Expected a rrfScore ≈ ${1 / 61}, got ${a.rrfScore}`,
   );
 
-  const c = merged.find(m => (m.item as { url: string }).url === 'c');
+  const c = merged.find((m) => (m.item as { url: string }).url === 'c');
   assert.ok(c, 'Expected c in merged results');
   assert.ok(
     Math.abs(c.rrfScore - 1 / 62) < 1e-9,
@@ -100,7 +107,10 @@ test('rrfMerge with two rankings produces correct RRF scores', () => {
 
 test('rrfMerge with one ranking preserves order and scores', () => {
   const rankings = [[{ url: 'x' }, { url: 'y' }]];
-  const merged = rrfMerge(rankings as unknown as any[][], { k: 60, keyFn: r => (r as { url: string }).url });
+  const merged = rrfMerge(rankings as unknown as any[][], {
+    k: 60,
+    keyFn: (r) => (r as { url: string }).url,
+  });
   assert.equal(merged.length, 2, 'Expected 2 results');
   assert.equal((merged[0].item as { url: string }).url, 'x');
   assert.equal((merged[1].item as { url: string }).url, 'y');
@@ -117,7 +127,10 @@ test('rrfMerge with one ranking preserves order and scores', () => {
 
 test('rrfMerge with duplicate items deduplicates', () => {
   const rankings = [[{ url: 'a' }], [{ url: 'a' }]];
-  const merged = rrfMerge(rankings as unknown as any[][], { k: 60, keyFn: r => (r as { url: string }).url });
+  const merged = rrfMerge(rankings as unknown as any[][], {
+    k: 60,
+    keyFn: (r) => (r as { url: string }).url,
+  });
   assert.equal(merged.length, 1, `Expected 1 deduped result, got ${merged.length}`);
   assert.ok(
     Math.abs(merged[0].rrfScore - 2 / 61) < 1e-9,
@@ -247,7 +260,7 @@ export function rrfMerge<T>(
 
   return [...scores.values()]
     .sort((a, b) => b.score - a.score)
-    .map(v => ({ item: v.item, rrfScore: v.score }));
+    .map((v) => ({ item: v.item, rrfScore: v.score }));
 }
 ```
 
@@ -270,6 +283,7 @@ Co-Authored-By: Claude Opus 4.7 <noreply@anthropic.com>"
 ### Task 2: Integrate parallel fusion into webSearch
 
 **Files:**
+
 - Modify: `src/tools/webSearch.ts`
 - Test: `test/webSearch.test.ts`
 
@@ -455,7 +469,7 @@ export async function searchWithBackends(
   const primary = cfg.searchBackend;
   const backends =
     overrideBackends ??
-    [primary, ...FALLBACK_ORDER.filter(b => b !== primary)].filter(backendAvailable);
+    [primary, ...FALLBACK_ORDER.filter((b) => b !== primary)].filter(backendAvailable);
 
   logger.info({ backends, query, limit, safeSearch }, 'Running parallel web search');
 
@@ -473,7 +487,7 @@ export async function searchWithBackends(
 
   const valid: SearchResult[][] = settled
     .filter((r): r is PromiseFulfilledResult<SearchResult[]> => r.status === 'fulfilled')
-    .map(r => r.value);
+    .map((r) => r.value);
 
   const errors: string[] = [];
   settled.forEach((r, idx) => {
@@ -495,8 +509,8 @@ export async function searchWithBackends(
     return valid[0].slice(0, limit);
   }
 
-  const merged = rrfMerge(valid, { k: 60, keyFn: r => normalizeUrl(r.url) });
-  return merged.map(m => m.item).slice(0, limit);
+  const merged = rrfMerge(valid, { k: 60, keyFn: (r) => normalizeUrl(r.url) });
+  return merged.map((m) => m.item).slice(0, limit);
 }
 
 /** Public entry point — delegates to searchWithBackends with real backend implementations. */
@@ -523,6 +537,7 @@ Expected: All 4 tests pass.
 npm run typecheck
 npm run lint
 ```
+
 Expected: No errors.
 
 - [ ] **Step 6: Commit**

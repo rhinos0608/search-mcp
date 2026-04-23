@@ -9,7 +9,7 @@ describe('parseSitemap', () => {
   <url><loc>https://example.com/page1</loc></url>
   <url><loc>https://example.com/page2</loc></url>
 </urlset>`;
-    const urls = await parseSitemap(xml);
+    const urls = parseSitemap(xml);
     assert.deepEqual(urls, ['https://example.com/page1', 'https://example.com/page2']);
   });
 
@@ -22,17 +22,17 @@ describe('parseSitemap', () => {
     <changefreq>daily</changefreq>
   </url>
 </urlset>`;
-    const urls = await parseSitemap(xml);
+    const urls = parseSitemap(xml);
     assert.deepEqual(urls, ['https://example.com/page1']);
   });
 
   it('returns empty array for invalid XML', async () => {
-    const urls = await parseSitemap('not xml');
+    const urls = parseSitemap('not xml');
     assert.deepEqual(urls, []);
   });
 
   it('returns empty array for empty input', async () => {
-    const urls = await parseSitemap('');
+    const urls = parseSitemap('');
     assert.deepEqual(urls, []);
   });
 
@@ -42,7 +42,7 @@ describe('parseSitemap', () => {
   <url><loc>https://example.com/page1</loc></url>
   <url><loc>https://example.com/page1</loc></url>
 </urlset>`;
-    const urls = await parseSitemap(xml);
+    const urls = parseSitemap(xml);
     assert.deepEqual(urls, ['https://example.com/page1']);
   });
 
@@ -66,8 +66,11 @@ describe('parseSitemap', () => {
   <sitemap><loc>https://example.com/sitemap1.xml</loc></sitemap>
   <sitemap><loc>https://example.com/sitemap2.xml</loc></sitemap>
 </sitemapindex>`;
-    const urls = await parseSitemap(xml);
-    assert.deepEqual(urls, ['https://example.com/sitemap1.xml', 'https://example.com/sitemap2.xml']);
+    const urls = parseSitemap(xml);
+    assert.deepEqual(urls, [
+      'https://example.com/sitemap1.xml',
+      'https://example.com/sitemap2.xml',
+    ]);
   });
 
   it('decodes XML entities in loc', async () => {
@@ -75,7 +78,7 @@ describe('parseSitemap', () => {
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
   <url><loc>https://example.com/page?foo=1&amp;bar=2</loc></url>
 </urlset>`;
-    const urls = await parseSitemap(xml);
+    const urls = parseSitemap(xml);
     assert.deepEqual(urls, ['https://example.com/page?foo=1&bar=2']);
   });
 });

@@ -134,9 +134,11 @@ export async function redditSearch(
 
   // Single-source RRF + rescoring
   const rescoreSort: 'relevance' | 'date' | 'top' =
-    effectiveSort === 'new' ? 'date' :
-    effectiveSort === 'hot' || effectiveSort === 'top' ? 'top' :
-    'relevance'; // covers 'relevance' and 'comments'
+    effectiveSort === 'new'
+      ? 'date'
+      : effectiveSort === 'hot' || effectiveSort === 'top'
+        ? 'top'
+        : 'relevance'; // covers 'relevance' and 'comments'
 
   const merged = rrfMerge([[...results]], { k: 60 });
   const allSignals = extractRedditSignals(results, rescoreSort);
@@ -147,7 +149,7 @@ export async function redditSearch(
   }));
   const rescoreWeights = loadConfig().rescoreWeights.redditSearch;
   const rescored = multiSignalRescore(signaled, rescoreWeights, limit);
-  results = rescored.map(r => r.item);
+  results = rescored.map((r) => r.item);
 
   cache.set(key, results);
   logger.debug({ resultCount: results.length }, 'Reddit search complete');

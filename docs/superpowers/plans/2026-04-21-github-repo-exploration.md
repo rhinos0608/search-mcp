@@ -12,18 +12,18 @@
 
 ## File Mapping
 
-| File | Responsibility |
-|------|---------------|
-| `src/types.ts` (modify) | Add `GitHubTreeEntry`, `GitHubTreeResult`, `GitHubFileResult`, `GitHubCodeResult`, `GitHubCodeSearchResult` |
-| `src/rateLimit.ts` (modify) | Add `'github_search'` to `RateLimitedBackend` union; add `parseGitHubSearchHeaders` |
-| `src/health.ts` (modify) | Add new tools to `FREE_TOOLS`, `RATE_LIMIT_TOOL_MAP`, `getNetworkProbes` |
-| `src/tools/githubRepoTree.ts` (create) | `getGitHubRepoTree` — list directory contents, recursive tree support |
-| `src/tools/githubRepoFile.ts` (create) | `getGitHubRepoFile` — read specific file content, handle binary/submodule/symlink |
-| `src/tools/githubRepoSearch.ts` (create) | `getGitHubRepoSearch` — GitHub code search with qualifiers |
-| `src/server.ts` (modify) | Register all three tools with Zod schemas |
-| `test/githubRepoTree.test.ts` (create) | Tests for tree listing: happy path, 404, recursive, limit truncation |
-| `test/githubRepoFile.test.ts` (create) | Tests for file read: happy path, directory error, oversized, binary, submodule, symlink, 403 >1MB |
-| `test/githubRepoSearch.test.ts` (create) | Tests for code search: happy path, 404, rate limit, pagination, query construction |
+| File                                     | Responsibility                                                                                              |
+| ---------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| `src/types.ts` (modify)                  | Add `GitHubTreeEntry`, `GitHubTreeResult`, `GitHubFileResult`, `GitHubCodeResult`, `GitHubCodeSearchResult` |
+| `src/rateLimit.ts` (modify)              | Add `'github_search'` to `RateLimitedBackend` union; add `parseGitHubSearchHeaders`                         |
+| `src/health.ts` (modify)                 | Add new tools to `FREE_TOOLS`, `RATE_LIMIT_TOOL_MAP`, `getNetworkProbes`                                    |
+| `src/tools/githubRepoTree.ts` (create)   | `getGitHubRepoTree` — list directory contents, recursive tree support                                       |
+| `src/tools/githubRepoFile.ts` (create)   | `getGitHubRepoFile` — read specific file content, handle binary/submodule/symlink                           |
+| `src/tools/githubRepoSearch.ts` (create) | `getGitHubRepoSearch` — GitHub code search with qualifiers                                                  |
+| `src/server.ts` (modify)                 | Register all three tools with Zod schemas                                                                   |
+| `test/githubRepoTree.test.ts` (create)   | Tests for tree listing: happy path, 404, recursive, limit truncation                                        |
+| `test/githubRepoFile.test.ts` (create)   | Tests for file read: happy path, directory error, oversized, binary, submodule, symlink, 403 >1MB           |
+| `test/githubRepoSearch.test.ts` (create) | Tests for code search: happy path, 404, rate limit, pagination, query construction                          |
 
 ---
 
@@ -38,12 +38,14 @@
 ### Task 1: Infrastructure — Types, Rate Limit, Health
 
 **Files:**
+
 - Modify: `src/types.ts`
 - Modify: `src/rateLimit.ts`
 - Modify: `src/health.ts`
 - Test: `test/infrastructure.test.ts`
 
 **Context for agent:**
+
 - `src/types.ts` already has `GitHubRepo`, `GitHubRelease`, `TrendingRepo`, etc. Add the new interfaces at the bottom under a new `// ── GitHub Repo Exploration ──` section.
 - `src/rateLimit.ts` has `RateLimitedBackend = 'brave' | 'github' | 'reddit' | 'semantic_scholar' | 'arxiv'`. Add `'github_search'`.
 - `src/rateLimit.ts` has `parseRateLimitHeaders` with a switch. Add `parseGitHubSearchHeaders` that delegates to `parseGitHubHeaders` (same header format, just tracked separately).
@@ -66,10 +68,21 @@ test('RateLimitedBackend includes github_search', () => {
 
 test('FREE_TOOLS includes github_repo_tree', () => {
   const freeTools = [
-    'web_read', 'github_repo', 'github_trending', 'youtube_transcript',
-    'reddit_search', 'reddit_comments', 'academic_search', 'hackernews_search',
-    'arxiv_search', 'npm_search', 'pypi_search', 'news_search',
-    'github_repo_tree', 'github_repo_file', 'github_repo_search',
+    'web_read',
+    'github_repo',
+    'github_trending',
+    'youtube_transcript',
+    'reddit_search',
+    'reddit_comments',
+    'academic_search',
+    'hackernews_search',
+    'arxiv_search',
+    'npm_search',
+    'pypi_search',
+    'news_search',
+    'github_repo_tree',
+    'github_repo_file',
+    'github_repo_search',
   ];
   // We will verify health.ts matches this list
   assert.ok(freeTools.includes('github_repo_tree'));
@@ -138,12 +151,21 @@ export interface GitHubCodeSearchResult {
 - [ ] **Step 3: Add `'github_search'` to rate limit tracking**
 
 In `src/rateLimit.ts`:
+
 1. Update `RateLimitedBackend`:
+
 ```typescript
-export type RateLimitedBackend = 'brave' | 'github' | 'github_search' | 'reddit' | 'semantic_scholar' | 'arxiv';
+export type RateLimitedBackend =
+  | 'brave'
+  | 'github'
+  | 'github_search'
+  | 'reddit'
+  | 'semantic_scholar'
+  | 'arxiv';
 ```
 
 2. Add `parseGitHubSearchHeaders` (delegates to `parseGitHubHeaders` but sets `backend: 'github_search'`):
+
 ```typescript
 function parseGitHubSearchHeaders(headers: Headers): RateLimitInfo | null {
   const base = parseGitHubHeaders(headers);
@@ -153,6 +175,7 @@ function parseGitHubSearchHeaders(headers: Headers): RateLimitInfo | null {
 ```
 
 3. Update `parseRateLimitHeaders` switch:
+
 ```typescript
     case 'github_search':
       return parseGitHubSearchHeaders(headers);
@@ -161,7 +184,9 @@ function parseGitHubSearchHeaders(headers: Headers): RateLimitInfo | null {
 - [ ] **Step 4: Update health checks**
 
 In `src/health.ts`:
+
 1. Add to `FREE_TOOLS`:
+
 ```typescript
 const FREE_TOOLS = [
   'web_read',
@@ -183,11 +208,13 @@ const FREE_TOOLS = [
 ```
 
 2. Update `getNetworkProbes` to include new tools under the `github` probe:
+
 ```typescript
     { label: 'github', url: 'https://api.github.com/rate_limit', tools: ['github_repo', 'github_repo_tree', 'github_repo_file', 'github_repo_search'] },
 ```
 
 3. Update `RATE_LIMIT_TOOL_MAP`:
+
 ```typescript
 const RATE_LIMIT_TOOL_MAP: [string, RateLimitedBackend][] = [
   ['web_search', 'brave'],
@@ -218,10 +245,12 @@ git commit -m "infra: add GitHub repo exploration types, rate limit, and health 
 ### Task 2: Implement `github_repo_tree`
 
 **Files:**
+
 - Create: `src/tools/githubRepoTree.ts`
 - Create: `test/githubRepoTree.test.ts`
 
 **Context for agent:**
+
 - Reuse patterns from `src/tools/githubRepo.ts`: `buildHeaders`, `githubFetch`, `handleGitHubError`, `isRecord`, `getString`, `getNumber`, `getStringOrNull`.
 - The `githubFetch` helper is private in `githubRepo.ts`. Extract shared helpers to a new `src/tools/githubUtils.ts` OR inline the pattern. **Decision:** Inline the fetch pattern (it's small) to avoid refactoring existing code. Copy `buildHeaders`, `githubFetch`, `handleGitHubError`, and the record helpers into each new file, or better, extract them to a shared module.
 - Actually, to keep changes minimal and avoid touching `githubRepo.ts`, inline the helpers in each new file. The code is small (~60 lines).
@@ -242,8 +271,22 @@ test('getGitHubRepoTree returns directory contents', async () => {
     requestUrl = String(input);
     return new Response(
       JSON.stringify([
-        { name: 'src', path: 'src', type: 'dir', html_url: 'https://github.com/owner/repo/tree/main/src', url: 'https://api.github.com/repos/owner/repo/contents/src' },
-        { name: 'README.md', path: 'README.md', type: 'file', size: 123, sha: 'abc', html_url: 'https://github.com/owner/repo/blob/main/README.md', url: 'https://api.github.com/repos/owner/repo/contents/README.md' },
+        {
+          name: 'src',
+          path: 'src',
+          type: 'dir',
+          html_url: 'https://github.com/owner/repo/tree/main/src',
+          url: 'https://api.github.com/repos/owner/repo/contents/src',
+        },
+        {
+          name: 'README.md',
+          path: 'README.md',
+          type: 'file',
+          size: 123,
+          sha: 'abc',
+          html_url: 'https://github.com/owner/repo/blob/main/README.md',
+          url: 'https://api.github.com/repos/owner/repo/contents/README.md',
+        },
       ]),
       { status: 200, headers: { 'content-type': 'application/json' } },
     );
@@ -304,9 +347,15 @@ async function githubFetch(url: string): Promise<{ response: Response; body: unk
       } catch (err) {
         const error = err instanceof Error ? err : new Error(String(err));
         if (error.name === 'AbortError') {
-          throw timeoutError(`GitHub API request to "${url}" timed out`, { backend: 'github', cause: err });
+          throw timeoutError(`GitHub API request to "${url}" timed out`, {
+            backend: 'github',
+            cause: err,
+          });
         }
-        throw unavailableError(`GitHub API request failed: ${error.message}`, { backend: 'github', cause: err });
+        throw unavailableError(`GitHub API request failed: ${error.message}`, {
+          backend: 'github',
+          cause: err,
+        });
       } finally {
         clearTimeout(timeout);
       }
@@ -316,12 +365,22 @@ async function githubFetch(url: string): Promise<{ response: Response; body: unk
 }
 
 function handleGitHubError(status: number, statusText: string, context: string): never {
-  if (status === 404) throw notFoundError(`GitHub resource "${context}" not found`, { statusCode: 404, backend: 'github' });
+  if (status === 404)
+    throw notFoundError(`GitHub resource "${context}" not found`, {
+      statusCode: 404,
+      backend: 'github',
+    });
   if (status === 403 || status === 429) {
     getTracker('github').recordLimitHit();
-    throw rateLimitError('GitHub API rate limit exceeded. Try again later.', { statusCode: status, backend: 'github' });
+    throw rateLimitError('GitHub API rate limit exceeded. Try again later.', {
+      statusCode: status,
+      backend: 'github',
+    });
   }
-  throw unavailableError(`GitHub API error ${String(status)}: ${statusText} for "${context}"`, { statusCode: status, backend: 'github' });
+  throw unavailableError(`GitHub API error ${String(status)}: ${statusText} for "${context}"`, {
+    statusCode: status,
+    backend: 'github',
+  });
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -377,7 +436,9 @@ function normalizeTreeEntry(item: unknown): GitHubTreeEntry | null {
     type: mappedType,
     size: getNumber(obj, 'size') || undefined,
     sha: getString(obj, 'sha') || undefined,
-    htmlUrl: getString(obj, 'html_url') || `https://github.com/${getString(obj, 'url').split('/repos/')[1]?.split('/contents/')[0]}/${getString(obj, 'path')}`,
+    htmlUrl:
+      getString(obj, 'html_url') ||
+      `https://github.com/${getString(obj, 'url').split('/repos/')[1]?.split('/contents/')[0]}/${getString(obj, 'path')}`,
     apiUrl: getString(obj, 'url'),
   };
 }
@@ -400,12 +461,16 @@ export async function getGitHubRepoTree(
   if (!recursive) {
     const url = `${GITHUB_API}/repos/${safeOwner}/${safeRepo}/contents/${safePath}${branch ? `?ref=${encodeURIComponent(branch)}` : ''}`;
     const { response, body } = await githubFetch(url);
-    if (!response.ok) handleGitHubError(response.status, response.statusText, `${owner}/${repo}/${path}`);
+    if (!response.ok)
+      handleGitHubError(response.status, response.statusText, `${owner}/${repo}/${path}`);
 
     const items = Array.isArray(body) ? body : [];
     const entries = items.map(normalizeTreeEntry).filter((e): e is GitHubTreeEntry => e !== null);
     const limited = entries.slice(0, limit);
-    const warnings = entries.length > limit ? [`Result truncated from ${String(entries.length)} to ${String(limit)} entries.`] : undefined;
+    const warnings =
+      entries.length > limit
+        ? [`Result truncated from ${String(entries.length)} to ${String(limit)} entries.`]
+        : undefined;
 
     return { entries: limited, truncated: false };
   }
@@ -420,7 +485,8 @@ export async function getGitHubRepoTree(
       // Fallback to non-recursive contents API
       const fallbackUrl = `${GITHUB_API}/repos/${safeOwner}/${safeRepo}/contents/${safePath}${branch ? `?ref=${encodeURIComponent(branch)}` : ''}`;
       const { response: fbResponse, body: fbBody } = await githubFetch(fallbackUrl);
-      if (!fbResponse.ok) handleGitHubError(fbResponse.status, fbResponse.statusText, `${owner}/${repo}/${path}`);
+      if (!fbResponse.ok)
+        handleGitHubError(fbResponse.status, fbResponse.statusText, `${owner}/${repo}/${path}`);
       const items = Array.isArray(fbBody) ? fbBody : [];
       const entries = items.map(normalizeTreeEntry).filter((e): e is GitHubTreeEntry => e !== null);
       const limited = entries.slice(0, limit);
@@ -430,7 +496,8 @@ export async function getGitHubRepoTree(
   }
 
   const treeObj = isRecord(body) ? body : null;
-  if (!treeObj) throw unavailableError('Unexpected GitHub API response shape', { backend: 'github' });
+  if (!treeObj)
+    throw unavailableError('Unexpected GitHub API response shape', { backend: 'github' });
 
   const rawTree = treeObj.tree;
   const items = Array.isArray(rawTree) ? rawTree : [];
@@ -461,8 +528,21 @@ test('getGitHubRepoTree returns recursive tree', async () => {
       JSON.stringify({
         sha: 'abc',
         tree: [
-          { path: 'src', type: 'tree', mode: '040000', sha: 'def', url: 'https://api.github.com/repos/owner/repo/git/trees/def' },
-          { path: 'src/index.ts', type: 'blob', mode: '100644', sha: 'ghi', size: 456, url: 'https://api.github.com/repos/owner/repo/git/blobs/ghi' },
+          {
+            path: 'src',
+            type: 'tree',
+            mode: '040000',
+            sha: 'def',
+            url: 'https://api.github.com/repos/owner/repo/git/trees/def',
+          },
+          {
+            path: 'src/index.ts',
+            type: 'blob',
+            mode: '100644',
+            sha: 'ghi',
+            size: 456,
+            url: 'https://api.github.com/repos/owner/repo/git/blobs/ghi',
+          },
         ],
         truncated: false,
       }),
@@ -497,7 +577,10 @@ Add to `test/githubRepoTree.test.ts`:
 test('getGitHubRepoTree throws NOT_FOUND for missing repo', async () => {
   const originalFetch = global.fetch;
   global.fetch = async () =>
-    new Response(JSON.stringify({ message: 'Not Found' }), { status: 404, headers: { 'content-type': 'application/json' } });
+    new Response(JSON.stringify({ message: 'Not Found' }), {
+      status: 404,
+      headers: { 'content-type': 'application/json' },
+    });
 
   try {
     await assert.rejects(getGitHubRepoTree('nonexistent', 'repo', ''), /not found/);
@@ -522,10 +605,12 @@ git commit -m "feat: add github_repo_tree tool with recursive support"
 ### Task 3: Implement `github_repo_file`
 
 **Files:**
+
 - Create: `src/tools/githubRepoFile.ts`
 - Create: `test/githubRepoFile.test.ts`
 
 **Context for agent:**
+
 - Reuse the same `buildHeaders`, `githubFetch`, `handleGitHubError`, `isRecord`, `getString`, `getNumber` pattern from Task 2.
 - Cap file content at 50 KB decoded (same as README in `githubRepo.ts`).
 - Detect binary by checking for null bytes after base64 decode.
@@ -581,7 +666,13 @@ import { logger } from '../logger.js';
 import { assertSafeUrl, safeResponseJson, TRUNCATED_MARKER } from '../httpGuards.js';
 import { retryWithBackoff } from '../retry.js';
 import { assertRateLimitOk, getTracker } from '../rateLimit.js';
-import { notFoundError, unavailableError, rateLimitError, timeoutError, validationError } from '../errors.js';
+import {
+  notFoundError,
+  unavailableError,
+  rateLimitError,
+  timeoutError,
+  validationError,
+} from '../errors.js';
 import type { GitHubFileResult } from '../types.js';
 
 const GITHUB_API = 'https://api.github.com';
@@ -612,9 +703,15 @@ async function githubFetch(url: string): Promise<{ response: Response; body: unk
       } catch (err) {
         const error = err instanceof Error ? err : new Error(String(err));
         if (error.name === 'AbortError') {
-          throw timeoutError(`GitHub API request to "${url}" timed out`, { backend: 'github', cause: err });
+          throw timeoutError(`GitHub API request to "${url}" timed out`, {
+            backend: 'github',
+            cause: err,
+          });
         }
-        throw unavailableError(`GitHub API request failed: ${error.message}`, { backend: 'github', cause: err });
+        throw unavailableError(`GitHub API request failed: ${error.message}`, {
+          backend: 'github',
+          cause: err,
+        });
       } finally {
         clearTimeout(timeout);
       }
@@ -624,12 +721,22 @@ async function githubFetch(url: string): Promise<{ response: Response; body: unk
 }
 
 function handleGitHubError(status: number, statusText: string, context: string): never {
-  if (status === 404) throw notFoundError(`GitHub resource "${context}" not found`, { statusCode: 404, backend: 'github' });
+  if (status === 404)
+    throw notFoundError(`GitHub resource "${context}" not found`, {
+      statusCode: 404,
+      backend: 'github',
+    });
   if (status === 403 || status === 429) {
     getTracker('github').recordLimitHit();
-    throw rateLimitError('GitHub API rate limit exceeded. Try again later.', { statusCode: status, backend: 'github' });
+    throw rateLimitError('GitHub API rate limit exceeded. Try again later.', {
+      statusCode: status,
+      backend: 'github',
+    });
   }
-  throw unavailableError(`GitHub API error ${String(status)}: ${statusText} for "${context}"`, { statusCode: status, backend: 'github' });
+  throw unavailableError(`GitHub API error ${String(status)}: ${statusText} for "${context}"`, {
+    statusCode: status,
+    backend: 'github',
+  });
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -682,11 +789,16 @@ export async function getGitHubRepoFile(
   const type = getString(obj, 'type');
 
   if (type === 'dir') {
-    throw validationError('Path is a directory, not a file. Use github_repo_tree to list directories.', { backend: 'github' });
+    throw validationError(
+      'Path is a directory, not a file. Use github_repo_tree to list directories.',
+      { backend: 'github' },
+    );
   }
 
   if (type === 'submodule') {
-    throw validationError('Path is a submodule. File content is not available for submodules.', { backend: 'github' });
+    throw validationError('Path is a submodule. File content is not available for submodules.', {
+      backend: 'github',
+    });
   }
 
   const encoding = getString(obj, 'encoding');
@@ -756,8 +868,12 @@ test('getGitHubRepoFile detects binary files', async () => {
   global.fetch = async () =>
     new Response(
       JSON.stringify({
-        name: 'binary.dat', path: 'binary.dat', size: 3, sha: 'abc',
-        content: binaryContent, encoding: 'base64',
+        name: 'binary.dat',
+        path: 'binary.dat',
+        size: 3,
+        sha: 'abc',
+        content: binaryContent,
+        encoding: 'base64',
         html_url: 'https://github.com/owner/repo/blob/main/binary.dat',
         url: 'https://api.github.com/repos/owner/repo/contents/binary.dat',
       }),
@@ -777,10 +893,10 @@ test('getGitHubRepoFile detects binary files', async () => {
 test('getGitHubRepoFile rejects directories', async () => {
   const originalFetch = global.fetch;
   global.fetch = async () =>
-    new Response(
-      JSON.stringify({ type: 'dir', name: 'src', path: 'src' }),
-      { status: 200, headers: { 'content-type': 'application/json' } },
-    );
+    new Response(JSON.stringify({ type: 'dir', name: 'src', path: 'src' }), {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    });
 
   try {
     await assert.rejects(getGitHubRepoFile('owner', 'repo', 'src'), /directory/);
@@ -792,10 +908,10 @@ test('getGitHubRepoFile rejects directories', async () => {
 test('getGitHubRepoFile rejects submodules', async () => {
   const originalFetch = global.fetch;
   global.fetch = async () =>
-    new Response(
-      JSON.stringify({ type: 'submodule', name: 'sub', path: 'sub', sha: 'abc' }),
-      { status: 200, headers: { 'content-type': 'application/json' } },
-    );
+    new Response(JSON.stringify({ type: 'submodule', name: 'sub', path: 'sub', sha: 'abc' }), {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    });
 
   try {
     await assert.rejects(getGitHubRepoFile('owner', 'repo', 'sub'), /submodule/);
@@ -820,10 +936,12 @@ git commit -m "feat: add github_repo_file tool with binary/submodule/symlink han
 ### Task 4: Implement `github_repo_search`
 
 **Files:**
+
 - Create: `src/tools/githubRepoSearch.ts`
 - Create: `test/githubRepoSearch.test.ts`
 
 **Context for agent:**
+
 - Uses `GET /search/code?q={query}`.
 - Has its own rate-limit tracker: `'github_search'`.
 - Query construction: base query + space-separated qualifiers (`repo:`, `language:`, `path:`).
@@ -924,9 +1042,15 @@ async function githubSearchFetch(url: string): Promise<{ response: Response; bod
       } catch (err) {
         const error = err instanceof Error ? err : new Error(String(err));
         if (error.name === 'AbortError') {
-          throw timeoutError(`GitHub Search API request timed out`, { backend: 'github_search', cause: err });
+          throw timeoutError(`GitHub Search API request timed out`, {
+            backend: 'github_search',
+            cause: err,
+          });
         }
-        throw unavailableError(`GitHub Search API request failed: ${error.message}`, { backend: 'github_search', cause: err });
+        throw unavailableError(`GitHub Search API request failed: ${error.message}`, {
+          backend: 'github_search',
+          cause: err,
+        });
       } finally {
         clearTimeout(timeout);
       }
@@ -936,12 +1060,22 @@ async function githubSearchFetch(url: string): Promise<{ response: Response; bod
 }
 
 function handleGitHubSearchError(status: number, statusText: string, context: string): never {
-  if (status === 404) throw notFoundError(`GitHub resource "${context}" not found`, { statusCode: 404, backend: 'github_search' });
+  if (status === 404)
+    throw notFoundError(`GitHub resource "${context}" not found`, {
+      statusCode: 404,
+      backend: 'github_search',
+    });
   if (status === 403 || status === 429) {
     getTracker('github_search').recordLimitHit();
-    throw rateLimitError('GitHub Search API rate limit exceeded. Try again later.', { statusCode: status, backend: 'github_search' });
+    throw rateLimitError('GitHub Search API rate limit exceeded. Try again later.', {
+      statusCode: status,
+      backend: 'github_search',
+    });
   }
-  throw unavailableError(`GitHub Search API error ${String(status)}: ${statusText}`, { statusCode: status, backend: 'github_search' });
+  throw unavailableError(`GitHub Search API error ${String(status)}: ${statusText}`, {
+    statusCode: status,
+    backend: 'github_search',
+  });
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -967,25 +1101,38 @@ function normalizeCodeResult(item: unknown): GitHubCodeResult | null {
 
   const rawMatches = obj.text_matches;
   const textMatches = Array.isArray(rawMatches)
-    ? rawMatches.map((m: unknown) => {
-        const matchObj = isRecord(m) ? m : null;
-        if (!matchObj) return null;
-        const rawMatches2 = matchObj.matches;
-        const matches = Array.isArray(rawMatches2)
-          ? rawMatches2.map((mm: unknown) => {
-              const mmObj = isRecord(mm) ? mm : null;
-              if (!mmObj) return null;
-              const rawIndices = mmObj.indices;
-              const indices = Array.isArray(rawIndices)
-                ? rawIndices.filter((pair): pair is [number, number] =>
-                    Array.isArray(pair) && pair.length === 2 && typeof pair[0] === 'number' && typeof pair[1] === 'number',
-                  )
-                : [];
-              return { text: getString(mmObj, 'text'), indices };
-            }).filter((x): x is { text: string; indices: [number, number][] } => x !== null)
-          : [];
-        return { fragment: getString(matchObj, 'fragment'), matches };
-      }).filter((x): x is { fragment: string; matches: { text: string; indices: [number, number][] }[] } => x !== null)
+    ? rawMatches
+        .map((m: unknown) => {
+          const matchObj = isRecord(m) ? m : null;
+          if (!matchObj) return null;
+          const rawMatches2 = matchObj.matches;
+          const matches = Array.isArray(rawMatches2)
+            ? rawMatches2
+                .map((mm: unknown) => {
+                  const mmObj = isRecord(mm) ? mm : null;
+                  if (!mmObj) return null;
+                  const rawIndices = mmObj.indices;
+                  const indices = Array.isArray(rawIndices)
+                    ? rawIndices.filter(
+                        (pair): pair is [number, number] =>
+                          Array.isArray(pair) &&
+                          pair.length === 2 &&
+                          typeof pair[0] === 'number' &&
+                          typeof pair[1] === 'number',
+                      )
+                    : [];
+                  return { text: getString(mmObj, 'text'), indices };
+                })
+                .filter((x): x is { text: string; indices: [number, number][] } => x !== null)
+            : [];
+          return { fragment: getString(matchObj, 'fragment'), matches };
+        })
+        .filter(
+          (
+            x,
+          ): x is { fragment: string; matches: { text: string; indices: [number, number][] }[] } =>
+            x !== null,
+        )
     : undefined;
 
   return {
@@ -1030,11 +1177,16 @@ export async function getGitHubRepoSearch(
     if (!response.ok) handleGitHubSearchError(response.status, response.statusText, query);
 
     const obj = isRecord(body) ? body : null;
-    if (!obj) throw unavailableError('Unexpected GitHub Search API response shape', { backend: 'github_search' });
+    if (!obj)
+      throw unavailableError('Unexpected GitHub Search API response shape', {
+        backend: 'github_search',
+      });
 
     totalCount = getNumber(obj, 'total_count');
     const items = Array.isArray(obj.items) ? obj.items : [];
-    const normalized = items.map(normalizeCodeResult).filter((r): r is GitHubCodeResult => r !== null);
+    const normalized = items
+      .map(normalizeCodeResult)
+      .filter((r): r is GitHubCodeResult => r !== null);
     results.push(...normalized);
 
     if (normalized.length < perPage) break; // no more results
@@ -1060,10 +1212,10 @@ test('getGitHubRepoSearch constructs query with qualifiers', async () => {
   const originalFetch = global.fetch;
   global.fetch = async (input: RequestInfo | URL) => {
     requestUrl = String(input);
-    return new Response(
-      JSON.stringify({ total_count: 0, items: [] }),
-      { status: 200, headers: { 'content-type': 'application/json' } },
-    );
+    return new Response(JSON.stringify({ total_count: 0, items: [] }), {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    });
   };
 
   try {
@@ -1081,7 +1233,10 @@ test('getGitHubRepoSearch constructs query with qualifiers', async () => {
 test('getGitHubRepoSearch throws NOT_FOUND for invalid query', async () => {
   const originalFetch = global.fetch;
   global.fetch = async () =>
-    new Response(JSON.stringify({ message: 'Validation Failed' }), { status: 422, headers: { 'content-type': 'application/json' } });
+    new Response(JSON.stringify({ message: 'Validation Failed' }), {
+      status: 422,
+      headers: { 'content-type': 'application/json' },
+    });
 
   try {
     await assert.rejects(getGitHubRepoSearch(''), /error/);
@@ -1106,9 +1261,11 @@ git commit -m "feat: add github_repo_search tool with pagination and query quali
 ### Task 5: Register Tools in `src/server.ts`
 
 **Files:**
+
 - Modify: `src/server.ts`
 
 **Context for agent:**
+
 - Add three `registerTool` calls following the exact pattern of `github_repo`.
 - Import the three new handlers at the top.
 - Use the same Zod regex for `owner` and `repo` as `github_repo`.
@@ -1139,6 +1296,7 @@ Actually, better approach: just modify `src/server.ts` directly and verify `npm 
 - [ ] **Step 2: Modify `src/server.ts`**
 
 Add imports near the top:
+
 ```typescript
 import { getGitHubRepoTree } from './tools/githubRepoTree.js';
 import { getGitHubRepoFile } from './tools/githubRepoFile.js';
@@ -1148,91 +1306,121 @@ import { getGitHubRepoSearch } from './tools/githubRepoSearch.js';
 Add tool registrations after `github_trending` (around line 251). Pattern each exactly like `github_repo`:
 
 ```typescript
-  // ── github_repo_tree ────────────────────────────────────────────────────
-  server.registerTool(
-    'github_repo_tree',
-    {
-      description:
-        'List the directory structure of a GitHub repository. Supports recursive tree listing and path-based browsing.',
-      inputSchema: {
-        owner: z.string().regex(/^[a-zA-Z0-9](?:[a-zA-Z0-9._-]*[a-zA-Z0-9])?$/).describe('GitHub username or organisation'),
-        repo: z.string().regex(/^[a-zA-Z0-9._-]{1,100}$/).describe('Repository name'),
-        path: z.string().optional().default('').describe('Directory path within the repo'),
-        branch: z.string().optional().describe('Git ref (branch, tag, or commit SHA)'),
-        recursive: z.boolean().optional().default(false).describe('Return full recursive tree'),
-        limit: z.number().int().min(1).max(500).optional().default(100).describe('Max items to return (1–500)'),
-      },
+// ── github_repo_tree ────────────────────────────────────────────────────
+server.registerTool(
+  'github_repo_tree',
+  {
+    description:
+      'List the directory structure of a GitHub repository. Supports recursive tree listing and path-based browsing.',
+    inputSchema: {
+      owner: z
+        .string()
+        .regex(/^[a-zA-Z0-9](?:[a-zA-Z0-9._-]*[a-zA-Z0-9])?$/)
+        .describe('GitHub username or organisation'),
+      repo: z
+        .string()
+        .regex(/^[a-zA-Z0-9._-]{1,100}$/)
+        .describe('Repository name'),
+      path: z.string().optional().default('').describe('Directory path within the repo'),
+      branch: z.string().optional().describe('Git ref (branch, tag, or commit SHA)'),
+      recursive: z.boolean().optional().default(false).describe('Return full recursive tree'),
+      limit: z
+        .number()
+        .int()
+        .min(1)
+        .max(500)
+        .optional()
+        .default(100)
+        .describe('Max items to return (1–500)'),
     },
-    async ({ owner, repo, path, branch, recursive, limit }) => {
-      logger.info({ tool: 'github_repo_tree', owner, repo, path, recursive }, 'Tool invoked');
-      const start = Date.now();
-      try {
-        const data = await getGitHubRepoTree(owner, repo, path, branch, recursive, limit);
-        const result = makeResult('github_repo_tree', data, Date.now() - start);
-        return successResponse(result);
-      } catch (err: unknown) {
-        logger.error({ err, tool: 'github_repo_tree' }, 'Tool failed');
-        return errorResponse(err);
-      }
-    },
-  );
+  },
+  async ({ owner, repo, path, branch, recursive, limit }) => {
+    logger.info({ tool: 'github_repo_tree', owner, repo, path, recursive }, 'Tool invoked');
+    const start = Date.now();
+    try {
+      const data = await getGitHubRepoTree(owner, repo, path, branch, recursive, limit);
+      const result = makeResult('github_repo_tree', data, Date.now() - start);
+      return successResponse(result);
+    } catch (err: unknown) {
+      logger.error({ err, tool: 'github_repo_tree' }, 'Tool failed');
+      return errorResponse(err);
+    }
+  },
+);
 
-  // ── github_repo_file ────────────────────────────────────────────────────
-  server.registerTool(
-    'github_repo_file',
-    {
-      description:
-        'Read the raw content of a specific file in a GitHub repository. Supports UTF-8 text and base64 output. Handles binary detection, submodules, and symlinks.',
-      inputSchema: {
-        owner: z.string().regex(/^[a-zA-Z0-9](?:[a-zA-Z0-9._-]*[a-zA-Z0-9])?$/).describe('GitHub username or organisation'),
-        repo: z.string().regex(/^[a-zA-Z0-9._-]{1,100}$/).describe('Repository name'),
-        path: z.string().describe('File path within the repo'),
-        branch: z.string().optional().describe('Git ref (branch, tag, or commit SHA)'),
-        raw: z.boolean().optional().default(true).describe('true = decoded UTF-8 text; false = base64'),
-      },
+// ── github_repo_file ────────────────────────────────────────────────────
+server.registerTool(
+  'github_repo_file',
+  {
+    description:
+      'Read the raw content of a specific file in a GitHub repository. Supports UTF-8 text and base64 output. Handles binary detection, submodules, and symlinks.',
+    inputSchema: {
+      owner: z
+        .string()
+        .regex(/^[a-zA-Z0-9](?:[a-zA-Z0-9._-]*[a-zA-Z0-9])?$/)
+        .describe('GitHub username or organisation'),
+      repo: z
+        .string()
+        .regex(/^[a-zA-Z0-9._-]{1,100}$/)
+        .describe('Repository name'),
+      path: z.string().describe('File path within the repo'),
+      branch: z.string().optional().describe('Git ref (branch, tag, or commit SHA)'),
+      raw: z
+        .boolean()
+        .optional()
+        .default(true)
+        .describe('true = decoded UTF-8 text; false = base64'),
     },
-    async ({ owner, repo, path, branch, raw }) => {
-      logger.info({ tool: 'github_repo_file', owner, repo, path }, 'Tool invoked');
-      const start = Date.now();
-      try {
-        const data = await getGitHubRepoFile(owner, repo, path, branch, raw);
-        const result = makeResult('github_repo_file', data, Date.now() - start);
-        return successResponse(result);
-      } catch (err: unknown) {
-        logger.error({ err, tool: 'github_repo_file' }, 'Tool failed');
-        return errorResponse(err);
-      }
-    },
-  );
+  },
+  async ({ owner, repo, path, branch, raw }) => {
+    logger.info({ tool: 'github_repo_file', owner, repo, path }, 'Tool invoked');
+    const start = Date.now();
+    try {
+      const data = await getGitHubRepoFile(owner, repo, path, branch, raw);
+      const result = makeResult('github_repo_file', data, Date.now() - start);
+      return successResponse(result);
+    } catch (err: unknown) {
+      logger.error({ err, tool: 'github_repo_file' }, 'Tool failed');
+      return errorResponse(err);
+    }
+  },
+);
 
-  // ── github_repo_search ────────────────────────────────────────────────────
-  server.registerTool(
-    'github_repo_search',
-    {
-      description:
-        'Search code across GitHub using the GitHub Search API. Supports repo-scoped, language, and path filtering. Results include code snippets with highlight positions.',
-      inputSchema: {
-        query: z.string().describe('Search term (GitHub code-search syntax)'),
-        owner: z.string().optional().describe('Narrow to a specific user or org'),
-        repo: z.string().optional().describe('Narrow to a specific repo (requires owner)'),
-        language: z.string().optional().describe('Filter by language (e.g. "typescript")'),
-        path: z.string().optional().describe('Filter to files under this path'),
-        limit: z.number().int().min(1).max(100).optional().default(30).describe('Max results (1–100)'),
-      },
+// ── github_repo_search ────────────────────────────────────────────────────
+server.registerTool(
+  'github_repo_search',
+  {
+    description:
+      'Search code across GitHub using the GitHub Search API. Supports repo-scoped, language, and path filtering. Results include code snippets with highlight positions.',
+    inputSchema: {
+      query: z.string().describe('Search term (GitHub code-search syntax)'),
+      owner: z.string().optional().describe('Narrow to a specific user or org'),
+      repo: z.string().optional().describe('Narrow to a specific repo (requires owner)'),
+      language: z.string().optional().describe('Filter by language (e.g. "typescript")'),
+      path: z.string().optional().describe('Filter to files under this path'),
+      limit: z
+        .number()
+        .int()
+        .min(1)
+        .max(100)
+        .optional()
+        .default(30)
+        .describe('Max results (1–100)'),
     },
-    async ({ query, owner, repo, language, path, limit }) => {
-      logger.info({ tool: 'github_repo_search', query, owner, repo }, 'Tool invoked');
-      const start = Date.now();
-      try {
-        const data = await getGitHubRepoSearch(query, owner, repo, language, path, limit);
-        const result = makeResult('github_repo_search', data, Date.now() - start);
-        return successResponse(result);
-      } catch (err: unknown) {
-        logger.error({ err, tool: 'github_repo_search' }, 'Tool failed');
-        return errorResponse(err);
-      }
-    },
-  );
+  },
+  async ({ query, owner, repo, language, path, limit }) => {
+    logger.info({ tool: 'github_repo_search', query, owner, repo }, 'Tool invoked');
+    const start = Date.now();
+    try {
+      const data = await getGitHubRepoSearch(query, owner, repo, language, path, limit);
+      const result = makeResult('github_repo_search', data, Date.now() - start);
+      return successResponse(result);
+    } catch (err: unknown) {
+      logger.error({ err, tool: 'github_repo_search' }, 'Tool failed');
+      return errorResponse(err);
+    }
+  },
+);
 ```
 
 - [ ] **Step 3: Verify typecheck and lint pass**
@@ -1255,6 +1443,7 @@ git commit -m "feat: register github_repo_tree, github_repo_file, github_repo_se
 ### Task 6: Integration Verification
 
 **Files:**
+
 - Run across all modified/created files
 
 - [ ] **Step 1: Run full test suite**
@@ -1287,6 +1476,7 @@ git commit -m "style: format new GitHub exploration code" || echo "No changes to
 - [ ] **Step 6: Final review summary**
 
 Confirm all files changed:
+
 - `src/types.ts`
 - `src/rateLimit.ts`
 - `src/health.ts`
@@ -1303,23 +1493,23 @@ Confirm all files changed:
 
 ## Spec Coverage Checklist
 
-| Spec Requirement | Task |
-|-----------------|------|
-| `github_repo_tree` tool | Task 2 |
-| `github_repo_file` tool | Task 3 |
-| `github_repo_search` tool | Task 4 |
-| New types in `src/types.ts` | Task 1 |
-| Separate `'github_search'` rate-limit tracker | Task 1 |
-| Health check updates (FREE_TOOLS, RATE_LIMIT_TOOL_MAP, probes) | Task 1 |
-| Zod regex validation for `owner`/`repo` | Task 5 |
-| Recursive tree with fallback | Task 2 |
-| File size cap (50 KB) | Task 3 |
-| Binary detection | Task 3 |
-| Submodule/symlink/directory handling | Task 3 |
-| Search query construction with qualifiers | Task 4 |
-| Search pagination (100/page, 1,000 ceiling) | Task 4 |
-| Server registration | Task 5 |
-| Error handling (404, 403, 429, network) | All tasks |
+| Spec Requirement                                               | Task      |
+| -------------------------------------------------------------- | --------- |
+| `github_repo_tree` tool                                        | Task 2    |
+| `github_repo_file` tool                                        | Task 3    |
+| `github_repo_search` tool                                      | Task 4    |
+| New types in `src/types.ts`                                    | Task 1    |
+| Separate `'github_search'` rate-limit tracker                  | Task 1    |
+| Health check updates (FREE_TOOLS, RATE_LIMIT_TOOL_MAP, probes) | Task 1    |
+| Zod regex validation for `owner`/`repo`                        | Task 5    |
+| Recursive tree with fallback                                   | Task 2    |
+| File size cap (50 KB)                                          | Task 3    |
+| Binary detection                                               | Task 3    |
+| Submodule/symlink/directory handling                           | Task 3    |
+| Search query construction with qualifiers                      | Task 4    |
+| Search pagination (100/page, 1,000 ceiling)                    | Task 4    |
+| Server registration                                            | Task 5    |
+| Error handling (404, 403, 429, network)                        | All tasks |
 
 ## Self-Review
 

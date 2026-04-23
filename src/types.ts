@@ -403,7 +403,7 @@ export interface UrlSource {
   type: 'url';
   url: string;
   /** Additional seed URLs to crawl in the same corpus. */
-  urls?: string[];
+  urls?: string[] | undefined;
 }
 
 export interface SitemapSource {
@@ -415,18 +415,18 @@ export interface SearchSeedSource {
   type: 'search';
   query: string;
   /** Max URLs to collect from web search (1–20, default 10). */
-  maxSeedUrls?: number;
+  maxSeedUrls?: number | undefined;
 }
 
 export interface GitHubSource {
   type: 'github';
   owner: string;
   repo: string;
-  branch?: string;
+  branch?: string | undefined;
   /** File extensions to include. Default: ['.md', '.mdx', '.rst', '.txt', '.py', '.ts', '.js', '.go', '.rs', '.java'] */
-  extensions?: string[];
+  extensions?: string[] | undefined;
   /** Optional code search query to pre-filter files. */
-  query?: string;
+  query?: string | undefined;
 }
 
 export type SemanticCrawlSource = UrlSource | SitemapSource | SearchSeedSource | GitHubSource;

@@ -33,7 +33,11 @@ interface EncodeResult {
 interface HFTokenizer {
   encode(
     text: string,
-    options?: { text_pair?: string | null; add_special_tokens?: boolean; return_token_type_ids?: boolean | null },
+    options?: {
+      text_pair?: string | null;
+      add_special_tokens?: boolean;
+      return_token_type_ids?: boolean | null;
+    },
   ): EncodeResult;
 }
 
@@ -76,11 +80,18 @@ async function getSession(): Promise<SessionState> {
 
     // @huggingface/tokenizers v0.1.x: constructor takes (tokenizerJson, configJson)
     // Pass the full parsed object to avoid stripping fields (e.g., added_tokens_decoder).
-    const tokenizerJson = JSON.parse(readFileSync(TOKENIZER_PATH, 'utf8'));
-    const tokenizer = new Tokenizer(tokenizerJson, {
-      truncation: tokenizerJson.truncation,
-      padding: tokenizerJson.padding,
-    }) as unknown as HFTokenizer;
+    const tokenizerJson: unknown = JSON.parse(readFileSync(TOKENIZER_PATH, 'utf8'));
+    const tokenizer = new Tokenizer(
+      tokenizerJson as Record<string, unknown>,
+      {
+        truncation: (tokenizerJson as Record<string, unknown>).truncation as
+          | Record<string, unknown>
+          | undefined,
+        padding: (tokenizerJson as Record<string, unknown>).padding as
+          | Record<string, unknown>
+          | undefined,
+      },
+    ) as unknown as HFTokenizer;
 
     const session = await InferenceSession.create(MODEL_PATH, {
       executionProviders: ['cpu'],
@@ -98,10 +109,7 @@ async function getSession(): Promise<SessionState> {
       throw unavailableError('Cross-encoder model has no output nodes');
     }
 
-    logger.info(
-      { inputNames, outputNames, hasTokenTypeIds },
-      'Cross-encoder model loaded',
-    );
+    logger.info({ inputNames, outputNames, hasTokenTypeIds }, 'Cross-encoder model loaded');
 
     return {
       session: session as unknown as SessionLike,
@@ -137,8 +145,8 @@ function tokenizePairs(
       return_token_type_ids: true,
     });
 
-    let ids = encoding.ids.slice(0, maxLength);
-    let mask = encoding.attention_mask.slice(0, maxLength);
+    const ids = encoding.ids.slice(0, maxLength);
+    const mask = encoding.attention_mask.slice(0, maxLength);
     const types = (encoding.token_type_ids ?? new Array(ids.length).fill(0)).slice(0, maxLength);
 
     // Pad to maxLength
@@ -156,10 +164,7 @@ function tokenizePairs(
   return { inputIds, attentionMask, tokenTypeIds };
 }
 
-async function runInference(
-  state: SessionState,
-  batch: TokenizedBatch,
-): Promise<number[]> {
+async function runInference(state: SessionState, batch: TokenizedBatch): Promise<number[]> {
   const ort = await import('onnxruntime-node');
   const batchSize = batch.inputIds.length;
   const seqLen = batch.inputIds[0]?.length ?? 0;
@@ -171,9 +176,9 @@ async function runInference(
   for (let i = 0; i < batchSize; i++) {
     for (let j = 0; j < seqLen; j++) {
       const idx = i * seqLen + j;
-      flatInputIds[idx] = batch.inputIds[i]![j]!;
-      flatAttentionMask[idx] = batch.attentionMask[i]![j]!;
-      flatTokenTypeIds[idx] = batch.tokenTypeIds[i]![j]!;
+      flatInputIds[idx] = (batch.inputIds[i]?.[j] as bigint | undefined) ?? 0n;
+      flatAttentionMask[idx] = (batch.attentionMask[i]?.[j] as bigint | undefined) ?? 0n;
+      flatTokenTypeIds[idx] = (batch.tokenTypeIds[i]?.[j] as bigint | undefined) ?? 0n;
     }
   }
 
@@ -188,7 +193,7 @@ async function runInference(
 
   const results = await state.session.run(feeds);
   const output = results[state.outputName] as { data: Float32Array } | undefined;
-  if (!output || !output.data) {
+  if (!output?.data) {
     throw unavailableError(
       `Cross-encoder output "${state.outputName}" missing from inference result`,
     );
@@ -196,7 +201,7 @@ async function runInference(
 
   const scores: number[] = [];
   for (let i = 0; i < batchSize; i++) {
-    scores.push(output.data[i]!);
+    scores.push(output.data[i] as number);
   }
   return scores;
 }
@@ -224,7 +229,7 @@ export async function rerank(
 
   const results: RerankResult[] = documents.map((doc, idx) => ({
     index: idx,
-    score: allScores[idx]!,
+    score: allScores[idx] as number,
     document: doc,
   }));
 

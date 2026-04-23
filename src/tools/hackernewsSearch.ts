@@ -172,7 +172,7 @@ export async function hackernewsSearch(
   }));
   const rescoreWeights = loadConfig().rescoreWeights.hackernewsSearch;
   const rescored = multiSignalRescore(signaled, rescoreWeights, limit);
-  results = rescored.map(r => r.item);
+  results = rescored.map((r) => r.item);
 
   cache.set(key, results);
   logger.debug({ resultCount: results.length }, 'HN search complete');

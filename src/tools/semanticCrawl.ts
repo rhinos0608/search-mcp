@@ -170,7 +170,9 @@ export function isBorderline(chunk: SemanticCrawlChunk): boolean {
 function filterBySemanticCoherence(chunkEmbeddings: ChunkWithEmbedding[]): SemanticCrawlChunk[] {
   if (chunkEmbeddings.length === 0) return [];
 
-  const dim = chunkEmbeddings[0]!.embedding.length;
+  const first = chunkEmbeddings[0];
+  if (!first) return [];
+  const dim = first.embedding.length;
   const centroid: number[] = new Array<number>(dim).fill(0);
   for (const ce of chunkEmbeddings) {
     for (let d = 0; d < dim; d++) {
@@ -357,7 +359,10 @@ export async function applyReranking(
     const reranked = await rerank(query, candidateTexts, { topK });
     return reranked.map((r) => {
       const candidate = candidates[r.index];
-      return candidate ? { ...candidate, rerankScore: r.score } : candidates[r.index]!;
+      if (!candidate) {
+        throw new Error(`Reranker returned invalid index ${String(r.index)}`);
+      }
+      return { ...candidate, rerankScore: r.score };
     });
   } catch (err) {
     logger.warn({ err }, 'Cross-encoder re-ranking failed, falling back to bi-encoder ranking');

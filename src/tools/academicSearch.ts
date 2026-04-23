@@ -479,13 +479,17 @@ export async function academicSearch(
     ]);
 
     if (arxivResult.status === 'rejected') {
-      const msg = arxivResult.reason instanceof Error ? arxivResult.reason.message : String(arxivResult.reason);
+      const msg =
+        arxivResult.reason instanceof Error
+          ? arxivResult.reason.message
+          : String(arxivResult.reason);
       warnings.push(`ArXiv search failed: ${msg}`);
       logger.warn({ backend: 'arxiv', error: msg }, 'ArXiv search failed');
     }
 
     if (ssResult.status === 'rejected') {
-      const msg = ssResult.reason instanceof Error ? ssResult.reason.message : String(ssResult.reason);
+      const msg =
+        ssResult.reason instanceof Error ? ssResult.reason.message : String(ssResult.reason);
       warnings.push(`Semantic Scholar search failed: ${msg}`);
       logger.warn({ backend: 'semantic_scholar', error: msg }, 'Semantic Scholar search failed');
     }

@@ -5,7 +5,7 @@ export function daysSince(date: Date): number {
 }
 
 export function parseAgeToDays(ageStr: string | null | undefined): number | null {
-  if (ageStr == null || ageStr === "") {
+  if (ageStr == null || ageStr === '') {
     return null;
   }
 
@@ -22,13 +22,13 @@ export function parseAgeToDays(ageStr: string | null | undefined): number | null
     }
     const value = parseFloat(rawValue);
     const unit = rawUnit.toLowerCase();
-    if (unit.startsWith("day")) {
+    if (unit.startsWith('day')) {
       return value;
     }
-    if (unit.startsWith("week")) {
+    if (unit.startsWith('week')) {
       return value * 7;
     }
-    if (unit.startsWith("hour")) {
+    if (unit.startsWith('hour')) {
       return value / 24;
     }
   }

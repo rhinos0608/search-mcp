@@ -34,7 +34,7 @@ export function minMaxNormalize(values: number[]): number[] {
   if (range === 0) {
     return new Array<number>(values.length).fill(0);
   }
-  return values.map(v => (v - min) / range);
+  return values.map((v) => (v - min) / range);
 }
 
 export function multiSignalRescore<T>(
@@ -42,7 +42,7 @@ export function multiSignalRescore<T>(
   weights: Partial<Record<string, number>>,
   limit: number,
 ): ScoredResult<T>[] {
-  const rrfScores = items.map(i => i.rrfScore);
+  const rrfScores = items.map((i) => i.rrfScore);
   const rrfNorm = minMaxNormalize(rrfScores);
 
   const scored = items.map((item, idx) => {
@@ -71,7 +71,7 @@ export function multiSignalRescore<T>(
 }
 
 export function extractWebSearchSignals(results: SearchResult[]): Record<string, number>[] {
-  const rawRecency = results.map(r => {
+  const rawRecency = results.map((r) => {
     const days = parseAgeToDays(r.age);
     if (days == null) return 0;
     return applyRecencyDecay(days, 7);
@@ -84,15 +84,18 @@ export function extractWebSearchSignals(results: SearchResult[]): Record<string,
   }));
 }
 
-export function extractAcademicSignals(papers: AcademicPaper[], currentYear: number): Record<string, number>[] {
-  const rawRecency = papers.map(p => {
+export function extractAcademicSignals(
+  papers: AcademicPaper[],
+  currentYear: number,
+): Record<string, number>[] {
+  const rawRecency = papers.map((p) => {
     const ageYears = p.year == null ? 10 : currentYear - p.year;
     const ageDays = ageYears * 365;
     return applyRecencyDecay(ageDays, 1095);
   });
   const recencyNorm = minMaxNormalize(rawRecency);
 
-  const rawCitations = papers.map(p => applyLogTransform(p.citationCount ?? 0));
+  const rawCitations = papers.map((p) => applyLogTransform(p.citationCount ?? 0));
   const citationsNorm = minMaxNormalize(rawCitations);
 
   return papers.map((p, i) => ({
@@ -102,10 +105,13 @@ export function extractAcademicSignals(papers: AcademicPaper[], currentYear: num
   }));
 }
 
-export function extractHNSignals(items: HackerNewsItem[], sort: 'relevance' | 'date' | 'top'): Record<string, number>[] {
+export function extractHNSignals(
+  items: HackerNewsItem[],
+  sort: 'relevance' | 'date' | 'top',
+): Record<string, number>[] {
   let rawRecency: number[] | undefined;
   if (sort !== 'date') {
-    rawRecency = items.map(item => {
+    rawRecency = items.map((item) => {
       const days = (Date.now() - new Date(item.createdAt).getTime()) / (1000 * 60 * 60 * 24);
       return applyRecencyDecay(days, 180);
     });
@@ -114,11 +120,11 @@ export function extractHNSignals(items: HackerNewsItem[], sort: 'relevance' | 'd
 
   let rawEngagement: number[] | undefined;
   if (sort !== 'top') {
-    rawEngagement = items.map(item => applyLogTransform(item.points));
+    rawEngagement = items.map((item) => applyLogTransform(item.points));
   }
   const engagementNorm = rawEngagement != null ? minMaxNormalize(rawEngagement) : undefined;
 
-  const rawCommentEngagement = items.map(item => applyLogTransform(item.numComments));
+  const rawCommentEngagement = items.map((item) => applyLogTransform(item.numComments));
   const commentEngagementNorm = minMaxNormalize(rawCommentEngagement);
 
   return items.map((_, i) => {
@@ -134,10 +140,13 @@ export function extractHNSignals(items: HackerNewsItem[], sort: 'relevance' | 'd
   });
 }
 
-export function extractRedditSignals(posts: RedditPost[], sort: 'relevance' | 'date' | 'top'): Record<string, number>[] {
+export function extractRedditSignals(
+  posts: RedditPost[],
+  sort: 'relevance' | 'date' | 'top',
+): Record<string, number>[] {
   let rawRecency: number[] | undefined;
   if (sort !== 'date') {
-    rawRecency = posts.map(post => {
+    rawRecency = posts.map((post) => {
       const days = (Date.now() - post.createdUtc * 1000) / (1000 * 60 * 60 * 24);
       return applyRecencyDecay(days, 180);
     });
@@ -146,11 +155,11 @@ export function extractRedditSignals(posts: RedditPost[], sort: 'relevance' | 'd
 
   let rawEngagement: number[] | undefined;
   if (sort !== 'top') {
-    rawEngagement = posts.map(post => applyLogTransform(post.score));
+    rawEngagement = posts.map((post) => applyLogTransform(post.score));
   }
   const engagementNorm = rawEngagement != null ? minMaxNormalize(rawEngagement) : undefined;
 
-  const rawCommentEngagement = posts.map(post => applyLogTransform(post.numComments));
+  const rawCommentEngagement = posts.map((post) => applyLogTransform(post.numComments));
   const commentEngagementNorm = minMaxNormalize(rawCommentEngagement);
 
   return posts.map((_, i) => {

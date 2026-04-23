@@ -274,7 +274,10 @@ async function fetchRawContent(
         }
 
         if (response.status === 404) {
-          throw notFoundError(`GitHub file "${path}" not found`, { statusCode: 404, backend: 'github' });
+          throw notFoundError(`GitHub file "${path}" not found`, {
+            statusCode: 404,
+            backend: 'github',
+          });
         }
         if (!response.ok && response.status !== 206) {
           throw unavailableError(
@@ -349,7 +352,10 @@ export async function getGitHubRepoFile(
   /** Internal: tracks symlink-follow depth to detect cycles. */
   _depth = 0,
 ): Promise<GitHubFileResult> {
-  logger.info({ owner, repo, path, branch, raw, offset, limit, byteOffset, byteLimit }, 'getGitHubRepoFile');
+  logger.info(
+    { owner, repo, path, branch, raw, offset, limit, byteOffset, byteLimit },
+    'getGitHubRepoFile',
+  );
 
   // ── Parameter validation ────────────────────────────────────────────────
 
@@ -434,8 +440,21 @@ export async function getGitHubRepoFile(
         // File too large for GitHub API — fall back to raw.githubusercontent.com
         // if line ranges or byte ranges are requested, otherwise keep the existing error
         if (hasLineRange || hasByteRange) {
-          logger.debug({ path, size: 'large' }, 'Falling back to raw.githubusercontent.com for range request');
-          return fetchRawAndNormalize(owner, repo, path, branch, raw, offset, limit, byteOffset, byteLimit);
+          logger.debug(
+            { path, size: 'large' },
+            'Falling back to raw.githubusercontent.com for range request',
+          );
+          return fetchRawAndNormalize(
+            owner,
+            repo,
+            path,
+            branch,
+            raw,
+            offset,
+            limit,
+            byteOffset,
+            byteLimit,
+          );
         }
         const rawUrl = branch
           ? `https://raw.githubusercontent.com/${owner}/${repo}/${encodeURIComponent(branch)}${encodedPath}`
@@ -537,10 +556,10 @@ export async function getGitHubRepoFile(
 
   if (binary) {
     if (hasLineRange || hasByteRange) {
-      throw validationError(
-        `Line ranges and byte ranges are not supported for binary files.`,
-        { statusCode: 400, backend: 'github' },
-      );
+      throw validationError(`Line ranges and byte ranges are not supported for binary files.`, {
+        statusCode: 400,
+        backend: 'github',
+      });
     }
     return normalizeBinaryContent(name, path, size, sha, bytes, htmlUrl, apiUrl);
   }
@@ -585,7 +604,17 @@ export async function getGitHubRepoFile(
   // Apply byte ranges (fallback to raw.githubusercontent.com even for API-sized files
   // because GitHub API doesn't support byte ranges)
   if (hasByteRange) {
-    return fetchRawAndNormalize(owner, repo, path, branch, raw, offset, limit, byteOffset, byteLimit);
+    return fetchRawAndNormalize(
+      owner,
+      repo,
+      path,
+      branch,
+      raw,
+      offset,
+      limit,
+      byteOffset,
+      byteLimit,
+    );
   }
 
   // Default path: no ranges specified
@@ -699,10 +728,10 @@ async function fetchRawAndNormalize(
   const binary = isBinaryContent(content, path);
 
   if (binary) {
-    throw validationError(
-      `Line ranges and byte ranges are not supported for binary files.`,
-      { statusCode: 400, backend: 'github' },
-    );
+    throw validationError(`Line ranges and byte ranges are not supported for binary files.`, {
+      statusCode: 400,
+      backend: 'github',
+    });
   }
 
   // For byte ranges, count total lines in the fetched chunk
@@ -719,7 +748,11 @@ async function fetchRawAndNormalize(
 
   if (hasLineRange) {
     const effectiveOffset = offset ?? 0;
-    const { text: sliced, totalLines: fileTotalLines, hasMore } = applyLineRange(content, effectiveOffset, limit);
+    const {
+      text: sliced,
+      totalLines: fileTotalLines,
+      hasMore,
+    } = applyLineRange(content, effectiveOffset, limit);
 
     let text = sliced;
     if (text.length > MAX_FILE_LENGTH) {

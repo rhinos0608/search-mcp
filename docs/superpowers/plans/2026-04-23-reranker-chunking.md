@@ -12,17 +12,17 @@
 
 ## File Structure
 
-| File | Action | Purpose |
-|---|---|---|
-| `src/utils/rerank.ts` | Create | Generic cross-encoder re-ranking utility |
-| `test/rerank.test.ts` | Create | Re-ranker tests (model-conditional) |
-| `src/chunking.ts` | Modify | Add breadcrumb, short-line+link, repeated-chunk heuristics + `filterBoilerplateWithContext` |
-| `test/chunking.test.ts` | Modify | Add tests for new boilerplate heuristics |
-| `src/tools/semanticCrawl.ts` | Modify | Wire re-ranker + semantic coherence check into pipeline |
-| `test/semanticCrawl.test.ts` | Modify | Add semantic coherence integration tests |
-| `.gitignore` | Modify | Add `models/` directory |
-| `scripts/download-model.ts` | Create | Download ONNX model + tokenizer from Hugging Face |
-| `scripts/eval-retrieval.ts` | Create | Tiny retrieval eval benchmark (before/after comparison) |
+| File                         | Action | Purpose                                                                                     |
+| ---------------------------- | ------ | ------------------------------------------------------------------------------------------- |
+| `src/utils/rerank.ts`        | Create | Generic cross-encoder re-ranking utility                                                    |
+| `test/rerank.test.ts`        | Create | Re-ranker tests (model-conditional)                                                         |
+| `src/chunking.ts`            | Modify | Add breadcrumb, short-line+link, repeated-chunk heuristics + `filterBoilerplateWithContext` |
+| `test/chunking.test.ts`      | Modify | Add tests for new boilerplate heuristics                                                    |
+| `src/tools/semanticCrawl.ts` | Modify | Wire re-ranker + semantic coherence check into pipeline                                     |
+| `test/semanticCrawl.test.ts` | Modify | Add semantic coherence integration tests                                                    |
+| `.gitignore`                 | Modify | Add `models/` directory                                                                     |
+| `scripts/download-model.ts`  | Create | Download ONNX model + tokenizer from Hugging Face                                           |
+| `scripts/eval-retrieval.ts`  | Create | Tiny retrieval eval benchmark (before/after comparison)                                     |
 
 ## Key Conventions
 
@@ -37,6 +37,7 @@
 ## Task 1: Install Dependencies
 
 **Files:**
+
 - Modify: `package.json`
 
 - [ ] **Step 1: Install onnxruntime-node and @huggingface/tokenizers**
@@ -65,6 +66,7 @@ git commit -m "deps: add onnxruntime-node and @huggingface/tokenizers for cross-
 ## Task 2: Model Download Script
 
 **Files:**
+
 - Create: `scripts/download-model.ts`
 - Modify: `.gitignore`
 
@@ -135,6 +137,7 @@ git commit -m "feat: add cross-encoder model download script"
 ## Task 3: Re-Ranker Tests (TDD — Write Failing Tests)
 
 **Files:**
+
 - Create: `test/rerank.test.ts`
 
 - [ ] **Step 1: Write the failing re-ranker tests**
@@ -148,12 +151,15 @@ import { join } from 'node:path';
 
 const MODEL_DIR = join(import.meta.dirname, '..', 'models');
 const MODEL_AVAILABLE =
-  existsSync(join(MODEL_DIR, 'model.onnx')) &&
-  existsSync(join(MODEL_DIR, 'tokenizer.json'));
+  existsSync(join(MODEL_DIR, 'model.onnx')) && existsSync(join(MODEL_DIR, 'tokenizer.json'));
 
 // Helper: skip block if model not available
 function requireModel(fn: () => void): () => void {
-  return MODEL_AVAILABLE ? fn : () => { /* skipped */ };
+  return MODEL_AVAILABLE
+    ? fn
+    : () => {
+        /* skipped */
+      };
 }
 
 describe('rerank', () => {
@@ -194,17 +200,21 @@ describe('rerank', () => {
   it(
     'ranks relevant document above irrelevant',
     requireModel(async () => {
-      const results = await rerank!('python web framework', [
-        'The quick brown fox jumps over the lazy dog.',
-        'Flask is a lightweight WSGI web application framework in Python.',
-        'Django is a high-level Python web framework that encourages rapid development.',
-        'Banana bread recipe: mix bananas, flour, eggs, and sugar.',
-      ], { topK: 4 });
+      const results = await rerank!(
+        'python web framework',
+        [
+          'The quick brown fox jumps over the lazy dog.',
+          'Flask is a lightweight WSGI web application framework in Python.',
+          'Django is a high-level Python web framework that encourages rapid development.',
+          'Banana bread recipe: mix bananas, flour, eggs, and sugar.',
+        ],
+        { topK: 4 },
+      );
 
       // The two Python docs should rank above the fox and banana bread
       const pythonIndices = [1, 2];
       const irrelevantIndices = [0, 3];
-      const topTwo = results.slice(0, 2).map(r => r.index);
+      const topTwo = results.slice(0, 2).map((r) => r.index);
       for (const idx of pythonIndices) {
         assert.ok(
           topTwo.includes(idx),
@@ -217,11 +227,15 @@ describe('rerank', () => {
   it(
     'returns results in descending score order',
     requireModel(async () => {
-      const results = await rerank!('machine learning', [
-        'Machine learning is a subset of artificial intelligence.',
-        'I like to eat pizza for dinner.',
-        'Deep learning uses neural networks with many layers.',
-      ], { topK: 3 });
+      const results = await rerank!(
+        'machine learning',
+        [
+          'Machine learning is a subset of artificial intelligence.',
+          'I like to eat pizza for dinner.',
+          'Deep learning uses neural networks with many layers.',
+        ],
+        { topK: 3 },
+      );
 
       for (let i = 1; i < results.length; i++) {
         assert.ok(
@@ -235,12 +249,16 @@ describe('rerank', () => {
   it(
     'respects topK parameter',
     requireModel(async () => {
-      const results = await rerank!('test', [
-        'doc one about testing',
-        'doc two about debugging',
-        'doc three about deployment',
-        'doc four about monitoring',
-      ], { topK: 2 });
+      const results = await rerank!(
+        'test',
+        [
+          'doc one about testing',
+          'doc two about debugging',
+          'doc three about deployment',
+          'doc four about monitoring',
+        ],
+        { topK: 2 },
+      );
 
       assert.equal(results.length, 2);
     }),
@@ -249,13 +267,13 @@ describe('rerank', () => {
   it(
     'preserves original index in results',
     requireModel(async () => {
-      const results = await rerank!('python', [
-        'nothing about python here',
-        'python is great',
-        'still nothing',
-      ], { topK: 3 });
+      const results = await rerank!(
+        'python',
+        ['nothing about python here', 'python is great', 'still nothing'],
+        { topK: 3 },
+      );
 
-      const indices = results.map(r => r.index).sort();
+      const indices = results.map((r) => r.index).sort();
       assert.deepEqual(indices, [0, 1, 2]);
     }),
   );
@@ -264,10 +282,11 @@ describe('rerank', () => {
     'handles documents exceeding max token length',
     requireModel(async () => {
       const longDoc = 'word '.repeat(600); // >512 tokens
-      const results = await rerank!('test query', [
-        longDoc,
-        'short relevant doc about test query',
-      ], { topK: 2 });
+      const results = await rerank!(
+        'test query',
+        [longDoc, 'short relevant doc about test query'],
+        { topK: 2 },
+      );
 
       assert.equal(results.length, 2);
       // Should not crash; long doc should be truncated
@@ -295,6 +314,7 @@ Expected: FAIL — `rerank` module not found (not yet created).
 ## Task 4: Re-Ranker Implementation (Make Tests Pass)
 
 **Files:**
+
 - Create: `src/utils/rerank.ts`
 
 - [ ] **Step 1: Write the re-ranker implementation**
@@ -389,10 +409,7 @@ async function getSession(): Promise<SessionState> {
       throw unavailableError('Cross-encoder model has no output nodes');
     }
 
-    logger.info(
-      { inputNames, outputNames, hasTokenTypeIds },
-      'Cross-encoder model loaded',
-    );
+    logger.info({ inputNames, outputNames, hasTokenTypeIds }, 'Cross-encoder model loaded');
 
     return {
       session: session as SessionState['session'],
@@ -449,10 +466,7 @@ function tokenizePairs(
   return { inputIds, attentionMask, tokenTypeIds };
 }
 
-async function runInference(
-  state: SessionState,
-  batch: TokenizedBatch,
-): Promise<number[]> {
+async function runInference(state: SessionState, batch: TokenizedBatch): Promise<number[]> {
   const ort = await import('onnxruntime-node');
   const batchSize = batch.inputIds.length;
   const seqLen = batch.inputIds[0]?.length ?? 0;
@@ -558,6 +572,7 @@ score-sorted results. Tests skip when model file is absent."
 ## Task 5: Chunking Boilerplate Tests (TDD — Write Failing Tests)
 
 **Files:**
+
 - Modify: `test/chunking.test.ts`
 
 - [ ] **Step 1: Add tests for new boilerplate heuristics**
@@ -565,10 +580,10 @@ score-sorted results. Tests skip when model file is absent."
 Append the following tests to `test/chunking.test.ts`:
 
 ```typescript
-  // --- New boilerplate heuristics ---
+// --- New boilerplate heuristics ---
 
-  it('filters breadcrumb navigation patterns', () => {
-    const md = `# Title
+it('filters breadcrumb navigation patterns', () => {
+  const md = `# Title
 
 ## Breadcrumbs
 
@@ -577,13 +592,13 @@ Append the following tests to `test/chunking.test.ts`:
 ## Real Content
 
 ${'Word '.repeat(50)}This is the actual documentation content that matters.`;
-    const chunks = chunkMarkdown(md, 'https://example.com');
-    assert.ok(chunks.some((c) => c.content.includes('actual documentation content')));
-    assert.ok(!chunks.some((c) => c.content.includes('[Home]')));
-  });
+  const chunks = chunkMarkdown(md, 'https://example.com');
+  assert.ok(chunks.some((c) => c.content.includes('actual documentation content')));
+  assert.ok(!chunks.some((c) => c.content.includes('[Home]')));
+});
 
-  it('filters short-line + link-heavy sidebar content', () => {
-    const md = `# Title
+it('filters short-line + link-heavy sidebar content', () => {
+  const md = `# Title
 
 ## Sidebar
 
@@ -596,14 +611,15 @@ ${'Word '.repeat(50)}This is the actual documentation content that matters.`;
 ## Article
 
 ${'Word '.repeat(50)}Detailed technical article content that should be preserved.`;
-    const chunks = chunkMarkdown(md, 'https://example.com');
-    assert.ok(chunks.some((c) => c.content.includes('Detailed technical article')));
-    assert.ok(!chunks.some((c) => c.content.includes('[Intro]')));
-  });
+  const chunks = chunkMarkdown(md, 'https://example.com');
+  assert.ok(chunks.some((c) => c.content.includes('Detailed technical article')));
+  assert.ok(!chunks.some((c) => c.content.includes('[Intro]')));
+});
 
-  it('filters repeated nav blocks across sibling sections', () => {
-    const navBlock = '- [Home](/)\n- [Docs](/docs)\n- [API](/api)\n- [Blog](/blog)\n- [GitHub](/github)';
-    const md = `# Title
+it('filters repeated nav blocks across sibling sections', () => {
+  const navBlock =
+    '- [Home](/)\n- [Docs](/docs)\n- [API](/api)\n- [Blog](/blog)\n- [GitHub](/github)';
+  const md = `# Title
 
 ## Section A
 
@@ -622,30 +638,30 @@ Some content B here. ${'Word '.repeat(20)}
 ${navBlock}
 
 Some content C here. ${'Word '.repeat(20)}`;
-    const chunks = chunkMarkdown(md, 'https://example.com');
-    // The repeated nav block should appear at most once (or zero times)
-    const navChunks = chunks.filter((c) => c.content.includes('[Home]'));
-    assert.ok(navChunks.length <= 1, `Expected at most 1 nav chunk, got ${navChunks.length}`);
-    // Content sections should all be present
-    assert.ok(chunks.some((c) => c.content.includes('content A')));
-    assert.ok(chunks.some((c) => c.content.includes('content B')));
-    assert.ok(chunks.some((c) => c.content.includes('content C')));
-  });
+  const chunks = chunkMarkdown(md, 'https://example.com');
+  // The repeated nav block should appear at most once (or zero times)
+  const navChunks = chunks.filter((c) => c.content.includes('[Home]'));
+  assert.ok(navChunks.length <= 1, `Expected at most 1 nav chunk, got ${navChunks.length}`);
+  // Content sections should all be present
+  assert.ok(chunks.some((c) => c.content.includes('content A')));
+  assert.ok(chunks.some((c) => c.content.includes('content B')));
+  assert.ok(chunks.some((c) => c.content.includes('content C')));
+});
 
-  it('preserves content with moderate links that is not boilerplate', () => {
-    const md = `# Title
+it('preserves content with moderate links that is not boilerplate', () => {
+  const md = `# Title
 
 ## Guide
 
 Read the [installation docs](/install) first, then follow the [configuration guide](/config). ${'Word '.repeat(30)}After setup, you can deploy using our [deployment tool](/deploy).`;
-    const chunks = chunkMarkdown(md, 'https://example.com');
-    assert.ok(chunks.length > 0);
-    assert.ok(chunks.some((c) => c.content.includes('installation docs')));
-    assert.ok(chunks.some((c) => c.content.includes('configuration guide')));
-  });
+  const chunks = chunkMarkdown(md, 'https://example.com');
+  assert.ok(chunks.length > 0);
+  assert.ok(chunks.some((c) => c.content.includes('installation docs')));
+  assert.ok(chunks.some((c) => c.content.includes('configuration guide')));
+});
 
-  it('filters pure link lines with short average word count', () => {
-    const md = `# Title
+it('filters pure link lines with short average word count', () => {
+  const md = `# Title
 
 ## Links
 
@@ -658,10 +674,10 @@ Read the [installation docs](/install) first, then follow the [configuration gui
 ## Content
 
 ${'Word '.repeat(50)}Real documentation content.`;
-    const chunks = chunkMarkdown(md, 'https://example.com');
-    assert.ok(chunks.some((c) => c.content.includes('Real documentation')));
-    assert.ok(!chunks.some((c) => c.content.includes('[Go here]')));
-  });
+  const chunks = chunkMarkdown(md, 'https://example.com');
+  assert.ok(chunks.some((c) => c.content.includes('Real documentation')));
+  assert.ok(!chunks.some((c) => c.content.includes('[Go here]')));
+});
 ```
 
 - [ ] **Step 2: Run tests to verify they fail**
@@ -677,6 +693,7 @@ Expected: FAIL — breadcrumb, sidebar, repeated-nav, and pure-link tests fail b
 ## Task 6: Chunking Boilerplate Implementation (Make Tests Pass)
 
 **Files:**
+
 - Modify: `src/chunking.ts`
 
 - [ ] **Step 1: Add new helper functions before `isBoilerplate`**
@@ -801,7 +818,10 @@ export function filterBoilerplateWithContext(chunks: MarkdownChunk[]): MarkdownC
         let shared = false;
         for (const otherIdx of group) {
           if (otherIdx === idx) continue;
-          if (lineSets[otherIdx]!.has(line)) { shared = true; break; }
+          if (lineSets[otherIdx]!.has(line)) {
+            shared = true;
+            break;
+          }
         }
         if (!shared) uniqueCount++;
       }
@@ -827,7 +847,9 @@ const contentNodes = nodes.filter((n) => !isBoilerplate(n.contentLines.join('\n'
 to:
 
 ```typescript
-const contentNodes = nodes.filter((n) => !isBoilerplateWithBreadcrumbCheck(n.contentLines.join('\n')));
+const contentNodes = nodes.filter(
+  (n) => !isBoilerplateWithBreadcrumbCheck(n.contentLines.join('\n')),
+);
 ```
 
 And change the post-processing section (after line 79) to add the contextual filter:
@@ -875,6 +897,7 @@ nav blocks. filterBoilerplateWithContext runs after postProcessChunks."
 ## Task 7: Wire Re-Ranker + Semantic Coherence Into semanticCrawl
 
 **Files:**
+
 - Modify: `src/tools/semanticCrawl.ts`
 
 - [ ] **Step 1: Import rerank and add semantic coherence logic**
@@ -915,9 +938,7 @@ function isBorderline(chunk: SemanticCrawlChunk): boolean {
   return (density >= 0.2 && density < 0.4) || (avgWords >= 3 && avgWords < 5);
 }
 
-function filterBySemanticCoherence(
-  chunkEmbeddings: ChunkWithEmbedding[],
-): SemanticCrawlChunk[] {
+function filterBySemanticCoherence(chunkEmbeddings: ChunkWithEmbedding[]): SemanticCrawlChunk[] {
   if (chunkEmbeddings.length === 0) return [];
 
   // Compute page centroid (mean embedding)
@@ -960,58 +981,58 @@ function filterBySemanticCoherence(
 Replace the section from `// 6. Rank` through `// 7. Return topK` (lines 252-262) with:
 
 ```typescript
-  // 6. Pair chunks with their embeddings (avoid indexOf remapping later)
-  const paired: ChunkWithEmbedding[] = allChunks.map((chunk, i) => ({
-    chunk,
-    embedding: allEmbeddings[i]!,
-  }));
+// 6. Pair chunks with their embeddings (avoid indexOf remapping later)
+const paired: ChunkWithEmbedding[] = allChunks.map((chunk, i) => ({
+  chunk,
+  embedding: allEmbeddings[i]!,
+}));
 
-  // 7. Semantic coherence check (filter borderline off-topic chunks)
-  const coherent = filterBySemanticCoherence(paired);
+// 7. Semantic coherence check (filter borderline off-topic chunks)
+const coherent = filterBySemanticCoherence(paired);
 
-  if (coherent.length < paired.length) {
-    logger.info(
-      { before: paired.length, after: coherent.length },
-      'Semantic coherence filter removed off-topic chunks',
-    );
+if (coherent.length < paired.length) {
+  logger.info(
+    { before: paired.length, after: coherent.length },
+    'Semantic coherence filter removed off-topic chunks',
+  );
+}
+
+// 8. Rank by cosine similarity (embedding already paired — no indexOf)
+for (const ce of coherent) {
+  ce.chunk.score = cosineSimilarity(queryEmbedding, ce.embedding);
+}
+coherent.sort((a, b) => b.chunk.score - a.chunk.score);
+
+// 9. Re-rank top candidates with cross-encoder
+const rerankCount = Math.min(RERANK_CANDIDATES, coherent.length);
+const candidates = coherent.slice(0, rerankCount);
+
+let topChunks: SemanticCrawlChunk[];
+if (candidates.length > opts.topK) {
+  try {
+    const candidateTexts = candidates.map((c) => c.chunk.text);
+    const reranked = await rerank(opts.query, candidateTexts, { topK: opts.topK });
+    topChunks = reranked.map((r) => candidates[r.index]!.chunk);
+  } catch (err) {
+    logger.warn({ err }, 'Cross-encoder re-ranking failed, falling back to bi-encoder ranking');
+    topChunks = candidates.slice(0, opts.topK).map((c) => c.chunk);
   }
-
-  // 8. Rank by cosine similarity (embedding already paired — no indexOf)
-  for (const ce of coherent) {
-    ce.chunk.score = cosineSimilarity(queryEmbedding, ce.embedding);
-  }
-  coherent.sort((a, b) => b.chunk.score - a.chunk.score);
-
-  // 9. Re-rank top candidates with cross-encoder
-  const rerankCount = Math.min(RERANK_CANDIDATES, coherent.length);
-  const candidates = coherent.slice(0, rerankCount);
-
-  let topChunks: SemanticCrawlChunk[];
-  if (candidates.length > opts.topK) {
-    try {
-      const candidateTexts = candidates.map((c) => c.chunk.text);
-      const reranked = await rerank(opts.query, candidateTexts, { topK: opts.topK });
-      topChunks = reranked.map((r) => candidates[r.index]!.chunk);
-    } catch (err) {
-      logger.warn({ err }, 'Cross-encoder re-ranking failed, falling back to bi-encoder ranking');
-      topChunks = candidates.slice(0, opts.topK).map((c) => c.chunk);
-    }
-  } else {
-    topChunks = candidates.map((c) => c.chunk);
-  }
+} else {
+  topChunks = candidates.map((c) => c.chunk);
+}
 ```
 
 And update the return to use `coherent.length` for `totalChunks`:
 
 ```typescript
-  return {
-    seedUrl: opts.url,
-    query: opts.query,
-    pagesCrawled: crawlResult.totalPages,
-    totalChunks: coherent.length,
-    successfulPages: crawlResult.successfulPages,
-    chunks: topChunks,
-  };
+return {
+  seedUrl: opts.url,
+  query: opts.query,
+  pagesCrawled: crawlResult.totalPages,
+  totalChunks: coherent.length,
+  successfulPages: crawlResult.successfulPages,
+  chunks: topChunks,
+};
 ```
 
 - [ ] **Step 3: Adjust variable naming**
@@ -1020,7 +1041,14 @@ In the existing embedding section (step 5), rename `chunkEmbeddings` to `allEmbe
 
 ```typescript
 const [allEmbeddings, queryEmbeddings] = await Promise.all([
-  embedTextsBatched(embeddingBaseUrl, embeddingApiToken, chunkTexts, 'document', embeddingDimensions, chunkTitles),
+  embedTextsBatched(
+    embeddingBaseUrl,
+    embeddingApiToken,
+    chunkTexts,
+    'document',
+    embeddingDimensions,
+    chunkTitles,
+  ),
   embedTexts(embeddingBaseUrl, embeddingApiToken, [opts.query], 'query', embeddingDimensions),
 ]);
 ```
@@ -1051,6 +1079,7 @@ Falls back to bi-encoder ranking if cross-encoder fails."
 ## Task 8: Semantic Coherence + Re-Ranking Integration Tests
 
 **Files:**
+
 - Modify: `test/semanticCrawl.test.ts`
 
 - [ ] **Step 1: Add unit tests for `isBorderline`**
@@ -1186,7 +1215,9 @@ describe('rerank', () => {
 
   before(async () => {
     if (!MODEL_AVAILABLE) {
-      console.warn('⚠ Cross-encoder model not found — rerank tests SKIPPED. Run: npx tsx scripts/download-model.ts');
+      console.warn(
+        '⚠ Cross-encoder model not found — rerank tests SKIPPED. Run: npx tsx scripts/download-model.ts',
+      );
       return;
     }
     const mod = await import('../src/utils/rerank.js');
@@ -1269,6 +1300,7 @@ git commit -m "chore: lint and format fixes"
 **Rationale:** "Tests pass" proves the code compiles, not that retrieval improved. This task creates a small eval set and runs before/after comparison to validate the changes are net-positive.
 
 **Files:**
+
 - Create: `scripts/eval-retrieval.ts`
 
 - [ ] **Step 1: Create the retrieval eval script**
@@ -1370,9 +1402,7 @@ async function runEval(): Promise<void> {
         latencyMs,
       });
 
-      console.log(
-        `${recallAt5 ? '✓' : '✗'} ${c.description} — ${latencyMs.toFixed(0)}ms`,
-      );
+      console.log(`${recallAt5 ? '✓' : '✗'} ${c.description} — ${latencyMs.toFixed(0)}ms`);
     } catch (err) {
       console.log(`✗ ${c.description} — ERROR: ${(err as Error).message}`);
       results.push({
@@ -1389,7 +1419,9 @@ async function runEval(): Promise<void> {
   const recall = results.filter((r) => r.recallAt5).length / results.length;
   const avgLatency = results.reduce((s, r) => s + r.latencyMs, 0) / results.length;
   console.log(`\n--- Summary ---`);
-  console.log(`Recall@5: ${(recall * 100).toFixed(0)}% (${results.filter((r) => r.recallAt5).length}/${results.length})`);
+  console.log(
+    `Recall@5: ${(recall * 100).toFixed(0)}% (${results.filter((r) => r.recallAt5).length}/${results.length})`,
+  );
   console.log(`Avg latency: ${avgLatency.toFixed(0)}ms`);
   console.log(`\nBaseline comparison: run this script before and after the changes.`);
   console.log(`Goal: Recall@5 should not decrease; re-rank overhead should be <50ms per query.`);
@@ -1431,21 +1463,21 @@ to validate re-ranking and chunking changes are net-positive."
 
 ## Spec Coverage Check
 
-| Spec Requirement | Task |
-|---|---|
+| Spec Requirement                                       | Task      |
+| ------------------------------------------------------ | --------- |
 | Cross-encoder re-ranker (ONNX, ms-marco-MiniLM-L-6-v2) | Tasks 3-4 |
-| Generic `src/utils/rerank.ts` utility | Task 4 |
-| Rerank top-30 → top-K pipeline | Task 7 |
-| Breadcrumb nav heuristic | Tasks 5-6 |
-| Short-line + link-heavy heuristic | Tasks 5-6 |
-| Repeated nav across chunks heuristic | Tasks 5-6 |
-| Semantic coherence check (borderline only) | Task 7 |
-| Page centroid computation | Task 7 |
-| Graceful fallback when cross-encoder fails | Task 7-8 |
-| Model download script | Task 2 |
-| `models/` in .gitignore | Task 2 |
-| Tests for re-ranker | Task 3 |
-| Tests for new chunking heuristics | Task 5 |
-| Tests for isBorderline | Task 8 |
-| Explicit fallback test (cross-encoder failure) | Task 8 |
-| Retrieval eval + latency benchmark | Task 10 |
+| Generic `src/utils/rerank.ts` utility                  | Task 4    |
+| Rerank top-30 → top-K pipeline                         | Task 7    |
+| Breadcrumb nav heuristic                               | Tasks 5-6 |
+| Short-line + link-heavy heuristic                      | Tasks 5-6 |
+| Repeated nav across chunks heuristic                   | Tasks 5-6 |
+| Semantic coherence check (borderline only)             | Task 7    |
+| Page centroid computation                              | Task 7    |
+| Graceful fallback when cross-encoder fails             | Task 7-8  |
+| Model download script                                  | Task 2    |
+| `models/` in .gitignore                                | Task 2    |
+| Tests for re-ranker                                    | Task 3    |
+| Tests for new chunking heuristics                      | Task 5    |
+| Tests for isBorderline                                 | Task 8    |
+| Explicit fallback test (cross-encoder failure)         | Task 8    |
+| Retrieval eval + latency benchmark                     | Task 10   |

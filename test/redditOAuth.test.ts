@@ -276,10 +276,10 @@ test('createRedditClient retries a single 401 on an OAuth content call by refres
   assert.equal(contentCalls, 2);
 });
 
-test('createRedditClient enforces the 10MB size guard on the token endpoint response', async () => {
+test('createRedditClient enforces the 50MB size guard on the token endpoint response', async () => {
   const clock = makeClock();
-  // Advertise a Content-Length well above the 10MB guard (SIZE = 20 MB).
-  const oversized = String(20 * 1024 * 1024);
+  // Advertise a Content-Length well above the 50MB guard (SIZE = 100 MB).
+  const oversized = String(100 * 1024 * 1024);
   const fetchImpl: typeof fetch = async (input) => {
     if (String(input).startsWith('https://www.reddit.com/api/v1/access_token')) {
       return new Response(

@@ -134,10 +134,9 @@ export async function webCrawl(
           { statusCode: response.status },
         );
       }
-      throw networkError(
-        `crawl4ai returned HTTP ${String(response.status)} for "${url}"`,
-        { statusCode: response.status },
-      );
+      throw networkError(`crawl4ai returned HTTP ${String(response.status)} for "${url}"`, {
+        statusCode: response.status,
+      });
     }
 
     raw = await safeResponseJson(response, endpoint);
@@ -226,10 +225,7 @@ export async function webCrawl(
     pages = filtered;
   }
 
-  logger.debug(
-    { url, totalPages: pages.length, strategy: opts.strategy },
-    'web_crawl complete',
-  );
+  logger.debug({ url, totalPages: pages.length, strategy: opts.strategy }, 'web_crawl complete');
 
   return {
     seedUrl: url,
