@@ -21,30 +21,41 @@ export function extractElementsFromMarkdown(markdown: string): ContentElement[] 
   let i = 0;
 
   while (i < lines.length) {
-    const line = lines[i]!;
+    const line = lines[i];
+    if (line === undefined) {
+      i += 1;
+      continue;
+    }
     const trimmed = line.trim();
 
     // Heading
-    const headingMatch = trimmed.match(HEADING_RE);
+    const headingMatch = HEADING_RE.exec(trimmed);
     if (headingMatch) {
-      elements.push({
-        type: 'heading',
-        level: headingMatch[1]!.length,
-        text: headingMatch[2]!.trim(),
-        id: null,
-      });
+      const levelMatch = headingMatch[1];
+      const textMatch = headingMatch[2];
+      if (levelMatch !== undefined && textMatch !== undefined) {
+        elements.push({
+          type: 'heading',
+          level: levelMatch.length,
+          text: textMatch.trim(),
+          id: null,
+        });
+      }
       i += 1;
       continue;
     }
 
     // Fenced code block
-    const fenceMatch = trimmed.match(FENCED_CODE_RE);
+    const fenceMatch = FENCED_CODE_RE.exec(trimmed);
     if (fenceMatch) {
-      const lang = fenceMatch[1] || null;
+      const lang = fenceMatch[1] ?? null;
       const contentLines: string[] = [];
       i += 1;
-      while (i < lines.length && !lines[i]!.trim().startsWith('```')) {
-        contentLines.push(lines[i]!);
+      while (i < lines.length) {
+        const innerLine = lines[i];
+        if (innerLine === undefined) break;
+        if (innerLine.trim().startsWith('```')) break;
+        contentLines.push(innerLine);
         i += 1;
       }
       elements.push({
@@ -59,16 +70,21 @@ export function extractElementsFromMarkdown(markdown: string): ContentElement[] 
     // Table
     if (TABLE_ROW_RE.test(trimmed)) {
       const tableLines: string[] = [];
-      while (i < lines.length && TABLE_ROW_RE.test(lines[i]!.trim())) {
-        tableLines.push(lines[i]!.trim());
+      while (i < lines.length) {
+        const tableLine = lines[i];
+        if (tableLine === undefined) break;
+        if (!TABLE_ROW_RE.test(tableLine.trim())) break;
+        tableLines.push(tableLine.trim());
         i += 1;
       }
       // Skip separator line if present
-      if (tableLines.length > 1 && /^\|[\s\-:|]+\|$/.test(tableLines[1]!)) {
+      const sepLine = tableLines[1];
+      if (tableLines.length > 1 && sepLine !== undefined && /^\|[\s\-:|]+\|$/.test(sepLine)) {
         tableLines.splice(1, 1);
       }
       const rows = tableLines.length;
-      const cols = rows > 0 ? countCols(tableLines[0]!) : 0;
+      const firstLine = tableLines[0];
+      const cols = rows > 0 && firstLine !== undefined ? countCols(firstLine) : 0;
       elements.push({
         type: 'table',
         markdown: tableLines.join('\n'),
@@ -80,15 +96,20 @@ export function extractElementsFromMarkdown(markdown: string): ContentElement[] 
     }
 
     // List
-    const listMatch = trimmed.match(LIST_ITEM_RE);
+    const listMatch = LIST_ITEM_RE.exec(trimmed);
     if (listMatch) {
-      const ordered = /^\d+\./.test(listMatch[2]!);
+      const listTypeMatch = listMatch[2];
+      const ordered = listTypeMatch !== undefined && /^\d+\./.test(listTypeMatch);
       const items: string[] = [];
       while (i < lines.length) {
-        const l = lines[i]!.trim();
-        const m = l.match(LIST_ITEM_RE);
+        const l = lines[i];
+        if (l === undefined) break;
+        const m = LIST_ITEM_RE.exec(l.trim());
         if (!m) break;
-        items.push(stripInlineCode(m[3]!));
+        const itemMatch = m[3];
+        if (itemMatch !== undefined) {
+          items.push(stripInlineCode(itemMatch));
+        }
         i += 1;
       }
       if (items.length > 0) {
@@ -102,12 +123,16 @@ export function extractElementsFromMarkdown(markdown: string): ContentElement[] 
       let m: RegExpExecArray | null;
       IMAGE_RE.lastIndex = 0;
       while ((m = IMAGE_RE.exec(trimmed)) !== null) {
-        elements.push({
-          type: 'image',
-          src: m[2]!,
-          alt: m[1]!,
-          title: m[3] ?? null,
-        });
+        const src = m[2];
+        const alt = m[1];
+        if (src !== undefined && alt !== undefined) {
+          elements.push({
+            type: 'image',
+            src,
+            alt,
+            title: m[3] ?? null,
+          });
+        }
       }
       i += 1;
       continue;

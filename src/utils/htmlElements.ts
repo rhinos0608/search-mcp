@@ -1,7 +1,7 @@
 import type { ContentElement } from '../types.js';
 
 function cellText(cell: Element): string {
-  return cell.textContent?.trim() ?? '';
+  return cell.textContent.trim();
 }
 
 function tableToMarkdown(table: HTMLTableElement): { markdown: string; rows: number; cols: number } {
@@ -24,12 +24,12 @@ function tableToMarkdown(table: HTMLTableElement): { markdown: string; rows: num
 
 function languageFromClass(cls: string | undefined): string | null {
   if (!cls) return null;
-  const m = cls.match(/(?:language|lang)-(\w+)/);
+  const m = /(?:language|lang)-(\w+)/.exec(cls);
   return m?.[1] ?? null;
 }
 
 function headingId(el: HTMLHeadingElement): string | null {
-  return el.getAttribute('id') || el.querySelector('a[id]')?.getAttribute('id') || null;
+  return el.getAttribute('id') ?? el.querySelector('a[id]')?.getAttribute('id') ?? null;
 }
 
 /** Tags we care about, in document order. */
@@ -77,8 +77,8 @@ export function extractElementsFromHtml(document: Document): ContentElement[] {
       case 'h4':
       case 'h5':
       case 'h6': {
-        const level = parseInt(tag[1]!, 10);
-        const text = el.textContent?.trim() ?? '';
+        const level = parseInt(tag.slice(1), 10);
+        const text = el.textContent.trim();
         if (text) {
           elements.push({ type: 'heading', level, text, id: headingId(el as HTMLHeadingElement) });
         }
@@ -91,7 +91,7 @@ export function extractElementsFromHtml(document: Document): ContentElement[] {
         elements.push({
           type: 'table',
           markdown,
-          caption: captionEl?.textContent?.trim() ?? null,
+          caption: captionEl ? captionEl.textContent.trim() : null,
           rows,
           cols,
         });
@@ -103,7 +103,7 @@ export function extractElementsFromHtml(document: Document): ContentElement[] {
         elements.push({
           type: 'image',
           src: img.getAttribute('src'),
-          alt: img.alt ?? '',
+          alt: img.alt,
           title: img.getAttribute('title'),
         });
         break;
@@ -111,7 +111,7 @@ export function extractElementsFromHtml(document: Document): ContentElement[] {
 
       case 'pre': {
         const code = el.querySelector('code');
-        const content = code?.textContent ?? el.textContent ?? '';
+        const content = code?.textContent ?? el.textContent;
         const cls = code?.getAttribute('class') ?? undefined;
         elements.push({
           type: 'code',
@@ -124,7 +124,7 @@ export function extractElementsFromHtml(document: Document): ContentElement[] {
       case 'ul':
       case 'ol': {
         const items = Array.from(el.querySelectorAll(':scope > li')).map(
-          (li) => li.textContent?.trim() ?? '',
+          (li) => li.textContent.trim(),
         );
         if (items.length > 0) {
           elements.push({ type: 'list', ordered: tag === 'ol', items });
@@ -139,8 +139,8 @@ export function extractElementsFromHtml(document: Document): ContentElement[] {
           BLOCK_TAGS.has(child.tagName.toLowerCase()),
         );
         if (!hasBlockChild) {
-          const text = el.textContent?.trim() ?? '';
-          if (text && text.length > 0) {
+          const text = el.textContent.trim();
+          if (text.length > 0) {
             elements.push({ type: 'text', text });
           }
         }
