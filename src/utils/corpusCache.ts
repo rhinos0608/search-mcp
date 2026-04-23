@@ -289,8 +289,30 @@ function writeCorpus(
   meta: CorpusMetadata,
   embeddings: number[][],
 ): void {
-  fs.writeFileSync(metaPath(cacheDir, meta.corpusId), JSON.stringify(meta), 'utf-8');
-  fs.writeFileSync(binPath(cacheDir, meta.corpusId), serializeEmbeddings(embeddings));
+  const jsonTmp = metaPath(cacheDir, meta.corpusId) + '.tmp';
+  const binTmp = binPath(cacheDir, meta.corpusId) + '.tmp';
+  const jsonFinal = metaPath(cacheDir, meta.corpusId);
+  const binFinal = binPath(cacheDir, meta.corpusId);
+
+  try {
+    fs.writeFileSync(jsonTmp, JSON.stringify(meta), 'utf-8');
+    fs.writeFileSync(binTmp, serializeEmbeddings(embeddings));
+    fs.renameSync(jsonTmp, jsonFinal);
+    fs.renameSync(binTmp, binFinal);
+  } catch (err) {
+    // Clean up temp files on any error
+    try {
+      fs.rmSync(jsonTmp, { force: true });
+    } catch {
+      // best effort
+    }
+    try {
+      fs.rmSync(binTmp, { force: true });
+    } catch {
+      // best effort
+    }
+    throw err;
+  }
 }
 
 function readCorpusFromDisk(

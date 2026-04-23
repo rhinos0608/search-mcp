@@ -444,3 +444,23 @@ test('roundtrip: original source is preserved through cache read/write', async (
   assert.ok(loaded !== null);
   assert.deepStrictEqual(loaded.source, source);
 });
+
+// ────────────────────────────────────────────────────────────────────
+// 13. Atomic writes leave no temp files behind
+// ────────────────────────────────────────────────────────────────────
+
+test('atomic writes: no .tmp files remain after successful write', async () => {
+  const cacheDir = makeTmpCacheDir();
+  const chunks = makeChunks(['atomic write test']);
+  const embeddings = makeEmbeddings(chunks);
+
+  await getOrBuildCorpus(
+    TEST_SOURCE,
+    async () => ({ chunks, embeddings, model: 'm', contentHash: computeContentHash(chunks) }),
+    { cacheDir },
+  );
+
+  const files = fs.readdirSync(cacheDir);
+  const tmpFiles = files.filter((f) => f.endsWith('.tmp'));
+  assert.deepStrictEqual(tmpFiles, [], 'Expected no .tmp files in cache directory');
+});
