@@ -75,16 +75,9 @@ async function getSession(): Promise<SessionState> {
     ]);
 
     // @huggingface/tokenizers v0.1.x: constructor takes (tokenizerJson, configJson)
+    // Pass the full parsed object to avoid stripping fields (e.g., added_tokens_decoder).
     const tokenizerJson = JSON.parse(readFileSync(TOKENIZER_PATH, 'utf8'));
-    const tokenizerConfig = {
-      model: tokenizerJson.model,
-      decoder: tokenizerJson.decoder,
-      post_processor: tokenizerJson.post_processor,
-      pre_tokenizer: tokenizerJson.pre_tokenizer,
-      normalizer: tokenizerJson.normalizer,
-      added_tokens: tokenizerJson.added_tokens,
-    };
-    const tokenizer = new Tokenizer(tokenizerConfig, {
+    const tokenizer = new Tokenizer(tokenizerJson, {
       truncation: tokenizerJson.truncation,
       padding: tokenizerJson.padding,
     }) as unknown as HFTokenizer;
