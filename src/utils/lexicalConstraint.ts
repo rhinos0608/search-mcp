@@ -21,7 +21,6 @@ export function applySoftLexicalConstraint(
   chunks: SemanticCrawlChunk[],
   query: string,
   corpusChunks: CorpusChunk[],
-  _topK: number,
 ): { filtered: SemanticCrawlChunk[]; warning?: string } {
   // 1. Tokenize query, remove stopwords
   const queryTokens = tokenize(query).filter((t) => !STOPWORDS.has(t));

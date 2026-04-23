@@ -10,6 +10,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
+import { createHash } from 'node:crypto';
 import {
   getOrBuildCorpus,
   loadCorpusById,
@@ -43,6 +44,10 @@ function makeEmbeddings(chunks: CorpusChunk[], dims = 4): number[][] {
   );
 }
 
+function computeContentHash(chunks: CorpusChunk[]): string {
+  return createHash('sha256').update(chunks.map((c) => c.text).join('\n')).digest('hex');
+}
+
 const TEST_SOURCE: SemanticCrawlSource = {
   type: 'url',
   url: 'https://example.com',
@@ -67,14 +72,14 @@ test('roundtrip: getOrBuildCorpus writes; loadCorpusById returns identical data'
     TEST_SOURCE,
     async () => {
       callCount++;
-      return { chunks, embeddings, model: 'test-model', contentHash: 'abc123' };
+      return { chunks, embeddings, model: 'test-model', contentHash: computeContentHash(chunks) };
     },
     { cacheDir },
   );
 
   assert.equal(callCount, 1);
   assert.equal(corpus.model, 'test-model');
-  assert.equal(corpus.contentHash, 'abc123');
+  assert.equal(corpus.contentHash, computeContentHash(chunks));
   assert.equal(corpus.chunks.length, 2);
   assert.equal(corpus.embeddings.length, 2);
 
@@ -82,7 +87,7 @@ test('roundtrip: getOrBuildCorpus writes; loadCorpusById returns identical data'
   const loaded = await loadCorpusById(corpus.corpusId, { cacheDir });
   assert.ok(loaded !== null, 'Expected loaded corpus, got null');
   assert.equal(loaded.model, 'test-model');
-  assert.equal(loaded.contentHash, 'abc123');
+  assert.equal(loaded.contentHash, computeContentHash(chunks));
   assert.equal(loaded.chunks.length, 2);
   assert.equal(loaded.embeddings.length, 2);
   assert.equal(loaded.chunks[0]!.text, 'hello world');
@@ -113,7 +118,7 @@ test('cache hit: second call does NOT invoke materializeFn again', async () => {
 
   const materialize = async () => {
     callCount++;
-    return { chunks, embeddings, model: 'model-v1', contentHash: 'hash1' };
+    return { chunks, embeddings, model: 'model-v1', contentHash: computeContentHash(chunks) };
   };
 
   // First call — materializes
@@ -135,7 +140,7 @@ test('TTL expiry: loadCorpusById returns null when createdAt exceeds ttlMs', asy
 
   const corpus = await getOrBuildCorpus(
     TEST_SOURCE,
-    async () => ({ chunks, embeddings, model: 'm', contentHash: 'h' }),
+    async () => ({ chunks, embeddings, model: 'm', contentHash: computeContentHash(chunks) }),
     { cacheDir },
   );
 
@@ -171,7 +176,7 @@ test('LRU eviction: writing when at maxCorpora evicts least-recently-accessed', 
     const embeddings = makeEmbeddings(chunks);
     const corpus = await getOrBuildCorpus(
       source,
-      async () => ({ chunks, embeddings, model: 'm', contentHash: 'h' }),
+      async () => ({ chunks, embeddings, model: 'm', contentHash: computeContentHash(chunks) }),
       { cacheDir, maxCorpora: 3 },
     );
     corpora.push(corpus);
@@ -188,7 +193,7 @@ test('LRU eviction: writing when at maxCorpora evicts least-recently-accessed', 
   const newEmbeddings = makeEmbeddings(newChunks);
   await getOrBuildCorpus(
     { type: 'url', url: 'https://d.com' },
-    async () => ({ chunks: newChunks, embeddings: newEmbeddings, model: 'm', contentHash: 'h' }),
+    async () => ({ chunks: newChunks, embeddings: newEmbeddings, model: 'm', contentHash: computeContentHash(newChunks) }),
     { cacheDir, maxCorpora: 3 },
   );
 
@@ -218,7 +223,7 @@ test('async lock: concurrent calls for same source invoke materializeFn exactly 
     callCount++;
     // Small delay to allow concurrency overlap
     await new Promise(r => setTimeout(r, 20));
-    return { chunks, embeddings, model: 'm', contentHash: 'h' };
+    return { chunks, embeddings, model: 'm', contentHash: computeContentHash(chunks) };
   };
 
   // Launch 5 concurrent calls for the same source
@@ -247,7 +252,7 @@ test('invalidateCorpus: removes corpus from disk', async () => {
 
   const corpus = await getOrBuildCorpus(
     TEST_SOURCE,
-    async () => ({ chunks, embeddings, model: 'm', contentHash: 'h' }),
+    async () => ({ chunks, embeddings, model: 'm', contentHash: computeContentHash(chunks) }),
     { cacheDir },
   );
 
@@ -273,7 +278,7 @@ test('invalidateCorpus: subsequent getOrBuildCorpus re-materializes', async () =
 
   const materialize = async () => {
     callCount++;
-    return { chunks, embeddings, model: 'm', contentHash: 'h' };
+    return { chunks, embeddings, model: 'm', contentHash: computeContentHash(chunks) };
   };
 
   const corpus = await getOrBuildCorpus(TEST_SOURCE, materialize, { cacheDir });
@@ -311,7 +316,7 @@ test('BM25 index: loaded corpus has functional bm25Index', async () => {
 
   const corpus = await getOrBuildCorpus(
     TEST_SOURCE,
-    async () => ({ chunks, embeddings, model: 'm', contentHash: 'h' }),
+    async () => ({ chunks, embeddings, model: 'm', contentHash: computeContentHash(chunks) }),
     { cacheDir },
   );
 
@@ -344,7 +349,7 @@ test('corpusId is deterministic: same source produces same id on different calls
 
   const corpus1 = await getOrBuildCorpus(
     TEST_SOURCE,
-    async () => ({ chunks, embeddings, model: 'model-abc', contentHash: 'h' }),
+    async () => ({ chunks, embeddings, model: 'model-abc', contentHash: computeContentHash(chunks) }),
     { cacheDir },
   );
 
@@ -353,7 +358,7 @@ test('corpusId is deterministic: same source produces same id on different calls
 
   const corpus2 = await getOrBuildCorpus(
     TEST_SOURCE,
-    async () => ({ chunks, embeddings, model: 'model-abc', contentHash: 'h' }),
+    async () => ({ chunks, embeddings, model: 'model-abc', contentHash: computeContentHash(chunks) }),
     { cacheDir },
   );
 
@@ -371,13 +376,13 @@ test('corpusId differs for different sources', async () => {
 
   const corpus1 = await getOrBuildCorpus(
     TEST_SOURCE,
-    async () => ({ chunks, embeddings, model: 'm', contentHash: 'h' }),
+    async () => ({ chunks, embeddings, model: 'm', contentHash: computeContentHash(chunks) }),
     { cacheDir },
   );
 
   const corpus2 = await getOrBuildCorpus(
     TEST_SOURCE_2,
-    async () => ({ chunks, embeddings, model: 'm', contentHash: 'h' }),
+    async () => ({ chunks, embeddings, model: 'm', contentHash: computeContentHash(chunks) }),
     { cacheDir },
   );
 
@@ -395,7 +400,7 @@ test('loadCorpusById: truncated .bin returns null', async () => {
 
   const corpus = await getOrBuildCorpus(
     TEST_SOURCE,
-    async () => ({ chunks, embeddings, model: 'm', contentHash: 'h' }),
+    async () => ({ chunks, embeddings, model: 'm', contentHash: computeContentHash(chunks) }),
     { cacheDir },
   );
 

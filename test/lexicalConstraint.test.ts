@@ -39,20 +39,20 @@ describe('applySoftLexicalConstraint', () => {
       makeChunk('the quick brown fox'),
     ];
 
-    const result = applySoftLexicalConstraint(chunks, 'configure PORT=8080', corpusChunks, 2);
+    const result = applySoftLexicalConstraint(chunks, 'configure PORT=8080', corpusChunks);
     assert.ok(result.filtered.length > 0);
   });
 
   it('skips constraint for stopword-only queries', () => {
     const chunks = [makeChunk('the quick brown fox')];
-    const result = applySoftLexicalConstraint(chunks, 'how to do it', corpusChunks, 2);
+    const result = applySoftLexicalConstraint(chunks, 'how to do it', corpusChunks);
     assert.strictEqual(result.filtered.length, 1);
     assert.strictEqual(result.warning, undefined);
   });
 
   it('returns warning when zero chunks satisfy', () => {
     const chunks = [makeChunk('completely unrelated text')];
-    const result = applySoftLexicalConstraint(chunks, 'configure PORT=8080', corpusChunks, 2);
+    const result = applySoftLexicalConstraint(chunks, 'configure PORT=8080', corpusChunks);
     assert.strictEqual(result.filtered.length, 1); // fallback to unfiltered
     assert.ok(result.warning?.includes('zero matches'));
   });

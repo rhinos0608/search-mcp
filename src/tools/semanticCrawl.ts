@@ -468,7 +468,7 @@ export async function embedAndRank(
   }
 
   // 8. Soft lexical constraint (IDF-weighted token coverage)
-  const lexicalResult = applySoftLexicalConstraint(coherent, opts.query, deduped, opts.topK);
+  const lexicalResult = applySoftLexicalConstraint(coherent, opts.query, deduped);
   if (lexicalResult.warning) {
     logger.warn(lexicalResult.warning);
   }

@@ -77,13 +77,14 @@ interface SourceIndexEntry {
 
 const DEFAULT_MAX_CORPORA = 50;
 
-const DEFAULT_CACHE_DIR = process.env['SEMANTIC_CRAWL_CACHE_DIR']
-  ? process.env['SEMANTIC_CRAWL_CACHE_DIR']
-  : path.join(os.homedir(), '.cache', 'search-mcp', 'semantic-crawl');
+const DEFAULT_CACHE_DIR =
+  process.env.SEMANTIC_CRAWL_CACHE_DIR ??
+  path.join(os.homedir(), '.cache', 'search-mcp', 'semantic-crawl');
 
-const DEFAULT_TTL_MS = process.env['SEMANTIC_CRAWL_CACHE_TTL_MS']
-  ? parseInt(process.env['SEMANTIC_CRAWL_CACHE_TTL_MS'], 10)
-  : 7 * 24 * 60 * 60 * 1000;
+const DEFAULT_TTL_MS =
+  process.env.SEMANTIC_CRAWL_CACHE_TTL_MS !== undefined
+    ? parseInt(process.env.SEMANTIC_CRAWL_CACHE_TTL_MS, 10)
+    : 7 * 24 * 60 * 60 * 1000;
 
 interface CacheOpts {
   ttlMs?: number;
@@ -134,10 +135,7 @@ function normalizeSource(source: SemanticCrawlSource): SemanticCrawlSource {
   if (source.type === 'github') {
     return { type: 'github', owner: source.owner, repo: source.repo, branch: source.branch, extensions: source.extensions, query: source.query };
   }
-  if (source.type === 'cached') {
-    return { type: 'cached', corpusId: source.corpusId };
-  }
-  return source;
+  return { type: 'cached', corpusId: source.corpusId };
 }
 
 /**
