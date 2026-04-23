@@ -58,8 +58,48 @@ export function chunkMarkdown(markdown: string, url: string): MarkdownChunk[] {
     parentStack.push(section);
   }
 
-  // Merge short sections (boilerplate filtering deferred to filterBoilerplateWithContext)
-  const groups = mergeShortSections(nodes);
+  // Strip shared nav lines across sections before filtering/merging
+  if (nodes.length > 1) {
+    const lineCounts = new Map<string, number>();
+    for (const node of nodes) {
+      const seen = new Set<string>();
+      for (const line of node.contentLines) {
+        const key = line.trim().toLowerCase();
+        if (key.length === 0) continue;
+        if (!seen.has(key)) {
+          seen.add(key);
+          lineCounts.set(key, (lineCounts.get(key) ?? 0) + 1);
+        }
+      }
+    }
+
+    const sharedLines = new Set<string>();
+    for (const [line, count] of lineCounts) {
+      if (count > 1) sharedLines.add(line);
+    }
+
+    if (sharedLines.size > 0) {
+      for (const node of nodes) {
+        node.contentLines = node.contentLines.filter((line) => {
+          const key = line.trim().toLowerCase();
+          return key.length === 0 || !sharedLines.has(key);
+        });
+      }
+    }
+  }
+
+  // Strip breadcrumb and pure-link lines from individual sections
+  for (const node of nodes) {
+    node.contentLines = node.contentLines.filter(
+      (line) => !isBreadcrumbLine(line) && !isPureLinkLine(line),
+    );
+  }
+
+  // Filter boilerplate sections (check stripped content with full heuristic)
+  const contentNodes = nodes.filter((n) => !isBoilerplate(n.contentLines.join('\n')));
+
+  // Merge short sections
+  const groups = mergeShortSections(contentNodes);
 
   // Split groups into chunks
   const allChunks: MarkdownChunk[] = [];
@@ -75,13 +115,13 @@ export function chunkMarkdown(markdown: string, url: string): MarkdownChunk[] {
   // Post-process to ensure floor invariant
   let processed = postProcessChunks(allChunks);
 
-  // Context-aware boilerplate filtering (breadcrumbs, repeated nav, link-heavy)
+  // Context-aware boilerplate filtering (breadcrumbs, link-heavy, etc.)
   processed = filterBoilerplateWithContext(processed);
 
   return processed;
 }
 
-// --- New boilerplate heuristics ---
+// --- Boilerplate heuristics ---
 
 const BREADCRUMB_LINK_RATIO = 0.5;
 const PURE_LINK_RATIO_THRESHOLD = 0.8;
@@ -89,7 +129,6 @@ const PURE_LINK_RATIO_THRESHOLD = 0.8;
 function isBreadcrumbLine(line: string): boolean {
   const trimmed = line.trim();
   if (trimmed.length === 0) return false;
-  // Match lines that are mostly " > [text](url) > [text](url)" patterns
   const linkParts = trimmed.match(/\[([^\]]+)\]\(([^)]+)\)/g);
   if (!linkParts) return false;
   const linkChars = linkParts.reduce((sum, m) => sum + m.length, 0);
@@ -163,10 +202,18 @@ export function filterBoilerplateWithContext(chunks: MarkdownChunk[]): MarkdownC
     }
   }
 
-  // Pass 2: individual boilerplate filtering (breadcrumbs, link-heavy, etc.)
-  const filtered = chunks.filter((c) => c.content.length > 0 && !isBoilerplateWithBreadcrumbCheck(c.content));
+  // Pass 2: strip remaining breadcrumb and pure-link lines from chunk content
+  chunks = chunks.map((chunk) => {
+    const stripped = chunk.content
+      .split('\n')
+      .filter((line) => !isBreadcrumbLine(line) && !isPureLinkLine(line))
+      .join('\n')
+      .trim();
+    return { ...chunk, content: stripped };
+  });
 
-  return filtered;
+  // Pass 3: individual boilerplate filtering (link-heavy, sidebar, etc.)
+  return chunks.filter((c) => c.content.length > 0 && !isBoilerplateWithBreadcrumbCheck(c.content));
 }
 
 function isBoilerplate(content: string): boolean {
