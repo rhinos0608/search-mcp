@@ -62,6 +62,10 @@ function fallbackExtract(document: Document): { content: string; textContent: st
   return { content: '<p>' + text + '</p>', textContent: text };
 }
 
+/**
+ * Note: extractionConfig is not supported in the Readability fallback path.
+ * When crawl4ai is configured, server.ts forwards extractionConfig to webCrawl.
+ */
 export async function webRead(url: string): Promise<ArticleResult> {
   assertSafeUrl(url);
 
