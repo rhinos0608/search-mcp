@@ -6,6 +6,7 @@ import { parseError } from '../errors.js';
 import { ToolCache, cacheKey } from '../cache.js';
 import { retryWithBackoff } from '../retry.js';
 import type { ArticleResult } from '../types.js';
+import { extractElementsFromHtml } from '../utils/htmlElements.js';
 
 const cache = new ToolCache<ArticleResult>({
   maxSize: 100,
@@ -145,6 +146,15 @@ export async function webRead(url: string): Promise<ArticleResult> {
         textContent = textContent.slice(0, MAX_CONTENT_LENGTH) + TRUNCATED_MARKER;
       }
 
+      const elements = (() => {
+        const articleDom = new JSDOM(content, { url });
+        try {
+          return extractElementsFromHtml(articleDom.window.document);
+        } finally {
+          articleDom.window.close();
+        }
+      })();
+
       result = {
         title: article.title ?? metadata.title,
         content,
@@ -156,6 +166,7 @@ export async function webRead(url: string): Promise<ArticleResult> {
         description: metadata.description,
         publishedDate: metadata.publishedDate,
         image: metadata.image,
+        elements,
       };
     } else {
       readabilityDom.window.close();
@@ -180,6 +191,8 @@ export async function webRead(url: string): Promise<ArticleResult> {
           textContent = textContent.slice(0, MAX_CONTENT_LENGTH) + TRUNCATED_MARKER;
         }
 
+        const elements = extractElementsFromHtml(fallbackDom.window.document);
+
         result = {
           title: metadata.title,
           content,
@@ -191,6 +204,7 @@ export async function webRead(url: string): Promise<ArticleResult> {
           description: metadata.description,
           publishedDate: metadata.publishedDate,
           image: metadata.image,
+          elements,
         };
       } finally {
         fallbackDom.window.close();
