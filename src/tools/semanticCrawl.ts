@@ -71,28 +71,21 @@ export async function embedTexts(
 
   let raw: unknown;
   try {
-    let response = await retryWithBackoff(
-      () =>
-        fetch(endpoint, {
+    const response = await retryWithBackoff(
+      async () => {
+        const res = await fetch(endpoint, {
           method: 'POST',
           headers,
           body: JSON.stringify(body),
           signal: AbortSignal.timeout(60_000),
-        }),
+        });
+        if (res.status === 503) {
+          throw networkError('Embedding sidecar returned HTTP 503', { statusCode: 503 });
+        }
+        return res;
+      },
       { label: 'embedding-sidecar', maxAttempts: 2, initialDelayMs: 500 },
     );
-
-    if (response.status === 503) {
-      const retryAfter = response.headers.get('retry-after');
-      const delayMs = Math.min(parseInt(retryAfter ?? '5', 10) * 1000, 30_000);
-      logger.warn({ delayMs }, 'Embedding sidecar returned 503, retrying after delay');
-      response = await fetch(endpoint, {
-        method: 'POST',
-        headers,
-        body: JSON.stringify(body),
-        signal: AbortSignal.timeout(60_000),
-      });
-    }
 
     if (!response.ok) {
       throw networkError(`Embedding sidecar returned HTTP ${String(response.status)}`, {
