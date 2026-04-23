@@ -14,17 +14,29 @@ export function isCookieBannerPage(markdown: string): boolean {
   if (lines.length === 0) return false;
 
   const bannerLines: string[] = [];
+  const exactIndices = new Set<number>();
 
-  for (const line of lines) {
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i]!;
     if (EXACT_PATTERNS.some((p) => p.test(line))) {
       bannerLines.push(line);
+      exactIndices.add(i);
     }
   }
 
   let consecutive = 0;
   let hasButton = false;
   let structuralLines = 0;
-  for (const line of lines) {
+  for (let i = 0; i < lines.length; i++) {
+    if (exactIndices.has(i)) {
+      if (consecutive >= 3 && hasButton) {
+        structuralLines += consecutive;
+      }
+      consecutive = 0;
+      hasButton = false;
+      continue;
+    }
+    const line = lines[i]!;
     const lower = line.toLowerCase();
     const hasKeyword = /\b(cookie|cookies|consent|privacy|tracking|gdpr|ccpa)\b/i.test(lower);
     if (hasKeyword) {
