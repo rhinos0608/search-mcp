@@ -644,7 +644,16 @@ async function crawlSeeds(
   crawl4aiCfg: Crawl4aiConfig,
   opts: Pick<
     SemanticCrawlOptions,
-    'strategy' | 'maxDepth' | 'maxPages' | 'includeExternalLinks' | 'maxBytes' | 'allowPathDrift'
+    | 'strategy'
+    | 'maxDepth'
+    | 'maxPages'
+    | 'includeExternalLinks'
+    | 'maxBytes'
+    | 'allowPathDrift'
+    | 'waitFor'
+    | 'delayBeforeReturnHtml'
+    | 'pageTimeout'
+    | 'jsCode'
   >,
 ): Promise<{ pages: CrawlPageResult[]; totalPages: number; successfulPages: number }> {
   if (seedUrls.length === 0) {
@@ -675,6 +684,10 @@ async function crawlSeeds(
       maxPages: perSeedPages,
       includeExternalLinks: opts.includeExternalLinks,
       ...(perSeedBytes !== undefined ? { maxBytes: perSeedBytes } : {}),
+      ...(opts.waitFor !== undefined ? { waitFor: opts.waitFor } : {}),
+      ...(opts.delayBeforeReturnHtml !== undefined ? { delayBeforeReturnHtml: opts.delayBeforeReturnHtml } : {}),
+      ...(opts.pageTimeout !== undefined ? { pageTimeout: opts.pageTimeout } : {}),
+      ...(opts.jsCode !== undefined ? { jsCode: opts.jsCode } : {}),
     };
 
     const result = await webCrawl(seedUrl, crawl4aiCfg.baseUrl, crawl4aiCfg.apiToken, crawlOpts);
@@ -773,6 +786,14 @@ export interface SemanticCrawlOptions {
   maxBytes?: number | undefined;
   useReranker?: boolean | undefined;
   allowPathDrift?: boolean | undefined;
+  /** CSS selector (css:.selector) or JS expression (js:() => boolean) to wait for before extracting. */
+  waitFor?: string | undefined;
+  /** Extra seconds to wait after page load for dynamic content to settle. */
+  delayBeforeReturnHtml?: number | undefined;
+  /** Page operation timeout in milliseconds. */
+  pageTimeout?: number | undefined;
+  /** Custom JavaScript to execute on the page (e.g. scroll, click buttons). */
+  jsCode?: string | undefined;
 }
 
 export async function semanticCrawl(

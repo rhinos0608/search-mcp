@@ -1234,9 +1234,36 @@ export function createServer(): McpServer {
             .optional()
             .default(false)
             .describe('Follow links to external domains (default false — stays on seed domain)'),
+          waitFor: z
+            .string()
+            .optional()
+            .describe(
+              'Wait for a CSS selector (css:.selector) or JS expression (js:() => boolean) before extracting content. Useful for SPAs and dynamic content.',
+            ),
+          delayBeforeReturnHtml: z
+            .number()
+            .min(0)
+            .max(30)
+            .optional()
+            .default(0.1)
+            .describe('Extra seconds to wait after page load for dynamic content to settle (0–30, default 0.1)'),
+          pageTimeout: z
+            .number()
+            .int()
+            .min(1000)
+            .max(300000)
+            .optional()
+            .default(60000)
+            .describe('Page operation timeout in milliseconds (1000–300000, default 60000)'),
+          jsCode: z
+            .string()
+            .optional()
+            .describe(
+              'Custom JavaScript to execute on the page (e.g. scroll to bottom, click "Load More"). Runs after wait_for completes.',
+            ),
         },
       },
-      async ({ url, strategy, maxDepth, maxPages, includeExternalLinks }) => {
+      async ({ url, strategy, maxDepth, maxPages, includeExternalLinks, waitFor, delayBeforeReturnHtml, pageTimeout, jsCode }) => {
         logger.info({ tool: 'web_crawl', url, strategy, maxDepth, maxPages }, 'Tool invoked');
         const start = Date.now();
         try {
@@ -1245,6 +1272,10 @@ export function createServer(): McpServer {
             maxDepth,
             maxPages,
             includeExternalLinks,
+            waitFor,
+            delayBeforeReturnHtml,
+            pageTimeout,
+            jsCode,
           });
           const result = makeResult('web_crawl', data, Date.now() - start);
           return successResponse(result);
@@ -1373,6 +1404,33 @@ export function createServer(): McpServer {
             .optional()
             .default(false)
             .describe('Allow crawler to follow links outside the seed URL path (default false)'),
+          waitFor: z
+            .string()
+            .optional()
+            .describe(
+              'Wait for a CSS selector (css:.selector) or JS expression (js:() => boolean) before extracting content. Useful for SPAs and dynamic content.',
+            ),
+          delayBeforeReturnHtml: z
+            .number()
+            .min(0)
+            .max(30)
+            .optional()
+            .default(0.1)
+            .describe('Extra seconds to wait after page load for dynamic content to settle (0–30, default 0.1)'),
+          pageTimeout: z
+            .number()
+            .int()
+            .min(1000)
+            .max(300000)
+            .optional()
+            .default(60000)
+            .describe('Page operation timeout in milliseconds (1000–300000, default 60000)'),
+          jsCode: z
+            .string()
+            .optional()
+            .describe(
+              'Custom JavaScript to execute on the page (e.g. scroll to bottom, click "Load More"). Runs after wait_for completes.',
+            ),
         },
       },
       async ({
@@ -1386,6 +1444,10 @@ export function createServer(): McpServer {
         maxBytes,
         useReranker,
         allowPathDrift,
+        waitFor,
+        delayBeforeReturnHtml,
+        pageTimeout,
+        jsCode,
       }) => {
         logger.info(
           { tool: 'semantic_crawl', sourceType: source.type, query, topK },
@@ -1406,6 +1468,10 @@ export function createServer(): McpServer {
               maxBytes: effectiveMaxBytes,
               useReranker,
               allowPathDrift,
+              waitFor,
+              delayBeforeReturnHtml,
+              pageTimeout,
+              jsCode,
             },
             cfg.crawl4ai,
             cfg.embeddingSidecar.baseUrl,

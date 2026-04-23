@@ -217,3 +217,43 @@ test('webCrawl sends deep_crawl_strategy in request body', async () => {
   assert.equal(deepStrategy.params.max_pages, 20);
   assert.equal(deepStrategy.params.include_external, false);
 });
+
+// ── Test 10: Dynamic content options passthrough ──────────────────────────────
+
+test('webCrawl passes waitFor, delayBeforeReturnHtml, pageTimeout, and jsCode to crawl4ai', async () => {
+  let capturedBody: unknown = null;
+
+  globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+    const req = new Request(input, init);
+    capturedBody = JSON.parse(await req.text());
+    return buildMockResponse({
+      result: { url: 'https://example.com', success: true, markdown: '# Loaded' },
+    });
+  };
+
+  await webCrawl('https://example.com', 'https://crawl4ai.example.com', '', {
+    ...defaultOpts,
+    waitFor: 'css:.dynamic-content',
+    delayBeforeReturnHtml: 2.5,
+    pageTimeout: 120000,
+    jsCode: 'window.scrollTo(0, document.body.scrollHeight);',
+  });
+
+  assert.ok(capturedBody);
+  const body = capturedBody as {
+    crawler_config: {
+      type: string;
+      params: {
+        wait_for?: string;
+        delay_before_return_html?: number;
+        page_timeout?: number;
+        js_code?: string;
+      };
+    };
+  };
+  assert.equal(body.crawler_config.type, 'CrawlerRunConfig');
+  assert.equal(body.crawler_config.params.wait_for, 'css:.dynamic-content');
+  assert.equal(body.crawler_config.params.delay_before_return_html, 2.5);
+  assert.equal(body.crawler_config.params.page_timeout, 120000);
+  assert.equal(body.crawler_config.params.js_code, 'window.scrollTo(0, document.body.scrollHeight);');
+});

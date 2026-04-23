@@ -12,6 +12,14 @@ export interface WebCrawlOptions {
   includeExternalLinks: boolean;
   /** Maximum total bytes of markdown to collect (client-side soft limit). */
   maxBytes?: number;
+  /** CSS selector (css:.selector) or JS expression (js:() => boolean) to wait for before extracting. */
+  waitFor?: string | undefined;
+  /** Extra seconds to wait after page load for dynamic content to settle. */
+  delayBeforeReturnHtml?: number | undefined;
+  /** Page operation timeout in milliseconds. */
+  pageTimeout?: number | undefined;
+  /** Custom JavaScript to execute on the page (e.g. scroll, click buttons). */
+  jsCode?: string | undefined;
 }
 
 // crawl4ai API response shape (stable across v0.7.x and v0.8.x)
@@ -99,6 +107,19 @@ export async function webCrawl(
       },
     },
   };
+
+  if (opts.waitFor !== undefined && opts.waitFor.length > 0) {
+    crawlerConfigParams.wait_for = opts.waitFor;
+  }
+  if (opts.delayBeforeReturnHtml !== undefined) {
+    crawlerConfigParams.delay_before_return_html = opts.delayBeforeReturnHtml;
+  }
+  if (opts.pageTimeout !== undefined) {
+    crawlerConfigParams.page_timeout = opts.pageTimeout;
+  }
+  if (opts.jsCode !== undefined && opts.jsCode.length > 0) {
+    crawlerConfigParams.js_code = opts.jsCode;
+  }
 
   const body = {
     urls: [url],
