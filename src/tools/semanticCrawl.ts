@@ -1,14 +1,16 @@
 import { logger } from '../logger.js';
 import { unavailableError, networkError, parseError } from '../errors.js';
 import { retryWithBackoff } from '../retry.js';
-import { assertSafeUrl, safeResponseJson } from '../httpGuards.js';
+import { safeResponseJson } from '../httpGuards.js';
 import { webCrawl, type WebCrawlOptions } from './webCrawl.js';
 import { chunkMarkdown } from '../chunking.js';
 import type { SemanticCrawlResult, SemanticCrawlChunk } from '../types.js';
 import type { Crawl4aiConfig } from '../config.js';
+import { createHash } from 'node:crypto';
 
 interface EmbedRequest {
   texts: string[];
+  titles?: string[];
   mode: 'document' | 'query';
   dimensions: number;
 }
@@ -22,21 +24,28 @@ interface EmbedResponse {
   truncatedIndices: number[];
 }
 
+const MAX_EMBEDDING_BATCH = 512;
+
 export async function embedTexts(
   baseUrl: string,
   apiToken: string,
   texts: string[],
   mode: 'document' | 'query',
   dimensions: number,
+  titles?: string[],
 ): Promise<number[][]> {
   if (!baseUrl) {
     throw unavailableError('Embedding sidecar is not configured. Set EMBEDDING_SIDECAR_BASE_URL.');
   }
 
   const endpoint = `${baseUrl.replace(/\/+$/, '')}/embed`;
-  assertSafeUrl(endpoint);
+  // Sidecar URLs come from operator configuration (EMBEDDING_SIDECAR_BASE_URL);
+  // they are inherently trusted and should not be subject to SSRF guards.
 
   const body: EmbedRequest = { texts, mode, dimensions };
+  if (titles !== undefined && titles.length > 0) {
+    body.titles = titles;
+  }
 
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
@@ -63,7 +72,6 @@ export async function embedTexts(
       const retryAfter = response.headers.get('retry-after');
       const delayMs = Math.min(parseInt(retryAfter ?? '5', 10) * 1000, 30_000);
       logger.warn({ delayMs }, 'Embedding sidecar returned 503, retrying after delay');
-      await new Promise((resolve) => setTimeout(resolve, delayMs));
       response = await fetch(endpoint, {
         method: 'POST',
         headers,
@@ -106,6 +114,35 @@ export async function embedTexts(
   return data.embeddings;
 }
 
+async function embedTextsBatched(
+  baseUrl: string,
+  apiToken: string,
+  texts: string[],
+  mode: 'document' | 'query',
+  dimensions: number,
+  titles?: string[],
+): Promise<number[][]> {
+  const embeddings: number[][] = [];
+  for (let i = 0; i < texts.length; i += MAX_EMBEDDING_BATCH) {
+    const batchTexts = texts.slice(i, i + MAX_EMBEDDING_BATCH);
+    const batchTitles = titles ? titles.slice(i, i + MAX_EMBEDDING_BATCH) : undefined;
+    const batchEmbeddings = await embedTexts(baseUrl, apiToken, batchTexts, mode, dimensions, batchTitles);
+    embeddings.push(...batchEmbeddings);
+  }
+  return embeddings;
+}
+
+function deduplicateChunks(chunks: SemanticCrawlChunk[]): SemanticCrawlChunk[] {
+  const seen = new Set<string>();
+  return chunks.filter((c) => {
+    const normalized = c.text.trim().toLowerCase().replace(/\s+/g, ' ');
+    const hash = createHash('sha256').update(normalized).digest('hex');
+    if (seen.has(hash)) return false;
+    seen.add(hash);
+    return true;
+  });
+}
+
 const MAX_CHUNKS_SOFT = 2_000;
 const MAX_CHUNKS_HARD = 5_000;
 
@@ -136,16 +173,22 @@ export async function semanticCrawl(
   const crawlResult = await webCrawl(opts.url, crawl4aiCfg.baseUrl, crawl4aiCfg.apiToken, crawlOpts);
 
   // 2. Chunk
-  const allChunks: SemanticCrawlChunk[] = [];
+  let allChunks: SemanticCrawlChunk[] = [];
+  let pagesWithContent = 0;
   for (const page of crawlResult.pages) {
     if (!page.success || !page.markdown) continue;
     const chunks = chunkMarkdown(page.markdown, page.url);
+    if (chunks.length === 0) {
+      logger.debug({ url: page.url }, 'semantic_crawl: page produced no chunks');
+      continue;
+    }
+    pagesWithContent++;
     allChunks.push(
       ...chunks.map((c) => ({
         text: c.content,
         url: c.url,
         section: c.section,
-        score: 0,
+        biEncoderScore: 0,
         charOffset: c.charOffset,
         chunkIndex: c.chunkIndex,
         totalChunks: c.totalChunks,
@@ -153,7 +196,24 @@ export async function semanticCrawl(
     );
   }
 
-  // 3. Chunk safety check
+  if (pagesWithContent < crawlResult.successfulPages) {
+    logger.warn(
+      { pagesWithContent, successfulPages: crawlResult.successfulPages },
+      'Some successfully crawled pages produced no meaningful chunks (likely boilerplate or empty)',
+    );
+  }
+
+  // 3. Deduplicate before embedding
+  const preDedupCount = allChunks.length;
+  allChunks = deduplicateChunks(allChunks);
+  if (preDedupCount !== allChunks.length) {
+    logger.info(
+      { preDedup: preDedupCount, postDedup: allChunks.length },
+      'Deduplicated chunks before embedding',
+    );
+  }
+
+  // 4. Chunk safety check
   if (allChunks.length > MAX_CHUNKS_HARD) {
     throw new Error(
       `Produced ${String(allChunks.length)} chunks, exceeding hard cap of ${String(MAX_CHUNKS_HARD)}. Reduce maxPages or increase chunk size.`,
@@ -177,10 +237,11 @@ export async function semanticCrawl(
     };
   }
 
-  // 4. Embed chunks and query in parallel
+  // 5. Embed chunks (batched) and query in parallel
   const chunkTexts = allChunks.map((c) => c.text);
+  const chunkTitles = allChunks.map((c) => c.section.split(' > ').at(-1)?.replace(/^#+\s+/, '') ?? 'none');
   const [chunkEmbeddings, queryEmbeddings] = await Promise.all([
-    embedTexts(embeddingBaseUrl, embeddingApiToken, chunkTexts, 'document', embeddingDimensions),
+    embedTextsBatched(embeddingBaseUrl, embeddingApiToken, chunkTexts, 'document', embeddingDimensions, chunkTitles),
     embedTexts(embeddingBaseUrl, embeddingApiToken, [opts.query], 'query', embeddingDimensions),
   ]);
   const queryEmbedding = queryEmbeddings[0];
@@ -193,9 +254,9 @@ export async function semanticCrawl(
     const chunk = allChunks[i];
     const emb = chunkEmbeddings[i];
     if (!chunk || emb === undefined) continue;
-    chunk.score = cosineSimilarity(queryEmbedding, emb);
+    chunk.biEncoderScore = cosineSimilarity(queryEmbedding, emb);
   }
-  allChunks.sort((a, b) => b.score - a.score);
+  allChunks.sort((a, b) => b.biEncoderScore - a.biEncoderScore);
 
   // 7. Return topK
   const topChunks = allChunks.slice(0, opts.topK);

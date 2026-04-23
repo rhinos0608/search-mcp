@@ -377,8 +377,10 @@ export interface SemanticCrawlChunk {
   text: string;
   url: string;
   section: string;
-  /** Cosine similarity score (0–1, higher = more relevant). */
-  score: number;
+  /** Cosine similarity score from bi-encoder embedding (always present, [-1, 1]). */
+  biEncoderScore: number;
+  /** Cross-encoder re-ranker score (only present when reranker was applied). */
+  rerankScore?: number;
   /** 0-based character offset in the source page text. */
   charOffset: number;
   chunkIndex: number;
@@ -393,4 +395,49 @@ export interface SemanticCrawlResult {
   totalChunks: number;
   successfulPages: number;
   chunks: SemanticCrawlChunk[];
+}
+
+// ── Semantic Crawl Sources ────────────────────────────────────────────────
+
+export interface UrlSource {
+  type: 'url';
+  url: string;
+  /** Additional seed URLs to crawl in the same corpus. */
+  urls?: string[];
+}
+
+export interface SitemapSource {
+  type: 'sitemap';
+  url: string;
+}
+
+export interface SearchSeedSource {
+  type: 'search';
+  query: string;
+  /** Max URLs to collect from web search (1–20, default 10). */
+  maxSeedUrls?: number;
+}
+
+export interface GitHubSource {
+  type: 'github';
+  owner: string;
+  repo: string;
+  branch?: string;
+  /** File extensions to include. Default: ['.md', '.mdx', '.rst', '.txt', '.py', '.ts', '.js', '.go', '.rs', '.java'] */
+  extensions?: string[];
+  /** Optional code search query to pre-filter files. */
+  query?: string;
+}
+
+export type SemanticCrawlSource = UrlSource | SitemapSource | SearchSeedSource | GitHubSource;
+
+// ── Corpus Chunk (adapter output, before embed+rank) ───────────────────────
+
+export interface CorpusChunk {
+  text: string;
+  url: string;
+  section: string;
+  charOffset: number;
+  chunkIndex: number;
+  totalChunks: number;
 }

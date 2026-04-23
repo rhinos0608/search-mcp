@@ -58,7 +58,7 @@ export function chunkMarkdown(markdown: string, url: string): MarkdownChunk[] {
     parentStack.push(section);
   }
 
-  // Merge short sections
+  // Merge short sections (boilerplate filtering deferred to filterBoilerplateWithContext)
   const groups = mergeShortSections(nodes);
 
   // Split groups into chunks
@@ -73,9 +73,140 @@ export function chunkMarkdown(markdown: string, url: string): MarkdownChunk[] {
   }
 
   // Post-process to ensure floor invariant
-  const processed = postProcessChunks(allChunks);
+  let processed = postProcessChunks(allChunks);
+
+  // Context-aware boilerplate filtering (breadcrumbs, repeated nav, link-heavy)
+  processed = filterBoilerplateWithContext(processed);
 
   return processed;
+}
+
+// --- New boilerplate heuristics ---
+
+const BREADCRUMB_LINK_RATIO = 0.5;
+const PURE_LINK_RATIO_THRESHOLD = 0.8;
+
+function isBreadcrumbLine(line: string): boolean {
+  const trimmed = line.trim();
+  if (trimmed.length === 0) return false;
+  // Match lines that are mostly " > [text](url) > [text](url)" patterns
+  const linkParts = trimmed.match(/\[([^\]]+)\]\(([^)]+)\)/g);
+  if (!linkParts) return false;
+  const linkChars = linkParts.reduce((sum, m) => sum + m.length, 0);
+  return linkChars / trimmed.length > PURE_LINK_RATIO_THRESHOLD && trimmed.includes('>');
+}
+
+function isPureLinkLine(line: string): boolean {
+  const trimmed = line.trim();
+  if (trimmed.length === 0) return false;
+  const linkMatch = /\[([^\]]+)\]\(([^)]+)\)/.exec(trimmed);
+  if (!linkMatch) return false;
+  return linkMatch[0].length / trimmed.length > PURE_LINK_RATIO_THRESHOLD;
+}
+
+function isBoilerplateWithBreadcrumbCheck(content: string): boolean {
+  if (isBoilerplate(content)) return true;
+
+  const trimmed = content.trim();
+  const lines = trimmed.split('\n');
+  const nonEmptyLines = lines.filter((l) => l.trim().length > 0);
+  if (nonEmptyLines.length === 0) return true;
+
+  // Breadcrumb navigation: >50% of lines are breadcrumb patterns
+  const breadcrumbLines = nonEmptyLines.filter(isBreadcrumbLine);
+  if (breadcrumbLines.length / nonEmptyLines.length > BREADCRUMB_LINK_RATIO) return true;
+
+  // Short-line + link-heavy: avg words < 3 AND >30% pure link lines
+  const totalWords = nonEmptyLines.reduce((sum, l) => sum + l.trim().split(/\s+/).length, 0);
+  const avgWordsPerLine = totalWords / nonEmptyLines.length;
+  const pureLinkLines = nonEmptyLines.filter(isPureLinkLine);
+  if (avgWordsPerLine < 3 && pureLinkLines.length / nonEmptyLines.length > 0.3) return true;
+
+  return false;
+}
+
+export function filterBoilerplateWithContext(chunks: MarkdownChunk[]): MarkdownChunk[] {
+  if (chunks.length === 0) return chunks;
+
+  // Pass 1: line-level dedup — strip lines that appear in 2+ chunks (repeated nav blocks)
+  if (chunks.length > 1) {
+    const lineCounts = new Map<string, number>();
+    for (const chunk of chunks) {
+      const seen = new Set<string>();
+      for (const line of chunk.content.split('\n')) {
+        const key = line.trim().toLowerCase();
+        if (key.length === 0) continue;
+        if (!seen.has(key)) {
+          seen.add(key);
+          lineCounts.set(key, (lineCounts.get(key) ?? 0) + 1);
+        }
+      }
+    }
+
+    const sharedLines = new Set<string>();
+    for (const [line, count] of lineCounts) {
+      if (count > 1) sharedLines.add(line);
+    }
+
+    if (sharedLines.size > 0) {
+      chunks = chunks.map((chunk) => {
+        const kept = chunk.content
+          .split('\n')
+          .filter((line) => {
+            const key = line.trim().toLowerCase();
+            return key.length === 0 || !sharedLines.has(key);
+          })
+          .join('\n')
+          .trim();
+        return { ...chunk, content: kept };
+      });
+    }
+  }
+
+  // Pass 2: individual boilerplate filtering (breadcrumbs, link-heavy, etc.)
+  const filtered = chunks.filter((c) => c.content.length > 0 && !isBoilerplateWithBreadcrumbCheck(c.content));
+
+  return filtered;
+}
+
+function isBoilerplate(content: string): boolean {
+  const trimmed = content.trim();
+  if (trimmed.length === 0) return true;
+
+  // Never treat code blocks as boilerplate
+  if (trimmed.includes('```')) return false;
+
+  // Count markdown links [text](url)
+  const linkMatches = trimmed.match(/\[([^\]]+)\]\(([^)]+)\)/g);
+  const linkChars = linkMatches ? linkMatches.reduce((sum, m) => sum + m.length, 0) : 0;
+  const linkDensity = trimmed.length > 0 ? linkChars / trimmed.length : 0;
+
+  // Very high link density = nav/footer
+  if (linkDensity > 0.5) return true;
+
+  const lines = trimmed.split('\n');
+  const nonEmptyLines = lines.filter((l) => l.trim().length > 0);
+  if (nonEmptyLines.length === 0) return true;
+
+  // List-item density and short-line density
+  const listItemLines = nonEmptyLines.filter(
+    (l) => /^\s*[-*+]\s/.test(l) || /^\s*\d+\.\s/.test(l),
+  );
+  const listDensity = nonEmptyLines.length > 0 ? listItemLines.length / nonEmptyLines.length : 0;
+  const shortLineCount = nonEmptyLines.filter((l) => l.length < 40).length;
+  const shortLineDensity = shortLineCount / nonEmptyLines.length;
+
+  // Nav menus: mostly short list items with moderate-to-high link density
+  if (listDensity > 0.6 && shortLineDensity > 0.7 && linkDensity > 0.2) return true;
+
+  // Plain-text nav/footer lists (no markdown links but very short items)
+  if (listDensity > 0.7 && shortLineDensity > 0.8) {
+    const avgWordsPerLine =
+      nonEmptyLines.reduce((sum, l) => sum + l.trim().split(/\s+/).length, 0) / nonEmptyLines.length;
+    if (avgWordsPerLine < 3) return true;
+  }
+
+  return false;
 }
 
 function estimateTokens(text: string): number {
@@ -199,7 +330,7 @@ function splitGroup(content: string, chain: string, url: string, pageTitle: stri
   const chunks: MarkdownChunk[] = [];
   let start = 0;
   let charOffset = 0;
-  const unitIdx = 0;
+  let unitIdx = 0;
 
   while (start < trimmed.length) {
     const remaining = trimmed.length - start;
@@ -211,7 +342,9 @@ function splitGroup(content: string, chain: string, url: string, pageTitle: stri
       break;
     }
 
-    let splitPos = findSplitPosition(trimmed, start, maxChars, units, unitIdx);
+    const splitResult = findSplitPosition(trimmed, start, maxChars, units, unitIdx);
+    let splitPos = splitResult.pos;
+    unitIdx = splitResult.unitIdx;
 
     // Ensure we make progress
     if (splitPos <= start) {
@@ -257,9 +390,15 @@ function splitGroup(content: string, chain: string, url: string, pageTitle: stri
   }));
 }
 
-function findSplitPosition(content: string, start: number, maxChars: number, units: AtomicUnit[], unitIdx: number): number {
+function findSplitPosition(
+  content: string,
+  start: number,
+  maxChars: number,
+  units: AtomicUnit[],
+  unitIdx: number,
+): { pos: number; unitIdx: number } {
   const target = start + maxChars;
-  if (target >= content.length) return content.length;
+  if (target >= content.length) return { pos: content.length, unitIdx };
 
   // Advance unitIdx to first unit that could overlap the search range
   while (unitIdx < units.length) {
@@ -273,7 +412,7 @@ function findSplitPosition(content: string, start: number, maxChars: number, uni
   while (pos > start) {
     if (content[pos] === '\n' && content[pos + 1] === '\n') {
       if (!isInAtomicUnit(pos, units, unitIdx)) {
-        return pos + 1;
+        return { pos: pos + 1, unitIdx };
       }
     }
     pos--;
@@ -287,12 +426,12 @@ function findSplitPosition(content: string, start: number, maxChars: number, uni
       content[pos + 1] === ' '
     ) {
       if (!isInAtomicUnit(pos, units, unitIdx)) {
-        return pos + 2;
+        return { pos: pos + 2, unitIdx };
       }
     }
     if (content[pos] === '\n' && content[pos + 1] !== '\n') {
       if (!isInAtomicUnit(pos, units, unitIdx)) {
-        return pos + 1;
+        return { pos: pos + 1, unitIdx };
       }
     }
     pos++;
@@ -303,7 +442,7 @@ function findSplitPosition(content: string, start: number, maxChars: number, uni
   while (pos < content.length && isInAtomicUnit(pos, units, unitIdx)) {
     pos++;
   }
-  return pos;
+  return { pos, unitIdx };
 }
 
 function findUnitIndex(pos: number, units: AtomicUnit[]): number {
@@ -400,21 +539,33 @@ function extractAtomicUnits(content: string): AtomicUnit[] {
 }
 
 function snapToSentenceBoundary(content: string, rawStart: number, splitPos: number): number {
-  let pos = rawStart;
-  while (pos < splitPos) {
+  const targetOverlap = splitPos - rawStart;
+  let bestPos = rawStart;
+  let bestDiff = Infinity;
+
+  // Search backward from splitPos for the sentence boundary that gives
+  // overlap closest to the target. This avoids the old bug where the
+  // first boundary in the window produced a tiny overlap.
+  for (let pos = splitPos - 1; pos >= 0; pos--) {
     if (
       (content[pos] === '.' || content[pos] === '?' || content[pos] === '!') &&
       content[pos + 1] === ' '
     ) {
-      return pos + 2;
+      const candidateStart = pos + 2;
+      const overlap = splitPos - candidateStart;
+      const diff = Math.abs(overlap - targetOverlap);
+
+      if (diff < bestDiff) {
+        bestDiff = diff;
+        bestPos = candidateStart;
+      }
     }
-    if (content[pos] === '\n') {
-      return pos + 1;
-    }
-    pos++;
+
+    // Stop once we've searched far enough back that overlap would be >2x target
+    if (splitPos - pos > targetOverlap * 2) break;
   }
-  // No sentence boundary found; keep the raw overlap
-  return rawStart;
+
+  return bestPos;
 }
 
 function postProcessChunks(chunks: MarkdownChunk[]): MarkdownChunk[] {

@@ -82,6 +82,11 @@ export interface EmbeddingSidecarConfig {
   dimensions: number;
 }
 
+export interface SemanticCrawlConfig {
+  defaultMaxBytes: number;
+  maxMaxBytes: number;
+}
+
 export interface SearchConfig {
   searchBackend: SearchBackend;
   brave: { apiKey: string };
@@ -96,6 +101,7 @@ export interface SearchConfig {
   reddit: RedditConfig;
   crawl4ai: Crawl4aiConfig;
   embeddingSidecar: EmbeddingSidecarConfig;
+  semanticCrawl: SemanticCrawlConfig;
   rescoreWeights: RescoreConfig;
 }
 
@@ -118,7 +124,8 @@ const DEFAULTS: Omit<SearchConfig, 'rescoreWeights'> = {
     oauthConfigValid: true,
   },
   crawl4ai: { baseUrl: '', apiToken: '' },
-  embeddingSidecar: { baseUrl: '', apiToken: '', dimensions: 256 },
+  embeddingSidecar: { baseUrl: '', apiToken: '', dimensions: 768 },
+  semanticCrawl: { defaultMaxBytes: 50_000_000, maxMaxBytes: 200_000_000 },
 };
 
 const VALID_BACKENDS = new Set<string>(['brave', 'searxng']);
@@ -147,11 +154,12 @@ function decryptConfigFile(filePath: string, password: string): SearchConfig {
   return JSON.parse(decrypted.toString('utf8')) as SearchConfig;
 }
 
-type EnvConfig = Omit<Partial<SearchConfig>, 'reddit' | 'crawl4ai' | 'github' | 'embeddingSidecar'> & {
+type EnvConfig = Omit<Partial<SearchConfig>, 'reddit' | 'crawl4ai' | 'github' | 'embeddingSidecar' | 'semanticCrawl'> & {
   reddit?: Partial<RedditConfig>;
   crawl4ai?: Partial<Crawl4aiConfig>;
   github?: Partial<GitHubConfig>;
   embeddingSidecar?: Partial<EmbeddingSidecarConfig>;
+  semanticCrawl?: Partial<SemanticCrawlConfig>;
 };
 
 function loadFromEnv(): EnvConfig {
@@ -249,6 +257,21 @@ function loadFromEnv(): EnvConfig {
     cfg.embeddingSidecar = esc;
   }
 
+  const semanticCrawlDefaultMaxBytes = process.env.SEMANTIC_CRAWL_DEFAULT_MAX_BYTES;
+  const semanticCrawlMaxMaxBytes = process.env.SEMANTIC_CRAWL_MAX_MAX_BYTES;
+  if (semanticCrawlDefaultMaxBytes !== undefined || semanticCrawlMaxMaxBytes !== undefined) {
+    const scc: Partial<SemanticCrawlConfig> = {};
+    if (semanticCrawlDefaultMaxBytes !== undefined) {
+      const n = Number(semanticCrawlDefaultMaxBytes);
+      if (!isNaN(n)) scc.defaultMaxBytes = n;
+    }
+    if (semanticCrawlMaxMaxBytes !== undefined) {
+      const n = Number(semanticCrawlMaxMaxBytes);
+      if (!isNaN(n)) scc.maxMaxBytes = n;
+    }
+    cfg.semanticCrawl = scc;
+  }
+
   return cfg;
 }
 
@@ -335,6 +358,10 @@ export function loadConfig(): SearchConfig {
       baseUrl: envConfig.embeddingSidecar?.baseUrl ?? fileConfig.embeddingSidecar?.baseUrl ?? DEFAULTS.embeddingSidecar.baseUrl,
       apiToken: envConfig.embeddingSidecar?.apiToken ?? fileConfig.embeddingSidecar?.apiToken ?? DEFAULTS.embeddingSidecar.apiToken,
       dimensions: envConfig.embeddingSidecar?.dimensions ?? fileConfig.embeddingSidecar?.dimensions ?? DEFAULTS.embeddingSidecar.dimensions,
+    },
+    semanticCrawl: {
+      defaultMaxBytes: envConfig.semanticCrawl?.defaultMaxBytes ?? fileConfig.semanticCrawl?.defaultMaxBytes ?? DEFAULTS.semanticCrawl.defaultMaxBytes,
+      maxMaxBytes: envConfig.semanticCrawl?.maxMaxBytes ?? fileConfig.semanticCrawl?.maxMaxBytes ?? DEFAULTS.semanticCrawl.maxMaxBytes,
     },
     rescoreWeights: DEFAULT_RESCORE_WEIGHTS,
   };
