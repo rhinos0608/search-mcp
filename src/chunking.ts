@@ -58,14 +58,16 @@ export function chunkMarkdown(markdown: string, url: string): MarkdownChunk[] {
     parentStack.push(section);
   }
 
-  // Strip shared nav lines across sections before filtering/merging
+  // Strip shared nav lines across sections before filtering/merging.
+  // Only counts short lines (≤200 chars) — long content lines are never nav.
   if (nodes.length > 1) {
     const lineCounts = new Map<string, number>();
     for (const node of nodes) {
       const seen = new Set<string>();
       for (const line of node.contentLines) {
         const key = line.trim().toLowerCase();
-        if (key.length === 0) continue;
+        // Only count short lines — nav items are short; long content lines are never nav
+        if (key.length === 0 || key.length > 200) continue;
         if (!seen.has(key)) {
           seen.add(key);
           lineCounts.set(key, (lineCounts.get(key) ?? 0) + 1);
@@ -105,7 +107,10 @@ export function chunkMarkdown(markdown: string, url: string): MarkdownChunk[] {
   const allChunks: MarkdownChunk[] = [];
   let runningOffset = 0;
   for (const group of groups) {
-    const groupContent = group.map((n) => n.contentLines.join('\n')).join('\n\n').trim();
+    const groupContent = group
+      .map((n) => n.contentLines.join('\n'))
+      .join('\n\n')
+      .trim();
     const groupChain = group.at(-1)?.chain ?? '';
     const chunks = splitGroup(groupContent, groupChain, url, pageTitle, runningOffset);
     runningOffset += groupContent.length + 2; // +2 for the '\n\n' joiner
@@ -167,14 +172,16 @@ function isBoilerplateWithBreadcrumbCheck(content: string): boolean {
 export function filterBoilerplateWithContext(chunks: MarkdownChunk[]): MarkdownChunk[] {
   if (chunks.length === 0) return chunks;
 
-  // Pass 1: line-level dedup — strip lines that appear in 2+ chunks (repeated nav blocks)
+  // Pass 1: line-level dedup — strip short lines that appear in 2+ chunks (repeated nav blocks)
+  // Only counts short lines (≤200 chars) — long content lines are never nav.
   if (chunks.length > 1) {
     const lineCounts = new Map<string, number>();
     for (const chunk of chunks) {
       const seen = new Set<string>();
       for (const line of chunk.content.split('\n')) {
         const key = line.trim().toLowerCase();
-        if (key.length === 0) continue;
+        // Only count short lines — nav items are short; long content lines are never nav
+        if (key.length === 0 || key.length > 200) continue;
         if (!seen.has(key)) {
           seen.add(key);
           lineCounts.set(key, (lineCounts.get(key) ?? 0) + 1);
@@ -236,9 +243,7 @@ function isBoilerplate(content: string): boolean {
   if (nonEmptyLines.length === 0) return true;
 
   // List-item density and short-line density
-  const listItemLines = nonEmptyLines.filter(
-    (l) => /^\s*[-*+]\s/.test(l) || /^\s*\d+\.\s/.test(l),
-  );
+  const listItemLines = nonEmptyLines.filter((l) => /^\s*[-*+]\s/.test(l) || /^\s*\d+\.\s/.test(l));
   const listDensity = nonEmptyLines.length > 0 ? listItemLines.length / nonEmptyLines.length : 0;
   const shortLineCount = nonEmptyLines.filter((l) => l.length < 40).length;
   const shortLineDensity = shortLineCount / nonEmptyLines.length;
@@ -249,7 +254,8 @@ function isBoilerplate(content: string): boolean {
   // Plain-text nav/footer lists (no markdown links but very short items)
   if (listDensity > 0.7 && shortLineDensity > 0.8) {
     const avgWordsPerLine =
-      nonEmptyLines.reduce((sum, l) => sum + l.trim().split(/\s+/).length, 0) / nonEmptyLines.length;
+      nonEmptyLines.reduce((sum, l) => sum + l.trim().split(/\s+/).length, 0) /
+      nonEmptyLines.length;
     if (avgWordsPerLine < 3) return true;
   }
 
@@ -314,9 +320,13 @@ function buildChain(pageTitle: string | null, section: Section, parentStack: Sec
   const parts: string[] = [];
   if (pageTitle) parts.push(`# ${pageTitle}`);
   for (const parent of parentStack) {
-    parts.push(parent.heading ? `${'#'.repeat(parent.depth)} ${parent.heading}` : '#'.repeat(parent.depth));
+    parts.push(
+      parent.heading ? `${'#'.repeat(parent.depth)} ${parent.heading}` : '#'.repeat(parent.depth),
+    );
   }
-  parts.push(section.heading ? `${'#'.repeat(section.depth)} ${section.heading}` : '#'.repeat(section.depth));
+  parts.push(
+    section.heading ? `${'#'.repeat(section.depth)} ${section.heading}` : '#'.repeat(section.depth),
+  );
   return parts.join(' > ');
 }
 
@@ -363,7 +373,13 @@ function mergeShortSections(nodes: SectionNode[]): SectionNode[][] {
   return groups;
 }
 
-function splitGroup(content: string, chain: string, url: string, pageTitle: string | null, baseOffset = 0): MarkdownChunk[] {
+function splitGroup(
+  content: string,
+  chain: string,
+  url: string,
+  pageTitle: string | null,
+  baseOffset = 0,
+): MarkdownChunk[] {
   const trimmed = content.trim();
   if (trimmed.length === 0) return [];
 
@@ -384,7 +400,9 @@ function splitGroup(content: string, chain: string, url: string, pageTitle: stri
     if (remaining <= maxChars) {
       const text = trimmed.slice(start).trim();
       if (text.length > 0) {
-        chunks.push(createChunk(text, chain, url, pageTitle, chunks.length, 0, baseOffset + charOffset));
+        chunks.push(
+          createChunk(text, chain, url, pageTitle, chunks.length, 0, baseOffset + charOffset),
+        );
       }
       break;
     }
@@ -400,7 +418,9 @@ function splitGroup(content: string, chain: string, url: string, pageTitle: stri
 
     const chunkText = trimmed.slice(start, splitPos).trim();
     if (chunkText.length > 0) {
-      chunks.push(createChunk(chunkText, chain, url, pageTitle, chunks.length, 0, baseOffset + charOffset));
+      chunks.push(
+        createChunk(chunkText, chain, url, pageTitle, chunks.length, 0, baseOffset + charOffset),
+      );
     }
 
     // Calculate overlap
@@ -570,7 +590,8 @@ function extractAtomicUnits(content: string): AtomicUnit[] {
       while (i < lines.length) {
         const codeLine = lines[i];
         if (codeLine === undefined) break;
-        if (!codeLine.startsWith('    ') && !codeLine.startsWith('\t') && codeLine.length > 0) break;
+        if (!codeLine.startsWith('    ') && !codeLine.startsWith('\t') && codeLine.length > 0)
+          break;
         charOffset += codeLine.length + 1;
         i++;
       }
@@ -675,7 +696,7 @@ function createChunk(
   pageTitle: string | null,
   chunkIndex: number,
   totalChunks: number,
-  charOffset: number
+  charOffset: number,
 ): MarkdownChunk {
   return {
     content,
