@@ -118,6 +118,44 @@ test('webCrawl throws parseError when sidecar lacks extraction support', async (
   );
 });
 
+test('webCrawl does not throw on failed page without extracted_content when other pages succeed', async () => {
+  globalThis.fetch = async () =>
+    buildMockResponse({
+      results: [
+        {
+          url: 'https://example.com',
+          success: false,
+          markdown: '',
+          status_code: 404,
+          error_message: 'Not found',
+          // No extracted_content — but page failed, so sidecar detection should not fire
+        },
+        {
+          url: 'https://example.com/page2',
+          success: true,
+          markdown: '# Hello',
+          extracted_content: [{ title: 'Job 1' }],
+        },
+      ],
+    });
+
+  const result = await webCrawl(
+    'https://example.com',
+    'https://crawl4ai.example.com',
+    '',
+    {
+      ...defaultOpts,
+      extractionConfig: {
+        type: 'css_schema',
+        schema: { name: 'Jobs', baseSelector: 'article', fields: [{ name: 'title', selector: 'h2', type: 'text' }] },
+      },
+    },
+  );
+
+  assert.ok(result.pages[1]);
+  assert.ok(result.pages[1].extractedData);
+});
+
 test('webCrawl passes llmFallback credentials through to extraction_config', async () => {
   let capturedBody: unknown = null;
 

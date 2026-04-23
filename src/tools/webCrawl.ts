@@ -198,10 +198,12 @@ export async function webCrawl(
 
   // Detect unsupported sidecar when extractionConfig was provided but no extracted_content present
   if (opts.extractionConfig) {
-    const hasExtractedContent =
-      (data.result !== undefined && 'extracted_content' in data.result) ||
-      (Array.isArray(data.results) && data.results.some((p) => 'extracted_content' in p));
-    if (!hasExtractedContent) {
+    const allPages = Array.isArray(data.results) ? data.results : data.result !== undefined ? [data.result] : [];
+    const anySuccessful = allPages.some((p) => p.success !== false);
+    const anySuccessfulWithExtraction = allPages.some(
+      (p) => p.success !== false && 'extracted_content' in p,
+    );
+    if (anySuccessful && !anySuccessfulWithExtraction) {
       throw parseError(
         'Crawl4AI sidecar does not support extraction. Upgrade Crawl4AI sidecar to v0.8.x or later for extraction support.',
       );
