@@ -7,6 +7,7 @@ import { webSearch } from './webSearch.js';
 import { chunkMarkdown } from '../chunking.js';
 import { parseSitemap, isSitemapIndex } from '../utils/sitemap.js';
 import { dedupPages } from '../utils/url.js';
+import { isCookieBannerPage } from '../utils/cookieBanner.js';
 import { rrfMerge } from '../utils/fusion.js';
 import { buildBm25Index, type Bm25Index } from '../utils/bm25.js';
 import { getOrBuildCorpus, loadCorpusById } from '../utils/corpusCache.js';
@@ -563,8 +564,13 @@ async function crawlSeeds(
 function pagesToCorpus(pages: CrawlPageResult[]): CorpusChunk[] {
   const chunks: CorpusChunk[] = [];
   let pagesWithContent = 0;
+  let droppedBannerPages = 0;
   for (const page of pages) {
     if (!page.success || !page.markdown) continue;
+    if (isCookieBannerPage(page.markdown)) {
+      droppedBannerPages++;
+      continue;
+    }
     const mdChunks = chunkMarkdown(page.markdown, page.url);
     if (mdChunks.length === 0) continue;
     pagesWithContent++;
@@ -579,9 +585,15 @@ function pagesToCorpus(pages: CrawlPageResult[]): CorpusChunk[] {
       })),
     );
   }
-  if (pagesWithContent < pages.filter((p) => p.success).length) {
+  if (droppedBannerPages > 0) {
     logger.warn(
-      { pagesWithContent, successfulPages: pages.filter((p) => p.success).length },
+      { droppedBannerPages, totalPages: pages.length },
+      'Dropped cookie-banner pages before chunking',
+    );
+  }
+  if (pagesWithContent < pages.filter((p) => p.success).length - droppedBannerPages) {
+    logger.info(
+      { pagesWithContent, successfulPages: pages.filter((p) => p.success).length - droppedBannerPages },
       'Some successfully crawled pages produced no meaningful chunks (likely boilerplate or empty)',
     );
   }
