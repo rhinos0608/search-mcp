@@ -73,25 +73,20 @@ async function getSession(): Promise<SessionState> {
       );
     }
 
-    const [{ InferenceSession }, { Tokenizer }] = await Promise.all([
+    const [{ InferenceSession }, tokenizerMod] = await Promise.all([
       import('onnxruntime-node'),
-      import('@huggingface/tokenizers'),
+      import('@huggingface/tokenizers') as Promise<{
+        Tokenizer: new (json: unknown, config: Record<string, unknown>) => unknown;
+      }>,
     ]);
 
     // @huggingface/tokenizers v0.1.x: constructor takes (tokenizerJson, configJson)
     // Pass the full parsed object to avoid stripping fields (e.g., added_tokens_decoder).
     const tokenizerJson: unknown = JSON.parse(readFileSync(TOKENIZER_PATH, 'utf8'));
-    const tokenizer = new Tokenizer(
-      tokenizerJson as Record<string, unknown>,
-      {
-        truncation: (tokenizerJson as Record<string, unknown>).truncation as
-          | Record<string, unknown>
-          | undefined,
-        padding: (tokenizerJson as Record<string, unknown>).padding as
-          | Record<string, unknown>
-          | undefined,
-      },
-    ) as unknown as HFTokenizer;
+    const tokenizer = new tokenizerMod.Tokenizer(tokenizerJson, {
+      truncation: (tokenizerJson as Record<string, unknown>).truncation,
+      padding: (tokenizerJson as Record<string, unknown>).padding,
+    }) as HFTokenizer;
 
     const session = await InferenceSession.create(MODEL_PATH, {
       executionProviders: ['cpu'],
@@ -176,9 +171,9 @@ async function runInference(state: SessionState, batch: TokenizedBatch): Promise
   for (let i = 0; i < batchSize; i++) {
     for (let j = 0; j < seqLen; j++) {
       const idx = i * seqLen + j;
-      flatInputIds[idx] = (batch.inputIds[i]?.[j] as bigint | undefined) ?? 0n;
-      flatAttentionMask[idx] = (batch.attentionMask[i]?.[j] as bigint | undefined) ?? 0n;
-      flatTokenTypeIds[idx] = (batch.tokenTypeIds[i]?.[j] as bigint | undefined) ?? 0n;
+      flatInputIds[idx] = batch.inputIds[i]?.[j] ?? 0n;
+      flatAttentionMask[idx] = batch.attentionMask[i]?.[j] ?? 0n;
+      flatTokenTypeIds[idx] = batch.tokenTypeIds[i]?.[j] ?? 0n;
     }
   }
 
@@ -201,7 +196,7 @@ async function runInference(state: SessionState, batch: TokenizedBatch): Promise
 
   const scores: number[] = [];
   for (let i = 0; i < batchSize; i++) {
-    scores.push(output.data[i] as number);
+    scores.push(output.data[i] ?? 0);
   }
   return scores;
 }
@@ -229,7 +224,7 @@ export async function rerank(
 
   const results: RerankResult[] = documents.map((doc, idx) => ({
     index: idx,
-    score: allScores[idx] as number,
+    score: allScores[idx] ?? 0,
     document: doc,
   }));
 
