@@ -56,4 +56,51 @@ describe('applySoftLexicalConstraint', () => {
     assert.strictEqual(result.filtered.length, 1); // fallback to unfiltered
     assert.ok(result.warning?.includes('zero matches'));
   });
+
+  it('uses word-level matching, not substring', () => {
+    // Query token 'car' should NOT match 'scary' (substring match would pass)
+    const chunks = [
+      makeChunk('I drive a car every day'),
+      makeChunk('That was a scary movie'),
+    ];
+    const corpus = [
+      { text: 'I drive a car every day', url: 'https://example.com', section: '## A', charOffset: 0, chunkIndex: 0, totalChunks: 1 },
+      { text: 'That was a scary movie', url: 'https://example.com', section: '## B', charOffset: 0, chunkIndex: 1, totalChunks: 2 },
+    ];
+    const result = applySoftLexicalConstraint(chunks, 'car', corpus);
+    assert.strictEqual(result.filtered.length, 1);
+    assert.ok(result.filtered[0]?.text.includes('car'));
+  });
+
+  it('requires all tokens for 1-token queries', () => {
+    const chunks = [
+      makeChunk('docker build instructions'),
+      makeChunk('the quick brown fox'),
+    ];
+    const corpus = [
+      { text: 'docker build instructions', url: 'https://example.com', section: '## A', charOffset: 0, chunkIndex: 0, totalChunks: 1 },
+      { text: 'the quick brown fox', url: 'https://example.com', section: '## B', charOffset: 0, chunkIndex: 1, totalChunks: 2 },
+    ];
+    // 1 non-stopword token → requiredCount = 1
+    const result = applySoftLexicalConstraint(chunks, 'docker', corpus);
+    assert.strictEqual(result.filtered.length, 1);
+    assert.ok(result.filtered[0]?.text.includes('docker'));
+  });
+
+  it('requires both tokens for 2-token queries', () => {
+    const chunks = [
+      makeChunk('docker build instructions'),
+      makeChunk('docker compose guide'),
+      makeChunk('the quick brown fox'),
+    ];
+    const corpus = [
+      { text: 'docker build instructions', url: 'https://example.com', section: '## A', charOffset: 0, chunkIndex: 0, totalChunks: 1 },
+      { text: 'docker compose guide', url: 'https://example.com', section: '## B', charOffset: 0, chunkIndex: 1, totalChunks: 2 },
+      { text: 'the quick brown fox', url: 'https://example.com', section: '## C', charOffset: 0, chunkIndex: 2, totalChunks: 3 },
+    ];
+    // 2 non-stopword tokens → requiredCount = 2
+    const result = applySoftLexicalConstraint(chunks, 'docker build', corpus);
+    assert.strictEqual(result.filtered.length, 1);
+    assert.ok(result.filtered[0]?.text.includes('docker build'));
+  });
 });

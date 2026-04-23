@@ -124,7 +124,6 @@ async function getSession(): Promise<SessionState> {
       if (scoreA <= scoreB + 0.1) {
         const msg = `Cross-encoder smoke test failed: good=${String(scoreA)}, bad=${String(scoreB)}. The model is not producing meaningful cross-encoder scores.`;
         logger.fatal({ scoreA, scoreB }, msg);
-        sessionPromise = null;
         throw unavailableError(msg);
       }
 

@@ -8,6 +8,7 @@ import {
   embedAndRank,
   filterByPathPrefix,
   isDirectChild,
+  pagesToCorpus,
   type SemanticCrawlOptions,
 } from '../src/tools/semanticCrawl.js';
 import type { SemanticCrawlChunk, SemanticCrawlResult, CorpusChunk, CrawlPageResult, SemanticCrawlSource, ScoreDetail } from '../src/types.js';
@@ -318,7 +319,7 @@ describe('embedAndRank', () => {
         embeddingDimensions: 4,
         precomputedEmbeddings: [[0.1, 0.2, 0.3, 0.4]], // length 1, but chunks has 2
       }),
-      (err: Error) => err.message.includes('does not match deduped chunk count'),
+      (err: Error) => err.message.includes('does not match chunk count'),
     );
   });
 });
@@ -569,44 +570,67 @@ describe('cache persistence', () => {
   });
 });
 
-describe('RRF candidate pool restriction', () => {
-  it('does not include chunks outside top-N bi-encoder + top-K BM25 pool', () => {
-    // Structural assertion: with topK=2, poolSize = max(2*3, 30) = 30.
-    // Build 25 chunks (5 relevant + 20 noise). All within poolSize.
-    const relevantChunks: SemanticCrawlChunk[] = [];
-    for (let i = 0; i < 5; i++) {
-      relevantChunks.push({
-        text: `relevant chunk ${String(i)} configure PORT=8080`,
-        url: `https://example.com/relevant/${String(i)}`,
-        section: '## Relevant',
-        charOffset: 0,
-        chunkIndex: i,
-        totalChunks: 5,
-        scores: {
-          biEncoder: { raw: 0.8 - i * 0.01, normalized: 0.8 - i * 0.01, corpusMin: 0, corpusMax: 1, median: 0.5 },
-          bm25: { raw: 0, normalized: 0, corpusMin: 0, corpusMax: 0, median: 0 },
-          rrf: { raw: 0, normalized: 0, corpusMin: 0, corpusMax: 0, median: 0 },
-        },
-      });
-    }
-    const noiseChunks: SemanticCrawlChunk[] = [];
-    for (let i = 0; i < 20; i++) {
-      noiseChunks.push({
-        text: `noise chunk ${String(i)}`,
-        url: `https://example.com/noise/${String(i)}`,
-        section: '## Noise',
-        charOffset: 0,
-        chunkIndex: i,
-        totalChunks: 20,
-        scores: {
-          biEncoder: { raw: 0.1, normalized: 0.1, corpusMin: 0, corpusMax: 1, median: 0.5 },
-          bm25: { raw: 0, normalized: 0, corpusMin: 0, corpusMax: 0, median: 0 },
-          rrf: { raw: 0, normalized: 0, corpusMin: 0, corpusMax: 0, median: 0 },
-        },
-      });
-    }
+describe('pagesToCorpus cookie-banner integration', () => {
+  const makePage = (url: string, markdown: string): CrawlPageResult => ({
+    url,
+    success: true,
+    markdown,
+    title: null,
+    description: null,
+    links: [],
+    statusCode: 200,
+    errorMessage: null,
+  });
 
-    assert.strictEqual(relevantChunks.length + noiseChunks.length, 25);
+  it('drops cookie-banner pages before chunking', () => {
+    const bannerPage = makePage(
+      'https://example.com/cookies',
+      'OneTrust Consent Manager\nManage Cookies\nAccept All Cookies\nNormal line.\nNormal line.',
+    );
+    const normalPage = makePage(
+      'https://example.com/docs',
+      '# Getting Started\n\nThis is documentation.\n\n## Installation\n\nRun `npm install`.',
+    );
+
+    const corpus = pagesToCorpus([bannerPage, normalPage]);
+    assert.ok(
+      corpus.every((c) => c.url !== bannerPage.url),
+      'cookie-banner page should be dropped from corpus',
+    );
+    assert.ok(
+      corpus.some((c) => c.url === normalPage.url),
+      'normal page should produce chunks',
+    );
+  });
+
+  it('drops structural cookie-banner pages', () => {
+    const bannerPage = makePage(
+      'https://example.com/privacy',
+      'This site uses cookies to improve your experience.\nWe value your privacy and tracking preferences.\nPlease Accept or Reject cookies to continue.\nNormal docs line.',
+    );
+    const normalPage = makePage(
+      'https://example.com/guide',
+      '# Guide\n\nStep by step instructions.',
+    );
+
+    const corpus = pagesToCorpus([bannerPage, normalPage]);
+    assert.ok(
+      corpus.every((c) => c.url !== bannerPage.url),
+      'structural cookie-banner page should be dropped',
+    );
+    assert.ok(
+      corpus.some((c) => c.url === normalPage.url),
+      'normal page should still produce chunks',
+    );
+  });
+
+  it('keeps normal pages below banner threshold', () => {
+    const normalPage = makePage(
+      'https://example.com/docs',
+      'OneTrust\n\nNormal documentation line 1.\nNormal documentation line 2.\nNormal documentation line 3.',
+    );
+    const corpus = pagesToCorpus([normalPage]);
+    assert.ok(corpus.length > 0, 'page with single banner mention should not be dropped');
   });
 });
 

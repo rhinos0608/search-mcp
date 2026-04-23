@@ -253,32 +253,22 @@ export async function embedAndRank(
 ): Promise<SemanticCrawlChunk[]> {
   if (chunks.length === 0) return [];
 
-  // 1. Deduplicate
-  const preDedupCount = chunks.length;
-  const deduped = deduplicateCorpusChunks(chunks);
-  if (preDedupCount !== deduped.length) {
-    logger.info(
-      { preDedup: preDedupCount, postDedup: deduped.length },
-      'Deduplicated corpus chunks before embedding',
-    );
-  }
-
-  // 2. Chunk safety check
-  if (deduped.length > MAX_CHUNKS_HARD) {
+  // 1. Chunk safety check
+  if (chunks.length > MAX_CHUNKS_HARD) {
     throw new Error(
-      `Produced ${String(deduped.length)} chunks, exceeding hard cap of ${String(MAX_CHUNKS_HARD)}. Reduce maxPages or increase chunk size.`,
+      `Produced ${String(chunks.length)} chunks, exceeding hard cap of ${String(MAX_CHUNKS_HARD)}. Reduce maxPages or increase chunk size.`,
     );
   }
-  if (deduped.length > MAX_CHUNKS_SOFT) {
+  if (chunks.length > MAX_CHUNKS_SOFT) {
     logger.warn(
-      { chunkCount: deduped.length, softCap: MAX_CHUNKS_SOFT },
+      { chunkCount: chunks.length, softCap: MAX_CHUNKS_SOFT },
       'Chunk count exceeds soft cap; embedding may be slower',
     );
   }
 
-  // 3. Embed chunks (batched) and query in parallel
-  const chunkTexts = deduped.map((c) => c.text);
-  const chunkTitles = deduped.map(
+  // 2. Embed chunks (batched) and query in parallel
+  const chunkTexts = chunks.map((c) => c.text);
+  const chunkTitles = chunks.map(
     (c) =>
       c.section
         .split(' > ')
@@ -287,9 +277,9 @@ export async function embedAndRank(
   );
 
   if (opts.precomputedEmbeddings !== undefined) {
-    if (opts.precomputedEmbeddings.length !== deduped.length) {
+    if (opts.precomputedEmbeddings.length !== chunks.length) {
       throw new Error(
-        `precomputedEmbeddings length (${String(opts.precomputedEmbeddings.length)}) does not match deduped chunk count (${String(deduped.length)}). Pass already-deduplicated chunks.`,
+        `precomputedEmbeddings length (${String(opts.precomputedEmbeddings.length)}) does not match chunk count (${String(chunks.length)}). Pass already-deduplicated chunks.`,
       );
     }
   }
@@ -328,8 +318,8 @@ export async function embedAndRank(
 
   // 4. Bi-encoder ranking (cosine similarity)
   const paired: ChunkWithEmbedding[] = [];
-  for (let i = 0; i < deduped.length; i++) {
-    const chunk = deduped[i];
+  for (let i = 0; i < chunks.length; i++) {
+    const chunk = chunks[i];
     const emb = chunkEmbeddings[i];
     if (!chunk || emb === undefined) continue;
     paired.push({
@@ -364,7 +354,7 @@ export async function embedAndRank(
   // 5. BM25+ ranking
   const bm25 =
     opts.bm25Index ??
-    buildBm25Index(deduped.map((c) => ({ id: c.url + ':' + String(c.chunkIndex), text: c.text })));
+    buildBm25Index(chunks.map((c) => ({ id: c.url + ':' + String(c.chunkIndex), text: c.text })));
 
   const idToChunk = new Map<string, SemanticCrawlChunk>();
   for (const p of paired) {
@@ -467,8 +457,8 @@ export async function embedAndRank(
     );
   }
 
-  // 8. Soft lexical constraint (IDF-weighted token coverage)
-  const lexicalResult = applySoftLexicalConstraint(coherent, opts.query, deduped);
+  // 9. Soft lexical constraint (IDF-weighted token coverage)
+  const lexicalResult = applySoftLexicalConstraint(coherent, opts.query, chunks);
   if (lexicalResult.warning) {
     logger.warn(lexicalResult.warning);
   }
@@ -737,7 +727,7 @@ async function crawlSeeds(
   return { pages: deduped, totalPages: totalPagesAttempted, successfulPages: totalSuccessfulPages };
 }
 
-function pagesToCorpus(pages: CrawlPageResult[]): CorpusChunk[] {
+export function pagesToCorpus(pages: CrawlPageResult[]): CorpusChunk[] {
   const chunks: CorpusChunk[] = [];
   let pagesWithContent = 0;
   let droppedBannerPages = 0;

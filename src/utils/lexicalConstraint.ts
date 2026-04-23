@@ -17,6 +17,10 @@ function tokenize(text: string): string[] {
   return (text.match(/\b\w+\b/g) ?? []).map((t) => t.toLowerCase());
 }
 
+function getWordSet(text: string): Set<string> {
+  return new Set(tokenize(text));
+}
+
 export function applySoftLexicalConstraint(
   chunks: SemanticCrawlChunk[],
   query: string,
@@ -29,13 +33,14 @@ export function applySoftLexicalConstraint(
     return { filtered: chunks };
   }
 
-  // 2. Compute IDF for each token against corpus
+  // 2. Compute IDF for each token against corpus (word-level matching)
   const N = corpusChunks.length;
+  const corpusWordSets = corpusChunks.map((c) => getWordSet(c.text));
   const tokenIdf = new Map<string, number>();
   for (const token of queryTokens) {
     let df = 0;
-    for (const chunk of corpusChunks) {
-      if (chunk.text.toLowerCase().includes(token)) {
+    for (const words of corpusWordSets) {
+      if (words.has(token)) {
         df++;
       }
     }
@@ -50,11 +55,12 @@ export function applySoftLexicalConstraint(
   // 4. Edge cases
   const requiredCount = queryTokens.length < 3 ? queryTokens.length : 2;
 
-  // 5. Filter chunks
+  // 5. Filter chunks (word-level matching)
   const filtered = chunks.filter((chunk) => {
+    const chunkWords = getWordSet(chunk.text);
     let matchCount = 0;
     for (const token of topTokens) {
-      if (chunk.text.toLowerCase().includes(token)) {
+      if (chunkWords.has(token)) {
         matchCount++;
       }
     }
