@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 
-const MODEL_DIR = join(import.meta.dirname, '..', 'models');
+const MODEL_DIR = join(process.cwd(), 'models');
 const MODEL_AVAILABLE =
   existsSync(join(MODEL_DIR, 'model.onnx')) &&
   existsSync(join(MODEL_DIR, 'tokenizer.json'));
