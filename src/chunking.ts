@@ -90,6 +90,9 @@ export function chunkMarkdown(markdown: string, url: string): MarkdownChunk[] {
     }
   }
 
+  // Save original contentLines before any stripping — needed for fallback
+  const originalContentLines = nodes.map((n) => [...n.contentLines]);
+
   // Strip breadcrumb and pure-link lines from individual sections
   for (const node of nodes) {
     node.contentLines = node.contentLines.filter(
@@ -98,7 +101,21 @@ export function chunkMarkdown(markdown: string, url: string): MarkdownChunk[] {
   }
 
   // Filter boilerplate sections (check stripped content with full heuristic)
-  const contentNodes = nodes.filter((n) => !isBoilerplate(n.contentLines.join('\n')));
+  let contentNodes = nodes.filter((n) => !isBoilerplate(n.contentLines.join('\n')));
+  // Fallback: if every section is flagged as boilerplate, restore original content.
+  // Structured pages (job listings, tables, etc.) can resemble boilerplate because
+  // they contain many short list items with links. If the filter would remove
+  // everything, we keep the original content so the page is not lost entirely.
+  if (contentNodes.length === 0 && nodes.length > 0) {
+    for (let i = 0; i < nodes.length; i++) {
+      const node = nodes[i];
+      const orig = originalContentLines[i];
+      if (node !== undefined && orig !== undefined) {
+        node.contentLines = orig;
+      }
+    }
+    contentNodes = nodes;
+  }
 
   // Merge short sections
   const groups = mergeShortSections(contentNodes);
@@ -173,6 +190,10 @@ function isBoilerplateWithBreadcrumbCheck(content: string): boolean {
 export function filterBoilerplateWithContext(chunks: MarkdownChunk[]): MarkdownChunk[] {
   if (chunks.length === 0) return chunks;
 
+  // Save originals before any filtering — needed for fallback when structured
+  // pages (job listings, tables, etc.) are misclassified as boilerplate.
+  const originalChunks = [...chunks];
+
   // Pass 1: line-level dedup — strip short lines that appear in 2+ chunks (repeated nav blocks)
   // Only counts short lines (≤200 chars) — long content lines are never nav.
   if (chunks.length > 1) {
@@ -221,7 +242,13 @@ export function filterBoilerplateWithContext(chunks: MarkdownChunk[]): MarkdownC
   });
 
   // Pass 3: individual boilerplate filtering (link-heavy, sidebar, etc.)
-  return chunks.filter((c) => c.content.length > 0 && !isBoilerplateWithBreadcrumbCheck(c.content));
+  const filtered = chunks.filter((c) => c.content.length > 0 && !isBoilerplateWithBreadcrumbCheck(c.content));
+  // Fallback: if all chunks would be filtered, keep the originals — structured
+  // pages (job listings, tables, etc.) can be misclassified as boilerplate.
+  if (filtered.length === 0 && chunks.length > 0) {
+    return originalChunks;
+  }
+  return filtered;
 }
 
 function isBoilerplate(content: string): boolean {

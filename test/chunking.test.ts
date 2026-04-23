@@ -295,4 +295,28 @@ ${'Word '.repeat(50)}Real documentation content.`;
     assert.ok(chunks.some((c) => c.content.includes('Real documentation')));
     assert.ok(!chunks.some((c) => c.content.includes('[Go here]')));
   });
+
+  it('keeps structured job-listing-like pages when all sections resemble boilerplate', () => {
+    // Job listing pages have short list items with links — structurally
+    // similar to nav menus. If the filter drops every section, we should
+    // keep them all so the page is not lost entirely.
+    const md = `# Data Entry Jobs
+
+## Inner West
+
+- [Admin Assistant - $60k](/job/1)
+- [Data Entry Clerk - $55k](/job/2)
+- [Receptionist - $58k](/job/3)
+- [Office Coordinator - $62k](/job/4)
+
+## Western Suburbs
+
+- [Customer Service - $50k](/job/5)
+- [Accounts Clerk - $65k](/job/6)
+- [Payroll Officer - $70k](/job/7)`;
+    const chunks = chunkMarkdown(md, 'https://example.com');
+    assert.ok(chunks.length > 0, 'Job listing page should produce chunks despite boilerplate resemblance');
+    assert.ok(chunks.some((c) => c.content.includes('Data Entry Clerk')));
+    assert.ok(chunks.some((c) => c.content.includes('Payroll Officer')));
+  });
 });
