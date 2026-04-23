@@ -1288,7 +1288,7 @@ export function createServer(): McpServer {
         const start = Date.now();
         try {
           const data = await semanticCrawl(
-            { url, query, topK, strategy, maxDepth, maxPages, includeExternalLinks },
+            { source: { type: 'url', url }, query, topK, strategy, maxDepth, maxPages, includeExternalLinks },
             cfg.crawl4ai,
             cfg.embeddingSidecar.baseUrl,
             cfg.embeddingSidecar.apiToken,
