@@ -106,6 +106,36 @@ async function getSession(): Promise<SessionState> {
 
     logger.info({ inputNames, outputNames, hasTokenTypeIds }, 'Cross-encoder model loaded');
 
+    // Smoke test: validate that the model behaves as a cross-encoder
+    try {
+      const smokeQuery = 'hello world';
+      const smokeGood = 'hello world';
+      const smokeBad = 'xyz abc def';
+
+      const smokeBatch = tokenizePairs(tokenizer, smokeQuery, [smokeGood, smokeBad], DEFAULT_MAX_LENGTH);
+      const smokeScores = await runInference(
+        { session: session as unknown as SessionLike, tokenizer, hasTokenTypeIds, outputName },
+        smokeBatch,
+      );
+
+      const scoreA = smokeScores[0] ?? 0;
+      const scoreB = smokeScores[1] ?? 0;
+
+      if (scoreA <= scoreB + 0.1) {
+        const msg = `Cross-encoder smoke test failed: good=${String(scoreA)}, bad=${String(scoreB)}. The model is not producing meaningful cross-encoder scores.`;
+        logger.fatal({ scoreA, scoreB }, msg);
+        sessionPromise = null;
+        throw unavailableError(msg);
+      }
+
+      logger.info({ scoreA, scoreB }, 'Cross-encoder smoke test passed');
+    } catch (err) {
+      if (err instanceof Error && err.message.includes('smoke test failed')) {
+        throw err;
+      }
+      logger.warn({ err }, 'Cross-encoder smoke test error');
+    }
+
     return {
       session: session as unknown as SessionLike,
       tokenizer,

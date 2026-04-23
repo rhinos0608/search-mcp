@@ -1366,8 +1366,8 @@ export function createServer(): McpServer {
           useReranker: z
             .boolean()
             .optional()
-            .default(true)
-            .describe('Apply cross-encoder re-ranking to top candidates (default true)'),
+            .default(false)
+            .describe('Apply cross-encoder re-ranking to top candidates (default false)'),
           allowPathDrift: z
             .boolean()
             .optional()

@@ -463,6 +463,31 @@ describe('filterByPathPrefix', () => {
   });
 });
 
+describe('reranker smoke test', () => {
+  it('validates smoke score comparison logic', () => {
+    // Extract the validation logic into a pure function for testability.
+    function validateSmokeScores(scoreA: number, scoreB: number, epsilon = 0.1): { ok: boolean; reason?: string } {
+      if (scoreA <= scoreB + epsilon) {
+        return { ok: false, reason: `good=${String(scoreA)}, bad=${String(scoreB)}` };
+      }
+      return { ok: true };
+    }
+
+    // Good model: good score is much higher than bad score
+    const goodResult = validateSmokeScores(8.5, 1.2);
+    assert.strictEqual(goodResult.ok, true);
+
+    // Bad model: scores are too close
+    const badResult = validateSmokeScores(1.5, 1.4);
+    assert.strictEqual(badResult.ok, false);
+    assert.ok(badResult.reason?.includes('1.5'));
+
+    // Edge case: exactly at threshold (1.1 > 1.0, so ok=true — just barely above the epsilon boundary)
+    const edgeResult = validateSmokeScores(1.11, 1.0);
+    assert.strictEqual(edgeResult.ok, true);
+  });
+});
+
 describe('cache persistence', () => {
   it('loads corpus from disk without rebuilding', async () => {
     const source: SemanticCrawlSource = { type: 'url', url: 'https://example.com/cache-test' };

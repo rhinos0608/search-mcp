@@ -393,7 +393,7 @@ export async function embedAndRank(
   // 8. Optional cross-encoder re-ranking
   let topChunks: SemanticCrawlChunk[];
 
-  if (opts.useReranker !== false && coherent.length > 1) {
+  if (opts.useReranker === true && coherent.length > 1) {
     const rerankCount = Math.min(RERANK_CANDIDATES, coherent.length);
     const candidates = coherent.slice(0, rerankCount);
     const candidateTexts = candidates.map((c) => c.text);
