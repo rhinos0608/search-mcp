@@ -51,6 +51,7 @@ export interface CachedCorpus {
 interface CorpusMetadata {
   schemaVersion: number;
   corpusId: string;
+  source: SemanticCrawlSource;
   contentHash: string;
   model: string;
   dimensions: number;
@@ -361,7 +362,7 @@ function readCorpusFromDisk(
 
   return {
     corpusId: meta.corpusId,
-    source: { type: 'cached', corpusId: meta.corpusId }, // source not stored in metadata
+    source: meta.source,
     contentHash: meta.contentHash,
     model: meta.model,
     dimensions: meta.dimensions,
@@ -554,6 +555,7 @@ export async function getOrBuildCorpus(
         const meta: CorpusMetadata = {
           schemaVersion: SCHEMA_VERSION,
           corpusId,
+          source,
           contentHash,
           model,
           dimensions,

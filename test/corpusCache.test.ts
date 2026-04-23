@@ -417,3 +417,30 @@ test('loadCorpusById: truncated .bin returns null', async () => {
   const result = await loadCorpusById(corpus.corpusId, { cacheDir });
   assert.equal(result, null, 'Expected null for corpus with truncated .bin file');
 });
+
+// ────────────────────────────────────────────────────────────────────
+// 12. Source preservation on disk roundtrip
+// ────────────────────────────────────────────────────────────────────
+
+test('roundtrip: original source is preserved through cache read/write', async () => {
+  const cacheDir = makeTmpCacheDir();
+  const source: SemanticCrawlSource = {
+    type: 'search',
+    query: 'test query',
+    maxSeedUrls: 15,
+  };
+  const chunks = makeChunks(['source preservation test']);
+  const embeddings = makeEmbeddings(chunks);
+
+  const corpus = await getOrBuildCorpus(
+    source,
+    async () => ({ chunks, embeddings, model: 'm', contentHash: computeContentHash(chunks) }),
+    { cacheDir },
+  );
+
+  assert.deepStrictEqual(corpus.source, source);
+
+  const loaded = await loadCorpusById(corpus.corpusId, { cacheDir });
+  assert.ok(loaded !== null);
+  assert.deepStrictEqual(loaded.source, source);
+});
