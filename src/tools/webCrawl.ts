@@ -6,6 +6,7 @@ import type { WebCrawlResult, CrawlPageResult } from '../types.js';
 import { dedupPages, dedupPagesByContent } from '../utils/url.js';
 import type { ExtractionConfig } from '../utils/extractionConfig.js';
 import { mapToCrawl4ai } from '../utils/extractionConfig.js';
+import { extractElementsFromMarkdown } from '../utils/markdownElements.js';
 
 export interface WebCrawlOptions {
   strategy: 'bfs' | 'dfs';
@@ -82,17 +83,20 @@ function normalizePage(page: Crawl4aiPage): CrawlPageResult {
   }));
 
   const extractedData = parseExtractedData(page.extracted_content);
+  const markdown = extractMarkdown(page.markdown);
+  const elements = markdown.length > 0 ? extractElementsFromMarkdown(markdown) : undefined;
 
   return {
     url: page.url ?? '',
     success: page.success ?? false,
-    markdown: extractMarkdown(page.markdown),
+    markdown,
     title: page.metadata?.title ?? null,
     description: page.metadata?.description ?? null,
     links: [...internalLinks, ...externalLinks],
     statusCode: page.status_code ?? null,
     errorMessage: page.error_message ?? null,
     ...(extractedData !== undefined && { extractedData }),
+    ...(elements !== undefined && elements.length > 0 && { elements }),
   };
 }
 
