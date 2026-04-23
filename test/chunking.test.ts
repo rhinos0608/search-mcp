@@ -27,9 +27,11 @@ describe('chunkMarkdown', () => {
   it('merges short sections forward', () => {
     const md = `# Title\n\n## A\n\nShort.\n\n## B\n\nThis is a much longer section with enough content to clear the fifty token floor easily. This is a much longer section with enough content to clear the fifty token floor easily. This is a much longer section with enough content to clear the fifty token floor easily. This is a much longer section with enough content to clear the fifty token floor easily.`;
     const chunks = chunkMarkdown(md, 'https://example.com');
-    // Short section A should be merged into B
-    assert.ok(chunks.length <= 2);
-    assert.ok(chunks.some((c) => c.content.includes('Short.') && c.content.includes('much longer')));
+    // Short section A should be merged into B, producing exactly one chunk
+    assert.strictEqual(chunks.length, 1);
+    assert.ok(chunks[0]);
+    assert.ok(chunks[0].content.includes('Short.'));
+    assert.ok(chunks[0].content.includes('much longer'));
   });
 
   it('splits oversized sections at boundaries', () => {
@@ -44,6 +46,39 @@ describe('chunkMarkdown', () => {
     const chunks = chunkMarkdown(md, 'https://example.com');
     assert.ok(chunks[0]);
     assert.strictEqual(chunks[0].pageTitle, 'My Page');
+  });
+
+  it('tracks ancestor headings across depth changes', () => {
+    const md = `# Title\n\n## A\n\nContent A.\n\n### B\n\nContent B.\n\n## C\n\nContent C.\n\n### D\n\nContent D.`;
+    const chunks = chunkMarkdown(md, 'https://example.com');
+    const dChunk = chunks.find((c) => c.content.includes('Content D.'));
+    assert.ok(dChunk);
+    assert.strictEqual(dChunk!.section, '# Title > ## C > ### D');
+  });
+
+  it('snaps overlap to last sentence boundary in window', () => {
+    // Create content with many short sentences so the overlap window
+    // contains multiple boundaries. The first boundary in the window
+    // would give a tiny overlap; the fix should find the best one.
+    const sentence = 'Sentence one. Sentence two. Sentence three. Sentence four. Sentence five. ';
+    // 60 chars per repeat. Need ~1700 chars to exceed maxChars=1600.
+    const content = sentence.repeat(30);
+    const md = `# Title\n\n## Section\n\n${content}`;
+    const chunks = chunkMarkdown(md, 'https://example.com');
+    assert.ok(chunks.length > 1, 'Should produce multiple chunks');
+    // No chunk (except first) should start mid-sentence with a lowercase letter
+    for (let i = 1; i < chunks.length; i++) {
+      const chunk = chunks[i];
+      if (!chunk) continue;
+      const trimmed = chunk.content.trimStart();
+      if (trimmed.length === 0) continue;
+      const firstChar = trimmed.charAt(0);
+      // After sentence snapping, chunks should start at word boundaries
+      assert.ok(
+        /^[A-Z\d\s`#*|\-]/.test(firstChar) || trimmed.startsWith('```'),
+        `Chunk ${i} starts mid-sentence: "${trimmed.slice(0, 40)}"`,
+      );
+    }
   });
 
   it('annotates totalChunks per section', () => {
@@ -144,5 +179,125 @@ describe('chunkMarkdown', () => {
         assert.ok(curr.charOffset >= prev.charOffset, `charOffset should not decrease at index ${i}`);
       }
     }
+  });
+
+  it('filters nav menu boilerplate with high link density', () => {
+    const md = `# Title\n\n## Docs\n\n- [Getting Started](/start)\n- [API Reference](/api)\n- [Examples](/examples)\n- [GitHub](/github)\n\n## Real Content\n\n${'Word '.repeat(50)}This is actual documentation content that should survive filtering.\n`;
+    const chunks = chunkMarkdown(md, 'https://example.com');
+    // Nav section should be filtered; real content should remain
+    assert.ok(chunks.some((c) => c.content.includes('actual documentation content')));
+    assert.ok(!chunks.some((c) => c.content.includes('Getting Started')));
+  });
+
+  it('filters sidebar link lists', () => {
+    const md = `# Title\n\n## Sidebar\n\n- Home\n- About\n- Contact\n- Products\n- Pricing\n- Blog\n\n## Article\n\n${'Word '.repeat(50)}Deep technical article content goes here and should not be filtered.`;
+    const chunks = chunkMarkdown(md, 'https://example.com');
+    assert.ok(chunks.some((c) => c.content.includes('Deep technical article')));
+    assert.ok(!chunks.some((c) => c.content.includes('Products')));
+  });
+
+  it('keeps content-rich sections with moderate link density', () => {
+    const md = `# Title\n\n## Resources\n\nHere are useful links: [Google](https://google.com), [GitHub](https://github.com), and [Docs](https://docs.example.com). ${'Word '.repeat(30)} Plus more detailed explanation that makes this section substantial.`;
+    const chunks = chunkMarkdown(md, 'https://example.com');
+    assert.ok(chunks.length > 0);
+    assert.ok(chunks.some((c) => c.content.includes('useful links')));
+  });
+
+  // --- New boilerplate heuristics ---
+
+  it('filters breadcrumb navigation patterns', () => {
+    const md = `# Title
+
+## Breadcrumbs
+
+[Home](/) > [Docs](/docs) > [API](/api) > [Reference](/ref) > [Users](/users)
+
+## Real Content
+
+${'Word '.repeat(50)}This is the actual documentation content that matters.`;
+    const chunks = chunkMarkdown(md, 'https://example.com');
+    assert.ok(chunks.some((c) => c.content.includes('actual documentation content')));
+    assert.ok(!chunks.some((c) => c.content.includes('[Home]')));
+  });
+
+  it('filters short-line + link-heavy sidebar content', () => {
+    const md = `# Title
+
+## Sidebar
+
+[Intro](/intro)
+[Setup](/setup)
+[Config](/config)
+[Deploy](/deploy)
+[FAQ](/faq)
+
+## Article
+
+${'Word '.repeat(50)}Detailed technical article content that should be preserved.`;
+    const chunks = chunkMarkdown(md, 'https://example.com');
+    assert.ok(chunks.some((c) => c.content.includes('Detailed technical article')));
+    assert.ok(!chunks.some((c) => c.content.includes('[Intro]')));
+  });
+
+  it('filters repeated nav blocks across sibling sections', () => {
+    const navBlock = '- [Home](/)\n- [Docs](/docs)\n- [API](/api)\n- [Blog](/blog)\n- [GitHub](/github)';
+    const md = `# Title
+
+## Section A
+
+${navBlock}
+
+Some content A here. ${'Word '.repeat(20)}
+
+## Section B
+
+${navBlock}
+
+Some content B here. ${'Word '.repeat(20)}
+
+## Section C
+
+${navBlock}
+
+Some content C here. ${'Word '.repeat(20)}`;
+    const chunks = chunkMarkdown(md, 'https://example.com');
+    // The repeated nav block should appear at most once (or zero times)
+    const navChunks = chunks.filter((c) => c.content.includes('[Home]'));
+    assert.ok(navChunks.length <= 1, `Expected at most 1 nav chunk, got ${navChunks.length}`);
+    // Content sections should all be present
+    assert.ok(chunks.some((c) => c.content.includes('content A')));
+    assert.ok(chunks.some((c) => c.content.includes('content B')));
+    assert.ok(chunks.some((c) => c.content.includes('content C')));
+  });
+
+  it('preserves content with moderate links that is not boilerplate', () => {
+    const md = `# Title
+
+## Guide
+
+Read the [installation docs](/install) first, then follow the [configuration guide](/config). ${'Word '.repeat(30)}After setup, you can deploy using our [deployment tool](/deploy).`;
+    const chunks = chunkMarkdown(md, 'https://example.com');
+    assert.ok(chunks.length > 0);
+    assert.ok(chunks.some((c) => c.content.includes('installation docs')));
+    assert.ok(chunks.some((c) => c.content.includes('configuration guide')));
+  });
+
+  it('filters pure link lines with short average word count', () => {
+    const md = `# Title
+
+## Links
+
+[Go here](/a)
+[Go there](/b)
+[Go everywhere](/c)
+[Go nowhere](/d)
+[Go somewhere](/e)
+
+## Content
+
+${'Word '.repeat(50)}Real documentation content.`;
+    const chunks = chunkMarkdown(md, 'https://example.com');
+    assert.ok(chunks.some((c) => c.content.includes('Real documentation')));
+    assert.ok(!chunks.some((c) => c.content.includes('[Go here]')));
   });
 });
