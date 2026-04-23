@@ -336,9 +336,10 @@ describe('filterByPathPrefix', () => {
       makePage('https://docs.docker.com/cli/config/'),
     ];
     const filtered = filterByPathPrefix(pages, seed);
-    assert.strictEqual(filtered.length, 3);
+    assert.strictEqual(filtered.length, 2);
     assert.ok(filtered.some((p) => p.url.includes('dockerfile/')));
     assert.ok(!filtered.some((p) => p.url.includes('cli/config')));
+    assert.ok(!filtered.some((p) => p.url.includes('args')));
   });
 
   it('allows drift when allowPathDrift is true', () => {

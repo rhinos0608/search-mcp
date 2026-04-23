@@ -517,7 +517,7 @@ export function filterByPathPrefix(
   let dropped = 0;
   for (const page of pages) {
     const pagePath = new URL(page.url).pathname;
-    if (pagePath.startsWith(seedPath) || isDirectChild(pagePath, seedPath)) {
+    if (pagePath === seedPath || isDirectChild(pagePath, seedPath)) {
       kept.push(page);
     } else {
       dropped++;
