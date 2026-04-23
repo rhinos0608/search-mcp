@@ -43,7 +43,57 @@ export interface ArticleResult {
   description: string | null;
   publishedDate: string | null;
   image: string | null;
+  elements?: ContentElement[];
 }
+
+// ── Structured Content Elements ──────────────────────────────────────────────
+
+export interface HeadingElement {
+  type: 'heading';
+  level: number;
+  text: string;
+  id: string | null;
+}
+
+export interface TextElement {
+  type: 'text';
+  text: string;
+}
+
+export interface TableElement {
+  type: 'table';
+  markdown: string;
+  caption: string | null;
+  rows: number;
+  cols: number;
+}
+
+export interface ImageElement {
+  type: 'image';
+  src: string | null;
+  alt: string;
+  title: string | null;
+}
+
+export interface CodeElement {
+  type: 'code';
+  language: string | null;
+  content: string;
+}
+
+export interface ListElement {
+  type: 'list';
+  ordered: boolean;
+  items: string[];
+}
+
+export type ContentElement =
+  | HeadingElement
+  | TextElement
+  | TableElement
+  | ImageElement
+  | CodeElement
+  | ListElement;
 
 // GitHubRepo
 export interface GitHubRepo {
@@ -360,6 +410,7 @@ export interface CrawlPageResult {
   statusCode: number | null;
   errorMessage: string | null;
   extractedData?: Record<string, unknown>[];
+  elements?: ContentElement[];
 }
 
 export interface WebCrawlResult {
