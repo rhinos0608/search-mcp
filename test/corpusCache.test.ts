@@ -251,15 +251,15 @@ test('invalidateCorpus: removes corpus from disk', async () => {
     { cacheDir },
   );
 
-  const metaPath = path.join(cacheDir, `${corpus.corpusId}.json`);
-  const binPath = path.join(cacheDir, `${corpus.corpusId}.bin`);
-  assert.ok(fs.existsSync(metaPath), 'Expected .json file to exist before invalidation');
-  assert.ok(fs.existsSync(binPath), 'Expected .bin file to exist before invalidation');
+  const metaFilePath = path.join(cacheDir, `${corpus.corpusId}.json`);
+  const binFilePath = path.join(cacheDir, `${corpus.corpusId}.bin`);
+  assert.ok(fs.existsSync(metaFilePath), 'Expected .json file to exist before invalidation');
+  assert.ok(fs.existsSync(binFilePath), 'Expected .bin file to exist before invalidation');
 
-  invalidateCorpus(corpus.corpusId, { cacheDir });
+  invalidateCorpus(corpus.corpusId, { cacheDir, source: TEST_SOURCE });
 
-  assert.ok(!fs.existsSync(metaPath), 'Expected .json file to be removed after invalidation');
-  assert.ok(!fs.existsSync(binPath), 'Expected .bin file to be removed after invalidation');
+  assert.ok(!fs.existsSync(metaFilePath), 'Expected .json file to be removed after invalidation');
+  assert.ok(!fs.existsSync(binFilePath), 'Expected .bin file to be removed after invalidation');
 
   const reloaded = await loadCorpusById(corpus.corpusId, { cacheDir });
   assert.equal(reloaded, null, 'Expected null after invalidation');
@@ -279,7 +279,7 @@ test('invalidateCorpus: subsequent getOrBuildCorpus re-materializes', async () =
   const corpus = await getOrBuildCorpus(TEST_SOURCE, materialize, { cacheDir });
   assert.equal(callCount, 1);
 
-  invalidateCorpus(corpus.corpusId, { cacheDir });
+  invalidateCorpus(corpus.corpusId, { cacheDir, source: TEST_SOURCE });
 
   // After invalidation, next call should re-materialize
   await getOrBuildCorpus(TEST_SOURCE, materialize, { cacheDir });
@@ -349,7 +349,7 @@ test('corpusId is deterministic: same source produces same id on different calls
   );
 
   // Invalidate so we can re-build
-  invalidateCorpus(corpus1.corpusId, { cacheDir });
+  invalidateCorpus(corpus1.corpusId, { cacheDir, source: TEST_SOURCE });
 
   const corpus2 = await getOrBuildCorpus(
     TEST_SOURCE,
@@ -382,4 +382,33 @@ test('corpusId differs for different sources', async () => {
   );
 
   assert.notEqual(corpus1.corpusId, corpus2.corpusId, 'Expected different corpusIds for different sources');
+});
+
+// ────────────────────────────────────────────────────────────────────
+// 11. Truncated .bin file triggers re-materialize (returns null)
+// ────────────────────────────────────────────────────────────────────
+
+test('loadCorpusById: truncated .bin returns null', async () => {
+  const cacheDir = makeTmpCacheDir();
+  const chunks = makeChunks(['truncated bin test']);
+  const embeddings = makeEmbeddings(chunks, 4); // 1 chunk × 4 dims
+
+  const corpus = await getOrBuildCorpus(
+    TEST_SOURCE,
+    async () => ({ chunks, embeddings, model: 'm', contentHash: 'h' }),
+    { cacheDir },
+  );
+
+  // Overwrite the .bin with a valid header (N=1, D=4) but only 4 bytes of float
+  // data instead of the expected 1×4×4 = 16 bytes.
+  const truncatedBuf = Buffer.allocUnsafe(8 + 4); // header + 4 bytes (should be 16)
+  truncatedBuf.writeUInt32LE(1, 0); // N = 1
+  truncatedBuf.writeUInt32LE(4, 4); // D = 4
+  truncatedBuf.writeFloatLE(0.1, 8); // only 1 float instead of 4
+  const bp = path.join(cacheDir, `${corpus.corpusId}.bin`);
+  fs.writeFileSync(bp, truncatedBuf);
+
+  // loadCorpusById should return null due to truncated binary data
+  const result = await loadCorpusById(corpus.corpusId, { cacheDir });
+  assert.equal(result, null, 'Expected null for corpus with truncated .bin file');
 });

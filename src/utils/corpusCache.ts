@@ -66,7 +66,7 @@ interface CacheOpts {
 }
 
 // ────────────────────────────────────────────────────────────────────
-// In-memory dedup map (corpusId → pending Promise)
+// In-memory dedup map (stableStringify(source) → pending Promise)
 // ────────────────────────────────────────────────────────────────────
 
 const pendingBuilds = new Map<string, Promise<CachedCorpus>>();
@@ -256,6 +256,7 @@ interface IndexEntry {
   corpusId: string;
   lastAccessedAt: number;
   createdAt: number;
+  source: SemanticCrawlSource | undefined;
 }
 
 function listCachedCorpora(cacheDir: string): IndexEntry[] {
@@ -270,6 +271,15 @@ function listCachedCorpora(cacheDir: string): IndexEntry[] {
   for (const f of files) {
     if (!f.endsWith('.json')) continue;
     const corpusId = f.slice(0, -5);
+    // Prune orphan .json entries where the corresponding .bin is missing
+    if (!fs.existsSync(binPath(cacheDir, corpusId))) {
+      try {
+        fs.rmSync(path.join(cacheDir, f), { force: true });
+      } catch {
+        // best effort
+      }
+      continue;
+    }
     try {
       const meta = JSON.parse(
         fs.readFileSync(path.join(cacheDir, f), 'utf-8'),
@@ -278,6 +288,7 @@ function listCachedCorpora(cacheDir: string): IndexEntry[] {
         corpusId,
         lastAccessedAt: meta.lastAccessedAt ?? 0,
         createdAt: meta.createdAt ?? 0,
+        source: meta.source,
       });
     } catch {
       // skip corrupted file
@@ -370,18 +381,18 @@ export async function getOrBuildCorpus(
     // Ensure cache dir exists
     const dirOk = ensureCacheDir(cacheDir);
 
-    // Try to find an existing corpus for this source on disk by scanning
-    // all .json files (we don't know the model yet, so we check by source).
-    // Pass updateAccess=false so scan reads don't touch lastAccessedAt timestamps.
+    // Try to find an existing corpus for this source on disk.
+    // First scan metadata only (no .bin reads) to find a matching entry by source,
+    // then load the full corpus (including .bin) only for the single match.
     if (dirOk) {
       const entries = listCachedCorpora(cacheDir);
-      for (const e of entries) {
-        const loaded = readCorpusFromDisk(cacheDir, e.corpusId, ttlMs, false);
-        if (loaded === null) continue;
-        if (stableStringify(loaded.source) === sourceKey) {
+      const match = entries.find(e => stableStringify(e.source) === sourceKey);
+      if (match !== undefined) {
+        const loaded = readCorpusFromDisk(cacheDir, match.corpusId, ttlMs, false);
+        if (loaded !== null) {
           // Actual cache hit — update lastAccessedAt now
           try {
-            const mp = metaPath(cacheDir, e.corpusId);
+            const mp = metaPath(cacheDir, match.corpusId);
             const meta = JSON.parse(fs.readFileSync(mp, 'utf-8')) as CorpusMetadata;
             meta.lastAccessedAt = Date.now();
             fs.writeFileSync(mp, JSON.stringify(meta), 'utf-8');
@@ -468,11 +479,17 @@ export function loadCorpusById(
 /**
  * Remove a corpus from disk and from the in-memory lock map.
  * Subsequent calls to getOrBuildCorpus will re-materialize.
+ *
+ * Pass `source` to also cancel any in-flight build for that source
+ * (the pendingBuilds key is stableStringify(source), not corpusId).
  */
-export function invalidateCorpus(corpusId: string, opts?: Pick<CacheOpts, 'cacheDir'>): void {
+export function invalidateCorpus(
+  corpusId: string,
+  opts?: { cacheDir?: string; source?: SemanticCrawlSource },
+): void {
   const cacheDir = opts?.cacheDir ?? DEFAULT_CACHE_DIR;
   deleteCorpusFiles(cacheDir, corpusId);
-  // Remove any pending build that matches this id (best effort — key is sourceKey, not corpusId)
-  // We can't easily map corpusId back to sourceKey here, but the files are gone so
-  // a pending promise will write to disk harmlessly or the next call will start fresh.
+  if (opts?.source !== undefined) {
+    pendingBuilds.delete(stableStringify(opts.source));
+  }
 }
