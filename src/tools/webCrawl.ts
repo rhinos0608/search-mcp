@@ -4,6 +4,8 @@ import { retryWithBackoff } from '../retry.js';
 import { unavailableError, networkError, parseError } from '../errors.js';
 import type { WebCrawlResult, CrawlPageResult } from '../types.js';
 import { dedupPages, dedupPagesByContent } from '../utils/url.js';
+import type { ExtractionConfig } from '../utils/extractionConfig.js';
+import { mapToCrawl4ai } from '../utils/extractionConfig.js';
 
 export interface WebCrawlOptions {
   strategy: 'bfs' | 'dfs';
@@ -20,6 +22,8 @@ export interface WebCrawlOptions {
   pageTimeout?: number | undefined;
   /** Custom JavaScript to execute on the page (e.g. scroll, click buttons). */
   jsCode?: string | undefined;
+  /** Structured data extraction configuration. */
+  extractionConfig?: ExtractionConfig;
 }
 
 // crawl4ai API response shape (stable across v0.7.x and v0.8.x)
@@ -38,6 +42,7 @@ interface Crawl4aiPage {
   } | null;
   error_message?: string | null;
   status_code?: number;
+  extracted_content?: unknown;
 }
 
 interface Crawl4aiResponse {
@@ -57,6 +62,13 @@ function extractMarkdown(raw: Crawl4aiPage['markdown']): string {
   return '';
 }
 
+function parseExtractedData(raw: unknown): Record<string, unknown>[] | undefined {
+  if (raw === undefined || raw === null) return undefined;
+  if (Array.isArray(raw)) return raw as Record<string, unknown>[];
+  if (typeof raw === 'object') return [raw as Record<string, unknown>];
+  return undefined;
+}
+
 function normalizePage(page: Crawl4aiPage): CrawlPageResult {
   const internalLinks = (page.links?.internal ?? []).map((l) => ({
     href: l.href ?? '',
@@ -67,6 +79,8 @@ function normalizePage(page: Crawl4aiPage): CrawlPageResult {
     text: l.text ?? '',
   }));
 
+  const extractedData = parseExtractedData(page.extracted_content);
+
   return {
     url: page.url ?? '',
     success: page.success ?? false,
@@ -76,6 +90,7 @@ function normalizePage(page: Crawl4aiPage): CrawlPageResult {
     links: [...internalLinks, ...externalLinks],
     statusCode: page.status_code ?? null,
     errorMessage: page.error_message ?? null,
+    ...(extractedData !== undefined && { extractedData }),
   };
 }
 
@@ -84,6 +99,7 @@ export async function webCrawl(
   baseUrl: string,
   apiToken: string,
   opts: WebCrawlOptions,
+  llmFallback?: { provider: string; apiToken: string },
 ): Promise<WebCrawlResult> {
   assertSafeUrl(url);
 
@@ -121,11 +137,15 @@ export async function webCrawl(
     crawlerConfigParams.js_code = opts.jsCode;
   }
 
-  const body = {
+  const body: Record<string, unknown> = {
     urls: [url],
     browser_config: { type: 'BrowserConfig', params: { headless: true } },
     crawler_config: { type: 'CrawlerRunConfig', params: crawlerConfigParams },
   };
+
+  if (opts.extractionConfig) {
+    body.extraction_config = mapToCrawl4ai(opts.extractionConfig, llmFallback);
+  }
 
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
@@ -175,6 +195,18 @@ export async function webCrawl(
   }
 
   const data = raw as Crawl4aiResponse;
+
+  // Detect unsupported sidecar when extractionConfig was provided but no extracted_content present
+  if (opts.extractionConfig) {
+    const hasExtractedContent =
+      (data.result !== undefined && 'extracted_content' in data.result) ||
+      (Array.isArray(data.results) && data.results.some((p) => 'extracted_content' in p));
+    if (!hasExtractedContent) {
+      throw parseError(
+        'Crawl4AI sidecar does not support extraction. Upgrade Crawl4AI sidecar to v0.8.x or later for extraction support.',
+      );
+    }
+  }
 
   // crawl4ai may return either { results: [...] } (deep crawl) or { result: {...} } (single page)
   let pages: CrawlPageResult[];
