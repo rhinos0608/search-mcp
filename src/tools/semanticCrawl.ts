@@ -9,6 +9,7 @@ import { parseSitemap, isSitemapIndex } from '../utils/sitemap.js';
 import { dedupPages } from '../utils/url.js';
 import { isCookieBannerPage } from '../utils/cookieBanner.js';
 import { rrfMerge } from '../utils/fusion.js';
+import { applySoftLexicalConstraint } from '../utils/lexicalConstraint.js';
 import { buildBm25Index, type Bm25Index } from '../utils/bm25.js';
 import { getOrBuildCorpus, loadCorpusById } from '../utils/corpusCache.js';
 import type {
@@ -466,12 +467,25 @@ export async function embedAndRank(
     );
   }
 
+  // 8. Soft lexical constraint (IDF-weighted token coverage)
+  const lexicalResult = applySoftLexicalConstraint(coherent, opts.query, deduped, opts.topK);
+  if (lexicalResult.warning) {
+    logger.warn(lexicalResult.warning);
+  }
+  if (lexicalResult.filtered.length < coherent.length) {
+    logger.info(
+      { before: coherent.length, after: lexicalResult.filtered.length },
+      'Soft lexical constraint filtered chunks',
+    );
+  }
+  const afterLexical = lexicalResult.filtered;
+
   // 9. Optional cross-encoder re-ranking (opt-in, default false)
   let topChunks: SemanticCrawlChunk[];
 
-  if (opts.useReranker === true && coherent.length > 1) {
-    const rerankCount = Math.min(RERANK_CANDIDATES, coherent.length);
-    const candidates = coherent.slice(0, rerankCount);
+  if (opts.useReranker === true && afterLexical.length > 1) {
+    const rerankCount = Math.min(RERANK_CANDIDATES, afterLexical.length);
+    const candidates = afterLexical.slice(0, rerankCount);
     const candidateTexts = candidates.map((c) => c.text);
 
     try {
@@ -511,7 +525,7 @@ export async function embedAndRank(
       topChunks = candidates.slice(0, opts.topK);
     }
   } else {
-    topChunks = coherent.slice(0, opts.topK);
+    topChunks = afterLexical.slice(0, opts.topK);
   }
 
   return topChunks;
