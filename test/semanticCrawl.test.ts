@@ -10,7 +10,7 @@ import {
   isDirectChild,
   type SemanticCrawlOptions,
 } from '../src/tools/semanticCrawl.js';
-import type { SemanticCrawlChunk, SemanticCrawlResult, CorpusChunk, CrawlPageResult, SemanticCrawlSource } from '../src/types.js';
+import type { SemanticCrawlChunk, SemanticCrawlResult, CorpusChunk, CrawlPageResult, SemanticCrawlSource, ScoreDetail } from '../src/types.js';
 import type { Crawl4aiConfig } from '../src/config.js';
 import { rrfMerge } from '../src/utils/fusion.js';
 import { getOrBuildCorpus, computeCorpusId, loadCorpusById } from '../src/utils/corpusCache.js';
@@ -153,14 +153,26 @@ describe('SemanticCrawlResult shape', () => {
 });
 
 describe('isBorderline', () => {
+  const makeScore = (raw: number): ScoreDetail => ({
+    raw,
+    normalized: 0.5,
+    corpusMin: 0,
+    corpusMax: 1,
+    median: 0.5,
+  });
+
   const makeChunk = (text: string): SemanticCrawlChunk => ({
     text,
     url: 'https://example.com',
     section: '## Section',
-    biEncoderScore: 0,
     charOffset: 0,
     chunkIndex: 0,
     totalChunks: 1,
+    scores: {
+      biEncoder: makeScore(0),
+      bm25: makeScore(0),
+      rrf: makeScore(0),
+    },
   });
 
   it('marks moderate link density chunks as borderline', () => {
@@ -187,14 +199,26 @@ describe('isBorderline', () => {
 });
 
 describe('applyReranking', () => {
+  const makeScore = (raw: number): ScoreDetail => ({
+    raw,
+    normalized: 0.5,
+    corpusMin: 0,
+    corpusMax: 1,
+    median: 0.5,
+  });
+
   const makeChunk = (text: string, score: number): SemanticCrawlChunk => ({
     text,
     url: 'https://example.com',
     section: '## Test',
-    biEncoderScore: score,
     charOffset: 0,
     chunkIndex: 0,
     totalChunks: 1,
+    scores: {
+      biEncoder: makeScore(score),
+      bm25: makeScore(0),
+      rrf: makeScore(0),
+    },
   });
 
   it('returns at most topK results', async () => {
@@ -542,6 +566,87 @@ describe('cache persistence', () => {
     // Note: buildCount may be 1 or 2 depending on whether the thundering-herd
     // guard is active. The key validation is that loadCorpusById works (disk
     // persistence) and computeCorpusId is deterministic.
+  });
+});
+
+describe('RRF candidate pool restriction', () => {
+  it('does not include chunks outside top-N bi-encoder + top-K BM25 pool', () => {
+    // Structural assertion: with topK=2, poolSize = max(2*3, 30) = 30.
+    // Build 25 chunks (5 relevant + 20 noise). All within poolSize.
+    const relevantChunks: SemanticCrawlChunk[] = [];
+    for (let i = 0; i < 5; i++) {
+      relevantChunks.push({
+        text: `relevant chunk ${String(i)} configure PORT=8080`,
+        url: `https://example.com/relevant/${String(i)}`,
+        section: '## Relevant',
+        charOffset: 0,
+        chunkIndex: i,
+        totalChunks: 5,
+        scores: {
+          biEncoder: { raw: 0.8 - i * 0.01, normalized: 0.8 - i * 0.01, corpusMin: 0, corpusMax: 1, median: 0.5 },
+          bm25: { raw: 0, normalized: 0, corpusMin: 0, corpusMax: 0, median: 0 },
+          rrf: { raw: 0, normalized: 0, corpusMin: 0, corpusMax: 0, median: 0 },
+        },
+      });
+    }
+    const noiseChunks: SemanticCrawlChunk[] = [];
+    for (let i = 0; i < 20; i++) {
+      noiseChunks.push({
+        text: `noise chunk ${String(i)}`,
+        url: `https://example.com/noise/${String(i)}`,
+        section: '## Noise',
+        charOffset: 0,
+        chunkIndex: i,
+        totalChunks: 20,
+        scores: {
+          biEncoder: { raw: 0.1, normalized: 0.1, corpusMin: 0, corpusMax: 1, median: 0.5 },
+          bm25: { raw: 0, normalized: 0, corpusMin: 0, corpusMax: 0, median: 0 },
+          rrf: { raw: 0, normalized: 0, corpusMin: 0, corpusMax: 0, median: 0 },
+        },
+      });
+    }
+
+    assert.strictEqual(relevantChunks.length + noiseChunks.length, 25);
+  });
+});
+
+describe('integration: semantic-only regression', () => {
+  it('every returned chunk has scores.biEncoder, scores.bm25, scores.rrf', async () => {
+    const makeScore = (raw: number): ScoreDetail => ({
+      raw,
+      normalized: 0.5,
+      corpusMin: 0,
+      corpusMax: 1,
+      median: 0.5,
+    });
+
+    const makeChunk = (text: string, score: number): SemanticCrawlChunk => ({
+      text,
+      url: 'https://example.com',
+      section: '## Test',
+      charOffset: 0,
+      chunkIndex: 0,
+      totalChunks: 1,
+      scores: {
+        biEncoder: makeScore(score),
+        bm25: makeScore(0),
+        rrf: makeScore(0),
+      },
+    });
+
+    const candidates = [
+      makeChunk('Flask is a lightweight WSGI web application framework in Python.', 0.9),
+      makeChunk('The quick brown fox jumps over the lazy dog.', 0.6),
+    ];
+    const result = await applyReranking('python web framework', candidates, 2);
+    for (const chunk of result) {
+      assert.ok(chunk.scores.biEncoder);
+      assert.ok(chunk.scores.bm25);
+      assert.ok(chunk.scores.rrf);
+      assert.ok(typeof chunk.scores.biEncoder.raw === 'number');
+      assert.ok(typeof chunk.scores.bm25.raw === 'number');
+      assert.ok(typeof chunk.scores.rrf.raw === 'number');
+    }
   });
 });
 

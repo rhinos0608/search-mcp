@@ -231,6 +231,21 @@ interface EmbedAndRankOptions {
   bm25Index?: Bm25Index | undefined;
 }
 
+function median(values: number[]): number {
+  if (values.length === 0) return 0;
+  const sorted = [...values].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  if (sorted.length % 2 === 0) {
+    return ((sorted[mid - 1] ?? 0) + (sorted[mid] ?? 0)) / 2;
+  }
+  return sorted[mid] ?? 0;
+}
+
+function normalizeScore(raw: number, min: number, max: number): number {
+  if (max === min) return 0;
+  return (raw - min) / (max - min);
+}
+
 export async function embedAndRank(
   chunks: CorpusChunk[],
   opts: EmbedAndRankOptions,
@@ -261,7 +276,6 @@ export async function embedAndRank(
   }
 
   // 3. Embed chunks (batched) and query in parallel
-  //    When precomputedEmbeddings are provided, skip the chunk embed step.
   const chunkTexts = deduped.map((c) => c.text);
   const chunkTitles = deduped.map(
     (c) =>
@@ -279,7 +293,6 @@ export async function embedAndRank(
     }
   }
 
-  // Fire query embedding concurrently with chunk batch embedding.
   const queryEmbedPromise = embedTexts(
     opts.embeddingBaseUrl,
     opts.embeddingApiToken,
@@ -323,65 +336,128 @@ export async function embedAndRank(
         text: chunk.text,
         url: chunk.url,
         section: chunk.section,
-        biEncoderScore: cosineSimilarity(queryEmbedding, emb),
         charOffset: chunk.charOffset,
         chunkIndex: chunk.chunkIndex,
         totalChunks: chunk.totalChunks,
+        scores: {
+          biEncoder: { raw: 0, normalized: 0, corpusMin: 0, corpusMax: 0, median: 0 },
+          bm25: { raw: 0, normalized: 0, corpusMin: 0, corpusMax: 0, median: 0 },
+          rrf: { raw: 0, normalized: 0, corpusMin: 0, corpusMax: 0, median: 0 },
+        },
       },
       embedding: emb,
     });
   }
-  paired.sort((a, b) => b.chunk.biEncoderScore - a.chunk.biEncoderScore);
+
+  for (const p of paired) {
+    p.chunk.scores.biEncoder.raw = cosineSimilarity(queryEmbedding, p.embedding);
+  }
+  paired.sort((a, b) => b.chunk.scores.biEncoder.raw - a.chunk.scores.biEncoder.raw);
+
+  // Compute bi-encoder score stats
+  const biScores = paired.map((p) => p.chunk.scores.biEncoder.raw);
+  const biMin = biScores.length > 0 ? Math.min(...biScores) : 0;
+  const biMax = biScores.length > 0 ? Math.max(...biScores) : 0;
+  const biMedian = median(biScores);
 
   // 5. BM25+ ranking
-  //    Use the pre-built index when available; otherwise build inline from chunk texts.
-  //    BM25 doc IDs use `url:chunkIndex` to match the corpusCache scheme.
   const bm25 =
     opts.bm25Index ??
     buildBm25Index(deduped.map((c) => ({ id: c.url + ':' + String(c.chunkIndex), text: c.text })));
 
-  // Build a map from BM25 doc id → SemanticCrawlChunk for fast lookup.
-  // BM25 doc IDs are `url:chunkIndex`, matching both the inline build above and corpusCache.
   const idToChunk = new Map<string, SemanticCrawlChunk>();
   for (const p of paired) {
     idToChunk.set(p.chunk.url + ':' + String(p.chunk.chunkIndex), p.chunk);
   }
 
   const bm25Scores = bm25.search(opts.query);
-  const bm25Ranking: SemanticCrawlChunk[] = [];
-  for (const { id } of bm25Scores) {
-    const c = idToChunk.get(id);
-    if (c) bm25Ranking.push(c);
+  const bm25ScoresMap = new Map<string, number>();
+  for (const { id, score } of bm25Scores) {
+    bm25ScoresMap.set(id, score);
   }
 
-  const biEncoderRanking = paired.map((p) => p.chunk);
+  const bm25Min = bm25Scores.length > 0 ? Math.min(...bm25Scores.map((s) => s.score)) : 0;
+  const bm25Max = bm25Scores.length > 0 ? Math.max(...bm25Scores.map((s) => s.score)) : 0;
+  const bm25Median = median(bm25Scores.map((s) => s.score));
 
-  // 6. RRF fusion (k=60)
-  const fused = rrfMerge([biEncoderRanking, bm25Ranking], {
+  // 6. RRF candidate pool restriction
+  // Bi-encoder pool: max(topK * 3, 30)
+  // BM25 pool: topK only — BM25 is more promiscuous on noisy corpora.
+  const poolSize = Math.max(opts.topK * 3, 30);
+  const biEncoderTopN = paired.slice(0, poolSize).map((p) => p.chunk);
+
+  // Re-use bm25Scores for topK extraction (avoids double search call)
+  const bm25TopKResults = bm25Scores.slice(0, opts.topK);
+  const bm25TopK: SemanticCrawlChunk[] = [];
+  for (const { id } of bm25TopKResults) {
+    const c = idToChunk.get(id);
+    if (c) bm25TopK.push(c);
+  }
+
+  const fused = rrfMerge([biEncoderTopN, bm25TopK], {
     k: 60,
     keyFn: (item) => item.url + '|' + item.text,
   });
 
-  // Build fused list as { chunk, embedding } for the coherence filter
+  // Compute RRF score stats
+  const rrfScores = fused.map((f) => f.rrfScore);
+  const rrfMin = rrfScores.length > 0 ? Math.min(...rrfScores) : 0;
+  const rrfMax = rrfScores.length > 0 ? Math.max(...rrfScores) : 0;
+  const rrfMedian = median(rrfScores);
+
+  logger.info(
+    { biEncoderCount: biEncoderTopN.length, bm25Count: bm25TopK.length, fusedCount: fused.length, poolSize },
+    'RRF fusion completed with restricted candidate pool',
+  );
+
+  // 7. Attach scores to fused chunks
+  const scoredChunks: SemanticCrawlChunk[] = [];
+  for (const { item, rrfScore } of fused) {
+    const biRaw = item.scores.biEncoder.raw;
+    const bm25Raw = bm25ScoresMap.get(item.url + ':' + String(item.chunkIndex)) ?? 0;
+
+    scoredChunks.push({
+      ...item,
+      scores: {
+        biEncoder: {
+          raw: biRaw,
+          normalized: normalizeScore(biRaw, biMin, biMax),
+          corpusMin: biMin,
+          corpusMax: biMax,
+          median: biMedian,
+        },
+        bm25: {
+          raw: bm25Raw,
+          normalized: normalizeScore(bm25Raw, bm25Min, bm25Max),
+          corpusMin: bm25Min,
+          corpusMax: bm25Max,
+          median: bm25Median,
+        },
+        rrf: {
+          raw: rrfScore,
+          normalized: normalizeScore(rrfScore, rrfMin, rrfMax),
+          corpusMin: rrfMin,
+          corpusMax: rrfMax,
+          median: rrfMedian,
+        },
+      },
+    });
+  }
+
+  // 8. Semantic coherence filter (borderline off-topic chunks)
   const chunkToEmbedding = new Map<string, number[]>();
   for (const p of paired) {
     chunkToEmbedding.set(p.chunk.url + '|' + p.chunk.text, p.embedding);
   }
 
   const fusedPaired: ChunkWithEmbedding[] = [];
-  for (const { item } of fused) {
-    const emb = chunkToEmbedding.get(item.url + '|' + item.text);
+  for (const chunk of scoredChunks) {
+    const emb = chunkToEmbedding.get(chunk.url + '|' + chunk.text);
     if (emb) {
-      fusedPaired.push({ chunk: item, embedding: emb });
+      fusedPaired.push({ chunk, embedding: emb });
     }
   }
 
-  logger.info(
-    { biEncoderCount: biEncoderRanking.length, bm25Count: bm25Ranking.length, fusedCount: fusedPaired.length },
-    'RRF fusion completed',
-  );
-
-  // 7. Semantic coherence filter (borderline off-topic chunks)
   const coherent = filterBySemanticCoherence(fusedPaired);
   if (coherent.length < fusedPaired.length) {
     logger.info(
@@ -390,7 +466,7 @@ export async function embedAndRank(
     );
   }
 
-  // 8. Optional cross-encoder re-ranking
+  // 9. Optional cross-encoder re-ranking (opt-in, default false)
   let topChunks: SemanticCrawlChunk[];
 
   if (opts.useReranker === true && coherent.length > 1) {
@@ -399,19 +475,35 @@ export async function embedAndRank(
     const candidateTexts = candidates.map((c) => c.text);
 
     try {
-      // Lazy import reranker — other agent owns this module
       const { rerank } = await import('../utils/rerank.js');
       const reranked = await rerank(opts.query, candidateTexts, { topK: opts.topK });
 
+      const rerankScores = reranked.map((r) => r.score);
+      const rerankMin = Math.min(...rerankScores);
+      const rerankMax = Math.max(...rerankScores);
+      const rerankMedian = median(rerankScores);
+
       topChunks = [];
-      for (const r of reranked) {
+      for (let rankIdx = 0; rankIdx < reranked.length; rankIdx++) {
+        const r = reranked[rankIdx];
+        if (!r) continue;
         const candidate = candidates[r.index];
-        if (candidate) {
-          topChunks.push({
-            ...candidate,
-            rerankScore: r.score,
-          });
-        }
+        if (!candidate) continue;
+        topChunks.push({
+          ...candidate,
+          scores: {
+            ...candidate.scores,
+            rerank: {
+              raw: r.score,
+              normalized: normalizeScore(r.score, rerankMin, rerankMax),
+              corpusMin: rerankMin,
+              corpusMax: rerankMax,
+              median: rerankMedian,
+              medianDelta: r.score - rerankMedian,
+              rank: rankIdx + 1,
+            },
+          },
+        });
       }
       logger.info({ topK: opts.topK, candidates: rerankCount }, 'Cross-encoder re-ranking applied');
     } catch (err) {
@@ -437,12 +529,32 @@ export async function applyReranking(
     const { rerank } = await import('../utils/rerank.js');
     const candidateTexts = candidates.map((c) => c.text);
     const reranked = await rerank(query, candidateTexts, { topK });
-    return reranked.map((r) => {
+
+    const rerankScores = reranked.map((r) => r.score);
+    const rerankMin = Math.min(...rerankScores);
+    const rerankMax = Math.max(...rerankScores);
+    const rerankMedian = median(rerankScores);
+
+    return reranked.map((r, rankIdx) => {
       const candidate = candidates[r.index];
       if (!candidate) {
         throw new Error(`Reranker returned invalid index ${String(r.index)}`);
       }
-      return { ...candidate, rerankScore: r.score };
+      return {
+        ...candidate,
+        scores: {
+          ...candidate.scores,
+          rerank: {
+            raw: r.score,
+            normalized: normalizeScore(r.score, rerankMin, rerankMax),
+            corpusMin: rerankMin,
+            corpusMax: rerankMax,
+            median: rerankMedian,
+            medianDelta: r.score - rerankMedian,
+            rank: rankIdx + 1,
+          },
+        },
+      };
     });
   } catch (err) {
     logger.warn({ err }, 'Cross-encoder re-ranking failed, falling back to bi-encoder ranking');

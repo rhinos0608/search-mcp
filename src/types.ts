@@ -373,18 +373,32 @@ export interface WebCrawlResult {
 
 // ── Semantic Crawl ────────────────────────────────────────────────────────
 
+export interface ScoreDetail {
+  raw: number;
+  normalized: number;
+  corpusMin: number;
+  corpusMax: number;
+  median: number;
+}
+
+export interface RerankScoreDetail extends ScoreDetail {
+  medianDelta: number;
+  rank: number;
+}
+
 export interface SemanticCrawlChunk {
   text: string;
   url: string;
   section: string;
-  /** Cosine similarity score from bi-encoder embedding (always present, [-1, 1]). */
-  biEncoderScore: number;
-  /** Cross-encoder re-ranker score (only present when reranker was applied). */
-  rerankScore?: number;
-  /** 0-based character offset in the source page text. */
   charOffset: number;
   chunkIndex: number;
   totalChunks: number;
+  scores: {
+    biEncoder: ScoreDetail;
+    bm25: ScoreDetail;
+    rrf: ScoreDetail;
+    rerank?: RerankScoreDetail;
+  };
 }
 
 export interface SemanticCrawlResult {
