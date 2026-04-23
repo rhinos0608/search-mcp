@@ -260,7 +260,7 @@ export async function embedAndRank(
   }
 
   // 3. Embed chunks (batched) and query in parallel
-  //    When precomputedEmbeddings are provided, skip the embed step.
+  //    When precomputedEmbeddings are provided, skip the chunk embed step.
   const chunkTexts = deduped.map((c) => c.text);
   const chunkTitles = deduped.map(
     (c) =>
@@ -270,28 +270,42 @@ export async function embedAndRank(
         ?.replace(/^#+\s+/, '') ?? 'none',
   );
 
-  let chunkEmbeddings: number[][];
   if (opts.precomputedEmbeddings !== undefined) {
-    chunkEmbeddings = opts.precomputedEmbeddings;
-  } else {
-    const { embeddings } = await embedTextsBatched(
-      opts.embeddingBaseUrl,
-      opts.embeddingApiToken,
-      chunkTexts,
-      'document',
-      opts.embeddingDimensions,
-      chunkTitles,
-    );
-    chunkEmbeddings = embeddings;
+    if (opts.precomputedEmbeddings.length !== deduped.length) {
+      throw new Error(
+        `precomputedEmbeddings length (${String(opts.precomputedEmbeddings.length)}) does not match deduped chunk count (${String(deduped.length)}). Pass already-deduplicated chunks.`,
+      );
+    }
   }
 
-  const queryResponse = await embedTexts(
+  // Fire query embedding concurrently with chunk batch embedding.
+  const queryEmbedPromise = embedTexts(
     opts.embeddingBaseUrl,
     opts.embeddingApiToken,
     [opts.query],
     'query',
     opts.embeddingDimensions,
   );
+
+  let chunkEmbeddings: number[][];
+  if (opts.precomputedEmbeddings !== undefined) {
+    chunkEmbeddings = opts.precomputedEmbeddings;
+  } else {
+    const [{ embeddings }] = await Promise.all([
+      embedTextsBatched(
+        opts.embeddingBaseUrl,
+        opts.embeddingApiToken,
+        chunkTexts,
+        'document',
+        opts.embeddingDimensions,
+        chunkTitles,
+      ),
+      queryEmbedPromise,
+    ]);
+    chunkEmbeddings = embeddings;
+  }
+
+  const queryResponse = await queryEmbedPromise;
   const queryEmbedding = queryResponse.embeddings[0];
   if (!queryEmbedding) {
     throw new Error('Embedding sidecar returned empty query embedding');
@@ -320,18 +334,16 @@ export async function embedAndRank(
 
   // 5. BM25+ ranking
   //    Use the pre-built index when available; otherwise build inline from chunk texts.
+  //    BM25 doc IDs use `url:chunkIndex` to match the corpusCache scheme.
   const bm25 =
     opts.bm25Index ??
-    buildBm25Index(deduped.map((c, i) => ({ id: String(i), text: c.text })));
+    buildBm25Index(deduped.map((c) => ({ id: c.url + ':' + String(c.chunkIndex), text: c.text })));
 
   // Build a map from BM25 doc id → SemanticCrawlChunk for fast lookup.
-  // BM25 doc IDs are String(i) where i is the index in deduped[].
+  // BM25 doc IDs are `url:chunkIndex`, matching both the inline build above and corpusCache.
   const idToChunk = new Map<string, SemanticCrawlChunk>();
-  for (let i = 0; i < deduped.length; i++) {
-    const p = paired.find((pe) => pe.chunk.url === deduped[i]?.url && pe.chunk.text === deduped[i]?.text);
-    if (p) {
-      idToChunk.set(String(i), p.chunk);
-    }
+  for (const p of paired) {
+    idToChunk.set(p.chunk.url + ':' + String(p.chunk.chunkIndex), p.chunk);
   }
 
   const bm25Scores = bm25.search(opts.query);
