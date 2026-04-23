@@ -858,7 +858,7 @@ export async function semanticCrawl(
     seedUrl,
     query: opts.query,
     pagesCrawled,
-    totalChunks: corpusChunks.length,
+    totalChunks: corpus.chunks.length,
     successfulPages,
     corpusId: resolvedCorpusId,
     chunks: topChunks,
