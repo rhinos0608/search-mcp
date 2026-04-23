@@ -931,7 +931,7 @@ export async function semanticCrawl(
     }
 
     case 'cached': {
-      const cached = await loadCorpusById(opts.source.corpusId);
+      const cached = loadCorpusById(opts.source.corpusId);
       if (!cached) {
         throw new Error(
           `Corpus '${opts.source.corpusId}' not found or expired. Re-issue with the original source to rebuild.`,

@@ -616,10 +616,10 @@ export async function getOrBuildCorpus(
 export function loadCorpusById(
   corpusId: string,
   opts?: CacheOpts,
-): Promise<CachedCorpus | null> {
+): CachedCorpus | null {
   const ttlMs = opts?.ttlMs ?? DEFAULT_TTL_MS;
   const cacheDir = opts?.cacheDir ?? DEFAULT_CACHE_DIR;
-  return Promise.resolve(readCorpusFromDisk(cacheDir, corpusId, ttlMs));
+  return readCorpusFromDisk(cacheDir, corpusId, ttlMs);
 }
 
 /**
