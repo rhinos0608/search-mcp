@@ -42,6 +42,17 @@ export interface CachedCorpus {
   bm25Index: Bm25Index;
   createdAt: number;    // Unix ms
   lastAccessedAt: number; // Unix ms
+  /**
+   * Aggregated extractedData from the original crawl, keyed by URL.
+   * Only present when the original crawl used an extractionConfig.
+   * Absent for older cached corpora or those built without extraction.
+   *
+   * **Known limitation**: extractedData is not currently persisted to disk cache.
+   * Re-querying with `source: { type: 'cached', corpusId }` will return no
+   * extractedData even if the original crawl produced some. To get extractedData
+   * again, re-issue the request with the original source type (e.g. 'url').
+   */
+  extractedData?: Record<string, Record<string, unknown>[]>;
 }
 
 // ────────────────────────────────────────────────────────────────────

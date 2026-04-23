@@ -656,8 +656,8 @@ async function crawlSeeds(
     | 'pageTimeout'
     | 'jsCode'
     | 'extractionConfig'
+    | 'llmFallback'
   >,
-  llmFallback?: { provider: string; apiToken: string },
 ): Promise<{ pages: CrawlPageResult[]; totalPages: number; successfulPages: number }> {
   if (seedUrls.length === 0) {
     return { pages: [], totalPages: 0, successfulPages: 0 };
@@ -692,9 +692,10 @@ async function crawlSeeds(
       ...(opts.pageTimeout !== undefined ? { pageTimeout: opts.pageTimeout } : {}),
       ...(opts.jsCode !== undefined ? { jsCode: opts.jsCode } : {}),
       ...(opts.extractionConfig !== undefined ? { extractionConfig: opts.extractionConfig } : {}),
+      ...(opts.llmFallback !== undefined ? { llmFallback: opts.llmFallback } : {}),
     };
 
-    const result = await webCrawl(seedUrl, crawl4aiCfg.baseUrl, crawl4aiCfg.apiToken, crawlOpts, llmFallback);
+    const result = await webCrawl(seedUrl, crawl4aiCfg.baseUrl, crawl4aiCfg.apiToken, crawlOpts);
 
     // Path focus filter
     let pages = filterByPathPrefix(result.pages, seedUrl, opts.allowPathDrift ?? false);
@@ -812,6 +813,8 @@ export interface SemanticCrawlOptions {
   jsCode?: string | undefined;
   /** Structured data extraction configuration. */
   extractionConfig?: ExtractionConfig | undefined;
+  /** LLM provider credentials for LLM extraction strategy fallback. */
+  llmFallback?: { provider: string; apiToken: string; baseUrl?: string } | undefined;
 }
 
 export async function semanticCrawl(
@@ -820,7 +823,6 @@ export async function semanticCrawl(
   embeddingBaseUrl: string,
   embeddingApiToken: string,
   embeddingDimensions: number,
-  llmFallback?: { provider: string; apiToken: string },
 ): Promise<SemanticCrawlResult> {
   let corpusChunks: CorpusChunk[];
   let pagesCrawled: number;
@@ -841,7 +843,7 @@ export async function semanticCrawl(
           ? [opts.source.url, ...opts.source.urls]
           : [opts.source.url];
       const safeUrls = filterSafeUrls(seedUrls);
-      const result = await crawlSeeds(safeUrls, crawl4aiCfg, opts, llmFallback);
+      const result = await crawlSeeds(safeUrls, crawl4aiCfg, opts);
       corpusChunks = pagesToCorpus(result.pages);
       pagesCrawled = result.totalPages;
       successfulPages = result.successfulPages;
@@ -906,7 +908,7 @@ export async function semanticCrawl(
         );
       }
       const sitemapOpts = { ...opts, maxDepth: 0 };
-      const result = await crawlSeeds(safeUrls, crawl4aiCfg, sitemapOpts, llmFallback);
+      const result = await crawlSeeds(safeUrls, crawl4aiCfg, sitemapOpts);
       corpusChunks = pagesToCorpus(result.pages);
       pagesCrawled = result.totalPages;
       successfulPages = result.successfulPages;
@@ -936,7 +938,7 @@ export async function semanticCrawl(
         );
       }
       const searchOpts = { ...opts, maxDepth: 0 };
-      const result = await crawlSeeds(safeUrls, crawl4aiCfg, searchOpts, llmFallback);
+      const result = await crawlSeeds(safeUrls, crawl4aiCfg, searchOpts);
       corpusChunks = pagesToCorpus(result.pages);
       pagesCrawled = result.totalPages;
       successfulPages = result.successfulPages;
@@ -976,6 +978,10 @@ export async function semanticCrawl(
     }
 
     case 'cached': {
+      // NOTE: extractedData is not persisted in the corpus cache.
+      // If extractionConfig was used on the original crawl, the extractedData
+      // was returned in that first response but is not available here.
+      // The server handler emits a warning when extractionConfig is combined with cached source.
       const cached = loadCorpusById(opts.source.corpusId);
       if (!cached) {
         throw new Error(

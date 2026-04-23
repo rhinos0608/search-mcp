@@ -2,7 +2,7 @@ import test, { beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { loadConfig, resetConfig } from '../src/config.js';
 
-const LLM_ENV_KEYS = ['LLM_PROVIDER', 'LLM_API_TOKEN', 'SEARCH_MCP_CONFIG_KEY'] as const;
+const LLM_ENV_KEYS = ['LLM_PROVIDER', 'LLM_API_TOKEN', 'LLM_BASE_URL', 'SEARCH_MCP_CONFIG_KEY'] as const;
 const saved = new Map<string, string | undefined>();
 
 beforeEach(() => {
@@ -32,28 +32,51 @@ test('loadConfig picks up LLM_PROVIDER and LLM_API_TOKEN from env', () => {
   assert.equal(cfg.llm.apiToken, 'sk-test123');
 });
 
-test('loadConfig defaults llm provider and apiToken to empty string when env vars missing', () => {
+test('loadConfig defaults llm provider, apiToken, and baseUrl to empty string when env vars missing', () => {
   const cfg = loadConfig();
   assert.equal(cfg.llm.provider, '');
   assert.equal(cfg.llm.apiToken, '');
+  assert.equal(cfg.llm.baseUrl, '');
 });
 
-test('loadConfig partial env: only LLM_PROVIDER set falls back to defaults for apiToken', () => {
+test('loadConfig partial env: only LLM_PROVIDER set falls back to defaults for apiToken and baseUrl', () => {
   process.env.LLM_PROVIDER = 'openai/gpt-4o';
   resetConfig();
   const cfg = loadConfig();
 
   assert.equal(cfg.llm.provider, 'openai/gpt-4o');
   assert.equal(cfg.llm.apiToken, '');
+  assert.equal(cfg.llm.baseUrl, '');
 });
 
-test('loadConfig partial env: only LLM_API_TOKEN set falls back to defaults for provider', () => {
+test('loadConfig partial env: only LLM_API_TOKEN set falls back to defaults for provider and baseUrl', () => {
   process.env.LLM_API_TOKEN = 'sk-test123';
   resetConfig();
   const cfg = loadConfig();
 
   assert.equal(cfg.llm.provider, '');
   assert.equal(cfg.llm.apiToken, 'sk-test123');
+  assert.equal(cfg.llm.baseUrl, '');
+});
+
+test('loadConfig picks up LLM_BASE_URL from env', () => {
+  process.env.LLM_BASE_URL = 'http://localhost:11434/v1';
+  resetConfig();
+  const cfg = loadConfig();
+
+  assert.equal(cfg.llm.baseUrl, 'http://localhost:11434/v1');
+});
+
+test('loadConfig picks up all LLM env vars together', () => {
+  process.env.LLM_PROVIDER = 'openai/gpt-4o';
+  process.env.LLM_API_TOKEN = 'sk-test123';
+  process.env.LLM_BASE_URL = 'http://localhost:11434/v1';
+  resetConfig();
+  const cfg = loadConfig();
+
+  assert.equal(cfg.llm.provider, 'openai/gpt-4o');
+  assert.equal(cfg.llm.apiToken, 'sk-test123');
+  assert.equal(cfg.llm.baseUrl, 'http://localhost:11434/v1');
 });
 
 test('resetConfig clears cached config so env changes are picked up', () => {

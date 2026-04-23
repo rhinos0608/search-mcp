@@ -95,6 +95,7 @@ export interface SemanticCrawlConfig {
 export interface LlmConfig {
   provider: string;
   apiToken: string;
+  baseUrl: string;
 }
 
 export interface SearchConfig {
@@ -137,7 +138,7 @@ const DEFAULTS: Omit<SearchConfig, 'rescoreWeights'> = {
   crawl4ai: { baseUrl: '', apiToken: '' },
   embeddingSidecar: { baseUrl: '', apiToken: '', dimensions: 768 },
   semanticCrawl: { defaultMaxBytes: 50_000_000, maxMaxBytes: 200_000_000 },
-  llm: { provider: '', apiToken: '' },
+  llm: { provider: '', apiToken: '', baseUrl: '' },
 };
 
 const VALID_BACKENDS = new Set<string>(['brave', 'searxng']);
@@ -294,12 +295,14 @@ function loadFromEnv(): EnvConfig {
 
   const llmProvider = process.env.LLM_PROVIDER;
   const llmApiToken = process.env.LLM_API_TOKEN;
-  if (llmProvider !== undefined || llmApiToken !== undefined) {
+  const llmBaseUrl = process.env.LLM_BASE_URL;
+  if (llmProvider !== undefined || llmApiToken !== undefined || llmBaseUrl !== undefined) {
     // Intentionally partial: missing keys are resolved via ?? chaining
     // in the final merge block below.
     const llmCfg: Partial<LlmConfig> = {};
     if (llmProvider !== undefined) llmCfg.provider = llmProvider;
     if (llmApiToken !== undefined) llmCfg.apiToken = llmApiToken;
+    if (llmBaseUrl !== undefined) llmCfg.baseUrl = llmBaseUrl;
     cfg.llm = llmCfg;
   }
 
@@ -413,6 +416,7 @@ export function loadConfig(): SearchConfig {
     llm: {
       provider: envConfig.llm?.provider ?? fileConfig.llm?.provider ?? DEFAULTS.llm.provider,
       apiToken: envConfig.llm?.apiToken ?? fileConfig.llm?.apiToken ?? DEFAULTS.llm.apiToken,
+      baseUrl: envConfig.llm?.baseUrl ?? fileConfig.llm?.baseUrl ?? DEFAULTS.llm.baseUrl,
     },
     rescoreWeights: DEFAULT_RESCORE_WEIGHTS,
   };

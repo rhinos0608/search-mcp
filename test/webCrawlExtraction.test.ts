@@ -118,6 +118,38 @@ test('webCrawl throws parseError when sidecar lacks extraction support', async (
   );
 });
 
+test('webCrawl does not falsely detect unsupported sidecar when extracted_content is empty array', async () => {
+  globalThis.fetch = async () =>
+    buildMockResponse({
+      result: {
+        url: 'https://example.com',
+        success: true,
+        markdown: '# Hello',
+        extracted_content: [],
+      },
+    });
+
+  // Empty array means sidecar *does* support extraction — it just found nothing.
+  // The sidecar detection check looks for the presence of 'extracted_content', not its contents.
+  const result = await webCrawl(
+    'https://example.com',
+    'https://crawl4ai.example.com',
+    '',
+    {
+      ...defaultOpts,
+      extractionConfig: {
+        type: 'css_schema',
+        schema: { name: 'Jobs', baseSelector: 'article', fields: [{ name: 'title', selector: 'h2', type: 'text' }] },
+      },
+    },
+  );
+
+  assert.equal(result.pages.length, 1);
+  assert.equal(result.pages[0]!.url, 'https://example.com');
+  // extractedData should be empty array, not undefined
+  assert.deepStrictEqual(result.pages[0]!.extractedData, []);
+});
+
 test('webCrawl does not throw on failed page without extracted_content when other pages succeed', async () => {
   globalThis.fetch = async () =>
     buildMockResponse({
@@ -182,8 +214,8 @@ test('webCrawl passes llmFallback credentials through to extraction_config', asy
         type: 'llm',
         instruction: 'Extract all jobs',
       },
+      llmFallback: { provider: 'openai/gpt-4o', apiToken: 'sk-test' },
     },
-    { provider: 'openai/gpt-4o', apiToken: 'sk-test' },
   );
 
   assert.ok(capturedBody);

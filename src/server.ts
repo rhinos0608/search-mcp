@@ -30,7 +30,12 @@ import { isToolError } from './errors.js';
 import type { RateLimitInfo } from './rateLimit.js';
 import type { ToolResult } from './types.js';
 import { configHealth, getGatedTools, runHealthProbes } from './health.js';
-import { extractionConfigSchema, validateExtractionConfig } from './utils/extractionConfig.js';
+import {
+  extractionConfigSchema,
+  validateExtractionConfig,
+  type ExtractionConfig,
+} from './utils/extractionConfig.js';
+import type { LlmConfig } from './config.js';
 
 interface MakeResultOpts {
   warnings?: string[];
@@ -91,6 +96,60 @@ function successResponse<T>(result: ToolResult<T>): {
       {
         type: 'text' as const,
         text: JSON.stringify(result),
+      },
+    ],
+  };
+}
+
+/** Build llmFallback config for Crawl4AI extraction when LLM strategy is used. */
+function buildLlmFallback(
+  extractionConfig: ExtractionConfig | undefined,
+  llm: LlmConfig,
+): { provider: string; apiToken: string; baseUrl?: string } | undefined {
+  if (extractionConfig?.type !== 'llm') return undefined;
+  return {
+    provider: extractionConfig.llmProvider ?? llm.provider,
+    apiToken: llm.apiToken,
+    ...(llm.baseUrl ? { baseUrl: llm.baseUrl } : {}),
+  };
+}
+
+/** Build extraction warnings: pages that succeeded but returned no extractedData. */
+function extractionWarnings(data: { pages: { url: string; success: boolean; extractedData?: unknown }[] }): string[] {
+  const warnings: string[] = [];
+  for (const page of data.pages) {
+    if (page.success && !page.extractedData) {
+      warnings.push(`Extraction produced no data for ${page.url}`);
+    }
+  }
+  return warnings;
+}
+
+/** Normalize a Readability article into the WebCrawlResult shape. */
+function readabilityFallbackResult(
+  url: string,
+  article: import('./types.js').ArticleResult,
+  strategy: 'bfs' | 'dfs',
+  maxDepth: number,
+  maxPages: number,
+): import('./types.js').WebCrawlResult {
+  return {
+    seedUrl: url,
+    strategy,
+    maxDepth,
+    maxPages,
+    totalPages: 1,
+    successfulPages: 1,
+    pages: [
+      {
+        url,
+        success: true,
+        markdown: article.textContent,
+        title: article.title ?? '',
+        description: article.description ?? '',
+        links: [],
+        statusCode: null,
+        errorMessage: null,
       },
     ],
   };
@@ -198,94 +257,35 @@ export function createServer(): McpServer {
       logger.info({ tool: 'web_read' }, 'Tool invoked');
       const start = Date.now();
       try {
-        // Prefer crawl4ai if configured; otherwise fall back to Readability-based fetch
-        let data: import('./types.js').WebCrawlResult;
-        if (cfg.crawl4ai.baseUrl) {
-          if (extractionConfig) {
-            validateExtractionConfig(extractionConfig, cfg.llm);
-          }
+        if (extractionConfig) {
+          validateExtractionConfig(extractionConfig, cfg.llm);
+        }
 
-          const warnings: string[] = [];
-          let llmFallback: { provider: string; apiToken: string } | undefined;
-          if (extractionConfig?.type === 'llm') {
-            llmFallback = {
-              provider: extractionConfig.llmProvider ?? cfg.llm.provider,
-              apiToken: cfg.llm.apiToken,
-            };
-          }
+        let data: import('./types.js').WebCrawlResult;
+        const warnings: string[] = [];
+
+        if (cfg.crawl4ai.baseUrl) {
+          const llmFallback = buildLlmFallback(extractionConfig, cfg.llm);
           data = await webCrawl(url, cfg.crawl4ai.baseUrl, cfg.crawl4ai.apiToken, {
             strategy,
             maxDepth,
             maxPages,
             includeExternalLinks,
             ...(extractionConfig ? { extractionConfig } : {}),
-          }, llmFallback);
-
-          if (extractionConfig) {
-            for (const page of data.pages) {
-              if (page.success && !page.extractedData) {
-                warnings.push(`Extraction produced no data for ${page.url}`);
-              }
-            }
-          }
-
-          const result = makeResult('web_read', data, Date.now() - start, { warnings });
-          return successResponse(result);
+            ...(llmFallback ? { llmFallback } : {}),
+          });
+          warnings.push(...extractionWarnings(data));
         } else {
           if (extractionConfig) {
-            const warnings: string[] = ['extractionConfig is ignored when crawl4ai is not configured (Readability fallback does not support structured extraction)'];
-            logger.debug('crawl4ai not configured — falling back to webRead (Readability)');
-            const article = await webRead(url);
-            // Normalize to the same shape as webCrawl for the tool result
-            data = {
-              seedUrl: url,
-              strategy,
-              maxDepth,
-              maxPages,
-              totalPages: 1,
-              successfulPages: 1,
-              pages: [
-                {
-                  url,
-                  success: true,
-                  markdown: article.textContent,
-                  title: article.title,
-                  description: article.description,
-                  links: [],
-                  statusCode: null,
-                  errorMessage: null,
-                },
-              ],
-            };
-            const result = makeResult('web_read', data, Date.now() - start, { warnings });
-            return successResponse(result);
+            warnings.push('extractionConfig is ignored when crawl4ai is not configured (Readability fallback does not support structured extraction)');
           }
           logger.debug('crawl4ai not configured — falling back to webRead (Readability)');
           const article = await webRead(url);
-          // Normalize to the same shape as webCrawl for the tool result
-          data = {
-            seedUrl: url,
-            strategy,
-            maxDepth,
-            maxPages,
-            totalPages: 1,
-            successfulPages: 1,
-            pages: [
-              {
-                url,
-                success: true,
-                markdown: article.textContent,
-                title: article.title,
-                description: article.description,
-                links: [],
-                statusCode: null,
-                errorMessage: null,
-              },
-            ],
-          };
-          const result = makeResult('web_read', data, Date.now() - start);
-          return successResponse(result);
+          data = readabilityFallbackResult(url, article, strategy, maxDepth, maxPages);
         }
+
+        const result = makeResult('web_read', data, Date.now() - start, { warnings });
+        return successResponse(result);
       } catch (err: unknown) {
         logger.error({ err, tool: 'web_read' }, 'Tool failed');
         return errorResponse(err);
@@ -1335,13 +1335,7 @@ export function createServer(): McpServer {
             validateExtractionConfig(extractionConfig, cfg.llm);
           }
 
-          let llmFallback: { provider: string; apiToken: string } | undefined;
-          if (extractionConfig?.type === 'llm') {
-            llmFallback = {
-              provider: extractionConfig.llmProvider ?? cfg.llm.provider,
-              apiToken: cfg.llm.apiToken,
-            };
-          }
+          const llmFallback = buildLlmFallback(extractionConfig, cfg.llm);
 
           const data = await webCrawl(url, cfg.crawl4ai.baseUrl, cfg.crawl4ai.apiToken, {
             strategy,
@@ -1353,17 +1347,10 @@ export function createServer(): McpServer {
             pageTimeout,
             jsCode,
             ...(extractionConfig ? { extractionConfig } : {}),
-          }, llmFallback);
+            ...(llmFallback ? { llmFallback } : {}),
+          });
 
-          const warnings: string[] = [];
-          if (extractionConfig) {
-            for (const page of data.pages) {
-              if (page.success && !page.extractedData) {
-                warnings.push(`Extraction produced no data for ${page.url}`);
-              }
-            }
-          }
-
+          const warnings = extractionWarnings(data);
           const result = makeResult('web_crawl', data, Date.now() - start, { warnings });
           return successResponse(result);
         } catch (err: unknown) {
@@ -1557,13 +1544,7 @@ export function createServer(): McpServer {
             warnings.push('extractionConfig is ignored when using cached source (cached sources skip crawling)');
           }
 
-          let llmFallback: { provider: string; apiToken: string } | undefined;
-          if (extractionConfig?.type === 'llm') {
-            llmFallback = {
-              provider: extractionConfig.llmProvider ?? cfg.llm.provider,
-              apiToken: cfg.llm.apiToken,
-            };
-          }
+          const llmFallback = buildLlmFallback(extractionConfig, cfg.llm);
 
           const effectiveMaxBytes = maxBytes ?? cfg.semanticCrawl.defaultMaxBytes;
           const data = await semanticCrawl(
@@ -1583,12 +1564,12 @@ export function createServer(): McpServer {
               pageTimeout,
               jsCode,
               ...(extractionConfig ? { extractionConfig } : {}),
+              ...(llmFallback ? { llmFallback } : {}),
             },
             cfg.crawl4ai,
             cfg.embeddingSidecar.baseUrl,
             cfg.embeddingSidecar.apiToken,
             cfg.embeddingSidecar.dimensions,
-            llmFallback,
           );
           const result = makeResult('semantic_crawl', data, Date.now() - start, { warnings });
           return successResponse(result);

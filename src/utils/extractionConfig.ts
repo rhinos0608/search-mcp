@@ -11,7 +11,7 @@ export const REGEX_PATTERNS = [
 export type RegexPattern = (typeof REGEX_PATTERNS)[number];
 
 // Verified against Crawl4AI RegexExtractionStrategy._B IntFlag (v0.8.x)
-export const REGEX_BITFLAGS: Record<RegexPattern, number> = {
+const REGEX_BITFLAGS_INDIVIDUAL = {
   email: 1,
   'phone-international': 2,
   'phone-us': 4,
@@ -33,7 +33,14 @@ export const REGEX_BITFLAGS: Record<RegexPattern, number> = {
   'mac-address': 262144,
   iban: 524288,
   'credit-card': 1048576,
-  all: 2097151, // bitwise OR of all individual flags
+} as const satisfies Record<string, number>;
+
+// Dynamically computed bitwise OR of all individual flags — stays correct if Crawl4AI adds new patterns.
+const ALL_FLAG = Object.values(REGEX_BITFLAGS_INDIVIDUAL).reduce((a, b) => a | b, 0);
+
+export const REGEX_BITFLAGS: Record<RegexPattern, number> = {
+  ...REGEX_BITFLAGS_INDIVIDUAL,
+  all: ALL_FLAG,
 };
 
 export type CssSchemaConfig = z.infer<typeof cssSchemaSchema>;
@@ -72,6 +79,7 @@ export const llmSchema = z.object({
   instruction: z.string().min(1),
   outputSchema: z.record(z.string(), z.unknown()).optional(),
   llmProvider: z.string().optional(),
+  llmBaseUrl: z.string().optional(),
 });
 
 export const singleExtractionConfigSchema = z.union([
@@ -87,7 +95,7 @@ export const extractionConfigSchema = singleExtractionConfigSchema;
 
 export function validateExtractionConfig(
   config: ExtractionConfig,
-  serverLlm?: { provider: string; apiToken: string },
+  serverLlm?: { provider: string; apiToken: string; baseUrl?: string },
 ): void {
   if (config.type === 'css_schema' || config.type === 'xpath_schema') {
     if (!config.schema.baseSelector || config.schema.baseSelector.trim().length === 0) {
@@ -114,15 +122,17 @@ export function validateExtractionConfig(
     if (!provider) {
       throw validationError('llm extractionConfig requires llmProvider (tool param) or LLM_PROVIDER env var');
     }
-    if (!serverLlm?.apiToken) {
-      throw validationError('llm extractionConfig requires LLM_API_TOKEN env var (not accepted as tool parameter)');
+    // Local providers (via baseUrl) may not require an API token.
+    const baseUrl = config.llmBaseUrl ?? serverLlm?.baseUrl ?? '';
+    if (!serverLlm?.apiToken && !baseUrl) {
+      throw validationError('llm extractionConfig requires LLM_API_TOKEN env var, or LLM_BASE_URL for local providers (not accepted as tool parameter)');
     }
   }
 }
 
 export function mapToCrawl4ai(
   config: ExtractionConfig,
-  resolvedLlm?: { provider: string; apiToken: string },
+  resolvedLlm?: { provider: string; apiToken: string; baseUrl?: string },
 ): unknown {
   switch (config.type) {
     case 'css_schema':
@@ -153,15 +163,18 @@ export function mapToCrawl4ai(
     case 'llm': {
       const provider = config.llmProvider ?? resolvedLlm?.provider ?? '';
       const apiToken = resolvedLlm?.apiToken;
+      const baseUrl = config.llmBaseUrl ?? resolvedLlm?.baseUrl;
+      const llmConfig: Record<string, string | undefined> = {
+        provider,
+      };
+      if (apiToken) llmConfig.api_token = apiToken;
+      if (baseUrl) llmConfig.base_url = baseUrl;
       return {
         type: 'LLMExtractionStrategy',
         params: {
           instruction: config.instruction,
           schema: config.outputSchema,
-          llm_config: {
-            provider,
-            api_token: apiToken,
-          },
+          llm_config: llmConfig,
         },
       };
     }

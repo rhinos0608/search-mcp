@@ -66,6 +66,46 @@ test('mapToCrawl4ai maps llm config with resolved provider and token', () => {
   });
 });
 
+test('mapToCrawl4ai maps llm config with baseUrl for local providers', () => {
+  const config = {
+    type: 'llm' as const,
+    instruction: 'Extract all jobs',
+  };
+  const mapped = mapToCrawl4ai(config, { provider: 'ollama/llama3', apiToken: '', baseUrl: 'http://localhost:11434/v1' });
+  assert.deepEqual(mapped, {
+    type: 'LLMExtractionStrategy',
+    params: {
+      instruction: 'Extract all jobs',
+      schema: undefined,
+      llm_config: {
+        provider: 'ollama/llama3',
+        base_url: 'http://localhost:11434/v1',
+      },
+    },
+  });
+});
+
+test('mapToCrawl4ai prefers per-request llmBaseUrl over server fallback', () => {
+  const config = {
+    type: 'llm' as const,
+    instruction: 'Extract all jobs',
+    llmBaseUrl: 'http://override.local:8000/v1',
+  };
+  const mapped = mapToCrawl4ai(config, { provider: 'openai/gpt-4o', apiToken: 'sk-test', baseUrl: 'http://server.local:8000/v1' });
+  assert.deepEqual(mapped, {
+    type: 'LLMExtractionStrategy',
+    params: {
+      instruction: 'Extract all jobs',
+      schema: undefined,
+      llm_config: {
+        provider: 'openai/gpt-4o',
+        api_token: 'sk-test',
+        base_url: 'http://override.local:8000/v1',
+      },
+    },
+  });
+});
+
 test('validateExtractionConfig throws for regex with neither patterns nor customPatterns', () => {
   assert.throws(
     () => validateExtractionConfig({ type: 'regex' }),
@@ -80,10 +120,27 @@ test('validateExtractionConfig throws for llm without provider or server config'
   );
 });
 
-test('validateExtractionConfig throws for llm without api token', () => {
+test('validateExtractionConfig throws for llm without api token and no baseUrl', () => {
   assert.throws(
     () => validateExtractionConfig({ type: 'llm', instruction: 'test', llmProvider: 'openai/gpt-4o' }),
     /LLM_API_TOKEN/,
+  );
+});
+
+test('validateExtractionConfig passes for llm with baseUrl but no apiToken (local provider)', () => {
+  assert.doesNotThrow(() =>
+    validateExtractionConfig(
+      { type: 'llm', instruction: 'test', llmProvider: 'ollama/llama3' },
+      { provider: '', apiToken: '', baseUrl: 'http://localhost:11434/v1' },
+    ),
+  );
+});
+
+test('validateExtractionConfig passes for llm with per-request llmBaseUrl only', () => {
+  assert.doesNotThrow(() =>
+    validateExtractionConfig(
+      { type: 'llm', instruction: 'test', llmProvider: 'ollama/llama3', llmBaseUrl: 'http://localhost:11434/v1' },
+    ),
   );
 });
 

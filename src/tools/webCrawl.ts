@@ -24,6 +24,8 @@ export interface WebCrawlOptions {
   jsCode?: string | undefined;
   /** Structured data extraction configuration. */
   extractionConfig?: ExtractionConfig;
+  /** LLM provider credentials for LLM extraction strategy fallback. */
+  llmFallback?: { provider: string; apiToken: string; baseUrl?: string };
 }
 
 // crawl4ai API response shape (stable across v0.7.x and v0.8.x)
@@ -99,7 +101,6 @@ export async function webCrawl(
   baseUrl: string,
   apiToken: string,
   opts: WebCrawlOptions,
-  llmFallback?: { provider: string; apiToken: string },
 ): Promise<WebCrawlResult> {
   assertSafeUrl(url);
 
@@ -144,7 +145,7 @@ export async function webCrawl(
   };
 
   if (opts.extractionConfig) {
-    body.extraction_config = mapToCrawl4ai(opts.extractionConfig, llmFallback);
+    body.extraction_config = mapToCrawl4ai(opts.extractionConfig, opts.llmFallback);
   }
 
   const headers: Record<string, string> = {
