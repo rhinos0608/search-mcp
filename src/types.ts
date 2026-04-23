@@ -31,8 +31,14 @@ export interface SearchResult {
   deepLinks: { title: string; url: string }[] | null;
 }
 
+// ── Structured Content Elements ──────────────────────────────────────────────
+
+export interface StructuredContent {
+  elements?: ContentElement[];
+}
+
 // ArticleResult — web read
-export interface ArticleResult {
+export interface ArticleResult extends StructuredContent {
   title: string | null;
   content: string; // HTML (Readability) or stripped text wrapped in <p> (fallback)
   textContent: string; // plain text
@@ -43,10 +49,7 @@ export interface ArticleResult {
   description: string | null;
   publishedDate: string | null;
   image: string | null;
-  elements?: ContentElement[];
 }
-
-// ── Structured Content Elements ──────────────────────────────────────────────
 
 export interface HeadingElement {
   type: 'heading';
@@ -149,7 +152,7 @@ export interface TranscriptSegment {
 }
 
 // YouTubeResult
-export interface YouTubeResult {
+export interface YouTubeResult extends StructuredContent {
   videoId: string;
   title: string | null;
   transcript: TranscriptSegment[];
@@ -157,7 +160,7 @@ export interface YouTubeResult {
 }
 
 // RedditPost
-export interface RedditPost {
+export interface RedditPost extends StructuredContent {
   title: string;
   url: string;
   selftext: string;
@@ -284,7 +287,7 @@ export interface ArXivPaper {
 
 // ── Stack Overflow ─────────────────────────────────────────────────────────
 
-export interface StackOverflowQuestion {
+export interface StackOverflowQuestion extends StructuredContent {
   questionId: number;
   title: string;
   body: string;
@@ -355,7 +358,7 @@ export interface GitHubTreeResult {
   warnings?: string[];
 }
 
-export interface GitHubFileResult {
+export interface GitHubFileResult extends StructuredContent {
   name: string;
   path: string;
   size: number;
@@ -400,7 +403,7 @@ export interface GitHubCodeSearchResult {
 
 // ── Crawl4AI ───────────────────────────────────────────────────────────────
 
-export interface CrawlPageResult {
+export interface CrawlPageResult extends StructuredContent {
   url: string;
   success: boolean;
   markdown: string;
@@ -410,7 +413,6 @@ export interface CrawlPageResult {
   statusCode: number | null;
   errorMessage: string | null;
   extractedData?: Record<string, unknown>[];
-  elements?: ContentElement[];
 }
 
 export interface WebCrawlResult {
@@ -453,7 +455,7 @@ export interface SemanticCrawlChunk {
   };
 }
 
-export interface SemanticCrawlResult {
+export interface SemanticCrawlResult extends StructuredContent {
   seedUrl: string;
   query: string;
   /** Total pages attempted in the crawl (includes failed pages). */

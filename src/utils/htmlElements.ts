@@ -1,5 +1,14 @@
 import type { ContentElement } from '../types.js';
 
+export const MAX_ELEMENTS = 50;
+export const MAX_TEXT_LENGTH = 10000;
+export const TRUNCATED_MARKER = '... [truncated]';
+
+function truncateText(text: string): string {
+  if (text.length <= MAX_TEXT_LENGTH) return text;
+  return text.slice(0, MAX_TEXT_LENGTH) + TRUNCATED_MARKER;
+}
+
 function cellText(cell: Element): string {
   return cell.textContent.trim();
 }
@@ -69,6 +78,8 @@ export function extractElementsFromHtml(document: Document): ContentElement[] {
   const candidates = Array.from(document.body.querySelectorAll(TARGET_SELECTOR));
 
   for (const el of candidates) {
+    if (elements.length >= MAX_ELEMENTS) break;
+
     // Skip if inside an ignored ancestor
     if (el.closest(Array.from(IGNORED_TAGS).join(','))) continue;
 
@@ -98,7 +109,12 @@ export function extractElementsFromHtml(document: Document): ContentElement[] {
         const level = parseInt(tag.slice(1), 10);
         const text = el.textContent.trim();
         if (text) {
-          elements.push({ type: 'heading', level, text, id: headingId(el as HTMLHeadingElement) });
+          elements.push({
+            type: 'heading',
+            level,
+            text: truncateText(text),
+            id: headingId(el as HTMLHeadingElement),
+          });
         }
         break;
       }
@@ -108,8 +124,8 @@ export function extractElementsFromHtml(document: Document): ContentElement[] {
         const { markdown, rows, cols } = tableToMarkdown(el as HTMLTableElement);
         elements.push({
           type: 'table',
-          markdown,
-          caption: captionEl ? captionEl.textContent.trim() : null,
+          markdown: truncateText(markdown),
+          caption: captionEl ? truncateText(captionEl.textContent.trim()) : null,
           rows,
           cols,
         });
@@ -121,8 +137,8 @@ export function extractElementsFromHtml(document: Document): ContentElement[] {
         elements.push({
           type: 'image',
           src: safeImageSrc(img.getAttribute('src')),
-          alt: img.alt,
-          title: img.getAttribute('title'),
+          alt: truncateText(img.alt),
+          title: truncateText(img.getAttribute('title') ?? ''),
         });
         break;
       }
@@ -134,15 +150,15 @@ export function extractElementsFromHtml(document: Document): ContentElement[] {
         elements.push({
           type: 'code',
           language: languageFromClass(cls),
-          content: content.trim(),
+          content: truncateText(content.trim()),
         });
         break;
       }
 
       case 'ul':
       case 'ol': {
-        const items = Array.from(el.querySelectorAll(':scope > li')).map(
-          (li) => li.textContent.trim(),
+        const items = Array.from(el.querySelectorAll(':scope > li')).map((li) =>
+          truncateText(li.textContent.trim()),
         );
         if (items.length > 0) {
           elements.push({ type: 'list', ordered: tag === 'ol', items });
@@ -159,7 +175,7 @@ export function extractElementsFromHtml(document: Document): ContentElement[] {
         if (!hasBlockChild) {
           const text = el.textContent.trim();
           if (text.length > 0) {
-            elements.push({ type: 'text', text });
+            elements.push({ type: 'text', text: truncateText(text) });
           }
         }
         break;

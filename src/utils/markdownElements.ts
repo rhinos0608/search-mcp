@@ -1,5 +1,14 @@
 import type { ContentElement } from '../types.js';
 
+export const MAX_ELEMENTS = 50;
+export const MAX_TEXT_LENGTH = 10000;
+export const TRUNCATED_MARKER = '... [truncated]';
+
+function truncateText(text: string): string {
+  if (text.length <= MAX_TEXT_LENGTH) return text;
+  return text.slice(0, MAX_TEXT_LENGTH) + TRUNCATED_MARKER;
+}
+
 const HEADING_RE = /^(#{1,6})\s+(.+)$/;
 const TABLE_ROW_RE = /^\|(.+)\|$/;
 const FENCED_CODE_RE = /^(```+)(\w*)/;
@@ -21,6 +30,8 @@ export function extractElementsFromMarkdown(markdown: string): ContentElement[] 
   let i = 0;
 
   while (i < lines.length) {
+    if (elements.length >= MAX_ELEMENTS) break;
+
     const line = lines[i];
     if (line === undefined) {
       i += 1;
@@ -37,7 +48,7 @@ export function extractElementsFromMarkdown(markdown: string): ContentElement[] 
         elements.push({
           type: 'heading',
           level: levelMatch.length,
-          text: textMatch.trim(),
+          text: truncateText(textMatch.trim()),
           id: null,
         });
       }
@@ -69,7 +80,7 @@ export function extractElementsFromMarkdown(markdown: string): ContentElement[] 
         elements.push({
           type: 'code',
           language: lang,
-          content: contentLines.join('\n').trimEnd(),
+          content: truncateText(contentLines.join('\n').trimEnd()),
         });
         i += 1; // skip closing fence
         continue;
@@ -96,7 +107,7 @@ export function extractElementsFromMarkdown(markdown: string): ContentElement[] 
       const cols = rows > 0 && firstLine !== undefined ? countCols(firstLine) : 0;
       elements.push({
         type: 'table',
-        markdown: tableLines.join('\n'),
+        markdown: truncateText(tableLines.join('\n')),
         caption: null,
         rows,
         cols,
@@ -124,7 +135,7 @@ export function extractElementsFromMarkdown(markdown: string): ContentElement[] 
         if (m) {
           const itemMatch = m[3];
           if (itemMatch !== undefined) {
-            items.push(stripInlineCode(itemMatch));
+            items.push(truncateText(stripInlineCode(itemMatch)));
           }
           i += 1;
           continue;
@@ -136,7 +147,7 @@ export function extractElementsFromMarkdown(markdown: string): ContentElement[] 
           // Append to the last item
           const last = items[items.length - 1];
           if (last !== undefined) {
-            items[items.length - 1] = last + ' ' + stripInlineCode(trimmedLine);
+            items[items.length - 1] = truncateText(last + ' ' + stripInlineCode(trimmedLine));
           }
           i += 1;
           continue;
@@ -161,8 +172,8 @@ export function extractElementsFromMarkdown(markdown: string): ContentElement[] 
           elements.push({
             type: 'image',
             src,
-            alt,
-            title: m[3] ?? null,
+            alt: truncateText(alt),
+            title: m[3] ? truncateText(m[3]) : null,
           });
         }
       }
@@ -174,7 +185,7 @@ export function extractElementsFromMarkdown(markdown: string): ContentElement[] 
     if (trimmed.length > 0) {
       const text = stripInlineCode(trimmed);
       if (text.length > 0) {
-        elements.push({ type: 'text', text });
+        elements.push({ type: 'text', text: truncateText(text) });
       }
     }
 
