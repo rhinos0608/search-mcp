@@ -1309,6 +1309,14 @@ export function createServer(): McpServer {
                   .optional()
                   .describe('Optional code search query to pre-filter files'),
               }),
+              z.object({
+                type: z.literal('cached'),
+                corpusId: z
+                  .string()
+                  .describe(
+                    'Corpus ID returned by a previous semantic_crawl call. Skip re-crawl and re-embed.',
+                  ),
+              }),
             ])
             .describe('Source of the corpus to crawl'),
           query: z.string().describe('The semantic search query — what are you looking for?'),

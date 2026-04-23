@@ -394,6 +394,8 @@ export interface SemanticCrawlResult {
   pagesCrawled: number;
   totalChunks: number;
   successfulPages: number;
+  /** Deterministic corpus ID — pass as `source: { type: 'cached', corpusId }` to skip re-crawl. */
+  corpusId: string;
   chunks: SemanticCrawlChunk[];
 }
 
@@ -429,7 +431,12 @@ export interface GitHubSource {
   query?: string | undefined;
 }
 
-export type SemanticCrawlSource = UrlSource | SitemapSource | SearchSeedSource | GitHubSource;
+export interface CachedSource {
+  type: 'cached';
+  corpusId: string;
+}
+
+export type SemanticCrawlSource = UrlSource | SitemapSource | SearchSeedSource | GitHubSource | CachedSource;
 
 // ── Corpus Chunk (adapter output, before embed+rank) ───────────────────────
 

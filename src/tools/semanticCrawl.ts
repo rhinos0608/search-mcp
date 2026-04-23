@@ -7,6 +7,9 @@ import { webSearch } from './webSearch.js';
 import { chunkMarkdown } from '../chunking.js';
 import { parseSitemap, isSitemapIndex } from '../utils/sitemap.js';
 import { dedupPages } from '../utils/url.js';
+import { rrfMerge } from '../utils/fusion.js';
+import { buildBm25Index, type Bm25Index } from '../utils/bm25.js';
+import { getOrBuildCorpus, loadCorpusById } from '../utils/corpusCache.js';
 import type {
   SemanticCrawlResult,
   SemanticCrawlChunk,
@@ -42,7 +45,7 @@ export async function embedTexts(
   mode: 'document' | 'query',
   dimensions: number,
   titles?: string[],
-): Promise<number[][]> {
+): Promise<EmbedResponse> {
   if (!baseUrl) {
     throw unavailableError('Embedding sidecar is not configured. Set EMBEDDING_SIDECAR_BASE_URL.');
   }
@@ -119,9 +122,10 @@ export async function embedTexts(
     );
   }
 
-  return data.embeddings;
+  return data;
 }
 
+/** Embed texts in batches, returning all embeddings and the model name from the last batch. */
 async function embedTextsBatched(
   baseUrl: string,
   apiToken: string,
@@ -129,12 +133,13 @@ async function embedTextsBatched(
   mode: 'document' | 'query',
   dimensions: number,
   titles?: string[],
-): Promise<number[][]> {
+): Promise<{ embeddings: number[][]; model: string }> {
   const embeddings: number[][] = [];
+  let model = '';
   for (let i = 0; i < texts.length; i += MAX_EMBEDDING_BATCH) {
     const batchTexts = texts.slice(i, i + MAX_EMBEDDING_BATCH);
     const batchTitles = titles ? titles.slice(i, i + MAX_EMBEDDING_BATCH) : undefined;
-    const batchEmbeddings = await embedTexts(
+    const response = await embedTexts(
       baseUrl,
       apiToken,
       batchTexts,
@@ -142,9 +147,10 @@ async function embedTextsBatched(
       dimensions,
       batchTitles,
     );
-    embeddings.push(...batchEmbeddings);
+    embeddings.push(...response.embeddings);
+    model = response.model;
   }
-  return embeddings;
+  return { embeddings, model };
 }
 
 // ── Semantic Coherence Filter ────────────────────────────────────────────
@@ -218,6 +224,10 @@ interface EmbedAndRankOptions {
   embeddingBaseUrl: string;
   embeddingApiToken: string;
   embeddingDimensions: number;
+  /** Pre-computed chunk embeddings from cache (skip embed step when provided). */
+  precomputedEmbeddings?: number[][] | undefined;
+  /** Pre-built BM25 index from cache (built inline when not provided). */
+  bm25Index?: Bm25Index | undefined;
 }
 
 export async function embedAndRank(
@@ -250,6 +260,7 @@ export async function embedAndRank(
   }
 
   // 3. Embed chunks (batched) and query in parallel
+  //    When precomputedEmbeddings are provided, skip the embed step.
   const chunkTexts = deduped.map((c) => c.text);
   const chunkTitles = deduped.map(
     (c) =>
@@ -258,24 +269,30 @@ export async function embedAndRank(
         .at(-1)
         ?.replace(/^#+\s+/, '') ?? 'none',
   );
-  const [chunkEmbeddings, queryEmbeddings] = await Promise.all([
-    embedTextsBatched(
+
+  let chunkEmbeddings: number[][];
+  if (opts.precomputedEmbeddings !== undefined) {
+    chunkEmbeddings = opts.precomputedEmbeddings;
+  } else {
+    const { embeddings } = await embedTextsBatched(
       opts.embeddingBaseUrl,
       opts.embeddingApiToken,
       chunkTexts,
       'document',
       opts.embeddingDimensions,
       chunkTitles,
-    ),
-    embedTexts(
-      opts.embeddingBaseUrl,
-      opts.embeddingApiToken,
-      [opts.query],
-      'query',
-      opts.embeddingDimensions,
-    ),
-  ]);
-  const queryEmbedding = queryEmbeddings[0];
+    );
+    chunkEmbeddings = embeddings;
+  }
+
+  const queryResponse = await embedTexts(
+    opts.embeddingBaseUrl,
+    opts.embeddingApiToken,
+    [opts.query],
+    'query',
+    opts.embeddingDimensions,
+  );
+  const queryEmbedding = queryResponse.embeddings[0];
   if (!queryEmbedding) {
     throw new Error('Embedding sidecar returned empty query embedding');
   }
@@ -301,16 +318,66 @@ export async function embedAndRank(
   }
   paired.sort((a, b) => b.chunk.biEncoderScore - a.chunk.biEncoderScore);
 
-  // 5. Semantic coherence filter (borderline off-topic chunks)
-  const coherent = filterBySemanticCoherence(paired);
-  if (coherent.length < paired.length) {
+  // 5. BM25+ ranking
+  //    Use the pre-built index when available; otherwise build inline from chunk texts.
+  const bm25 =
+    opts.bm25Index ??
+    buildBm25Index(deduped.map((c, i) => ({ id: String(i), text: c.text })));
+
+  // Build a map from BM25 doc id → SemanticCrawlChunk for fast lookup.
+  // BM25 doc IDs are String(i) where i is the index in deduped[].
+  const idToChunk = new Map<string, SemanticCrawlChunk>();
+  for (let i = 0; i < deduped.length; i++) {
+    const p = paired.find((pe) => pe.chunk.url === deduped[i]?.url && pe.chunk.text === deduped[i]?.text);
+    if (p) {
+      idToChunk.set(String(i), p.chunk);
+    }
+  }
+
+  const bm25Scores = bm25.search(opts.query);
+  const bm25Ranking: SemanticCrawlChunk[] = [];
+  for (const { id } of bm25Scores) {
+    const c = idToChunk.get(id);
+    if (c) bm25Ranking.push(c);
+  }
+
+  const biEncoderRanking = paired.map((p) => p.chunk);
+
+  // 6. RRF fusion (k=60)
+  const fused = rrfMerge([biEncoderRanking, bm25Ranking], {
+    k: 60,
+    keyFn: (item) => item.url + '|' + item.text,
+  });
+
+  // Build fused list as { chunk, embedding } for the coherence filter
+  const chunkToEmbedding = new Map<string, number[]>();
+  for (const p of paired) {
+    chunkToEmbedding.set(p.chunk.url + '|' + p.chunk.text, p.embedding);
+  }
+
+  const fusedPaired: ChunkWithEmbedding[] = [];
+  for (const { item } of fused) {
+    const emb = chunkToEmbedding.get(item.url + '|' + item.text);
+    if (emb) {
+      fusedPaired.push({ chunk: item, embedding: emb });
+    }
+  }
+
+  logger.info(
+    { biEncoderCount: biEncoderRanking.length, bm25Count: bm25Ranking.length, fusedCount: fusedPaired.length },
+    'RRF fusion completed',
+  );
+
+  // 7. Semantic coherence filter (borderline off-topic chunks)
+  const coherent = filterBySemanticCoherence(fusedPaired);
+  if (coherent.length < fusedPaired.length) {
     logger.info(
-      { before: paired.length, after: coherent.length },
+      { before: fusedPaired.length, after: coherent.length },
       'Semantic coherence filter removed off-topic chunks',
     );
   }
 
-  // 6. Optional cross-encoder re-ranking
+  // 8. Optional cross-encoder re-ranking
   let topChunks: SemanticCrawlChunk[];
 
   if (opts.useReranker !== false && coherent.length > 1) {
@@ -535,6 +602,10 @@ export async function semanticCrawl(
   let pagesCrawled: number;
   let successfulPages: number;
   let seedUrl: string;
+  // Pre-computed data from cache (populated for 'cached' source only)
+  let precomputedEmbeddings: number[][] | undefined;
+  let bm25IndexFromCache: Bm25Index | undefined;
+  let cachedCorpusId: string | undefined;
 
   switch (opts.source.type) {
     case 'url': {
@@ -675,20 +746,100 @@ export async function semanticCrawl(
       break;
     }
 
+    case 'cached': {
+      const cached = await loadCorpusById(opts.source.corpusId);
+      if (!cached) {
+        throw new Error(
+          `Corpus '${opts.source.corpusId}' not found or expired. Re-issue with the original source to rebuild.`,
+        );
+      }
+      corpusChunks = cached.chunks;
+      precomputedEmbeddings = cached.embeddings;
+      bm25IndexFromCache = cached.bm25Index;
+      cachedCorpusId = cached.corpusId;
+      pagesCrawled = 0;
+      successfulPages = 0;
+      seedUrl = `corpus:${opts.source.corpusId}`;
+      break;
+    }
+
     default: {
       // Exhaustiveness check — TypeScript should prevent this at compile time
       throw new Error(`Unknown source type '${(opts.source as { type: string }).type}'`);
     }
   }
 
-  // Embed and rank via shared helper
-  const topChunks = await embedAndRank(corpusChunks, {
+  // For non-cached sources: wrap embed+build in corpus cache so results are
+  // persisted for future calls with source: { type: 'cached', corpusId }.
+  // For 'cached' source: skip the cache build — use what we already loaded.
+  let resolvedCorpusId: string;
+
+  if (opts.source.type === 'cached') {
+    // Already loaded from cache — just use the pre-computed data directly.
+    resolvedCorpusId = cachedCorpusId ?? opts.source.corpusId;
+
+    const topChunks = await embedAndRank(corpusChunks, {
+      query: opts.query,
+      topK: opts.topK,
+      ...(opts.useReranker !== undefined ? { useReranker: opts.useReranker } : {}),
+      embeddingBaseUrl,
+      embeddingApiToken,
+      embeddingDimensions,
+      precomputedEmbeddings,
+      bm25Index: bm25IndexFromCache,
+    });
+
+    return {
+      seedUrl,
+      query: opts.query,
+      pagesCrawled,
+      totalChunks: corpusChunks.length,
+      successfulPages,
+      corpusId: resolvedCorpusId,
+      chunks: topChunks,
+    };
+  }
+
+  // Non-cached sources: build corpus (embed + cache)
+  const deduped = deduplicateCorpusChunks(corpusChunks);
+  const chunkTexts = deduped.map((c) => c.text);
+  const chunkTitles = deduped.map(
+    (c) =>
+      c.section
+        .split(' > ')
+        .at(-1)
+        ?.replace(/^#+\s+/, '') ?? 'none',
+  );
+
+  const corpus = await getOrBuildCorpus(
+    opts.source,
+    async () => {
+      const { embeddings, model } = await embedTextsBatched(
+        embeddingBaseUrl,
+        embeddingApiToken,
+        chunkTexts,
+        'document',
+        embeddingDimensions,
+        chunkTitles,
+      );
+      const contentHash = createHash('sha256').update(chunkTexts.join('\n')).digest('hex');
+      return { chunks: deduped, embeddings, model, contentHash };
+    },
+    { ttlMs: 24 * 60 * 60 * 1000, maxCorpora: 50 },
+  );
+
+  resolvedCorpusId = corpus.corpusId;
+
+  // Use cached embeddings + BM25 index from the corpus
+  const topChunks = await embedAndRank(corpus.chunks, {
     query: opts.query,
     topK: opts.topK,
     ...(opts.useReranker !== undefined ? { useReranker: opts.useReranker } : {}),
     embeddingBaseUrl,
     embeddingApiToken,
     embeddingDimensions,
+    precomputedEmbeddings: corpus.embeddings,
+    bm25Index: corpus.bm25Index,
   });
 
   return {
@@ -697,6 +848,7 @@ export async function semanticCrawl(
     pagesCrawled,
     totalChunks: corpusChunks.length,
     successfulPages,
+    corpusId: resolvedCorpusId,
     chunks: topChunks,
   };
 }
