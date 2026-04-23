@@ -53,6 +53,30 @@ test('extracts images from markdown', () => {
   });
 });
 
+test('extracts images without title', () => {
+  const md = '![alt text](https://example.com/img.png)\n';
+  const elements = extractElementsFromMarkdown(md);
+
+  assert.equal(elements.length, 1);
+  assert.deepEqual(elements[0], {
+    type: 'image',
+    src: 'https://example.com/img.png',
+    alt: 'alt text',
+    title: null,
+  });
+});
+
+test('extracts multiple image lines', () => {
+  const md = '![a](http://a.com/a.png)\n![b](http://b.com/b.png)\n';
+  const elements = extractElementsFromMarkdown(md);
+
+  assert.equal(elements.length, 2);
+  assert.equal(elements[0]!.type, 'image');
+  assert.equal(elements[0]!.src, 'http://a.com/a.png');
+  assert.equal(elements[1]!.type, 'image');
+  assert.equal(elements[1]!.src, 'http://b.com/b.png');
+});
+
 test('extracts unordered and ordered lists', () => {
   const md = '- one\n- two\n\n1. first\n';
   const elements = extractElementsFromMarkdown(md);
@@ -88,4 +112,44 @@ const x = 1;
   assert.equal(elements[3]!.type, 'list');
   assert.equal(elements[4]!.type, 'code');
   assert.equal(elements[5]!.type, 'image');
+});
+
+test('handles empty input', () => {
+  const elements = extractElementsFromMarkdown('');
+  assert.equal(elements.length, 0);
+});
+
+test('handles whitespace-only input', () => {
+  const elements = extractElementsFromMarkdown('   \n\n  ');
+  assert.equal(elements.length, 0);
+});
+
+test('handles unclosed fenced code block', () => {
+  const md = '```python\nprint(1)\n';
+  const elements = extractElementsFromMarkdown(md);
+
+  assert.equal(elements.length, 1);
+  assert.equal(elements[0]!.type, 'code');
+  assert.equal(elements[0]!.language, 'python');
+  assert.equal(elements[0]!.content, 'print(1)');
+});
+
+test('handles fenced code block containing backticks', () => {
+  const md = '````\n```\ninner\n```\n````\n';
+  const elements = extractElementsFromMarkdown(md);
+
+  assert.equal(elements.length, 1);
+  assert.equal(elements[0]!.type, 'code');
+  assert.ok(elements[0]!.content.includes('inner'));
+});
+
+test('handles list continuation lines', () => {
+  const md = '- first item\n  continuation text\n- second item\n';
+  const elements = extractElementsFromMarkdown(md);
+
+  assert.equal(elements.length, 1);
+  const list = elements[0]!;
+  assert.equal(list.type, 'list');
+  assert.equal(list.items.length, 2);
+  assert.ok(list.items[0]!.includes('continuation'));
 });

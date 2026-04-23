@@ -6,13 +6,18 @@ function cellText(cell: Element): string {
 
 function tableToMarkdown(table: HTMLTableElement): { markdown: string; rows: number; cols: number } {
   const rows = table.querySelectorAll('tr');
-  const lines: string[] = [];
-  let maxCols = 0;
 
+  // First pass: compute max columns across all rows
+  let maxCols = 0;
+  rows.forEach((row) => {
+    const cells = row.querySelectorAll('th, td');
+    maxCols = Math.max(maxCols, cells.length);
+  });
+
+  const lines: string[] = [];
   rows.forEach((row, rowIdx) => {
     const cells = row.querySelectorAll('th, td');
     const texts = Array.from(cells).map(cellText);
-    maxCols = Math.max(maxCols, texts.length);
     lines.push(`| ${texts.join(' | ')} |`);
     if (rowIdx === 0) {
       lines.push(`|${' --- |'.repeat(maxCols)}`);
@@ -47,12 +52,21 @@ const BLOCK_TAGS = new Set([
 /** Tags to ignore entirely. */
 const IGNORED_TAGS = new Set(['script', 'style', 'noscript', 'svg', 'nav', 'header', 'footer']);
 
+const TARGET_SELECTOR = Array.from(TARGET_TAGS).join(',');
+
+function safeImageSrc(raw: string | null): string | null {
+  if (raw === null) return null;
+  const lower = raw.toLowerCase();
+  if (lower.startsWith('javascript:') || lower.startsWith('data:') || lower.startsWith('vbscript:')) {
+    return null;
+  }
+  return raw;
+}
+
 export function extractElementsFromHtml(document: Document): ContentElement[] {
   const elements: ContentElement[] = [];
 
-  const candidates = Array.from(
-    document.body.querySelectorAll(Array.from(TARGET_TAGS).join(',')),
-  );
+  const candidates = Array.from(document.body.querySelectorAll(TARGET_SELECTOR));
 
   for (const el of candidates) {
     // Skip if inside an ignored ancestor
@@ -63,11 +77,15 @@ export function extractElementsFromHtml(document: Document): ContentElement[] {
 
     const tag = el.tagName.toLowerCase();
 
-    // Skip nested tables/lists that are children of already-processed parents
+    // Skip paragraphs/divs that are children of already-processed containers
+    // (list items, table cells, or nested lists/tables)
     const parent = el.parentElement;
-    if (parent && (parent.tagName.toLowerCase() === 'li' || parent.closest('table') || parent.closest('ul, ol'))) {
-      // We still want to process the top-level container, so skip individual li/td children
-      if (tag === 'p' || tag === 'div') continue;
+    if (parent && (tag === 'p' || tag === 'div')) {
+      const insideContainer =
+        parent.tagName.toLowerCase() === 'li' ||
+        parent.closest('table') !== null ||
+        parent.closest('ul, ol') !== null;
+      if (insideContainer) continue;
     }
 
     switch (tag) {
@@ -102,7 +120,7 @@ export function extractElementsFromHtml(document: Document): ContentElement[] {
         const img = el as HTMLImageElement;
         elements.push({
           type: 'image',
-          src: img.getAttribute('src'),
+          src: safeImageSrc(img.getAttribute('src')),
           alt: img.alt,
           title: img.getAttribute('title'),
         });

@@ -2,7 +2,7 @@ import type { ContentElement } from '../types.js';
 
 const HEADING_RE = /^(#{1,6})\s+(.+)$/;
 const TABLE_ROW_RE = /^\|(.+)\|$/;
-const FENCED_CODE_RE = /^```(\w*)/;
+const FENCED_CODE_RE = /^(```+)(\w*)/;
 const IMAGE_RE = /!\[([^\]]*)\]\(([^)\s]+)(?:\s+"([^"]*)")?\)/g;
 const LIST_ITEM_RE = /^(\s*)([-*]|\d+\.)\s+(.+)$/;
 const INLINE_CODE_RE = /`([^`]+)`/g;
@@ -48,23 +48,32 @@ export function extractElementsFromMarkdown(markdown: string): ContentElement[] 
     // Fenced code block
     const fenceMatch = FENCED_CODE_RE.exec(trimmed);
     if (fenceMatch) {
-      const lang = fenceMatch[1] ?? null;
-      const contentLines: string[] = [];
-      i += 1;
-      while (i < lines.length) {
-        const innerLine = lines[i];
-        if (innerLine === undefined) break;
-        if (innerLine.trim().startsWith('```')) break;
-        contentLines.push(innerLine);
+      const openTicks = fenceMatch[1];
+      const lang = fenceMatch[2] ?? null;
+      if (openTicks !== undefined) {
+        const contentLines: string[] = [];
         i += 1;
+        while (i < lines.length) {
+          const innerLine = lines[i];
+          if (innerLine === undefined) break;
+          const innerTrimmed = innerLine.trim();
+          if (
+            innerTrimmed.startsWith(openTicks) &&
+            !/[^`]/.test(innerTrimmed.slice(openTicks.length))
+          ) {
+            break;
+          }
+          contentLines.push(innerLine);
+          i += 1;
+        }
+        elements.push({
+          type: 'code',
+          language: lang,
+          content: contentLines.join('\n').trimEnd(),
+        });
+        i += 1; // skip closing fence
+        continue;
       }
-      elements.push({
-        type: 'code',
-        language: lang,
-        content: contentLines.join('\n').trimEnd(),
-      });
-      i += 1; // skip closing ```
-      continue;
     }
 
     // Table
@@ -101,16 +110,38 @@ export function extractElementsFromMarkdown(markdown: string): ContentElement[] 
       const listTypeMatch = listMatch[2];
       const ordered = listTypeMatch !== undefined && /^\d+\./.test(listTypeMatch);
       const items: string[] = [];
+      const indentMatch = listMatch[1];
+      const baseIndent = indentMatch !== undefined ? indentMatch.length : 0;
       while (i < lines.length) {
         const l = lines[i];
         if (l === undefined) break;
-        const m = LIST_ITEM_RE.exec(l.trim());
-        if (!m) break;
-        const itemMatch = m[3];
-        if (itemMatch !== undefined) {
-          items.push(stripInlineCode(itemMatch));
+        const trimmedLine = l.trim();
+        if (trimmedLine.length === 0) {
+          i += 1;
+          break; // blank line ends the list
         }
-        i += 1;
+        const m = LIST_ITEM_RE.exec(trimmedLine);
+        if (m) {
+          const itemMatch = m[3];
+          if (itemMatch !== undefined) {
+            items.push(stripInlineCode(itemMatch));
+          }
+          i += 1;
+          continue;
+        }
+        // Check if indented continuation line for the current item
+        const indentMatch = /^\s*/.exec(l);
+        const lineIndent = indentMatch !== null ? indentMatch[0].length : 0;
+        if (lineIndent > baseIndent && items.length > 0) {
+          // Append to the last item
+          const last = items[items.length - 1];
+          if (last !== undefined) {
+            items[items.length - 1] = last + ' ' + stripInlineCode(trimmedLine);
+          }
+          i += 1;
+          continue;
+        }
+        break;
       }
       if (items.length > 0) {
         elements.push({ type: 'list', ordered, items });
