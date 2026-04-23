@@ -116,19 +116,32 @@ export function isCookieBannerPage(markdown: string): boolean {
   const bannerLines: string[] = [];
 
   // Exact substring matching
-  for (const line of lines) {
+  const exactIndices = new Set<number>();
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
     if (EXACT_PATTERNS.some((p) => p.test(line))) {
       bannerLines.push(line);
+      exactIndices.add(i);
     }
   }
 
   // Structural: 3+ consecutive lines where every line contains one of
   // cookie, consent, privacy, tracking, gdpr, ccpa, and at least one
   // line contains a button pattern (Accept, Reject, Manage)
+  // Skip lines already flagged by exact patterns to avoid double-counting.
   let consecutive = 0;
   let hasButton = false;
   let structuralLines = 0;
-  for (const line of lines) {
+  for (let i = 0; i < lines.length; i++) {
+    if (exactIndices.has(i)) {
+      if (consecutive >= 3 && hasButton) {
+        structuralLines += consecutive;
+      }
+      consecutive = 0;
+      hasButton = false;
+      continue;
+    }
+    const line = lines[i];
     const lower = line.toLowerCase();
     const hasKeyword = /\b(cookie|consent|privacy|tracking|gdpr|ccpa)\b/i.test(lower);
     if (hasKeyword) {
@@ -247,7 +260,7 @@ describe('isDirectChild', () => {
     assert.strictEqual(isDirectChild('/reference/cli/', '/reference/dockerfile/'), false);
   });
 
-  it('accepts identical paths', () => {
+  it('rejects identical paths', () => {
     assert.strictEqual(isDirectChild('/reference/dockerfile/', '/reference/dockerfile/'), false);
   });
 });
@@ -273,9 +286,10 @@ describe('filterByPathPrefix', () => {
       makePage('https://docs.docker.com/cli/config/'),
     ];
     const filtered = filterByPathPrefix(pages, seed);
-    assert.strictEqual(filtered.length, 3);
+    assert.strictEqual(filtered.length, 2);
     assert.ok(filtered.some((p) => p.url.includes('dockerfile/')));
     assert.ok(!filtered.some((p) => p.url.includes('cli/config')));
+    assert.ok(!filtered.some((p) => p.url.includes('args')));
   });
 
   it('allows drift when allowPathDrift is true', () => {
@@ -322,7 +336,7 @@ export function filterByPathPrefix(
   let dropped = 0;
   for (const page of pages) {
     const pagePath = new URL(page.url).pathname;
-    if (pagePath.startsWith(seedPath) || isDirectChild(pagePath, seedPath)) {
+    if (pagePath === seedPath || isDirectChild(pagePath, seedPath)) {
       kept.push(page);
     } else {
       dropped++;
@@ -525,18 +539,22 @@ describe('cache persistence', () => {
     const source: SemanticCrawlSource = { type: 'url', url: 'https://example.com/cache-test' };
     let buildCount = 0;
 
+    const testCacheDir = '/tmp/test-corpus-cache-' + Date.now();
+
     const corpus = await getOrBuildCorpus(
       source,
       async () => {
         buildCount++;
+        const chunks = [{ text: 'hello world', url: 'https://example.com', section: '## A', charOffset: 0, chunkIndex: 0, totalChunks: 1 }];
+        const contentHash = crypto.createHash('sha256').update(chunks.map((c) => c.text).join('\n')).digest('hex');
         return {
-          chunks: [{ text: 'hello world', url: 'https://example.com', section: '## A', charOffset: 0, chunkIndex: 0, totalChunks: 1 }],
+          chunks,
           embeddings: [[0.1, 0.2, 0.3, 0.4]],
           model: 'test-model',
-          contentHash: 'abc123',
+          contentHash,
         };
       },
-      { ttlMs: 60_000, maxCorpora: 10, cacheDir: '/tmp/test-corpus-cache-' + Date.now() },
+      { ttlMs: 60_000, maxCorpora: 10, cacheDir: testCacheDir },
     );
 
     assert.strictEqual(buildCount, 1);
@@ -547,14 +565,16 @@ describe('cache persistence', () => {
       source,
       async () => {
         buildCount++;
+        const chunks = [{ text: 'hello world', url: 'https://example.com', section: '## A', charOffset: 0, chunkIndex: 0, totalChunks: 1 }];
+        const contentHash = crypto.createHash('sha256').update(chunks.map((c) => c.text).join('\n')).digest('hex');
         return {
-          chunks: [{ text: 'hello world', url: 'https://example.com', section: '## A', charOffset: 0, chunkIndex: 0, totalChunks: 1 }],
+          chunks,
           embeddings: [[0.1, 0.2, 0.3, 0.4]],
           model: 'test-model',
-          contentHash: 'abc123',
+          contentHash,
         };
       },
-      { ttlMs: 60_000, maxCorpora: 10, cacheDir: '/tmp/test-corpus-cache-' + Date.now() },
+      { ttlMs: 60_000, maxCorpora: 10, cacheDir: testCacheDir },
     );
 
     // This test will fail initially because the cache lookup by source is broken
@@ -892,6 +912,8 @@ function readCorpusFromDisk(
   }
 
   // Content hash validation
+  // Contract: materializeFn MUST compute contentHash as sha256(chunks.map(c => c.text).join('\n')).
+  // This is the caller's responsibility — the cache validates against this contract.
   const recomputedHash = crypto
     .createHash('sha256')
     .update(meta.chunks.map((c) => c.text).join('\n'))
@@ -1186,6 +1208,8 @@ npm test test/semanticCrawl.test.ts
 
 Expected: PASS (cache persistence test should pass).
 
+**Integration note (cache → embedAndRank wiring):** When `getOrBuildCorpus` returns a cached corpus, the caller in `semanticCrawl.ts` must pass `corpus.embeddings` as `opts.precomputedEmbeddings` to `embedAndRank`. Without this wiring, the cache loads embeddings but `embedAndRank` re-embeds everything. The `semanticCrawl` orchestration function should read the corpus, then call `embedAndRank(chunks, { ..., precomputedEmbeddings: corpus.embeddings })`. This is the caller's responsibility — see Task 7 integration.
+
 ### Step 5: Commit
 
 ```bash
@@ -1208,12 +1232,29 @@ Add to `test/semanticCrawl.test.ts`:
 
 ```typescript
 describe('reranker smoke test', () => {
-  it('rejects model with inverted scores', async () => {
-    // We can't easily mock ONNX internals here, so we document the behavior:
+  it('validates smoke score comparison logic', () => {
+    // Extract the validation logic into a pure function for testability.
     // After the fix, getSession() should run a smoke test and throw if
     // the model produces A <= B + 0.1 for the validation pairs.
-    // This test serves as documentation of the expected contract.
-    assert.ok(true, 'Smoke test is implemented in getSession() in src/utils/rerank.ts');
+    function validateSmokeScores(scoreA: number, scoreB: number, epsilon = 0.1): { ok: boolean; reason?: string } {
+      if (scoreA <= scoreB + epsilon) {
+        return { ok: false, reason: `good=${String(scoreA)}, bad=${String(scoreB)}` };
+      }
+      return { ok: true };
+    }
+
+    // Good model: good score is much higher than bad score
+    const goodResult = validateSmokeScores(8.5, 1.2);
+    assert.strictEqual(goodResult.ok, true);
+
+    // Bad model: scores are too close
+    const badResult = validateSmokeScores(1.5, 1.4);
+    assert.strictEqual(badResult.ok, false);
+    assert.ok(badResult.reason?.includes('1.5'));
+
+    // Edge case: exactly at threshold
+    const edgeResult = validateSmokeScores(1.2, 1.0);
+    assert.strictEqual(edgeResult.ok, false);
   });
 });
 ```
@@ -1307,6 +1348,8 @@ git commit -m "feat: reranker smoke test + make opt-in (default false)"
 - Modify: `src/types.ts`
 - Modify: `test/semanticCrawl.test.ts` (update `makeChunk` helpers)
 
+**Note on type migration ordering:** Tasks 1–5 use the old `biEncoderScore` / `rerankScore` shape implicitly through `semanticCrawl.ts` references. Task 6 renames the type, and Task 7 rewrites `embedAndRank` to populate the new shape. Between Task 6 and Task 7, the codebase will not typecheck because `semanticCrawl.ts` still references the old fields. To avoid a broken-CI window, **Tasks 6 and 7 should be committed as a single commit** (or Task 6's changes should be staged but not committed until Task 7 is also ready).
+
 ### Step 1: Update types.ts
 
 Replace the `SemanticCrawlChunk` interface in `src/types.ts`:
@@ -1315,8 +1358,8 @@ Replace the `SemanticCrawlChunk` interface in `src/types.ts`:
 export interface ScoreDetail {
   raw: number;
   normalized: number;
-  minQuery: number;
-  maxQuery: number;
+  corpusMin: number;
+  corpusMax: number;
   median: number;
 }
 
@@ -1365,8 +1408,8 @@ New:
 const makeScore = (raw: number): ScoreDetail => ({
   raw,
   normalized: 0.5,
-  minQuery: 0,
-  maxQuery: 1,
+  corpusMin: 0,
+  corpusMax: 1,
   median: 0.5,
 });
 
@@ -1426,9 +1469,9 @@ describe('RRF candidate pool restriction', () => {
         chunkIndex: i,
         totalChunks: 5,
         scores: {
-          biEncoder: { raw: 0.8 - i * 0.01, normalized: 0.8 - i * 0.01, minQuery: 0, maxQuery: 1, median: 0.5 },
-          bm25: { raw: 0, normalized: 0, minQuery: 0, maxQuery: 0, median: 0 },
-          rrf: { raw: 0, normalized: 0, minQuery: 0, maxQuery: 0, median: 0 },
+          biEncoder: { raw: 0.8 - i * 0.01, normalized: 0.8 - i * 0.01, corpusMin: 0, corpusMax: 1, median: 0.5 },
+          bm25: { raw: 0, normalized: 0, corpusMin: 0, corpusMax: 0, median: 0 },
+          rrf: { raw: 0, normalized: 0, corpusMin: 0, corpusMax: 0, median: 0 },
         },
       });
     }
@@ -1442,9 +1485,9 @@ describe('RRF candidate pool restriction', () => {
         chunkIndex: i,
         totalChunks: 20,
         scores: {
-          biEncoder: { raw: 0.1, normalized: 0.1, minQuery: 0, maxQuery: 1, median: 0.5 },
-          bm25: { raw: 0, normalized: 0, minQuery: 0, maxQuery: 0, median: 0 },
-          rrf: { raw: 0, normalized: 0, minQuery: 0, maxQuery: 0, median: 0 },
+          biEncoder: { raw: 0.1, normalized: 0.1, corpusMin: 0, corpusMax: 1, median: 0.5 },
+          bm25: { raw: 0, normalized: 0, corpusMin: 0, corpusMax: 0, median: 0 },
+          rrf: { raw: 0, normalized: 0, corpusMin: 0, corpusMax: 0, median: 0 },
         },
       });
     }
@@ -1579,9 +1622,9 @@ export async function embedAndRank(
         chunkIndex: chunk.chunkIndex,
         totalChunks: chunk.totalChunks,
         scores: {
-          biEncoder: { raw: 0, normalized: 0, minQuery: 0, maxQuery: 0, median: 0 },
-          bm25: { raw: 0, normalized: 0, minQuery: 0, maxQuery: 0, median: 0 },
-          rrf: { raw: 0, normalized: 0, minQuery: 0, maxQuery: 0, median: 0 },
+          biEncoder: { raw: 0, normalized: 0, corpusMin: 0, corpusMax: 0, median: 0 },
+          bm25: { raw: 0, normalized: 0, corpusMin: 0, corpusMax: 0, median: 0 },
+          rrf: { raw: 0, normalized: 0, corpusMin: 0, corpusMax: 0, median: 0 },
         },
       },
       embedding: emb,
@@ -1620,25 +1663,19 @@ export async function embedAndRank(
   const bm25Median = median(bm25Scores.map((s) => s.score));
 
   // 6. RRF candidate pool restriction
+  // Bi-encoder pool: max(topK * 3, 30) — broad enough for diversity.
+  // BM25 pool: topK only — BM25 is more promiscuous on noisy corpora,
+  // so we restrict it more tightly to prevent noise injection.
   const poolSize = Math.max(opts.topK * 3, 30);
   const biEncoderTopN = paired.slice(0, poolSize).map((p) => p.chunk);
 
-  const bm25TopKResults = bm25.search(opts.query, opts.topK);
+  // Re-use bm25Scores for topK extraction (avoids double search call)
+  const bm25TopKResults = bm25Scores.slice(0, opts.topK);
   const bm25TopK: SemanticCrawlChunk[] = [];
   for (const { id } of bm25TopKResults) {
     const c = idToChunk.get(id);
     if (c) bm25TopK.push(c);
   }
-
-  // Deduplicated union for candidate pool
-  const candidatePoolMap = new Map<string, SemanticCrawlChunk>();
-  for (const c of biEncoderTopN) {
-    candidatePoolMap.set(c.url + '|' + c.text, c);
-  }
-  for (const c of bm25TopK) {
-    candidatePoolMap.set(c.url + '|' + c.text, c);
-  }
-  const candidatePool = Array.from(candidatePoolMap.values());
 
   const fused = rrfMerge([biEncoderTopN, bm25TopK], {
     k: 60,
@@ -1668,22 +1705,22 @@ export async function embedAndRank(
         biEncoder: {
           raw: biRaw,
           normalized: normalizeScore(biRaw, biMin, biMax),
-          minQuery: biMin,
-          maxQuery: biMax,
+          corpusMin: biMin,
+          corpusMax: biMax,
           median: biMedian,
         },
         bm25: {
           raw: bm25Raw,
           normalized: normalizeScore(bm25Raw, bm25Min, bm25Max),
-          minQuery: bm25Min,
-          maxQuery: bm25Max,
+          corpusMin: bm25Min,
+          corpusMax: bm25Max,
           median: bm25Median,
         },
         rrf: {
           raw: rrfScore,
           normalized: normalizeScore(rrfScore, rrfMin, rrfMax),
-          minQuery: rrfMin,
-          maxQuery: rrfMax,
+          corpusMin: rrfMin,
+          corpusMax: rrfMax,
           median: rrfMedian,
         },
       },
@@ -1742,8 +1779,8 @@ export async function embedAndRank(
             rerank: {
               raw: r.score,
               normalized: normalizeScore(r.score, rerankMin, rerankMax),
-              minQuery: rerankMin,
-              maxQuery: rerankMax,
+              corpusMin: rerankMin,
+              corpusMax: rerankMax,
               median: rerankMedian,
               medianDelta: r.score - rerankMedian,
               rank: rankIdx + 1,
@@ -1818,8 +1855,8 @@ export async function applyReranking(
           rerank: {
             raw: r.score,
             normalized: normalizeScore(r.score, rerankMin, rerankMax),
-            minQuery: rerankMin,
-            maxQuery: rerankMax,
+            corpusMin: rerankMin,
+            corpusMax: rerankMax,
             median: rerankMedian,
             medianDelta: r.score - rerankMedian,
             rank: rankIdx + 1,
@@ -1878,9 +1915,9 @@ describe('applySoftLexicalConstraint', () => {
     chunkIndex: 0,
     totalChunks: 1,
     scores: {
-      biEncoder: { raw: 0, normalized: 0, minQuery: 0, maxQuery: 0, median: 0 },
-      bm25: { raw: 0, normalized: 0, minQuery: 0, maxQuery: 0, median: 0 },
-      rrf: { raw: 0, normalized: 0, minQuery: 0, maxQuery: 0, median: 0 },
+      biEncoder: { raw: 0, normalized: 0, corpusMin: 0, corpusMax: 0, median: 0 },
+      bm25: { raw: 0, normalized: 0, corpusMin: 0, corpusMax: 0, median: 0 },
+      rrf: { raw: 0, normalized: 0, corpusMin: 0, corpusMax: 0, median: 0 },
     },
   });
 
