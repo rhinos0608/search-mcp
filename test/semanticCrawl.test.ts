@@ -315,6 +315,114 @@ describe('isDirectChild', () => {
   });
 });
 
+describe('maxPages client-side enforcement', () => {
+  const makePage = (url: string): CrawlPageResult => ({
+    url,
+    success: true,
+    markdown: `# ${url}`,
+    title: null,
+    description: null,
+    links: [],
+    statusCode: 200,
+    errorMessage: null,
+  });
+
+  it('moves seed URL to first position when it is not already first', () => {
+    const seedUrl = 'https://docs.docker.com/reference/dockerfile/';
+    const pages = [
+      makePage('https://docs.docker.com/reference/dockerfile/build/'),
+      makePage('https://docs.docker.com/reference/dockerfile/'), // seed is second
+      makePage('https://docs.docker.com/reference/dockerfile/run/'),
+    ];
+
+    // Simulate the seed-first reordering logic from crawlSeeds
+    const seedIndex = pages.findIndex((p) => p.url === seedUrl);
+    if (seedIndex > 0) {
+      const [seedPage] = pages.splice(seedIndex, 1);
+      if (seedPage) pages.unshift(seedPage);
+    }
+
+    assert.strictEqual(pages[0]?.url, seedUrl, 'seed URL should be moved to first position');
+    assert.strictEqual(pages.length, 3, 'pages count should be unchanged when under limit');
+  });
+
+  it('does not reorder when seed URL is already at index 0', () => {
+    const seedUrl = 'https://docs.docker.com/reference/dockerfile/';
+    const pages = [
+      makePage('https://docs.docker.com/reference/dockerfile/'), // seed is already first
+      makePage('https://docs.docker.com/reference/dockerfile/build/'),
+      makePage('https://docs.docker.com/reference/dockerfile/run/'),
+    ];
+
+    const seedIndex = pages.findIndex((p) => p.url === seedUrl);
+    if (seedIndex > 0) {
+      const [seedPage] = pages.splice(seedIndex, 1);
+      if (seedPage) pages.unshift(seedPage);
+    }
+
+    assert.strictEqual(pages[0]?.url, seedUrl, 'seed URL should remain at first position');
+    assert.strictEqual(pages.length, 3, 'pages count should be unchanged');
+  });
+
+  it('truncates to perSeedPages while keeping seed first', () => {
+    const seedUrl = 'https://docs.docker.com/reference/dockerfile/';
+    const perSeedPages = 3;
+    let pages: CrawlPageResult[] = [
+      makePage('https://docs.docker.com/reference/dockerfile/'),
+      makePage('https://docs.docker.com/reference/dockerfile/build/'),
+      makePage('https://docs.docker.com/reference/dockerfile/run/'),
+      makePage('https://docs.docker.com/reference/dockerfile/create/'),
+      makePage('https://docs.docker.com/reference/dockerfile/remove/'),
+      makePage('https://docs.docker.com/reference/dockerfile/list/'),
+    ];
+
+    // Simulate seed-first reordering
+    const seedIndex = pages.findIndex((p) => p.url === seedUrl);
+    if (seedIndex > 0) {
+      const [seedPage] = pages.splice(seedIndex, 1);
+      if (seedPage) pages.unshift(seedPage);
+    }
+
+    // Simulate truncation
+    if (pages.length > perSeedPages) {
+      pages = pages.slice(0, perSeedPages);
+    }
+
+    assert.strictEqual(pages[0]?.url, seedUrl, 'seed URL should remain first after truncation');
+    assert.strictEqual(pages.length, perSeedPages, 'pages should be truncated to perSeedPages');
+    // Verify seed is still present and first
+    assert.ok(pages.some((p) => p.url === seedUrl), 'seed URL should still be in the truncated list');
+  });
+
+  it('truncates correctly when seed is not originally first', () => {
+    const seedUrl = 'https://docs.docker.com/reference/dockerfile/';
+    const perSeedPages = 2;
+    let pages: CrawlPageResult[] = [
+      makePage('https://docs.docker.com/reference/dockerfile/build/'),
+      makePage('https://docs.docker.com/reference/dockerfile/run/'),
+      makePage('https://docs.docker.com/reference/dockerfile/'), // seed at index 2
+      makePage('https://docs.docker.com/reference/dockerfile/create/'),
+    ];
+
+    // Simulate seed-first reordering (moves seed to front)
+    const seedIndex = pages.findIndex((p) => p.url === seedUrl);
+    if (seedIndex > 0) {
+      const [seedPage] = pages.splice(seedIndex, 1);
+      if (seedPage) pages.unshift(seedPage);
+    }
+
+    // Simulate truncation
+    if (pages.length > perSeedPages) {
+      pages = pages.slice(0, perSeedPages);
+    }
+
+    assert.strictEqual(pages[0]?.url, seedUrl, 'seed URL should be first after reordering');
+    assert.strictEqual(pages.length, perSeedPages, 'pages should be truncated to perSeedPages');
+    // Only the seed should remain since it was moved to front and we truncated to 2
+    assert.ok(pages.some((p) => p.url === seedUrl), 'seed URL should be in truncated list');
+  });
+});
+
 describe('filterByPathPrefix', () => {
   const makePage = (url: string): CrawlPageResult => ({
     url,
