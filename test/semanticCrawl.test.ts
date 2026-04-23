@@ -5,9 +5,11 @@ import {
   isBorderline,
   applyReranking,
   embedAndRank,
+  filterByPathPrefix,
+  isDirectChild,
   type SemanticCrawlOptions,
 } from '../src/tools/semanticCrawl.js';
-import type { SemanticCrawlChunk, SemanticCrawlResult, CorpusChunk } from '../src/types.js';
+import type { SemanticCrawlChunk, SemanticCrawlResult, CorpusChunk, CrawlPageResult } from '../src/types.js';
 import type { Crawl4aiConfig } from '../src/config.js';
 import { rrfMerge } from '../src/utils/fusion.js';
 
@@ -294,3 +296,59 @@ describe('embedAndRank', () => {
     );
   });
 });
+
+describe('isDirectChild', () => {
+  it('accepts exactly one deeper segment', () => {
+    assert.strictEqual(isDirectChild('/reference/dockerfile/build/', '/reference/dockerfile/'), true);
+  });
+
+  it('rejects two deeper segments', () => {
+    assert.strictEqual(isDirectChild('/reference/dockerfile/build/args/', '/reference/dockerfile/'), false);
+  });
+
+  it('rejects sibling paths', () => {
+    assert.strictEqual(isDirectChild('/reference/cli/', '/reference/dockerfile/'), false);
+  });
+
+  it('rejects identical paths', () => {
+    assert.strictEqual(isDirectChild('/reference/dockerfile/', '/reference/dockerfile/'), false);
+  });
+});
+
+describe('filterByPathPrefix', () => {
+  const makePage = (url: string): CrawlPageResult => ({
+    url,
+    success: true,
+    markdown: `# ${url}`,
+    title: null,
+    description: null,
+    links: [],
+    statusCode: 200,
+    errorMessage: null,
+  });
+
+  it('keeps pages under seed path', () => {
+    const seed = 'https://docs.docker.com/reference/dockerfile/';
+    const pages = [
+      makePage('https://docs.docker.com/reference/dockerfile/'),
+      makePage('https://docs.docker.com/reference/dockerfile/build/'),
+      makePage('https://docs.docker.com/reference/dockerfile/build/args/'),
+      makePage('https://docs.docker.com/cli/config/'),
+    ];
+    const filtered = filterByPathPrefix(pages, seed);
+    assert.strictEqual(filtered.length, 3);
+    assert.ok(filtered.some((p) => p.url.includes('dockerfile/')));
+    assert.ok(!filtered.some((p) => p.url.includes('cli/config')));
+  });
+
+  it('allows drift when allowPathDrift is true', () => {
+    const seed = 'https://docs.docker.com/reference/dockerfile/';
+    const pages = [
+      makePage('https://docs.docker.com/reference/dockerfile/'),
+      makePage('https://docs.docker.com/cli/config/'),
+    ];
+    const filtered = filterByPathPrefix(pages, seed, true);
+    assert.strictEqual(filtered.length, 2);
+  });
+});
+

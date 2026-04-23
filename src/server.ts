@@ -1368,6 +1368,11 @@ export function createServer(): McpServer {
             .optional()
             .default(true)
             .describe('Apply cross-encoder re-ranking to top candidates (default true)'),
+          allowPathDrift: z
+            .boolean()
+            .optional()
+            .default(false)
+            .describe('Allow crawler to follow links outside the seed URL path (default false)'),
         },
       },
       async ({
@@ -1380,6 +1385,7 @@ export function createServer(): McpServer {
         includeExternalLinks,
         maxBytes,
         useReranker,
+        allowPathDrift,
       }) => {
         logger.info(
           { tool: 'semantic_crawl', sourceType: source.type, query, topK },
@@ -1399,6 +1405,7 @@ export function createServer(): McpServer {
               includeExternalLinks,
               maxBytes: effectiveMaxBytes,
               useReranker,
+              allowPathDrift,
             },
             cfg.crawl4ai,
             cfg.embeddingSidecar.baseUrl,

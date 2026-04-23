@@ -497,13 +497,45 @@ function divideBudget(total: number, seeds: number): number {
   return Math.max(1, Math.ceil(total / seeds));
 }
 
+export function isDirectChild(pagePath: string, seedPath: string): boolean {
+  const seedParts = seedPath.split('/').filter(Boolean);
+  const pageParts = pagePath.split('/').filter(Boolean);
+  return (
+    pageParts.length === seedParts.length + 1 &&
+    pageParts.slice(0, seedParts.length).join('/') === seedParts.join('/')
+  );
+}
+
+export function filterByPathPrefix(
+  pages: CrawlPageResult[],
+  seedUrl: string,
+  allowPathDrift = false,
+): CrawlPageResult[] {
+  if (allowPathDrift) return pages;
+  const seedPath = new URL(seedUrl).pathname;
+  const kept: CrawlPageResult[] = [];
+  let dropped = 0;
+  for (const page of pages) {
+    const pagePath = new URL(page.url).pathname;
+    if (pagePath.startsWith(seedPath) || isDirectChild(pagePath, seedPath)) {
+      kept.push(page);
+    } else {
+      dropped++;
+    }
+  }
+  if (dropped > 0) {
+    logger.info({ dropped, seedPath }, 'semantic_crawl: dropped pages outside seed path');
+  }
+  return kept;
+}
+
 /** Crawl a list of seed URLs with per-seed budget division and sequential budget tracking. */
 async function crawlSeeds(
   seedUrls: string[],
   crawl4aiCfg: Crawl4aiConfig,
   opts: Pick<
     SemanticCrawlOptions,
-    'strategy' | 'maxDepth' | 'maxPages' | 'includeExternalLinks' | 'maxBytes'
+    'strategy' | 'maxDepth' | 'maxPages' | 'includeExternalLinks' | 'maxBytes' | 'allowPathDrift'
   >,
 ): Promise<{ pages: CrawlPageResult[]; totalPages: number; successfulPages: number }> {
   if (seedUrls.length === 0) {
@@ -537,9 +569,27 @@ async function crawlSeeds(
     };
 
     const result = await webCrawl(seedUrl, crawl4aiCfg.baseUrl, crawl4aiCfg.apiToken, crawlOpts);
+
+    // Path focus filter
+    let pages = filterByPathPrefix(result.pages, seedUrl, opts.allowPathDrift ?? false);
+
+    // maxPages client-side enforcement (guarantee seed-first, then truncate)
+    const seedIndex = pages.findIndex((p) => p.url === seedUrl);
+    if (seedIndex > 0) {
+      const [seedPage] = pages.splice(seedIndex, 1);
+      if (seedPage) pages.unshift(seedPage);
+    }
+    if (pages.length > perSeedPages) {
+      logger.warn(
+        { requested: perSeedPages, received: pages.length, seedUrl },
+        'semantic_crawl: crawl4ai returned more pages than requested; truncating client-side',
+      );
+      pages = pages.slice(0, perSeedPages);
+    }
+
     totalPagesAttempted += result.totalPages;
     totalSuccessfulPages += result.successfulPages;
-    allPages.push(...result.pages);
+    allPages.push(...pages);
 
     remainingPages -= result.totalPages;
     if (perSeedBytes !== undefined) {
@@ -613,6 +663,7 @@ export interface SemanticCrawlOptions {
   includeExternalLinks: boolean;
   maxBytes?: number | undefined;
   useReranker?: boolean | undefined;
+  allowPathDrift?: boolean | undefined;
 }
 
 export async function semanticCrawl(
