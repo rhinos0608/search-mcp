@@ -54,6 +54,7 @@ test('redditSearch preserves global-search heuristics and result shape through t
       createdUtc: 1710000000,
       permalink: 'https://www.reddit.com/r/typescript/comments/abc123/typescript_58_released/',
       isVideo: false,
+      elements: [{ type: 'text', text: `${'x'.repeat(2000)}${TRUNCATED_MARKER}` }],
     },
     {
       title: 'Typed linting pipeline',
@@ -66,6 +67,7 @@ test('redditSearch preserves global-search heuristics and result shape through t
       createdUtc: 1710000123,
       permalink: 'https://www.reddit.com/r/typescript/comments/def456/typed_linting_pipeline/',
       isVideo: true,
+      elements: [{ type: 'text', text: 'Short body' }],
     },
   ]);
 });

@@ -23,6 +23,7 @@ import {
   validationError,
 } from '../errors.js';
 import type { GitHubFileResult } from '../types.js';
+import { wrapTextInElement } from '../utils/elementHelpers.js';
 
 const GITHUB_API = 'https://api.github.com';
 
@@ -637,6 +638,10 @@ export async function getGitHubRepoFile(
   }
 
   const totalLines = splitLines(decoded).length;
+  const codeElements = wrapTextInElement(finalContent);
+  if (codeElements.length > 0 && codeElements[0]?.type === 'text') {
+    codeElements[0] = { type: 'code', language: detectLanguage(path), content: codeElements[0].text };
+  }
 
   return {
     name,
@@ -655,10 +660,48 @@ export async function getGitHubRepoFile(
     hasMore: truncated,
     byteOffset: null,
     byteLimit: null,
+    ...(codeElements.length > 0 && { elements: codeElements }),
   };
 }
 
 // ── Helpers for content normalization ───────────────────────────────────────
+
+/** Map file extension to language for CodeElement. */
+function detectLanguage(path: string): string {
+  const ext = path.split('.').pop()?.toLowerCase() ?? '';
+  const langMap: Record<string, string> = {
+    ts: 'typescript',
+    tsx: 'typescript',
+    js: 'javascript',
+    jsx: 'javascript',
+    py: 'python',
+    rb: 'ruby',
+    go: 'go',
+    rs: 'rust',
+    java: 'java',
+    kt: 'kotlin',
+    swift: 'swift',
+    cs: 'csharp',
+    c: 'c',
+    cpp: 'cpp',
+    h: 'c',
+    hpp: 'cpp',
+    css: 'css',
+    scss: 'scss',
+    html: 'html',
+    xml: 'xml',
+    json: 'json',
+    yaml: 'yaml',
+    yml: 'yaml',
+    md: 'markdown',
+    sql: 'sql',
+    sh: 'bash',
+    bash: 'bash',
+    zsh: 'bash',
+    dockerfile: 'dockerfile',
+  };
+  return langMap[ext] ?? 'text';
+}
 
 function normalizeBinaryContent(
   name: string,

@@ -1,6 +1,7 @@
 import { TRUNCATED_MARKER } from '../httpGuards.js';
 import type { RedditPost } from '../types.js';
 import { canonicalizeRedditPermalink } from './redditPermalink.js';
+import { safeExtractFromMarkdown } from '../utils/elementHelpers.js';
 
 function asRecord(value: unknown): Record<string, unknown> | null {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) {
@@ -29,6 +30,7 @@ export function parseRedditSearchListing(json: unknown): RedditPost[] {
       const selftext =
         rawSelftext.length > 2000 ? rawSelftext.slice(0, 2000) + TRUNCATED_MARKER : rawSelftext;
 
+      const elements = safeExtractFromMarkdown(selftext);
       return {
         title: typeof post.title === 'string' ? post.title : '',
         url: typeof post.url === 'string' ? post.url : '',
@@ -41,6 +43,7 @@ export function parseRedditSearchListing(json: unknown): RedditPost[] {
         permalink:
           typeof post.permalink === 'string' ? canonicalizeRedditPermalink(post.permalink) : '',
         isVideo: typeof post.is_video === 'boolean' ? post.is_video : false,
+        ...(elements.length > 0 && { elements }),
       } satisfies RedditPost;
     })
     .filter((post): post is RedditPost => post !== null && Boolean(post.title));

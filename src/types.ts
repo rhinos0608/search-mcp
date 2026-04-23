@@ -99,7 +99,7 @@ export type ContentElement =
   | ListElement;
 
 // GitHubRepo
-export interface GitHubRepo {
+export interface GitHubRepo extends StructuredContent {
   name: string;
   fullName: string;
   description: string | null;
