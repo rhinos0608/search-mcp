@@ -81,19 +81,14 @@ describe('chunkMarkdown', () => {
     }
   });
 
-  it('annotates totalChunks per section', () => {
+  it('annotates totalChunks globally across all returned chunks', () => {
     const longText = 'Word '.repeat(500);
     const md = `# Title\n\n## One\n\n${longText}\n\n## Two\n\n${longText}`;
     const chunks = chunkMarkdown(md, 'https://example.com');
-    const sectionOne = chunks.filter((c) => c.section.includes('One'));
-    const sectionTwo = chunks.filter((c) => c.section.includes('Two'));
-    assert.ok(sectionOne.length > 1, 'Section One should split into multiple chunks');
-    assert.ok(sectionTwo.length > 1, 'Section Two should split into multiple chunks');
-    for (const c of sectionOne) {
-      assert.strictEqual(c.totalChunks, sectionOne.length);
-    }
-    for (const c of sectionTwo) {
-      assert.strictEqual(c.totalChunks, sectionTwo.length);
+    assert.ok(chunks.length > 1, 'Should produce multiple chunks');
+    for (let i = 0; i < chunks.length; i++) {
+      assert.strictEqual(chunks[i]!.chunkIndex, i, `chunkIndex should be ${i}`);
+      assert.strictEqual(chunks[i]!.totalChunks, chunks.length, `totalChunks should be ${chunks.length}`);
     }
   });
 

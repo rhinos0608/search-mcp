@@ -123,7 +123,8 @@ export function chunkMarkdown(markdown: string, url: string): MarkdownChunk[] {
   // Context-aware boilerplate filtering (breadcrumbs, link-heavy, etc.)
   processed = filterBoilerplateWithContext(processed);
 
-  return processed;
+  // Re-index after all post-processing so chunkIndex and totalChunks are consistent
+  return processed.map((c, i) => ({ ...c, chunkIndex: i, totalChunks: processed.length }));
 }
 
 // --- Boilerplate heuristics ---
