@@ -43,21 +43,19 @@ export function buildBm25Index(docs: Bm25Document[]): Bm25Index {
 
   if (N === 0) {
     return {
-      search(_query: string, _topK?: number): { id: string; score: number }[] {
+      search(): { id: string; score: number }[] {
         return [];
       },
     };
   }
 
-  // Pre-compute per-document term frequencies and lengths
-  const docTf: Map<string, number>[] = [];
-  const docLengths: number[] = [];
+  // Pre-compute per-document term frequencies and lengths, zipped with doc id
+  const corpus: { id: string; tf: Map<string, number>; dl: number }[] = [];
   let totalLength = 0;
 
   for (const doc of docs) {
     const tokens = tokenize(doc.text);
-    docTf.push(buildTermFreq(tokens));
-    docLengths.push(tokens.length);
+    corpus.push({ id: doc.id, tf: buildTermFreq(tokens), dl: tokens.length });
     totalLength += tokens.length;
   }
 
@@ -65,8 +63,8 @@ export function buildBm25Index(docs: Bm25Document[]): Bm25Index {
 
   // Build document-frequency map: term → count of docs containing term
   const df = new Map<string, number>();
-  for (const tf of docTf) {
-    for (const term of tf.keys()) {
+  for (const entry of corpus) {
+    for (const term of entry.tf.keys()) {
       df.set(term, (df.get(term) ?? 0) + 1);
     }
   }
@@ -83,9 +81,8 @@ export function buildBm25Index(docs: Bm25Document[]): Bm25Index {
 
       const scores: { id: string; score: number }[] = [];
 
-      for (let i = 0; i < N; i++) {
-        const tf = docTf[i]!;
-        const dl = docLengths[i]!;
+      for (const entry of corpus) {
+        const { id, tf, dl } = entry;
         let score = 0;
 
         for (const term of queryTerms) {
@@ -99,7 +96,7 @@ export function buildBm25Index(docs: Bm25Document[]): Bm25Index {
         }
 
         if (score > 0) {
-          scores.push({ id: docs[i]!.id, score });
+          scores.push({ id, score });
         }
       }
 
