@@ -34,6 +34,7 @@ Pipeline step (after bi-encoder ranking, before RRF):
 - If a BM25 result already exists in `biEncoderTopK`, it is not duplicated.
 - The `candidatePool` is then passed to RRF fusion. The BM25 results participate in fusion even if their bi-encoder score would have excluded them.
 - This guarantees that strong lexical matches are never invisible to the downstream ranking stages.
+- **Important:** This is a guarantee of *pool inclusion*, not *output inclusion*. The soft lexical constraint (§2) may still filter out a BM25 top-3 result if it fails the IDF-coverage check.
 
 ### Backwards compatibility
 No API change. The set of returned chunks may expand slightly (still capped by `topK`), and lexical matches may rise in rank.
@@ -81,9 +82,7 @@ export interface ScoreDetail {
   normalized: number;    // 0-1 scale: (raw - minQuery) / (maxQuery - minQuery), or 0 if max === min
   minQuery: number;      // minimum raw score across all chunks for this query
   maxQuery: number;      // maximum raw score across all chunks for this query
-  p25: number;           // 25th percentile raw score for this query
-  p50: number;           // median raw score for this query
-  p90: number;           // 90th percentile raw score for this query
+  median: number;        // median (p50) raw score for this query — the only robust percentile for small candidate pools
 }
 
 export interface RerankScoreDetail extends ScoreDetail {
@@ -108,9 +107,9 @@ export interface SemanticCrawlChunk {
 ```
 
 **Computation:**
-- `minQuery`, `maxQuery`, `p25`, `p50`, `p90` are computed once per score type across all chunks in the final result set (post-filtering, pre-truncation to `topK`).
+- `minQuery`, `maxQuery`, `median` are computed once per score type across all chunks in the final result set (post-filtering, pre-truncation to `topK`).
 - `normalized` is `0` when `maxQuery === minQuery` (all identical) to avoid division by zero.
-- `rerank.medianDelta` helps consumers understand whether a reranked chunk is above or below the typical rerank score for this query. Positive = better than median.
+- `rerank.medianDelta` helps consumers understand whether a reranked chunk is above or below the typical rerank score for this query (`raw - median`). Positive = better than median.
 - `rerank.rank` is the 1-based position after reranking, so consumers can see reordering effects.
 
 **Old fields removed:** `biEncoderScore` and `rerankScore` (the flat numbers) are replaced by the nested `scores` object.
@@ -134,6 +133,7 @@ sha256(stableStringify(source) + "|" + model + "|" + dimensions + "|" + MAX_TOKE
 ```
 
 Where:
+- `stableStringify` is the recursive key-sorting JSON serializer already used in `corpusCache.ts`. Arrays are serialized in their original order; objects have keys sorted lexicographically. For a single URL this is just the URL string.
 - `MAX_TOKENS` = 400 (chunking max, from `src/chunking.ts`)
 - `MIN_TOKENS` = 50 (chunking min, from `src/chunking.ts`)
 - `OVERLAP_RATIO` = 0.2 (chunk overlap, from `src/chunking.ts`)
@@ -197,43 +197,11 @@ No API change. The number of returned pages now strictly respects `maxPages`.
 
 ---
 
-## 7. IDF-Weighted Query Embedding
+## Future Work (out of scope)
 
-### Problem
-The bi-encoder treats every query token equally. Rare, specific tokens (e.g., "PORT=8080") should contribute more to the query embedding than common tokens (e.g., "how", "configure").
+### IDF-Weighted Query Embedding
 
-### Solution
-Weight the query embedding by token IDF before cosine similarity computation.
-
-**Algorithm:**
-1. Tokenize the query with the BM25 tokenizer.
-2. Compute IDF for each token against the current corpus (same formula as BM25).
-3. Send the query to the embedding sidecar as before (single text, `mode: "query"`).
-4. Receive the query embedding vector `q`.
-5. Compute a token-level weight vector `w` where `w_i = idf(token_i) / max_idf` (normalized to [0,1]).
-6. **Note:** The embedding sidecar returns a single aggregated vector, not per-token vectors. Therefore, IDF weighting must be applied at the tokenization layer before embedding, not post-hoc on the vector.
-
-**Revised approach (feasible):**
-Instead of weighting the vector, weight the query text sent to the sidecar by repeating high-IDF tokens:
-
-1. Tokenize query.
-2. Compute IDF for each token.
-3. Build a weighted query string: for each token, repeat it `ceil(idf / median_idf)` times, capped at 3 repetitions.
-4. Send the weighted query string to the sidecar with `mode: "query"`.
-
-Example:
-- Query: "how to configure PORT=8080 in Dockerfile"
-- IDFs: `how=0.1`, `to=0.1`, `configure=0.5`, `port=2.3`, `8080=3.1`, `in=0.1`, `dockerfile=2.0`
-- Median IDF = 0.5
-- Weighted query: "how to configure configure PORT=8080 PORT=8080 PORT=8080 in Dockerfile Dockerfile"
-- The sidecar embeds this weighted text, naturally emphasizing rare tokens.
-
-**Caveat:** This may interact poorly with the sidecar's asymmetric prompt formatting (`task: search result | query: {content}`). If the sidecar truncates the query, repetition may waste context window. To mitigate:
-- Only apply IDF weighting when the weighted query is <= 512 characters.
-- If the weighted query exceeds 512 characters, fall back to the original unweighted query.
-
-### Backwards compatibility
-No API change. This is an internal bi-encoder improvement. Results may shift toward keyword specificity.
+The bi-encoder treats every query token equally. An approach that weights rare tokens more heavily (e.g., by repeating high-IDF tokens in the query string before embedding) could improve keyword specificity. However, transformer attention mechanisms do not scale linearly with token repetition — mean-pooling encoders sublinearly attenuate redundancy, and [CLS]-based models behave unpredictably under repetition. This is an empirical bet that requires controlled ablation testing before shipping. It should only be added behind an `enableIdfWeighting` flag (default `false`) with a synthetic benchmark validating improvement. Not included in this implementation cycle.
 
 ---
 
@@ -246,17 +214,15 @@ No API change. This is an internal bi-encoder improvement. Results may shift tow
 | Old-format cache on disk | Reject (return `null` from `readCorpusFromDisk`), rebuild silently |
 | Cache directory creation fails | Log warning, continue without disk cache (in-memory only) |
 | crawl4ai returns > maxPages | Truncate client-side, log warning, continue |
-| IDF-weighted query exceeds 512 chars | Fall back to unweighted query, log debug message |
 
 ## Testing Strategy
 
-1. **Keyword blindness regression test** — Query Docker docs for "configure PORT=8080". Assert EXPOSE is in top-3. Assert ENTRYPOINT is not ranked above EXPOSE.
+1. **Keyword blindness regression test** — Build a synthetic corpus with four chunks: (A) "ENTRYPOINT configures the startup command", (B) "EXPOSE declares PORT=8080 for external access", (C) "WORKDIR sets the working directory", (D) "COPY copies files into the image". Query "configure PORT=8080 in Dockerfile". Assert EXPOSE (chunk B) is in top-3 and ranked above ENTRYPOINT (chunk A).
 2. **Soft lexical constraint test** — Query with stopwords only (e.g., "how to do it"). Assert no filtering occurs and `meta.warnings` does not contain a lexical constraint skip message.
 3. **Score observability test** — Assert every returned chunk has `scores.biEncoder`, `scores.bm25`, `scores.rrf`. When reranking is enabled, assert `scores.rerank` exists with `medianDelta` and `rank`.
 4. **Cache versioning test** — Write a cache file with no `schemaVersion`. Assert `readCorpusFromDisk` returns `null`. Write a cache with `schemaVersion: 1`. Assert it loads.
 5. **Cache directory test** — Set `SEMANTIC_CRAWL_CACHE_DIR` to a temp path. Run `getOrBuildCorpus`. Assert `.json` and `.bin` files appear in the temp path.
 6. **maxPages enforcement test** — Mock crawl4ai to return 27 pages when 15 requested. Assert `crawlSeeds` returns exactly 15 and logs a warning.
-7. **IDF-weighted query test** — Mock the embedding sidecar. Assert the query text sent to the sidecar repeats high-IDF tokens when the weighted length is <= 512 chars.
 
 ## Open Questions (none remaining)
 
