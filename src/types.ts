@@ -359,6 +359,7 @@ export interface CrawlPageResult {
   links: { href: string; text: string }[];
   statusCode: number | null;
   errorMessage: string | null;
+  extractedData?: Record<string, unknown>[];
 }
 
 export interface WebCrawlResult {
@@ -411,6 +412,7 @@ export interface SemanticCrawlResult {
   /** Deterministic corpus ID — pass as `source: { type: 'cached', corpusId }` to skip re-crawl. */
   corpusId: string;
   chunks: SemanticCrawlChunk[];
+  extractedData?: Record<string, Record<string, unknown>[]>;
 }
 
 // ── Semantic Crawl Sources ────────────────────────────────────────────────

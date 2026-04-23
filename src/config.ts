@@ -92,6 +92,11 @@ export interface SemanticCrawlConfig {
   maxMaxBytes: number;
 }
 
+export interface LlmConfig {
+  provider: string;
+  apiToken: string;
+}
+
 export interface SearchConfig {
   searchBackend: SearchBackend;
   brave: { apiKey: string };
@@ -107,6 +112,7 @@ export interface SearchConfig {
   crawl4ai: Crawl4aiConfig;
   embeddingSidecar: EmbeddingSidecarConfig;
   semanticCrawl: SemanticCrawlConfig;
+  llm: LlmConfig;
   rescoreWeights: RescoreConfig;
 }
 
@@ -131,6 +137,7 @@ const DEFAULTS: Omit<SearchConfig, 'rescoreWeights'> = {
   crawl4ai: { baseUrl: '', apiToken: '' },
   embeddingSidecar: { baseUrl: '', apiToken: '', dimensions: 768 },
   semanticCrawl: { defaultMaxBytes: 50_000_000, maxMaxBytes: 200_000_000 },
+  llm: { provider: '', apiToken: '' },
 };
 
 const VALID_BACKENDS = new Set<string>(['brave', 'searxng']);
@@ -161,13 +168,14 @@ function decryptConfigFile(filePath: string, password: string): SearchConfig {
 
 type EnvConfig = Omit<
   Partial<SearchConfig>,
-  'reddit' | 'crawl4ai' | 'github' | 'embeddingSidecar' | 'semanticCrawl'
+  'reddit' | 'crawl4ai' | 'github' | 'embeddingSidecar' | 'semanticCrawl' | 'llm'
 > & {
   reddit?: Partial<RedditConfig>;
   crawl4ai?: Partial<Crawl4aiConfig>;
   github?: Partial<GitHubConfig>;
   embeddingSidecar?: Partial<EmbeddingSidecarConfig>;
   semanticCrawl?: Partial<SemanticCrawlConfig>;
+  llm?: Partial<LlmConfig>;
 };
 
 function loadFromEnv(): EnvConfig {
@@ -284,6 +292,17 @@ function loadFromEnv(): EnvConfig {
     cfg.semanticCrawl = scc;
   }
 
+  const llmProvider = process.env.LLM_PROVIDER;
+  const llmApiToken = process.env.LLM_API_TOKEN;
+  if (llmProvider !== undefined || llmApiToken !== undefined) {
+    // Intentionally partial: missing keys are resolved via ?? chaining
+    // in the final merge block below.
+    const llmCfg: Partial<LlmConfig> = {};
+    if (llmProvider !== undefined) llmCfg.provider = llmProvider;
+    if (llmApiToken !== undefined) llmCfg.apiToken = llmApiToken;
+    cfg.llm = llmCfg;
+  }
+
   return cfg;
 }
 
@@ -390,6 +409,10 @@ export function loadConfig(): SearchConfig {
         envConfig.semanticCrawl?.maxMaxBytes ??
         fileConfig.semanticCrawl?.maxMaxBytes ??
         DEFAULTS.semanticCrawl.maxMaxBytes,
+    },
+    llm: {
+      provider: envConfig.llm?.provider ?? fileConfig.llm?.provider ?? DEFAULTS.llm.provider,
+      apiToken: envConfig.llm?.apiToken ?? fileConfig.llm?.apiToken ?? DEFAULTS.llm.apiToken,
     },
     rescoreWeights: DEFAULT_RESCORE_WEIGHTS,
   };
