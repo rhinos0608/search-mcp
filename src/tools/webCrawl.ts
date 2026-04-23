@@ -3,12 +3,15 @@ import { assertSafeUrl, safeResponseJson } from '../httpGuards.js';
 import { retryWithBackoff } from '../retry.js';
 import { unavailableError, networkError, parseError } from '../errors.js';
 import type { WebCrawlResult, CrawlPageResult } from '../types.js';
+import { dedupPages, dedupPagesByContent } from '../utils/url.js';
 
 export interface WebCrawlOptions {
   strategy: 'bfs' | 'dfs';
   maxDepth: number;
   maxPages: number;
   includeExternalLinks: boolean;
+  /** Maximum total bytes of markdown to collect (client-side soft limit). */
+  maxBytes?: number;
 }
 
 // crawl4ai API response shape (stable across v0.7.x and v0.8.x)
@@ -39,8 +42,9 @@ interface Crawl4aiResponse {
 function extractMarkdown(raw: Crawl4aiPage['markdown']): string {
   if (typeof raw === 'string') return raw;
   if (raw !== null && raw !== undefined && typeof raw === 'object') {
-    // v0.8.x: prefer raw_markdown (full content), fall back to fit_markdown
-    return raw.raw_markdown ?? raw.fit_markdown ?? '';
+    // v0.8.x: prefer fit_markdown (content-extracted, nav stripped),
+    // fall back to raw_markdown for completeness when extraction fails.
+    return raw.fit_markdown ?? raw.raw_markdown ?? '';
   }
   return '';
 }
@@ -82,6 +86,8 @@ export async function webCrawl(
   }
 
   const endpoint = `${baseUrl.replace(/\/+$/, '')}/crawl`;
+  // Sidecar URLs come from operator configuration (CRAWL4AI_BASE_URL);
+  // they are inherently trusted and should not be subject to SSRF guards.
 
   const crawlerConfigParams: Record<string, unknown> = {
     deep_crawl_strategy: {
@@ -134,8 +140,6 @@ export async function webCrawl(
       );
     }
 
-    // safeResponseJson enforces a 10MB cap as a guard against runaway responses.
-    // The maxPages limit (1-100) keeps deep-crawl responses well below this in practice.
     raw = await safeResponseJson(response, endpoint);
 
     if (raw === null || typeof raw !== 'object') {
@@ -163,6 +167,63 @@ export async function webCrawl(
     throw parseError(
       `crawl4ai returned an unexpected response shape${serverErr}. Check that the sidecar version is v0.7.x or v0.8.x.`,
     );
+  }
+
+  // Defense-in-depth: validate each page URL against SSRF guards.
+  // crawl4ai should enforce this itself, but we filter as a second layer.
+  const beforeSsrf = pages.length;
+  pages = pages.filter((page) => {
+    try {
+      assertSafeUrl(page.url);
+      return true;
+    } catch {
+      logger.warn({ url: page.url }, 'web_crawl: skipping page with unsafe URL');
+      return false;
+    }
+  });
+  if (pages.length < beforeSsrf) {
+    logger.warn(
+      { url, before: beforeSsrf, after: pages.length, removed: beforeSsrf - pages.length },
+      'web_crawl filtered pages with unsafe URLs',
+    );
+  }
+
+  const before = pages.length;
+  pages = dedupPages(pages);
+  if (pages.length < before) {
+    logger.debug(
+      { url, before, after: pages.length, removed: before - pages.length },
+      'web_crawl deduplicated pages by URL',
+    );
+  }
+
+  const beforeContent = pages.length;
+  pages = dedupPagesByContent(pages);
+  if (pages.length < beforeContent) {
+    logger.debug(
+      { url, before: beforeContent, after: pages.length, removed: beforeContent - pages.length },
+      'web_crawl deduplicated pages by content hash',
+    );
+  }
+
+  // Client-side maxBytes enforcement: crawl4ai does not support corpus-total limits.
+  const maxBytes = opts.maxBytes;
+  if (maxBytes !== undefined && maxBytes > 0) {
+    let totalBytes = 0;
+    const filtered: CrawlPageResult[] = [];
+    for (const page of pages) {
+      const pageBytes = page.markdown.length;
+      if (totalBytes + pageBytes > maxBytes && filtered.length > 0) {
+        logger.info(
+          { url, maxBytes, totalBytes, pagesKept: filtered.length },
+          'web_crawl: maxBytes limit reached, stopping collection',
+        );
+        break;
+      }
+      totalBytes += pageBytes;
+      filtered.push(page);
+    }
+    pages = filtered;
   }
 
   logger.debug(
