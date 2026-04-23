@@ -130,3 +130,26 @@ test('topK=0 returns empty array', () => {
   const results = idx.search('hello', 0);
   assert.deepEqual(results, []);
 });
+
+// --- duplicate query terms deduplication ---
+
+test('duplicate query terms are deduplicated: "cat cat" same ranking as "cat"', () => {
+  const idx = buildBm25Index([
+    { id: 'a', text: 'cat sat on mat' },
+    { id: 'b', text: 'dog played all day' },
+    { id: 'c', text: 'cat cat cat everywhere' },
+  ]);
+  const singleResults = idx.search('cat');
+  const duplicateResults = idx.search('cat cat');
+
+  // Both should return same documents in same order (scores are identical when deduped)
+  assert.equal(singleResults.length, duplicateResults.length,
+    'Expected same number of results for "cat" and "cat cat"');
+
+  for (let i = 0; i < singleResults.length; i++) {
+    assert.equal(singleResults[i]!.id, duplicateResults[i]!.id,
+      `Document order mismatch at index ${i}: "cat" vs "cat cat"`);
+    assert.equal(singleResults[i]!.score, duplicateResults[i]!.score,
+      `Score mismatch for doc ${singleResults[i]!.id}: "cat" (${singleResults[i]!.score}) vs "cat cat" (${duplicateResults[i]!.score})`);
+  }
+});

@@ -76,7 +76,7 @@ export function buildBm25Index(docs: Bm25Document[]): Bm25Index {
 
   return {
     search(query: string, topK?: number): { id: string; score: number }[] {
-      const queryTerms = tokenize(query);
+      const queryTerms = [...new Set(tokenize(query))];
       if (queryTerms.length === 0) return [];
 
       const scores: { id: string; score: number }[] = [];
