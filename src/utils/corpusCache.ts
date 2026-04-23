@@ -2,10 +2,11 @@
  * Disk-backed corpus cache.
  *
  * Storage:
- *   {cacheDir}/{corpusId}.json  — metadata + chunks + bm25Docs
- *   {cacheDir}/{corpusId}.bin   — raw Float32Array embeddings
+ *   {cacheDir}/source-index.json  — source key → corpusId mapping (fast lookup)
+ *   {cacheDir}/{corpusId}.json     — metadata + chunks + bm25Docs
+ *   {cacheDir}/{corpusId}.bin      — raw Float32Array embeddings
  *
- * Binary layout:
+ * Binary layout (.bin):
  *   [4 bytes: uint32 numEmbeddings]
  *   [4 bytes: uint32 dimensionsPerEmbedding]
  *   [N × D × 4 bytes: float32 values row-major]
@@ -13,10 +14,18 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
+import os from 'node:os';
 import crypto from 'node:crypto';
 import type { CorpusChunk, SemanticCrawlSource } from '../types.js';
 import { buildBm25Index, type Bm25Index } from './bm25.js';
 import { logger } from '../logger.js';
+import { MAX_TOKENS, MIN_TOKENS, TOKEN_RATIO, OVERLAP_RATIO } from '../chunking.js';
+
+// ────────────────────────────────────────────────────────────────────
+// Schema version — increment when the on-disk format changes
+// ────────────────────────────────────────────────────────────────────
+
+const SCHEMA_VERSION = 1;
 
 // ────────────────────────────────────────────────────────────────────
 // Public types
@@ -40,8 +49,8 @@ export interface CachedCorpus {
 // ────────────────────────────────────────────────────────────────────
 
 interface CorpusMetadata {
+  schemaVersion: number;
   corpusId: string;
-  source: SemanticCrawlSource;
   contentHash: string;
   model: string;
   dimensions: number;
@@ -52,12 +61,29 @@ interface CorpusMetadata {
 }
 
 // ────────────────────────────────────────────────────────────────────
+// Source index entry (stored in source-index.json)
+// ────────────────────────────────────────────────────────────────────
+
+interface SourceIndexEntry {
+  corpusId: string;
+  model: string;
+  dimensions: number;
+  createdAt: number;
+}
+
+// ────────────────────────────────────────────────────────────────────
 // Options
 // ────────────────────────────────────────────────────────────────────
 
-const DEFAULT_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
 const DEFAULT_MAX_CORPORA = 50;
-const DEFAULT_CACHE_DIR = path.join(process.cwd(), '.cache', 'semantic-crawl');
+
+const DEFAULT_CACHE_DIR = process.env['SEMANTIC_CRAWL_CACHE_DIR']
+  ? process.env['SEMANTIC_CRAWL_CACHE_DIR']
+  : path.join(os.homedir(), '.cache', 'search-mcp', 'semantic-crawl');
+
+const DEFAULT_TTL_MS = process.env['SEMANTIC_CRAWL_CACHE_TTL_MS']
+  ? parseInt(process.env['SEMANTIC_CRAWL_CACHE_TTL_MS'], 10)
+  : 7 * 24 * 60 * 60 * 1000;
 
 interface CacheOpts {
   ttlMs?: number;
@@ -89,17 +115,45 @@ function stableStringify(value: unknown): string {
 }
 
 /**
- * Deterministic corpusId.
- * sha256(stableStringify(source) + "|" + model + "|" + String(dimensions))
- * NOTE: model and dimensions come from the materialize result, so we compute
- * the id AFTER we have that info.
+ * Normalize a source for stable comparison: sort urls arrays so that
+ * different orderings produce the same canonical form.
+ */
+function normalizeSource(source: SemanticCrawlSource): SemanticCrawlSource {
+  if (source.type === 'url') {
+    if (source.urls !== undefined) {
+      return { type: 'url', url: source.url, urls: [...source.urls].sort() };
+    }
+    return source;
+  }
+  if (source.type === 'search') {
+    return { type: 'search', query: source.query, maxSeedUrls: source.maxSeedUrls };
+  }
+  if (source.type === 'sitemap') {
+    return { type: 'sitemap', url: source.url };
+  }
+  if (source.type === 'github') {
+    return { type: 'github', owner: source.owner, repo: source.repo, branch: source.branch, extensions: source.extensions, query: source.query };
+  }
+  if (source.type === 'cached') {
+    return { type: 'cached', corpusId: source.corpusId };
+  }
+  return source;
+}
+
+/**
+ * Deterministic corpusId including chunking parameters.
+ * sha256(normalized_source | model | dimensions | MAX_TOKENS | MIN_TOKENS | OVERLAP_RATIO | TOKEN_RATIO)
  */
 export function computeCorpusId(
   source: SemanticCrawlSource,
   model: string,
   dimensions: number,
 ): string {
-  const payload = stableStringify(source) + '|' + model + '|' + String(dimensions);
+  const payload =
+    stableStringify(normalizeSource(source)) +
+    '|' + model + '|' + String(dimensions) +
+    '|' + String(MAX_TOKENS) + '|' + String(MIN_TOKENS) +
+    '|' + String(OVERLAP_RATIO) + '|' + String(TOKEN_RATIO);
   return crypto.createHash('sha256').update(payload).digest('hex');
 }
 
@@ -128,6 +182,66 @@ function metaPath(cacheDir: string, corpusId: string): string {
 
 function binPath(cacheDir: string, corpusId: string): string {
   return path.join(cacheDir, `${corpusId}.bin`);
+}
+
+function indexPath(cacheDir: string): string {
+  return path.join(cacheDir, 'source-index.json');
+}
+
+// ────────────────────────────────────────────────────────────────────
+// Source index helpers
+// ────────────────────────────────────────────────────────────────────
+
+/** Read the full source-index.json, or return empty object if absent. */
+function readSourceIndex(cacheDir: string): Record<string, SourceIndexEntry[]> {
+  const ip = indexPath(cacheDir);
+  if (!fs.existsSync(ip)) return {};
+  try {
+    const raw = fs.readFileSync(ip, 'utf-8');
+    return JSON.parse(raw) as Record<string, SourceIndexEntry[]>;
+  } catch {
+    return {};
+  }
+}
+
+/** Write the source index (entries sorted by createdAt descending). */
+function writeSourceIndex(cacheDir: string, index: Record<string, SourceIndexEntry[]>): void {
+  fs.writeFileSync(indexPath(cacheDir), JSON.stringify(index), 'utf-8');
+}
+
+/**
+ * Add or update an entry in the source index for a given source key.
+ * Entries are kept sorted by createdAt descending (most recent first).
+ */
+function addToSourceIndex(
+  cacheDir: string,
+  sourceKey: string,
+  entry: SourceIndexEntry,
+): void {
+  const index = readSourceIndex(cacheDir);
+  const existing = index[sourceKey] ?? [];
+  // Remove any entry with the same corpusId (replace case)
+  const filtered = existing.filter(e => e.corpusId !== entry.corpusId);
+  // Insert in descending createdAt order
+  const insertAt = filtered.findIndex(e => e.createdAt < entry.createdAt);
+  if (insertAt === -1) {
+    filtered.push(entry);
+  } else {
+    filtered.splice(insertAt, 0, entry);
+  }
+  index[sourceKey] = filtered;
+  writeSourceIndex(cacheDir, index);
+}
+
+/**
+ * Look up corpusIds for a source key from the source index.
+ * Returns entries sorted by createdAt descending.
+ */
+function findInSourceIndex(
+  cacheDir: string,
+  sourceKey: string,
+): SourceIndexEntry[] {
+  return readSourceIndex(cacheDir)[sourceKey] ?? [];
 }
 
 // ────────────────────────────────────────────────────────────────────
@@ -201,6 +315,19 @@ function readCorpusFromDisk(
     return null;
   }
 
+  // Schema version check
+  if (meta.schemaVersion !== SCHEMA_VERSION) {
+    logger.warn({ corpusId, found: meta.schemaVersion, expected: SCHEMA_VERSION }, 'corpusCache: schema version mismatch');
+    return null;
+  }
+
+  // Content hash validation
+  const recomputedHash = crypto.createHash('sha256').update(meta.chunks.map(c => c.text).join('\n')).digest('hex');
+  if (recomputedHash !== meta.contentHash) {
+    logger.warn({ corpusId, expected: meta.contentHash, actual: recomputedHash }, 'corpusCache: content hash mismatch');
+    return null;
+  }
+
   // TTL check
   if (Date.now() - meta.createdAt > ttlMs) {
     return null;
@@ -236,7 +363,7 @@ function readCorpusFromDisk(
 
   return {
     corpusId: meta.corpusId,
-    source: meta.source,
+    source: { type: 'cached', corpusId: meta.corpusId }, // source not stored in metadata
     contentHash: meta.contentHash,
     model: meta.model,
     dimensions: meta.dimensions,
@@ -256,7 +383,6 @@ interface IndexEntry {
   corpusId: string;
   lastAccessedAt: number;
   createdAt: number;
-  source: SemanticCrawlSource | undefined;
 }
 
 function listCachedCorpora(cacheDir: string): IndexEntry[] {
@@ -270,6 +396,8 @@ function listCachedCorpora(cacheDir: string): IndexEntry[] {
   const entries: IndexEntry[] = [];
   for (const f of files) {
     if (!f.endsWith('.json')) continue;
+    // Skip the source-index.json
+    if (f === 'source-index.json') continue;
     const corpusId = f.slice(0, -5);
     // Prune orphan .json entries where the corresponding .bin is missing
     if (!fs.existsSync(binPath(cacheDir, corpusId))) {
@@ -288,7 +416,6 @@ function listCachedCorpora(cacheDir: string): IndexEntry[] {
         corpusId,
         lastAccessedAt: meta.lastAccessedAt ?? 0,
         createdAt: meta.createdAt ?? 0,
-        source: meta.source,
       });
     } catch {
       // skip corrupted file
@@ -350,8 +477,8 @@ function deleteCorpusFiles(cacheDir: string, corpusId: string): void {
  * Get a cached corpus or build it via `materializeFn`.
  *
  * - Deduplicates concurrent calls for the same source (thundering herd guard).
- * - Reads from disk when available and within TTL.
- * - Writes to disk after materializing.
+ * - Looks up source in source-index.json → reads from disk when available and within TTL.
+ * - Writes to disk after materializing (updating source-index.json).
  * - Evicts LRU + TTL-expired entries before writing.
  */
 export async function getOrBuildCorpus(
@@ -368,9 +495,8 @@ export async function getOrBuildCorpus(
   const maxCorpora = opts?.maxCorpora ?? DEFAULT_MAX_CORPORA;
   const cacheDir = opts?.cacheDir ?? DEFAULT_CACHE_DIR;
 
-  // We need a stable key before we know the model/dimensions.
-  // Use a source-only key for the in-memory dedup map.
-  const sourceKey = stableStringify(source);
+  // Stable key for pendingBuilds map — uses normalized source for consistency
+  const sourceKey = stableStringify(normalizeSource(source));
 
   const existing = pendingBuilds.get(sourceKey);
   if (existing !== undefined) {
@@ -381,27 +507,17 @@ export async function getOrBuildCorpus(
     // Ensure cache dir exists
     const dirOk = ensureCacheDir(cacheDir);
 
-    // Try to find an existing corpus for this source on disk.
-    // First scan metadata only (no .bin reads) to find a matching entry by source,
-    // then load the full corpus (including .bin) only for the single match.
+    // Look up corpusIds for this source via the source index
     if (dirOk) {
-      const entries = listCachedCorpora(cacheDir);
-      const match = entries.find(e => stableStringify(e.source) === sourceKey);
-      if (match !== undefined) {
-        const loaded = readCorpusFromDisk(cacheDir, match.corpusId, ttlMs, false);
+      const candidates = findInSourceIndex(cacheDir, sourceKey);
+      for (const candidate of candidates) {
+        const loaded = readCorpusFromDisk(cacheDir, candidate.corpusId, ttlMs, true);
         if (loaded !== null) {
-          // Actual cache hit — update lastAccessedAt now
-          try {
-            const mp = metaPath(cacheDir, match.corpusId);
-            const meta = JSON.parse(fs.readFileSync(mp, 'utf-8')) as CorpusMetadata;
-            meta.lastAccessedAt = Date.now();
-            fs.writeFileSync(mp, JSON.stringify(meta), 'utf-8');
-            loaded.lastAccessedAt = meta.lastAccessedAt;
-          } catch {
-            // non-fatal
-          }
+          // Return the disk-loaded corpus; update lastAccessedAt was done in readCorpusFromDisk
           return loaded;
         }
+        // If readCorpusFromDisk returned null (hash mismatch, schema mismatch, TTL expired),
+        // fall through to materialize
       }
     }
 
@@ -438,8 +554,8 @@ export async function getOrBuildCorpus(
         evictIfNeeded(cacheDir, ttlMs, maxCorpora, corpusId);
 
         const meta: CorpusMetadata = {
+          schemaVersion: SCHEMA_VERSION,
           corpusId,
-          source,
           contentHash,
           model,
           dimensions,
@@ -449,6 +565,14 @@ export async function getOrBuildCorpus(
           bm25Docs,
         };
         writeCorpus(cacheDir, meta, embeddings);
+
+        // Update the source index
+        addToSourceIndex(cacheDir, sourceKey, {
+          corpusId,
+          model,
+          dimensions,
+          createdAt: now,
+        });
       } catch (err) {
         logger.warn({ err, corpusId }, 'corpusCache: failed to write corpus to disk');
       }
@@ -481,7 +605,7 @@ export function loadCorpusById(
  * Subsequent calls to getOrBuildCorpus will re-materialize.
  *
  * Pass `source` to also cancel any in-flight build for that source
- * (the pendingBuilds key is stableStringify(source), not corpusId).
+ * (the pendingBuilds key is stableStringify(normalizeSource(source)), not corpusId).
  */
 export function invalidateCorpus(
   corpusId: string,
@@ -490,6 +614,6 @@ export function invalidateCorpus(
   const cacheDir = opts?.cacheDir ?? DEFAULT_CACHE_DIR;
   deleteCorpusFiles(cacheDir, corpusId);
   if (opts?.source !== undefined) {
-    pendingBuilds.delete(stableStringify(opts.source));
+    pendingBuilds.delete(stableStringify(normalizeSource(opts.source)));
   }
 }

@@ -10,10 +10,10 @@ export interface MarkdownChunk {
 }
 
 const HEADING_RE = /^(#{1,6})\s+(.*)$/;
-const MAX_TOKENS = 400;
-const MIN_TOKENS = 50;
-const TOKEN_RATIO = 4;
-const OVERLAP_RATIO = 0.2;
+export const MAX_TOKENS = 400;
+export const MIN_TOKENS = 50;
+export const TOKEN_RATIO = 4;
+export const OVERLAP_RATIO = 0.2;
 
 interface Section {
   depth: number;
