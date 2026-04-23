@@ -1,14 +1,18 @@
 import { logger } from '../logger.js';
 import { unavailableError, networkError, parseError } from '../errors.js';
 import { retryWithBackoff } from '../retry.js';
-import { safeResponseJson } from '../httpGuards.js';
+import { assertSafeUrl, safeResponseJson } from '../httpGuards.js';
 import { webCrawl, type WebCrawlOptions } from './webCrawl.js';
+import { webSearch } from './webSearch.js';
 import { chunkMarkdown } from '../chunking.js';
+import { parseSitemap, isSitemapIndex } from '../utils/sitemap.js';
+import { dedupPages } from '../utils/url.js';
 import type {
   SemanticCrawlResult,
   SemanticCrawlChunk,
   CorpusChunk,
   SemanticCrawlSource,
+  CrawlPageResult,
 } from '../types.js';
 import type { Crawl4aiConfig } from '../config.js';
 import { createHash } from 'node:crypto';
@@ -86,10 +90,9 @@ export async function embedTexts(
     }
 
     if (!response.ok) {
-      throw networkError(
-        `Embedding sidecar returned HTTP ${String(response.status)}`,
-        { statusCode: response.status },
-      );
+      throw networkError(`Embedding sidecar returned HTTP ${String(response.status)}`, {
+        statusCode: response.status,
+      });
     }
 
     raw = await safeResponseJson(response, endpoint);
@@ -131,10 +134,72 @@ async function embedTextsBatched(
   for (let i = 0; i < texts.length; i += MAX_EMBEDDING_BATCH) {
     const batchTexts = texts.slice(i, i + MAX_EMBEDDING_BATCH);
     const batchTitles = titles ? titles.slice(i, i + MAX_EMBEDDING_BATCH) : undefined;
-    const batchEmbeddings = await embedTexts(baseUrl, apiToken, batchTexts, mode, dimensions, batchTitles);
+    const batchEmbeddings = await embedTexts(
+      baseUrl,
+      apiToken,
+      batchTexts,
+      mode,
+      dimensions,
+      batchTitles,
+    );
     embeddings.push(...batchEmbeddings);
   }
   return embeddings;
+}
+
+// ── Semantic Coherence Filter ────────────────────────────────────────────
+
+interface ChunkWithEmbedding {
+  chunk: SemanticCrawlChunk;
+  embedding: number[];
+}
+
+export function isBorderline(chunk: SemanticCrawlChunk): boolean {
+  const text = chunk.text;
+  const linkMatches = text.match(/\[([^\]]+)\]\(([^)]+)\)/g);
+  const linkChars = linkMatches ? linkMatches.reduce((sum, m) => sum + m.length, 0) : 0;
+  const density = text.length > 0 ? linkChars / text.length : 0;
+
+  const lines = text.split('\n').filter((l) => l.trim().length > 0);
+  const totalWords = lines.reduce((sum, l) => sum + l.trim().split(/\s+/).length, 0);
+  const avgWords = lines.length > 0 ? totalWords / lines.length : 0;
+
+  return (density >= 0.2 && density < 0.4) || (avgWords >= 3 && avgWords < 5);
+}
+
+function filterBySemanticCoherence(chunkEmbeddings: ChunkWithEmbedding[]): SemanticCrawlChunk[] {
+  if (chunkEmbeddings.length === 0) return [];
+
+  const dim = chunkEmbeddings[0]!.embedding.length;
+  const centroid: number[] = new Array<number>(dim).fill(0);
+  for (const ce of chunkEmbeddings) {
+    for (let d = 0; d < dim; d++) {
+      centroid[d] = (centroid[d] ?? 0) + (ce.embedding[d] ?? 0);
+    }
+  }
+  for (let d = 0; d < dim; d++) {
+    centroid[d] = (centroid[d] ?? 0) / chunkEmbeddings.length;
+  }
+
+  let norm = 0;
+  for (let d = 0; d < dim; d++) {
+    const v = centroid[d] ?? 0;
+    norm += v * v;
+  }
+  norm = Math.sqrt(norm);
+  if (norm > 0) {
+    for (let d = 0; d < dim; d++) {
+      centroid[d] = (centroid[d] ?? 0) / norm;
+    }
+  }
+
+  const filtered = chunkEmbeddings.filter((ce) => {
+    if (!isBorderline(ce.chunk)) return true;
+    const sim = cosineSimilarity(centroid, ce.embedding);
+    return sim >= BOILERPLATE_CENTROID_THRESHOLD;
+  });
+
+  return filtered.map((ce) => ce.chunk);
 }
 
 // ── Embed-and-Rank Shared Helper ────────────────────────────────────────────
@@ -142,6 +207,7 @@ async function embedTextsBatched(
 const MAX_CHUNKS_SOFT = 2_000;
 const MAX_CHUNKS_HARD = 5_000;
 const RERANK_CANDIDATES = 30;
+const BOILERPLATE_CENTROID_THRESHOLD = 0.2;
 
 interface EmbedAndRankOptions {
   query: string;
@@ -183,7 +249,13 @@ export async function embedAndRank(
 
   // 3. Embed chunks (batched) and query in parallel
   const chunkTexts = deduped.map((c) => c.text);
-  const chunkTitles = deduped.map((c) => c.section.split(' > ').at(-1)?.replace(/^#+\s+/, '') ?? 'none');
+  const chunkTitles = deduped.map(
+    (c) =>
+      c.section
+        .split(' > ')
+        .at(-1)
+        ?.replace(/^#+\s+/, '') ?? 'none',
+  );
   const [chunkEmbeddings, queryEmbeddings] = await Promise.all([
     embedTextsBatched(
       opts.embeddingBaseUrl,
@@ -207,29 +279,41 @@ export async function embedAndRank(
   }
 
   // 4. Bi-encoder ranking (cosine similarity)
-  const ranked: SemanticCrawlChunk[] = [];
+  const paired: ChunkWithEmbedding[] = [];
   for (let i = 0; i < deduped.length; i++) {
     const chunk = deduped[i];
     const emb = chunkEmbeddings[i];
     if (!chunk || emb === undefined) continue;
-    ranked.push({
-      text: chunk.text,
-      url: chunk.url,
-      section: chunk.section,
-      biEncoderScore: cosineSimilarity(queryEmbedding, emb),
-      charOffset: chunk.charOffset,
-      chunkIndex: chunk.chunkIndex,
-      totalChunks: chunk.totalChunks,
+    paired.push({
+      chunk: {
+        text: chunk.text,
+        url: chunk.url,
+        section: chunk.section,
+        biEncoderScore: cosineSimilarity(queryEmbedding, emb),
+        charOffset: chunk.charOffset,
+        chunkIndex: chunk.chunkIndex,
+        totalChunks: chunk.totalChunks,
+      },
+      embedding: emb,
     });
   }
-  ranked.sort((a, b) => b.biEncoderScore - a.biEncoderScore);
+  paired.sort((a, b) => b.chunk.biEncoderScore - a.chunk.biEncoderScore);
 
-  // 5. Optional cross-encoder re-ranking
+  // 5. Semantic coherence filter (borderline off-topic chunks)
+  const coherent = filterBySemanticCoherence(paired);
+  if (coherent.length < paired.length) {
+    logger.info(
+      { before: paired.length, after: coherent.length },
+      'Semantic coherence filter removed off-topic chunks',
+    );
+  }
+
+  // 6. Optional cross-encoder re-ranking
   let topChunks: SemanticCrawlChunk[];
 
-  if (opts.useReranker !== false && ranked.length > 1) {
-    const rerankCount = Math.min(RERANK_CANDIDATES, ranked.length);
-    const candidates = ranked.slice(0, rerankCount);
+  if (opts.useReranker !== false && coherent.length > 1) {
+    const rerankCount = Math.min(RERANK_CANDIDATES, coherent.length);
+    const candidates = coherent.slice(0, rerankCount);
     const candidateTexts = candidates.map((c) => c.text);
 
     try {
@@ -253,10 +337,32 @@ export async function embedAndRank(
       topChunks = candidates.slice(0, opts.topK);
     }
   } else {
-    topChunks = ranked.slice(0, opts.topK);
+    topChunks = coherent.slice(0, opts.topK);
   }
 
   return topChunks;
+}
+
+export async function applyReranking(
+  query: string,
+  candidates: SemanticCrawlChunk[],
+  topK: number,
+): Promise<SemanticCrawlChunk[]> {
+  if (candidates.length <= topK) {
+    return candidates;
+  }
+  try {
+    const { rerank } = await import('../utils/rerank.js');
+    const candidateTexts = candidates.map((c) => c.text);
+    const reranked = await rerank(query, candidateTexts, { topK });
+    return reranked.map((r) => {
+      const candidate = candidates[r.index];
+      return candidate ? { ...candidate, rerankScore: r.score } : candidates[r.index]!;
+    });
+  } catch (err) {
+    logger.warn({ err }, 'Cross-encoder re-ranking failed, falling back to bi-encoder ranking');
+    return candidates.slice(0, topK);
+  }
 }
 
 function deduplicateCorpusChunks(chunks: CorpusChunk[]): CorpusChunk[] {
@@ -285,79 +391,92 @@ function cosineSimilarity(a: number[], b: number[]): number {
   return denom === 0 ? 0 : dot / denom;
 }
 
-// ── Semantic Crawl Orchestrator ─────────────────────────────────────────
+// ── Source Helpers ────────────────────────────────────────────────────────
 
-export interface SemanticCrawlOptions {
-  /** Discriminated source for the corpus. */
-  source: SemanticCrawlSource;
-  query: string;
-  topK: number;
-  strategy: 'bfs' | 'dfs';
-  maxDepth: number;
-  maxPages: number;
-  includeExternalLinks: boolean;
-  maxBytes?: number;
-  useReranker?: boolean;
+/** SSRF-validate every URL in a list, dropping unsafe ones. */
+function filterSafeUrls(urls: string[]): string[] {
+  const safe: string[] = [];
+  for (const u of urls) {
+    try {
+      assertSafeUrl(u);
+      safe.push(u);
+    } catch {
+      logger.warn({ url: u }, 'semantic_crawl: dropping unsafe adapter URL');
+    }
+  }
+  return safe;
 }
 
-export async function semanticCrawl(
-  opts: SemanticCrawlOptions,
+/** Divide a numeric budget across N seeds, with a floor of 1. */
+function divideBudget(total: number, seeds: number): number {
+  return Math.max(1, Math.ceil(total / seeds));
+}
+
+/** Crawl a list of seed URLs with per-seed budget division and sequential budget tracking. */
+async function crawlSeeds(
+  seedUrls: string[],
   crawl4aiCfg: Crawl4aiConfig,
-  embeddingBaseUrl: string,
-  embeddingApiToken: string,
-  embeddingDimensions: number,
-): Promise<SemanticCrawlResult> {
-  // 1. Resolve source → corpus chunks
-  let corpusChunks: CorpusChunk[];
-  let pagesCrawled: number;
-  let successfulPages: number;
-  let seedUrl: string;
+  opts: Pick<
+    SemanticCrawlOptions,
+    'strategy' | 'maxDepth' | 'maxPages' | 'includeExternalLinks' | 'maxBytes'
+  >,
+): Promise<{ pages: CrawlPageResult[]; totalPages: number; successfulPages: number }> {
+  if (seedUrls.length === 0) {
+    return { pages: [], totalPages: 0, successfulPages: 0 };
+  }
 
-  switch (opts.source.type) {
-    case 'url': {
-      seedUrl = opts.source.url;
-      const crawlOpts: WebCrawlOptions = {
-        strategy: opts.strategy,
-        maxDepth: opts.maxDepth,
-        maxPages: opts.maxPages,
-        includeExternalLinks: opts.includeExternalLinks,
-        ...(opts.maxBytes !== undefined ? { maxBytes: opts.maxBytes } : {}),
-      };
-      const crawlResult = await webCrawl(seedUrl, crawl4aiCfg.baseUrl, crawl4aiCfg.apiToken, crawlOpts);
-      corpusChunks = pagesToCorpus(crawlResult.pages);
-      pagesCrawled = crawlResult.totalPages;
-      successfulPages = crawlResult.successfulPages;
-      break;
-    }
+  const allPages: CrawlPageResult[] = [];
+  let totalPagesAttempted = 0;
+  let totalSuccessfulPages = 0;
 
-    default: {
-      // Fallback for sources not yet implemented (sitemap, search, github)
-      // This will be replaced in the next task with full adapter dispatch
-      throw new Error(`Source type '${opts.source.type}' is not yet implemented`);
+  // Sequential crawl with global budget tracking
+  let remainingPages = opts.maxPages;
+  let remainingBytes = opts.maxBytes ?? Infinity;
+
+  for (let i = 0; i < seedUrls.length; i++) {
+    const seedUrl = seedUrls[i];
+    if (seedUrl === undefined) continue;
+    if (remainingPages <= 0) break;
+
+    const remainingSeeds = seedUrls.length - i;
+    const perSeedPages = divideBudget(remainingPages, remainingSeeds);
+    const perSeedBytes =
+      remainingBytes !== Infinity ? divideBudget(remainingBytes, remainingSeeds) : undefined;
+
+    const crawlOpts: WebCrawlOptions = {
+      strategy: opts.strategy,
+      maxDepth: opts.maxDepth,
+      maxPages: perSeedPages,
+      includeExternalLinks: opts.includeExternalLinks,
+      ...(perSeedBytes !== undefined ? { maxBytes: perSeedBytes } : {}),
+    };
+
+    const result = await webCrawl(seedUrl, crawl4aiCfg.baseUrl, crawl4aiCfg.apiToken, crawlOpts);
+    totalPagesAttempted += result.totalPages;
+    totalSuccessfulPages += result.successfulPages;
+    allPages.push(...result.pages);
+
+    remainingPages -= result.totalPages;
+    if (perSeedBytes !== undefined) {
+      const bytesUsed = result.pages.reduce((sum, p) => sum + p.markdown.length, 0);
+      remainingBytes -= bytesUsed;
     }
   }
 
-  // 2. Embed and rank via shared helper
-  const topChunks = await embedAndRank(corpusChunks, {
-    query: opts.query,
-    topK: opts.topK,
-    ...(opts.useReranker !== undefined ? { useReranker: opts.useReranker } : {}),
-    embeddingBaseUrl,
-    embeddingApiToken,
-    embeddingDimensions,
-  });
+  // Deduplicate by URL across all seeds
+  const beforeDedup = allPages.length;
+  const deduped = dedupPages(allPages);
+  if (deduped.length < beforeDedup) {
+    logger.info(
+      { before: beforeDedup, after: deduped.length },
+      'Multi-URL crawl deduplicated pages by URL',
+    );
+  }
 
-  return {
-    seedUrl,
-    query: opts.query,
-    pagesCrawled,
-    totalChunks: corpusChunks.length,
-    successfulPages,
-    chunks: topChunks,
-  };
+  return { pages: deduped, totalPages: totalPagesAttempted, successfulPages: totalSuccessfulPages };
 }
 
-function pagesToCorpus(pages: import('../types.js').CrawlPageResult[]): CorpusChunk[] {
+function pagesToCorpus(pages: CrawlPageResult[]): CorpusChunk[] {
   const chunks: CorpusChunk[] = [];
   let pagesWithContent = 0;
   for (const page of pages) {
@@ -383,4 +502,196 @@ function pagesToCorpus(pages: import('../types.js').CrawlPageResult[]): CorpusCh
     );
   }
   return chunks;
+}
+
+// ── Semantic Crawl Orchestrator ─────────────────────────────────────────
+
+export interface SemanticCrawlOptions {
+  /** Discriminated source for the corpus. */
+  source: SemanticCrawlSource;
+  query: string;
+  topK: number;
+  strategy: 'bfs' | 'dfs';
+  maxDepth: number;
+  maxPages: number;
+  includeExternalLinks: boolean;
+  maxBytes?: number | undefined;
+  useReranker?: boolean | undefined;
+}
+
+export async function semanticCrawl(
+  opts: SemanticCrawlOptions,
+  crawl4aiCfg: Crawl4aiConfig,
+  embeddingBaseUrl: string,
+  embeddingApiToken: string,
+  embeddingDimensions: number,
+): Promise<SemanticCrawlResult> {
+  let corpusChunks: CorpusChunk[];
+  let pagesCrawled: number;
+  let successfulPages: number;
+  let seedUrl: string;
+
+  switch (opts.source.type) {
+    case 'url': {
+      seedUrl = opts.source.url;
+      const seedUrls =
+        opts.source.urls && opts.source.urls.length > 0
+          ? [opts.source.url, ...opts.source.urls]
+          : [opts.source.url];
+      const safeUrls = filterSafeUrls(seedUrls);
+      const result = await crawlSeeds(safeUrls, crawl4aiCfg, opts);
+      corpusChunks = pagesToCorpus(result.pages);
+      pagesCrawled = result.totalPages;
+      successfulPages = result.successfulPages;
+      break;
+    }
+
+    case 'sitemap': {
+      seedUrl = opts.source.url;
+      assertSafeUrl(seedUrl);
+      const response = await fetch(seedUrl, {
+        headers: { 'User-Agent': 'search-mcp/1.0' },
+        signal: AbortSignal.timeout(30_000),
+      });
+      if (!response.ok) {
+        throw new Error(`Sitemap fetch failed: HTTP ${String(response.status)} for ${seedUrl}`);
+      }
+      const xml = await response.text();
+      let sitemapUrls = parseSitemap(xml);
+
+      // If it's a sitemap index, fetch sub-sitemaps for page URLs
+      if (isSitemapIndex(xml) && sitemapUrls.length > 0) {
+        logger.info(
+          { sitemapUrl: seedUrl, subSitemaps: sitemapUrls.length },
+          'Sitemap is an index; fetching sub-sitemaps',
+        );
+        const pageUrls: string[] = [];
+        for (const subUrl of sitemapUrls.slice(0, 10)) {
+          try {
+            assertSafeUrl(subUrl);
+            const subResponse = await fetch(subUrl, {
+              headers: { 'User-Agent': 'search-mcp/1.0' },
+              signal: AbortSignal.timeout(30_000),
+            });
+            if (subResponse.ok) {
+              const subXml = await subResponse.text();
+              const subUrls = parseSitemap(subXml);
+              pageUrls.push(...subUrls);
+            }
+          } catch (err) {
+            logger.warn({ err, subUrl }, 'Failed to fetch sub-sitemap');
+          }
+        }
+        sitemapUrls = pageUrls;
+        logger.info(
+          { firstSub: sitemapUrls.length, urlsFound: sitemapUrls.length },
+          'Fetched sub-sitemaps',
+        );
+      }
+
+      const safeUrls = filterSafeUrls(sitemapUrls).slice(0, opts.maxPages);
+      logger.info(
+        { sitemapUrl: seedUrl, urlsFound: sitemapUrls.length, urlsUsed: safeUrls.length },
+        'Parsed sitemap',
+      );
+
+      // Sitemap URLs are the authoritative list — do not follow links
+      if (opts.maxDepth > 0) {
+        logger.warn(
+          { requestedDepth: opts.maxDepth },
+          'semantic_crawl: sitemap mode ignores maxDepth > 0, forcing depth 0',
+        );
+      }
+      const sitemapOpts = { ...opts, maxDepth: 0 };
+      const result = await crawlSeeds(safeUrls, crawl4aiCfg, sitemapOpts);
+      corpusChunks = pagesToCorpus(result.pages);
+      pagesCrawled = result.totalPages;
+      successfulPages = result.successfulPages;
+      break;
+    }
+
+    case 'search': {
+      seedUrl = opts.source.query;
+      const searchResults = await webSearch(
+        opts.source.query,
+        opts.source.maxSeedUrls ?? 10,
+        'moderate',
+      );
+      const searchUrls = searchResults.map((r) => r.url).filter((url) => url.length > 0);
+      const safeUrls = filterSafeUrls(searchUrls).slice(0, opts.maxPages);
+      logger.info(
+        { searchQuery: opts.source.query, urlsFound: searchUrls.length, urlsUsed: safeUrls.length },
+        'Search-then-crawl: discovered URLs',
+      );
+
+      // Search-derived URLs are the target pages — do not follow links
+      if (opts.maxDepth > 0) {
+        logger.warn(
+          { requestedDepth: opts.maxDepth },
+          'semantic_crawl: search mode ignores maxDepth > 0, forcing depth 0',
+        );
+      }
+      const searchOpts = { ...opts, maxDepth: 0 };
+      const result = await crawlSeeds(safeUrls, crawl4aiCfg, searchOpts);
+      corpusChunks = pagesToCorpus(result.pages);
+      pagesCrawled = result.totalPages;
+      successfulPages = result.successfulPages;
+      break;
+    }
+
+    case 'github': {
+      seedUrl = `https://github.com/${opts.source.owner}/${opts.source.repo}`;
+      const { fetchGitHubCorpus } = await import('../utils/githubCorpus.js');
+      const ghOpts: import('../utils/githubCorpus.js').GitHubCorpusOptions = {
+        owner: opts.source.owner,
+        repo: opts.source.repo,
+        maxFiles: opts.maxPages,
+      };
+      if (opts.source.branch !== undefined) ghOpts.branch = opts.source.branch;
+      if (opts.source.extensions !== undefined) ghOpts.extensions = opts.source.extensions;
+      if (opts.source.query !== undefined) ghOpts.query = opts.source.query;
+      const docs = await fetchGitHubCorpus(ghOpts);
+      corpusChunks = [];
+      for (const doc of docs) {
+        const chunks = chunkMarkdown(doc.content, doc.url);
+        corpusChunks.push(
+          ...chunks.map((c) => ({
+            text: c.content,
+            url: c.url,
+            section: `${doc.path} > ${c.section}`,
+            charOffset: c.charOffset,
+            chunkIndex: c.chunkIndex,
+            totalChunks: c.totalChunks,
+          })),
+        );
+      }
+      pagesCrawled = docs.length;
+      successfulPages = docs.length;
+      break;
+    }
+
+    default: {
+      // Exhaustiveness check — TypeScript should prevent this at compile time
+      throw new Error(`Unknown source type '${(opts.source as { type: string }).type}'`);
+    }
+  }
+
+  // Embed and rank via shared helper
+  const topChunks = await embedAndRank(corpusChunks, {
+    query: opts.query,
+    topK: opts.topK,
+    ...(opts.useReranker !== undefined ? { useReranker: opts.useReranker } : {}),
+    embeddingBaseUrl,
+    embeddingApiToken,
+    embeddingDimensions,
+  });
+
+  return {
+    seedUrl,
+    query: opts.query,
+    pagesCrawled,
+    totalChunks: corpusChunks.length,
+    successfulPages,
+    chunks: topChunks,
+  };
 }
