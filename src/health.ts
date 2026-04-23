@@ -218,6 +218,78 @@ function checkRateLimit(backend: RateLimitedBackend): ToolHealth | null {
 
 const PROBE_TIMEOUT_MS = 5_000;
 
+async function probeExtractionSupport(crawl4aiBaseUrl: string, apiToken: string): Promise<ToolHealth> {
+  const endpoint = `${crawl4aiBaseUrl.replace(/\/+$/, '')}/crawl`;
+  const body = {
+    urls: ['data:text/html,<html><body><div class="item">Test</div></body></html>'],
+    browser_config: { type: 'BrowserConfig', params: { headless: true } },
+    crawler_config: {
+      type: 'CrawlerRunConfig',
+      params: {
+        deep_crawl_strategy: {
+          type: 'BFSDeepCrawlStrategy',
+          params: { max_depth: 1, max_pages: 1, include_external: false },
+        },
+      },
+    },
+    extraction_config: {
+      type: 'JsonCssExtractionStrategy',
+      params: {
+        schema: {
+          name: 'Health Probe',
+          baseSelector: '.item',
+          fields: [{ name: 'text', selector: '.item', type: 'text' }],
+        },
+      },
+    },
+  };
+
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    'User-Agent': 'search-mcp/1.0',
+  };
+  if (apiToken) headers.Authorization = `Bearer ${apiToken}`;
+
+  try {
+    const res = await fetch(endpoint, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(15_000),
+    });
+
+    if (!res.ok) {
+      return {
+        status: 'degraded',
+        message: `Crawl4AI sidecar returned HTTP ${String(res.status)} during extraction probe.`,
+        remediation: 'Check that the Crawl4AI sidecar is running and healthy.',
+      };
+    }
+
+    const raw = (await res.json()) as { result?: { extracted_content?: unknown }; results?: { extracted_content?: unknown }[] };
+    const page = raw.result ?? raw.results?.[0];
+    if (page && 'extracted_content' in page) {
+      return {
+        status: 'healthy',
+        message: 'Crawl4AI sidecar supports structured data extraction (v0.8.x+).',
+      };
+    }
+
+    return {
+      status: 'degraded',
+      message: 'Crawl4AI sidecar does not report extraction support.',
+      remediation: 'Upgrade Crawl4AI sidecar to v0.8.x or later for extraction support.',
+    };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return {
+      status: 'unreachable',
+      message: `Extraction probe failed: ${msg}`,
+      remediation: 'Check network connectivity to the Crawl4AI sidecar.',
+    };
+  }
+}
+
 async function probeUrl(url: string): Promise<number> {
   const start = Date.now();
   const controller = new AbortController();
@@ -360,6 +432,13 @@ export async function runHealthProbes(cfg: SearchConfig): Promise<HealthReport> 
         };
       }
     }
+  }
+
+  // Extraction capability probe (only when crawl4ai is configured)
+  if (cfg.crawl4ai.baseUrl.length > 0) {
+    const extractionHealth = await probeExtractionSupport(cfg.crawl4ai.baseUrl, cfg.crawl4ai.apiToken);
+    tools.web_crawl_extraction = extractionHealth;
+    tools.semantic_crawl_extraction = extractionHealth;
   }
 
   // Compute overall status keyed on web_search as primary
