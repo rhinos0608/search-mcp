@@ -36,4 +36,37 @@ describe('isCookieBannerPage', () => {
     ].join('\n');
     assert.strictEqual(isCookieBannerPage(md), true);
   });
+
+  it('detects German cookie banner', () => {
+    const md = [
+      'Cookie-Einstellungen',
+      'Wir verwenden Cookies, um Ihre Erfahrung zu verbessern.',
+      'Datenschutz ist uns wichtig.',
+      'Bitte akzeptieren Sie alle Cookies, um fortzufahren.',
+      'Normaler Inhalt.',
+    ].join('\n');
+    assert.strictEqual(isCookieBannerPage(md), true);
+  });
+
+  it('detects French cookie banner', () => {
+    const md = [
+      'Paramètres de cookies',
+      'Nous utilisons des cookies pour améliorer votre expérience.',
+      'La confidentialité est importante.',
+      'Accepter les cookies pour continuer.',
+      'Contenu normal.',
+    ].join('\n');
+    assert.strictEqual(isCookieBannerPage(md), true);
+  });
+
+  it('detects Spanish cookie banner', () => {
+    const md = [
+      'Configuración de cookies',
+      'Usamos cookies para mejorar su experiencia.',
+      'La privacidad es importante.',
+      'Aceptar cookies para continuar.',
+      'Contenido normal.',
+    ].join('\n');
+    assert.strictEqual(isCookieBannerPage(md), true);
+  });
 });

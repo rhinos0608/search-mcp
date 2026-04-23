@@ -7,6 +7,15 @@ const EXACT_PATTERNS = [
   /Accept All Cookies/i,
   /We use cookies to/i,
   /By continuing to use this site/i,
+  // German
+  /Cookie-Einstellungen/i,
+  /Alle Cookies akzeptieren/i,
+  // French
+  /Accepter les cookies/i,
+  /Paramètres de cookies/i,
+  // Spanish
+  /Aceptar cookies/i,
+  /Configuraci[oó]n de cookies/i,
 ];
 
 export function isCookieBannerPage(markdown: string): boolean {
@@ -27,35 +36,37 @@ export function isCookieBannerPage(markdown: string): boolean {
 
   let consecutive = 0;
   let hasButton = false;
+  let exactInStreak = 0;
   let structuralLines = 0;
   for (let i = 0; i < lines.length; i++) {
-    if (exactIndices.has(i)) {
-      if (consecutive >= 3 && hasButton) {
-        structuralLines += consecutive;
-      }
-      consecutive = 0;
-      hasButton = false;
-      continue;
-    }
     const line = lines[i];
     if (line === undefined) continue;
     const lower = line.toLowerCase();
-    const hasKeyword = /\b(cookie|cookies|consent|privacy|tracking|gdpr|ccpa)\b/i.test(lower);
+    const isExact = exactIndices.has(i);
+    const hasKeyword =
+      isExact ||
+      /\b(cookie|cookies|consent|privacy|tracking|gdpr|ccpa)\b/i.test(lower) ||
+      /datenschutz|confidentialit[eé]|privacidad/i.test(lower);
     if (hasKeyword) {
       consecutive++;
-      if (/\b(accept|reject|manage)\b/i.test(lower)) {
+      if (isExact) exactInStreak++;
+      if (
+        /\b(accept|reject|manage)\b/i.test(lower) ||
+        /akzeptieren|accepter|aceptar|param[eè]tres|configuraci[oó]n|einstellungen/i.test(lower)
+      ) {
         hasButton = true;
       }
     } else {
       if (consecutive >= 3 && hasButton) {
-        structuralLines += consecutive;
+        structuralLines += consecutive - exactInStreak;
       }
       consecutive = 0;
       hasButton = false;
+      exactInStreak = 0;
     }
   }
   if (consecutive >= 3 && hasButton) {
-    structuralLines += consecutive;
+    structuralLines += consecutive - exactInStreak;
   }
 
   const totalBannerLines = bannerLines.length + structuralLines;
