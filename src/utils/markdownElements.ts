@@ -1,12 +1,16 @@
 import type { ContentElement } from '../types.js';
+import {
+  MAX_ELEMENTS,
+  MAX_RAW_ELEMENTS,
+  MAX_TEXT_LENGTH,
+  TRUNCATED_MARKER,
+  truncateElementText,
+} from './elementTruncation.js';
 
-export const MAX_ELEMENTS = 50;
-export const MAX_TEXT_LENGTH = 10000;
-export const TRUNCATED_MARKER = '... [truncated]';
+export { MAX_ELEMENTS, MAX_RAW_ELEMENTS, MAX_TEXT_LENGTH, TRUNCATED_MARKER };
 
 function truncateText(text: string): string {
-  if (text.length <= MAX_TEXT_LENGTH) return text;
-  return text.slice(0, MAX_TEXT_LENGTH) + TRUNCATED_MARKER;
+  return truncateElementText(text).value;
 }
 
 const HEADING_RE = /^(#{1,6})\s+(.+)$/;
@@ -30,7 +34,7 @@ export function extractElementsFromMarkdown(markdown: string): ContentElement[] 
   let i = 0;
 
   while (i < lines.length) {
-    if (elements.length >= MAX_ELEMENTS) break;
+    if (elements.length >= MAX_RAW_ELEMENTS) break;
 
     const line = lines[i];
     if (line === undefined) {
@@ -77,10 +81,15 @@ export function extractElementsFromMarkdown(markdown: string): ContentElement[] 
           contentLines.push(innerLine);
           i += 1;
         }
+        const truncatedContent = truncateElementText(contentLines.join('\n').trimEnd());
         elements.push({
           type: 'code',
           language: lang,
-          content: truncateText(contentLines.join('\n').trimEnd()),
+          content: truncatedContent.value,
+          ...(truncatedContent.truncated && {
+            truncated: truncatedContent.truncated,
+            originalLength: truncatedContent.originalLength,
+          }),
         });
         i += 1; // skip closing fence
         continue;
@@ -105,12 +114,18 @@ export function extractElementsFromMarkdown(markdown: string): ContentElement[] 
       const rows = tableLines.length;
       const firstLine = tableLines[0];
       const cols = rows > 0 && firstLine !== undefined ? countCols(firstLine) : 0;
+      const markdownValue = tableLines.join('\n');
+      const truncatedMarkdown = truncateElementText(markdownValue);
       elements.push({
         type: 'table',
-        markdown: truncateText(tableLines.join('\n')),
+        markdown: truncatedMarkdown.value,
         caption: null,
         rows,
         cols,
+        ...(truncatedMarkdown.truncated && {
+          truncated: truncatedMarkdown.truncated,
+          originalLength: truncatedMarkdown.originalLength,
+        }),
       });
       continue;
     }
@@ -185,7 +200,15 @@ export function extractElementsFromMarkdown(markdown: string): ContentElement[] 
     if (trimmed.length > 0) {
       const text = stripInlineCode(trimmed);
       if (text.length > 0) {
-        elements.push({ type: 'text', text: truncateText(text) });
+        const truncatedText = truncateElementText(text);
+        elements.push({
+          type: 'text',
+          text: truncatedText.value,
+          ...(truncatedText.truncated && {
+            truncated: truncatedText.truncated,
+            originalLength: truncatedText.originalLength,
+          }),
+        });
       }
     }
 

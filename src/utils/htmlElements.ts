@@ -1,19 +1,27 @@
 import type { ContentElement } from '../types.js';
+import {
+  MAX_ELEMENTS,
+  MAX_RAW_ELEMENTS,
+  MAX_TEXT_LENGTH,
+  TRUNCATED_MARKER,
+  truncateElementText,
+} from './elementTruncation.js';
 
-export const MAX_ELEMENTS = 50;
-export const MAX_TEXT_LENGTH = 10000;
-export const TRUNCATED_MARKER = '... [truncated]';
+export { MAX_ELEMENTS, MAX_RAW_ELEMENTS, MAX_TEXT_LENGTH, TRUNCATED_MARKER };
 
 function truncateText(text: string): string {
-  if (text.length <= MAX_TEXT_LENGTH) return text;
-  return text.slice(0, MAX_TEXT_LENGTH) + TRUNCATED_MARKER;
+  return truncateElementText(text).value;
 }
 
 function cellText(cell: Element): string {
   return cell.textContent.trim();
 }
 
-function tableToMarkdown(table: HTMLTableElement): { markdown: string; rows: number; cols: number } {
+function tableToMarkdown(table: HTMLTableElement): {
+  markdown: string;
+  rows: number;
+  cols: number;
+} {
   const rows = table.querySelectorAll('tr');
 
   // First pass: compute max columns across all rows
@@ -48,14 +56,36 @@ function headingId(el: HTMLHeadingElement): string | null {
 
 /** Tags we care about, in document order. */
 const TARGET_TAGS = new Set([
-  'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
-  'table', 'img', 'pre', 'ul', 'ol', 'p', 'div',
+  'h1',
+  'h2',
+  'h3',
+  'h4',
+  'h5',
+  'h6',
+  'table',
+  'img',
+  'pre',
+  'ul',
+  'ol',
+  'p',
+  'div',
 ]);
 
 /** Block-level tags that, if present as children, mean we skip this element as a leaf. */
 const BLOCK_TAGS = new Set([
-  'p', 'div', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
-  'table', 'ul', 'ol', 'pre', 'blockquote',
+  'p',
+  'div',
+  'h1',
+  'h2',
+  'h3',
+  'h4',
+  'h5',
+  'h6',
+  'table',
+  'ul',
+  'ol',
+  'pre',
+  'blockquote',
 ]);
 
 /** Tags to ignore entirely. */
@@ -66,7 +96,11 @@ const TARGET_SELECTOR = Array.from(TARGET_TAGS).join(',');
 function safeImageSrc(raw: string | null): string | null {
   if (raw === null) return null;
   const lower = raw.toLowerCase();
-  if (lower.startsWith('javascript:') || lower.startsWith('data:') || lower.startsWith('vbscript:')) {
+  if (
+    lower.startsWith('javascript:') ||
+    lower.startsWith('data:') ||
+    lower.startsWith('vbscript:')
+  ) {
     return null;
   }
   return raw;
@@ -78,7 +112,7 @@ export function extractElementsFromHtml(document: Document): ContentElement[] {
   const candidates = Array.from(document.body.querySelectorAll(TARGET_SELECTOR));
 
   for (const el of candidates) {
-    if (elements.length >= MAX_ELEMENTS) break;
+    if (elements.length >= MAX_RAW_ELEMENTS) break;
 
     // Skip if inside an ignored ancestor
     if (el.closest(Array.from(IGNORED_TAGS).join(','))) continue;
@@ -122,21 +156,28 @@ export function extractElementsFromHtml(document: Document): ContentElement[] {
       case 'table': {
         const captionEl = el.querySelector('caption');
         const { markdown, rows, cols } = tableToMarkdown(el as HTMLTableElement);
+        const truncatedMarkdown = truncateElementText(markdown);
         elements.push({
           type: 'table',
-          markdown: truncateText(markdown),
+          markdown: truncatedMarkdown.value,
           caption: captionEl ? truncateText(captionEl.textContent.trim()) : null,
           rows,
           cols,
+          ...(truncatedMarkdown.truncated && {
+            truncated: truncatedMarkdown.truncated,
+            originalLength: truncatedMarkdown.originalLength,
+          }),
         });
         break;
       }
 
       case 'img': {
         const img = el as HTMLImageElement;
+        const rawSrc = img.getAttribute('src');
+        const src = document.baseURI && document.baseURI !== 'about:blank' ? img.src : rawSrc;
         elements.push({
           type: 'image',
-          src: safeImageSrc(img.getAttribute('src')),
+          src: safeImageSrc(src),
           alt: truncateText(img.alt),
           title: truncateText(img.getAttribute('title') ?? ''),
         });
@@ -147,10 +188,15 @@ export function extractElementsFromHtml(document: Document): ContentElement[] {
         const code = el.querySelector('code');
         const content = code?.textContent ?? el.textContent;
         const cls = code?.getAttribute('class') ?? undefined;
+        const truncatedContent = truncateElementText(content.trim());
         elements.push({
           type: 'code',
           language: languageFromClass(cls),
-          content: truncateText(content.trim()),
+          content: truncatedContent.value,
+          ...(truncatedContent.truncated && {
+            truncated: truncatedContent.truncated,
+            originalLength: truncatedContent.originalLength,
+          }),
         });
         break;
       }
@@ -175,7 +221,15 @@ export function extractElementsFromHtml(document: Document): ContentElement[] {
         if (!hasBlockChild) {
           const text = el.textContent.trim();
           if (text.length > 0) {
-            elements.push({ type: 'text', text: truncateText(text) });
+            const truncatedText = truncateElementText(text);
+            elements.push({
+              type: 'text',
+              text: truncatedText.value,
+              ...(truncatedText.truncated && {
+                truncated: truncatedText.truncated,
+                originalLength: truncatedText.originalLength,
+              }),
+            });
           }
         }
         break;

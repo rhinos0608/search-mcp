@@ -35,6 +35,9 @@ export interface SearchResult {
 
 export interface StructuredContent {
   elements?: ContentElement[];
+  truncatedElements?: true;
+  originalElementCount?: number;
+  omittedElementCount?: number;
 }
 
 // ArticleResult — web read
@@ -61,6 +64,8 @@ export interface HeadingElement {
 export interface TextElement {
   type: 'text';
   text: string;
+  truncated?: true;
+  originalLength?: number;
 }
 
 export interface TableElement {
@@ -69,6 +74,8 @@ export interface TableElement {
   caption: string | null;
   rows: number;
   cols: number;
+  truncated?: true;
+  originalLength?: number;
 }
 
 export interface ImageElement {
@@ -82,6 +89,8 @@ export interface CodeElement {
   type: 'code';
   language: string | null;
   content: string;
+  truncated?: true;
+  originalLength?: number;
 }
 
 export interface ListElement {
@@ -505,7 +514,12 @@ export interface CachedSource {
   corpusId: string;
 }
 
-export type SemanticCrawlSource = UrlSource | SitemapSource | SearchSeedSource | GitHubSource | CachedSource;
+export type SemanticCrawlSource =
+  | UrlSource
+  | SitemapSource
+  | SearchSeedSource
+  | GitHubSource
+  | CachedSource;
 
 // ── Corpus Chunk (adapter output, before embed+rank) ───────────────────────
 
