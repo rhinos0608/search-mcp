@@ -11,9 +11,13 @@ import { logger } from '../logger.js';
 import { TRUNCATED_MARKER } from '../httpGuards.js';
 import { ToolCache, cacheKey } from '../cache.js';
 import type { YouTubeResult, TranscriptSegment } from '../types.js';
-import { wrapTextAsStructuredContent } from '../utils/elementHelpers.js';
+import { finalizeStructuredContent, wrapTextInElement } from '../utils/elementHelpers.js';
 
 const cache = new ToolCache<YouTubeResult>({ maxSize: 50, ttlMs: 7 * 24 * 60 * 60 * 1000 });
+
+export function transcriptSegmentsToStructuredContent(transcript: TranscriptSegment[]) {
+  return finalizeStructuredContent(transcript.flatMap((seg) => wrapTextInElement(seg.text)));
+}
 
 function extractVideoId(videoIdOrUrl: string): string {
   let id: string | null = null;
@@ -105,7 +109,7 @@ export async function getYouTubeTranscript(
     fullTextLength: fullText.length,
   });
 
-  const structured = wrapTextAsStructuredContent(fullText);
+  const structured = transcriptSegmentsToStructuredContent(allSegments);
 
   const result: YouTubeResult = {
     videoId,

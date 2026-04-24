@@ -61,6 +61,7 @@ test('getGitHubRepoFile returns decoded content when raw=true', async () => {
   assert.equal(result.truncated, false);
   assert.equal(result.isBinary, false);
   assert.equal(result.htmlUrl, 'https://github.com/o/r/blob/main/hello.txt');
+  assert.deepEqual(result.elements, [{ type: 'code', language: 'text', content: fileContent }]);
 });
 
 test('getGitHubRepoFile emits a code element for decoded raw content', async () => {
@@ -110,6 +111,7 @@ test('getGitHubRepoFile returns base64 when raw=false', async () => {
   assert.equal(result.encoding, 'base64');
   assert.equal(result.content, encoded);
   assert.equal(result.isBinary, false);
+  assert.deepEqual(result.elements, [{ type: 'code', language: 'text', content: fileContent }]);
 });
 
 test('getGitHubRepoFile emits code elements from decoded content when raw=false', async () => {

@@ -113,6 +113,59 @@ test('webRead extracts rich elements in fallback path', async () => {
   assert.ok(image, 'should extract image in fallback');
 });
 
+test('webRead emits finalized truncation metadata for over-budget article elements', async () => {
+  const paragraphs = Array.from(
+    { length: MAX_ELEMENTS + 5 },
+    (_, idx) => `<p>Paragraph ${idx}</p>`,
+  ).join('');
+  const html = `<!DOCTYPE html>
+<html>
+<head><title>Long Article</title></head>
+<body>
+  <article>
+    ${paragraphs}
+    <h2>Late high-signal heading</h2>
+  </article>
+</body>
+</html>`;
+
+  globalThis.fetch = async () => makeHtmlResponse(html);
+
+  const result = await webRead('https://example.com/long');
+
+  assert.equal(result.elements?.length, MAX_ELEMENTS);
+  assert.equal(result.truncatedElements, true);
+  assert.ok(result.originalElementCount !== undefined);
+  assert.ok(result.originalElementCount > MAX_ELEMENTS);
+  assert.equal(result.omittedElementCount, result.originalElementCount - MAX_ELEMENTS);
+  assert.equal(result.elements?.at(-1)?.type, 'heading');
+});
+
+test('webRead extracts structured elements before applying content length caps', async () => {
+  const longIntro = 'a'.repeat(60_000);
+  const html = `<!DOCTYPE html>
+<html>
+<head><title>Long Capped Article</title></head>
+<body>
+  <article>
+    <p>${longIntro}</p>
+    <h2>Heading after capped content</h2>
+  </article>
+</body>
+</html>`;
+
+  globalThis.fetch = async () => makeHtmlResponse(html);
+
+  const result = await webRead('https://example.com/capped');
+
+  assert.ok(result.content.endsWith('... [truncated]'));
+  assert.ok(
+    result.elements?.some(
+      (element) => element.type === 'heading' && element.text === 'Heading after capped content',
+    ),
+  );
+});
+
 test('webRead elements are absent when content is unreadable', async () => {
   const html = `<!DOCTYPE html>
 <html><head><title>Empty</title></head><body></body></html>`;
