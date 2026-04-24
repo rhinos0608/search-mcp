@@ -1,10 +1,14 @@
 # AGENTS.md
 
-This file provides guidance to Codex (Codex.ai/code) when working with code in this repository.
+> **Version: 2.0.0** — Semantic overhaul: RAG pipeline, embedding sidecar, hybrid ranking, corpus cache, GitHub corpus adapter, structured crawl extraction.
+
+This file provides guidance to AI coding agents (Codex, OpenCode, etc.) when working with code in this repository.
 
 ## What This Is
 
-An MCP (Model Context Protocol) server that exposes web search, web reading, GitHub, YouTube, Reddit, Twitter/X, Product Hunt, patent, podcast, academic research, Hacker News, Stack Overflow, npm, PyPI, and news tools over stdio JSON-RPC. Clients like Codex Desktop or the Codex CLI connect via stdin/stdout; all logging goes to stderr.
+An MCP (Model Context Protocol) server that exposes web search, web reading, deep crawling, **semantic RAG search**, GitHub (repo, file, tree, search, corpus), YouTube, Reddit, Twitter/X, Product Hunt, patent, podcast, academic research, Hacker News, Stack Overflow, npm, PyPI, and news tools over stdio JSON-RPC. Clients connect via stdin/stdout; all logging goes to stderr.
+
+V2.0.0 adds a full retrieval pipeline: Crawl4AI-powered deep crawling → markdown chunking → embedding sidecar (document/query asymmetric) → BM25+ full-text index → RRF hybrid fusion → optional cross-encoder reranking → corpus cache. The `semantic_crawl` tool is the primary entry point; `github_repo_file`, `github_repo_search`, `github_repo_tree`, and `web_crawl` are supporting tools.
 
 ## Commands
 
@@ -30,36 +34,72 @@ Append `--json` (via `dev:json` / `start:json`) for structured JSON logging inst
 **Tool registration**: `src/server.ts` creates the `McpServer` and registers all tools inline with Zod input schemas. Each tool delegates to a function in `src/tools/`.
 
 **Tools** (one file each in `src/tools/`):
+
+_Search & Read_
 - `web_search` — Multi-backend search with fallback chain: primary backend (configured) → remaining backend. Supports Brave and SearXNG.
 - `web_read` — Fetches a URL and extracts article content via Mozilla Readability + jsdom.
-- `github_repo` — GitHub API (unauthenticated) for repo metadata, latest release, optional README.
-- `github_trending` — Scrapes github.com/trending with cheerio (no API).
+- `web_crawl` — Deep multi-page crawl via Crawl4AI (JS rendering). Returns raw markdown per page. Requires `CRAWL4AI_BASE_URL`.
+- `semantic_crawl` — Full RAG pipeline over a crawled corpus. Source types: `url`, `sitemap`, `search`, `github`, `cached`. Returns top-K semantically ranked chunks with bi-encoder, BM25, and RRF scores. Requires `CRAWL4AI_BASE_URL` + `EMBEDDING_SIDECAR_BASE_URL`.
+
+_GitHub_
+- `github_repo` — Repo metadata, latest release, optional README.
+- `github_repo_file` — Fetch raw content of a specific file from a GitHub repo.
+- `github_repo_search` — Search GitHub repos by query string.
+- `github_repo_tree` — Browse the directory tree of a GitHub repo at a given ref/path.
+- `github_trending` — Scrapes github.com/trending.
+
+_Video & Social_
+- `youtube_search` — YouTube Data API v3. Requires `YOUTUBE_API_KEY`. Pairs with `youtube_transcript`.
 - `youtube_transcript` — Fetches video captions via youtube-transcript library.
-- `reddit_search` — Reddit search via shared Reddit transport (`src/tools/redditClient.ts`): public JSON API by default, OAuth (`oauth.reddit.com`) when `REDDIT_CLIENT_ID` and `REDDIT_CLIENT_SECRET` are both set.
-- `reddit_comments` — Fetches a Reddit post plus a normalized comment tree via the same shared transport. Supports `url` / `permalink` / `subreddit`+`article` locators, focused subthreads via `comment`+`context`, and `sort` / `depth` / `limit` / `showMore` controls.
-- `twitter_search` — Searches Twitter/X via a configurable Nitter instance (cheerio scraping). Requires `NITTER_BASE_URL`.
-- `producthunt_search` — Product Hunt search via GraphQL API (with `PRODUCTHUNT_API_TOKEN`) or public leaderboard scraping fallback.
-- `patent_search` — USPTO PatentsView API for US patent search. Requires `PATENTSVIEW_API_KEY` (free registration).
-- `podcast_search` — ListenNotes API for podcast episode search. Requires `LISTENNOTES_API_KEY`.
-- `academic_search` — ArXiv API + Semantic Scholar API for academic paper search (free, no auth). Supports searching either or both with merged/deduplicated results.
-- `hackernews_search` — HN Algolia API for searching stories/comments (free, no auth). Supports type filtering, sort by relevance/date, and date range.
-- `youtube_search` — YouTube Data API v3 for video discovery. Returns video IDs + metadata. Requires `YOUTUBE_API_KEY`. Pairs with `youtube_transcript`.
-- `arxiv_search` — Fast direct ArXiv-only search with full date range filtering via `submittedDate`. Supports category filtering. Faster than `academic_search` for ArXiv-only queries.
-- `stackoverflow_search` — Stack Exchange API for searching questions. Supports tag filtering and accepted-answer filtering. Optional `STACKEXCHANGE_API_KEY` for higher rate limits.
-- `npm_search` — npm registry search API (free, no auth). Returns packages with metadata, scores, and repository links.
-- `pypi_search` — PyPI search via HTML scraping (cheerio) with top-result enrichment from PyPI JSON API (free, no auth).
-- `news_search` — GDELT Global Knowledge Graph API for news articles (free, no auth). Supports date range filtering and language selection.
+- `reddit_search` — Reddit search (public JSON API or OAuth).
+- `reddit_comments` — Reddit post + normalized comment tree.
+- `twitter_search` — Searches Twitter/X via Nitter (cheerio). Requires `NITTER_BASE_URL`.
 
-**Config resolution** (`src/config.ts`): encrypted file (`config.enc` + `SEARCH_MCP_CONFIG_KEY` env var) → individual env vars (`BRAVE_API_KEY`, `SEARXNG_BASE_URL`, `SEARCH_BACKEND`, `NITTER_BASE_URL`, `LISTENNOTES_API_KEY`, `PRODUCTHUNT_API_TOKEN`, `PATENTSVIEW_API_KEY`, `YOUTUBE_API_KEY`, `STACKEXCHANGE_API_KEY`, `REDDIT_CLIENT_ID`, `REDDIT_CLIENT_SECRET`, `REDDIT_USER_AGENT`) → defaults. Config is cached after first load. Reddit OAuth is optional: both `REDDIT_CLIENT_ID` and `REDDIT_CLIENT_SECRET` must be set to enable the OAuth path; setting exactly one is treated as invalid configuration (server starts, health reports degraded, Reddit tools throw `VALIDATION_ERROR` at first use).
+_Research & Discovery_
+- `academic_search` — ArXiv + Semantic Scholar (merged, deduplicated).
+- `arxiv_search` — ArXiv-only, faster, supports `submittedDate` + category filtering.
+- `hackernews_search` — HN Algolia API.
+- `stackoverflow_search` — Stack Exchange API.
+- `news_search` — GDELT Global Knowledge Graph API.
 
-**HTTP safety** (`src/httpGuards.ts`): SSRF protection (blocks private IPs, localhost, cloud metadata endpoints) and 10MB response size limits. All outbound HTTP in tools should use `assertSafeUrl` and `safeResponseText`/`safeResponseJson`.
+_Packages & Products_
+- `npm_search` — npm registry search.
+- `pypi_search` — PyPI search via HTML scraping + JSON API enrichment.
+- `producthunt_search` — Product Hunt via GraphQL or public leaderboard.
 
-**Tool response pattern**: Every tool handler wraps results in `ToolResult<T>` (data + meta with tool name, duration, timestamp), then returns `{ content: [{ type: "text", text: JSON.stringify(result) }] }`. Errors return `isError: true` with a sanitized (no stack trace) message.
+_Specialist_
+- `patent_search` — USPTO PatentsView API. Requires `PATENTSVIEW_API_KEY`.
+- `podcast_search` — ListenNotes API. Requires `LISTENNOTES_API_KEY`.
+
+**Config resolution** (`src/config.ts`): encrypted file (`config.enc` + `SEARCH_MCP_CONFIG_KEY`) → individual env vars → defaults. Config is cached after first load.
+
+Key env vars: `BRAVE_API_KEY`, `SEARXNG_BASE_URL`, `SEARCH_BACKEND`, `NITTER_BASE_URL`, `REDDIT_CLIENT_ID`, `REDDIT_CLIENT_SECRET`, `REDDIT_USER_AGENT`, `LISTENNOTES_API_KEY`, `PRODUCTHUNT_API_TOKEN`, `PATENTSVIEW_API_KEY`, `YOUTUBE_API_KEY`, `STACKEXCHANGE_API_KEY`, `CRAWL4AI_BASE_URL`, `CRAWL4AI_API_TOKEN`, `EMBEDDING_SIDECAR_BASE_URL`, `EMBEDDING_SIDECAR_API_TOKEN`, `EMBEDDING_DIMENSIONS`.
+
+Reddit OAuth requires both `REDDIT_CLIENT_ID` and `REDDIT_CLIENT_SECRET` — setting exactly one is invalid (health reports degraded, tools throw at first use).
+
+**Semantic pipeline** (`src/tools/semanticCrawl.ts` + `src/chunking.ts` + `src/utils/`):
+1. Crawl pages → strip cookie banners → `chunkMarkdown()` (400-token max, 20% overlap, atomic units for code/tables, boilerplate heuristics)
+2. Batch embed documents via sidecar (max 512/batch, asymmetric document/query mode)
+3. BM25+ index + bi-encoder cosine → RRF fusion → semantic coherence filter → soft lexical constraint
+4. Optional cross-encoder reranking (ONNX, local, default off)
+5. Corpus cache: 24h TTL, max 50 corpora, stores chunks + embeddings + BM25 index
+
+GitHub corpus: fetches files via GitHub API, chunks with path-prefixed sections. Code-aware path filter by extension.
+
+**Sidecar services** (`sidecar/`):
+- `sidecar/embedding/` — Python FastAPI server exposing `POST /embed`.
+- `sidecar/openai-embedding-proxy/` — OpenAI-compatible proxy routing `/v1/embeddings` to the sidecar.
+
+**HTTP safety** (`src/httpGuards.ts`): SSRF protection and 10MB response limits. Use `assertSafeUrl` and `safeResponseText`/`safeResponseJson` for all outbound HTTP. Sidecar URLs bypass SSRF guards (operator-configured).
+
+**Tool response pattern**: Every handler wraps in `ToolResult<T>` (data + meta), returns `{ content: [{ type: "text", text: JSON.stringify(result) }] }`. Errors: `isError: true` with sanitized message (no stack trace).
 
 ## Key Constraints
 
-- TypeScript strict mode with `exactOptionalPropertyTypes`, `noUncheckedIndexedAccess`, `noUnusedLocals`, `noUnusedParameters`
-- ESM-only (`"type": "module"` in package.json), all local imports need `.js` extension
+- TypeScript strict mode: `exactOptionalPropertyTypes`, `noUncheckedIndexedAccess`, `noUnusedLocals`, `noUnusedParameters`
+- ESM-only (`"type": "module"`), all local imports need `.js` extension
 - Zod v4 imported as `zod/v4`
-- youtube-transcript has a broken ESM export; the workaround imports directly from `youtube-transcript/dist/youtube-transcript.esm.js` with `@ts-expect-error`
+- youtube-transcript broken ESM: import directly from `youtube-transcript/dist/youtube-transcript.esm.js` with `@ts-expect-error`
 - `config.json` and `config.enc` are gitignored — never commit API keys
+- `rerank.ts` and `githubCorpus.ts` are dynamically imported — do not add static imports
+- Corpus cache is in-process only; `cached` source type only works within the same server process lifetime

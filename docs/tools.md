@@ -73,8 +73,15 @@ Fetch a URL and extract the main article text, stripping navigation, ads, and ot
   byline: string; // author line if detected
   siteName: string; // publication or site name if detected
   url: string; // the URL that was fetched
+  elements?: ContentElement[]; // typed headings, text, tables, images, code, lists
+  truncatedElements?: true; // present when element finalization omitted candidates
+  originalElementCount?: number; // candidate count before finalization
+  omittedElementCount?: number; // number of candidates omitted by finalization
 }
 ```
+
+`text`, `code`, and `table` elements may include `truncated: true` and `originalLength`
+when their payload field was shortened.
 
 ### Underlying approach
 

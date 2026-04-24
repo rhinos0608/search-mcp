@@ -1,32 +1,53 @@
 # Composition with RAG-Anything and Other Tools
 
-search-mcp now emits structured `ContentElement[]` arrays from `web_read` and `web_crawl` results. This page shows how to compose those elements into downstream pipelines.
+search-mcp emits structured `ContentElement[]` arrays from `web_read`, `web_crawl`, and several content-oriented tools. This page shows how to compose those elements into downstream pipelines.
 
 ## ContentElement Format
 
-Every successful `web_read` and `web_crawl` page includes an `elements` array:
+Structured content is optional. When present, it uses an `elements` array:
 
 ```ts
+type StructuredContent = {
+  elements?: ContentElement[];
+  truncatedElements?: true;
+  originalElementCount?: number;
+  omittedElementCount?: number;
+};
+
 type ContentElement =
   | { type: 'heading'; level: number; text: string; id: string | null }
-  | { type: 'text'; text: string }
-  | { type: 'table'; markdown: string; caption: string | null; rows: number; cols: number }
+  | { type: 'text'; text: string; truncated?: true; originalLength?: number }
+  | {
+      type: 'table';
+      markdown: string;
+      caption: string | null;
+      rows: number;
+      cols: number;
+      truncated?: true;
+      originalLength?: number;
+    }
   | { type: 'image'; src: string | null; alt: string; title: string | null }
-  | { type: 'code'; language: string | null; content: string }
+  | {
+      type: 'code';
+      language: string | null;
+      content: string;
+      truncated?: true;
+      originalLength?: number;
+    }
   | { type: 'list'; ordered: boolean; items: string[] };
 ```
 
-`elements` preserves document structure -- headings, tables, images, code blocks, and lists are all typed and accessible without re-parsing raw HTML or markdown.
+`elements` preserves document structure -- headings, tables, images, code blocks, and lists are all typed and accessible without re-parsing raw HTML or markdown. When more candidates are found than the response budget allows, `truncatedElements`, `originalElementCount`, and `omittedElementCount` describe the omission. Long text, code, and table payloads can also carry `truncated` plus `originalLength`.
 
 ## RAG-Anything (`HKUDS/RAG-Anything`)
 
 RAG-Anything accepts a pre-parsed `content_list` for multimodal ingestion. The types are compatible:
 
-| RAG-Anything `content_list` | search-mcp `ContentElement` |
-|----------------------------|----------------------------|
-| `{"type": "text", "text": ...}` | `{"type": "text", "text": ...}` |
-| `{"type": "image", "image": ..., "caption": ...}` | `{"type": "image", "src": ..., "alt": ...}` |
-| `{"type": "table", "html": ..., "text": ...}` | `{"type": "table", "markdown": ..., "rows": ..., "cols": ...}` |
+| RAG-Anything `content_list`                       | search-mcp `ContentElement`                                    |
+| ------------------------------------------------- | -------------------------------------------------------------- |
+| `{"type": "text", "text": ...}`                   | `{"type": "text", "text": ...}`                                |
+| `{"type": "image", "image": ..., "caption": ...}` | `{"type": "image", "src": ..., "alt": ...}`                    |
+| `{"type": "table", "html": ..., "text": ...}`     | `{"type": "table", "markdown": ..., "rows": ..., "cols": ...}` |
 
 ### web_read -> elements -> RAG-Anything
 
@@ -82,7 +103,7 @@ Because `web_crawl` already converts crawl4ai markdown into typed `ContentElemen
 
 ### github_repo_file -> code elements
 
-`github_repo_file` returns source code. You can wrap the returned `content` into a `ContentElement`-like structure:
+`github_repo_file` returns source code and, for text files, includes a `code` element built from the decoded file content:
 
 ```python
 file_result = mcp_call("github_repo_file", {
@@ -91,11 +112,7 @@ file_result = mcp_call("github_repo_file", {
     "path": "src/main.py"
 })
 
-element = {
-    "type": "code",
-    "language": "python",
-    "content": file_result["data"]["content"]
-}
+element = file_result["data"]["elements"][0]
 ```
 
 This is useful for feeding code chunks into RAG-Anything's knowledge graph for code-aware retrieval.
@@ -123,19 +140,17 @@ for comment in comments["data"]["comments"]:
 
 ### youtube_transcript -> text elements
 
-Transcript segments map cleanly to `text` elements:
+`youtube_transcript` includes one finalized `text` element for the returned transcript text. Use `transcript` when you need segment timing:
 
 ```python
 transcript = mcp_call("youtube_transcript", {"videoId": "dQw4w9WgXcQ"})
-elements = [
-    {"type": "text", "text": seg["text"]}
-    for seg in transcript["data"]["transcript"]
-]
+elements = transcript["data"].get("elements", [])
 ```
 
 ## Design Notes
 
 - `web_read` extracts elements from the **article content** (Readability path) or the **full page** (fallback path). In the Readability path, nav, ads, and sidebars are already stripped, so `elements` represents the actual article.
 - `web_crawl` extracts elements from crawl4ai's **markdown output**. This includes headings, tables, lists, code fences, and images found in the converted markdown.
-- Both tools include `elements` only when content was successfully extracted. Failed pages have `elements: undefined`.
+- Tools include `elements` only when structured content was successfully extracted. Failed or empty pages have `elements: undefined`.
+- Element finalization prefers headings, tables, code, lists, and images over low-value text when a page has more structural candidates than the response budget.
 - The `ContentElement` type is intentionally flat and simple -- it serializes cleanly over JSON-RPC and requires zero client-side dependencies to consume.
