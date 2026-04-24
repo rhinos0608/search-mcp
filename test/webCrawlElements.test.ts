@@ -1,6 +1,7 @@
 import test, { afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { webCrawl } from '../src/tools/webCrawl.js';
+import { MAX_ELEMENTS } from '../src/utils/htmlElements.js';
 
 const originalFetch = globalThis.fetch;
 
@@ -100,4 +101,37 @@ test('webCrawl does not include elements when markdown is empty', async () => {
 
   assert.ok(result.pages[0]);
   assert.equal(result.pages[0].elements, undefined);
+});
+
+test('webCrawl emits finalized omission metadata for over-budget markdown', async () => {
+  const paragraphs = Array.from({ length: MAX_ELEMENTS + 5 }, (_, i) => `Paragraph ${i}`).join(
+    '\n\n',
+  );
+  const markdown = `${paragraphs}\n\n## Late heading\n\n| A |\n|---|\n| B |\n`;
+
+  globalThis.fetch = async () =>
+    buildMockResponse({
+      result: {
+        url: 'https://example.com/over-budget',
+        success: true,
+        markdown,
+      },
+    });
+
+  const result = await webCrawl(
+    'https://example.com/over-budget',
+    'https://crawl4ai.example.com',
+    '',
+    defaultOpts,
+  );
+
+  const page = result.pages[0]!;
+  assert.equal(page.elements?.length, MAX_ELEMENTS);
+  assert.equal(page.truncatedElements, true);
+  assert.equal(page.originalElementCount, MAX_ELEMENTS + 7);
+  assert.equal(page.omittedElementCount, 7);
+  assert.ok(
+    page.elements?.some((element) => element.type === 'heading' && element.text === 'Late heading'),
+  );
+  assert.ok(page.elements?.some((element) => element.type === 'table'));
 });

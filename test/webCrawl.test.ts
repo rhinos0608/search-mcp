@@ -62,6 +62,8 @@ test('webCrawl returns markdown string unchanged when API returns markdown as a 
   );
 
   assert.ok(result.pages[0]);
+  assert.equal(result.successfulPages, 1);
+  assert.equal(result.pages[0].success, true);
   assert.equal(result.pages[0].markdown, '# Hello');
 });
 
@@ -86,6 +88,48 @@ test('webCrawl prefers fit_markdown over raw_markdown when markdown is an object
 
   assert.ok(result.pages[0]);
   assert.equal(result.pages[0].markdown, '# Fit');
+});
+
+test('webCrawl falls back to raw_markdown when fit_markdown is blank', async () => {
+  globalThis.fetch = async () =>
+    buildMockResponse({
+      result: {
+        url: 'https://example.com',
+        success: true,
+        markdown: { fit_markdown: '', raw_markdown: '# Raw\n\nUseful page content.' },
+      },
+    });
+
+  const result = await webCrawl(
+    'https://example.com',
+    'https://crawl4ai.example.com',
+    '',
+    defaultOpts,
+  );
+
+  assert.ok(result.pages[0]);
+  assert.equal(result.pages[0].markdown, '# Raw\n\nUseful page content.');
+});
+
+test('webCrawl treats contentful pages with omitted success flag as successful', async () => {
+  globalThis.fetch = async () =>
+    buildMockResponse({
+      result: {
+        url: 'https://example.com',
+        markdown: '# Content\n\nUseful page content.',
+      },
+    });
+
+  const result = await webCrawl(
+    'https://example.com',
+    'https://crawl4ai.example.com',
+    '',
+    defaultOpts,
+  );
+
+  assert.ok(result.pages[0]);
+  assert.equal(result.pages[0].success, true);
+  assert.equal(result.successfulPages, 1);
 });
 
 // ── Test 4: Deep crawl response with results array ────────────────────────────

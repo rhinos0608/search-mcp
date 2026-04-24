@@ -4,7 +4,7 @@ import { ToolCache, cacheKey } from '../cache.js';
 import { retryWithBackoff } from '../retry.js';
 import { unavailableError, timeoutError, ToolError } from '../errors.js';
 import type { StackOverflowQuestion } from '../types.js';
-import { safeExtractFromHtml } from '../utils/elementHelpers.js';
+import { safeStructuredFromHtml } from '../utils/elementHelpers.js';
 
 const SE_API_URL = 'https://api.stackexchange.com/2.3';
 const USER_AGENT = 'search-mcp/1.0';
@@ -148,7 +148,7 @@ export async function stackoverflowSearch(
 
       // Extract elements from raw HTML body (before stripping to plain text)
       const rawHtml = typeof q.body === 'string' ? q.body : '';
-      const elements = rawHtml.length > 0 ? safeExtractFromHtml(rawHtml) : undefined;
+      const structured = safeStructuredFromHtml(rawHtml);
 
       // Extract owner name
       let author = '';
@@ -175,7 +175,7 @@ export async function stackoverflowSearch(
         creationDate: typeof q.creation_date === 'number' ? q.creation_date : 0,
         author,
         viewCount: typeof q.view_count === 'number' ? q.view_count : 0,
-        ...(elements !== undefined && elements.length > 0 && { elements }),
+        ...structured,
       } satisfies StackOverflowQuestion;
     })
     .filter((q): q is StackOverflowQuestion => q !== null);

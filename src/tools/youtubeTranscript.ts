@@ -10,8 +10,8 @@ const YoutubeTranscript = (_ytModule as { YoutubeTranscript: typeof YoutubeTrans
 import { logger } from '../logger.js';
 import { TRUNCATED_MARKER } from '../httpGuards.js';
 import { ToolCache, cacheKey } from '../cache.js';
-import type { YouTubeResult, TranscriptSegment, ContentElement } from '../types.js';
-import { wrapTextInElement } from '../utils/elementHelpers.js';
+import type { YouTubeResult, TranscriptSegment } from '../types.js';
+import { wrapTextAsStructuredContent } from '../utils/elementHelpers.js';
 
 const cache = new ToolCache<YouTubeResult>({ maxSize: 50, ttlMs: 7 * 24 * 60 * 60 * 1000 });
 
@@ -105,14 +105,14 @@ export async function getYouTubeTranscript(
     fullTextLength: fullText.length,
   });
 
-  const elements: ContentElement[] = transcript.flatMap((seg) => wrapTextInElement(seg.text));
+  const structured = wrapTextAsStructuredContent(fullText);
 
   const result: YouTubeResult = {
     videoId,
     title: null,
     transcript,
     fullText,
-    ...(elements.length > 0 && { elements }),
+    ...structured,
   };
   cache.set(key, result);
   return result;

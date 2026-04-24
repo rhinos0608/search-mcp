@@ -1,6 +1,7 @@
 import test, { afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { webRead } from '../src/tools/webRead.js';
+import { MAX_ELEMENTS } from '../src/utils/htmlElements.js';
 
 const originalFetch = globalThis.fetch;
 
@@ -140,4 +141,44 @@ test('webRead degrades gracefully when element extraction throws', async () => {
 
   assert.ok(result.elements === undefined || Array.isArray(result.elements));
   assert.equal(result.extractionMethod, 'readability');
+});
+
+test('webRead finalizes article elements and preserves relative image URL resolution', async () => {
+  const paragraphs = Array.from(
+    { length: MAX_ELEMENTS + 5 },
+    (_, i) => `<p>Paragraph ${i}</p>`,
+  ).join('');
+  const html = `<!DOCTYPE html>
+<html>
+<head><title>Large Article</title></head>
+<body>
+  <article>
+    ${paragraphs}
+    <h2>Late heading</h2>
+    <table><tr><th>A</th></tr><tr><td>B</td></tr></table>
+    <img src="/late.png" alt="late image">
+  </article>
+</body>
+</html>`;
+
+  globalThis.fetch = async () => makeHtmlResponse(html);
+
+  const result = await webRead('https://example.com/large-structured-article');
+
+  assert.equal(result.elements?.length, MAX_ELEMENTS);
+  assert.equal(result.truncatedElements, true);
+  assert.ok((result.originalElementCount ?? 0) > MAX_ELEMENTS);
+  assert.ok((result.omittedElementCount ?? 0) > 0);
+  assert.ok(
+    result.elements?.some(
+      (element) => element.type === 'heading' && element.text === 'Late heading',
+    ),
+  );
+  assert.ok(result.elements?.some((element) => element.type === 'table'));
+
+  const image = result.elements?.find((element) => element.type === 'image');
+  assert.equal(image?.type, 'image');
+  if (image?.type === 'image') {
+    assert.equal(image.src, 'https://example.com/late.png');
+  }
 });

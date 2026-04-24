@@ -6,7 +6,7 @@ import { parseError } from '../errors.js';
 import { ToolCache, cacheKey } from '../cache.js';
 import { retryWithBackoff } from '../retry.js';
 import type { ArticleResult } from '../types.js';
-import { extractElementsFromHtml } from '../utils/htmlElements.js';
+import { safeStructuredFromHtml } from '../utils/elementHelpers.js';
 
 const cache = new ToolCache<ArticleResult>({
   maxSize: 100,
@@ -146,17 +146,7 @@ export async function webRead(url: string): Promise<ArticleResult> {
         textContent = textContent.slice(0, MAX_CONTENT_LENGTH) + TRUNCATED_MARKER;
       }
 
-      let elements: import('../types.js').ContentElement[] | undefined;
-      try {
-        const articleDom = new JSDOM(content, { url });
-        try {
-          elements = extractElementsFromHtml(articleDom.window.document);
-        } finally {
-          articleDom.window.close();
-        }
-      } catch {
-        elements = undefined;
-      }
+      const structured = safeStructuredFromHtml(content, url);
 
       result = {
         title: article.title ?? metadata.title,
@@ -169,7 +159,7 @@ export async function webRead(url: string): Promise<ArticleResult> {
         description: metadata.description,
         publishedDate: metadata.publishedDate,
         image: metadata.image,
-        ...(elements !== undefined && elements.length > 0 && { elements }),
+        ...structured,
       };
     } else {
       readabilityDom.window.close();
@@ -194,12 +184,7 @@ export async function webRead(url: string): Promise<ArticleResult> {
           textContent = textContent.slice(0, MAX_CONTENT_LENGTH) + TRUNCATED_MARKER;
         }
 
-        let elements: import('../types.js').ContentElement[] | undefined;
-        try {
-          elements = extractElementsFromHtml(fallbackDom.window.document);
-        } catch {
-          elements = undefined;
-        }
+        const structured = safeStructuredFromHtml(html, url);
 
         result = {
           title: metadata.title,
@@ -212,7 +197,7 @@ export async function webRead(url: string): Promise<ArticleResult> {
           description: metadata.description,
           publishedDate: metadata.publishedDate,
           image: metadata.image,
-          ...(elements !== undefined && elements.length > 0 && { elements }),
+          ...structured,
         };
       } finally {
         fallbackDom.window.close();

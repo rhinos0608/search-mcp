@@ -6,7 +6,7 @@ import type { WebCrawlResult, CrawlPageResult } from '../types.js';
 import { dedupPages, dedupPagesByContent } from '../utils/url.js';
 import type { ExtractionConfig } from '../utils/extractionConfig.js';
 import { mapToCrawl4ai } from '../utils/extractionConfig.js';
-import { extractElementsFromMarkdown } from '../utils/markdownElements.js';
+import { safeStructuredFromMarkdown } from '../utils/elementHelpers.js';
 
 export interface WebCrawlOptions {
   strategy: 'bfs' | 'dfs';
@@ -60,7 +60,11 @@ function extractMarkdown(raw: Crawl4aiPage['markdown']): string {
   if (raw !== null && raw !== undefined && typeof raw === 'object') {
     // v0.8.x: prefer fit_markdown (content-extracted, nav stripped),
     // fall back to raw_markdown for completeness when extraction fails.
-    return raw.fit_markdown ?? raw.raw_markdown ?? '';
+    const fit = raw.fit_markdown?.trim();
+    if (fit) return raw.fit_markdown ?? '';
+    const rawMarkdown = raw.raw_markdown?.trim();
+    if (rawMarkdown) return raw.raw_markdown ?? '';
+    return '';
   }
   return '';
 }
@@ -84,11 +88,12 @@ function normalizePage(page: Crawl4aiPage): CrawlPageResult {
 
   const extractedData = parseExtractedData(page.extracted_content);
   const markdown = extractMarkdown(page.markdown);
-  const elements = markdown.length > 0 ? extractElementsFromMarkdown(markdown) : undefined;
+  const success = page.success ?? markdown.trim().length > 0;
+  const structured = safeStructuredFromMarkdown(markdown);
 
   return {
     url: page.url ?? '',
-    success: page.success ?? false,
+    success,
     markdown,
     title: page.metadata?.title ?? null,
     description: page.metadata?.description ?? null,
@@ -96,7 +101,7 @@ function normalizePage(page: Crawl4aiPage): CrawlPageResult {
     statusCode: page.status_code ?? null,
     errorMessage: page.error_message ?? null,
     ...(extractedData !== undefined && { extractedData }),
-    ...(elements !== undefined && elements.length > 0 && { elements }),
+    ...structured,
   };
 }
 
@@ -203,7 +208,11 @@ export async function webCrawl(
 
   // Detect unsupported sidecar when extractionConfig was provided but no extracted_content present
   if (opts.extractionConfig) {
-    const allPages = Array.isArray(data.results) ? data.results : data.result !== undefined ? [data.result] : [];
+    const allPages = Array.isArray(data.results)
+      ? data.results
+      : data.result !== undefined
+        ? [data.result]
+        : [];
     const anySuccessful = allPages.some((p) => p.success !== false);
     const anySuccessfulWithExtraction = allPages.some(
       (p) => p.success !== false && 'extracted_content' in p,
