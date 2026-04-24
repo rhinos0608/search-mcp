@@ -1,7 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { JSDOM } from 'jsdom';
-import { extractElementsFromHtml } from '../src/utils/htmlElements.js';
+import {
+  extractElementsFromHtml,
+  MAX_ELEMENTS,
+  MAX_TEXT_LENGTH,
+  TRUNCATED_MARKER,
+} from '../src/utils/htmlElements.js';
 import type { TableElement, ImageElement } from '../src/types.js';
 
 test('extracts headings with levels', () => {
@@ -15,7 +20,8 @@ test('extracts headings with levels', () => {
 });
 
 test('extracts table as markdown', () => {
-  const html = '<table><caption>Results</caption><tr><th>A</th><th>B</th></tr><tr><td>1</td><td>2</td></tr></table>';
+  const html =
+    '<table><caption>Results</caption><tr><th>A</th><th>B</th></tr><tr><td>1</td><td>2</td></tr></table>';
   const dom = new JSDOM(html);
   const elements = extractElementsFromHtml(dom.window.document);
 
@@ -83,7 +89,8 @@ test('converts inline code inside paragraphs to plain text', () => {
 });
 
 test('skips nav, header, and footer content', () => {
-  const html = '<nav>Nav link</nav><header>Header</header><main><p>Body</p></main><footer>Footer</footer>';
+  const html =
+    '<nav>Nav link</nav><header>Header</header><main><p>Body</p></main><footer>Footer</footer>';
   const dom = new JSDOM(html);
   const elements = extractElementsFromHtml(dom.window.document);
 
@@ -113,7 +120,8 @@ test('handles nested lists', () => {
 });
 
 test('handles nested tables', () => {
-  const html = '<table><tr><td><table><tr><th>X</th></tr><tr><td>1</td></tr></table></td></tr></table>';
+  const html =
+    '<table><tr><td><table><tr><th>X</th></tr><tr><td>1</td></tr></table></td></tr></table>';
   const dom = new JSDOM(html);
   const elements = extractElementsFromHtml(dom.window.document);
 
@@ -174,7 +182,8 @@ test('filters out empty table', () => {
 });
 
 test('filters dangerous image src schemes', () => {
-  const html = '<img src="javascript:alert(1)" alt="bad"><img src="data:text/html,foo" alt="also bad"><img src="/safe.png" alt="safe">';
+  const html =
+    '<img src="javascript:alert(1)" alt="bad"><img src="data:text/html,foo" alt="also bad"><img src="/safe.png" alt="safe">';
   const dom = new JSDOM(html);
   const elements = extractElementsFromHtml(dom.window.document);
 
@@ -182,4 +191,53 @@ test('filters dangerous image src schemes', () => {
   assert.equal((elements[0]! as ImageElement).src, null);
   assert.equal((elements[1]! as ImageElement).src, null);
   assert.equal((elements[2]! as ImageElement).src, '/safe.png');
+});
+
+test('keeps late high-signal candidates beyond final element budget', () => {
+  const paragraphs = Array.from(
+    { length: MAX_ELEMENTS + 5 },
+    (_, i) => `<p>Paragraph ${i}</p>`,
+  ).join('');
+  const html = `${paragraphs}<h2>Late heading</h2><table><tr><th>A</th></tr><tr><td>B</td></tr></table>`;
+  const dom = new JSDOM(html);
+  const elements = extractElementsFromHtml(dom.window.document);
+
+  assert.ok(elements.length > MAX_ELEMENTS);
+  assert.ok(
+    elements.some((element) => element.type === 'heading' && element.text === 'Late heading'),
+  );
+  assert.ok(elements.some((element) => element.type === 'table'));
+});
+
+test('annotates truncated text, code, and table markdown payloads', () => {
+  const longText = 'a'.repeat(MAX_TEXT_LENGTH + 10);
+  const html = `
+    <p>${longText}</p>
+    <pre><code>${longText}</code></pre>
+    <table><tr><td>${longText}</td></tr></table>
+  `;
+  const dom = new JSDOM(html);
+  const elements = extractElementsFromHtml(dom.window.document);
+
+  const text = elements.find((element) => element.type === 'text') as
+    | { type: 'text'; text: string; truncated?: true; originalLength?: number }
+    | undefined;
+  const code = elements.find((element) => element.type === 'code') as
+    | { type: 'code'; content: string; truncated?: true; originalLength?: number }
+    | undefined;
+  const table = elements.find((element) => element.type === 'table') as
+    | (TableElement & { truncated?: true; originalLength?: number })
+    | undefined;
+
+  assert.equal(text?.truncated, true);
+  assert.equal(text?.originalLength, longText.length);
+  assert.ok(text?.text.endsWith(TRUNCATED_MARKER));
+
+  assert.equal(code?.truncated, true);
+  assert.equal(code?.originalLength, longText.length);
+  assert.ok(code?.content.endsWith(TRUNCATED_MARKER));
+
+  assert.equal(table?.truncated, true);
+  assert.ok((table?.originalLength ?? 0) > MAX_TEXT_LENGTH);
+  assert.ok(table?.markdown.endsWith(TRUNCATED_MARKER));
 });

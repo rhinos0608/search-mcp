@@ -1,115 +1,129 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert';
-import { safeExtractFromHtml, safeExtractFromMarkdown, wrapTextInElement } from '../src/utils/elementHelpers.js';
+import {
+  finalizeStructuredContent,
+  safeStructuredFromHtml,
+  safeStructuredFromMarkdown,
+  wrapCodeAsStructuredContent,
+  wrapTextAsStructuredContent,
+} from '../src/utils/elementHelpers.js';
 import { MAX_ELEMENTS, MAX_TEXT_LENGTH, TRUNCATED_MARKER } from '../src/utils/htmlElements.js';
+import type { ContentElement } from '../src/types.js';
 
 describe('elementHelpers', () => {
-  describe('safeExtractFromHtml', () => {
-    it('should extract elements from valid HTML', () => {
-      const html = '<h1>Title</h1><p>Paragraph</p>';
-      const elements = safeExtractFromHtml(html);
-      assert.strictEqual(elements.length, 2);
-      assert.strictEqual(elements[0]?.type, 'heading');
-      assert.strictEqual(elements[1]?.type, 'text');
+  describe('safeStructuredFromHtml', () => {
+    it('extracts finalized elements from valid HTML', () => {
+      const structured = safeStructuredFromHtml('<h1>Title</h1><p>Paragraph</p>');
+      assert.strictEqual(structured.elements?.length, 2);
+      assert.strictEqual(structured.elements?.[0]?.type, 'heading');
+      assert.strictEqual(structured.elements?.[1]?.type, 'text');
+      assert.strictEqual(structured.truncatedElements, undefined);
     });
 
-    it('should respect MAX_ELEMENTS limit', () => {
-      let html = '';
-      for (let i = 0; i < MAX_ELEMENTS + 10; i++) {
-        html += `<p>Paragraph ${i}</p>`;
-      }
-      const elements = safeExtractFromHtml(html);
-      assert.strictEqual(elements.length, MAX_ELEMENTS);
-    });
-
-    it('should truncate long text', () => {
-      const longText = 'a'.repeat(MAX_TEXT_LENGTH + 100);
-      const html = `<p>${longText}</p>`;
-      const elements = safeExtractFromHtml(html);
-      assert.strictEqual(elements[0]?.type, 'text');
-      if (elements[0]?.type === 'text') {
-        assert.strictEqual(elements[0].text.length, MAX_TEXT_LENGTH + TRUNCATED_MARKER.length);
-        assert.ok(elements[0].text.endsWith(TRUNCATED_MARKER));
+    it('resolves relative image URLs when a base URL is provided', () => {
+      const structured = safeStructuredFromHtml(
+        '<img src="/pic.png" alt="diagram">',
+        'https://example.com/article',
+      );
+      const image = structured.elements?.[0];
+      assert.strictEqual(image?.type, 'image');
+      if (image?.type === 'image') {
+        assert.strictEqual(image.src, 'https://example.com/pic.png');
       }
     });
 
-    it('should truncate table markdown', () => {
-      const longText = 'a'.repeat(MAX_TEXT_LENGTH + 100);
-      const html = `<table><tr><td>${longText}</td></tr></table>`;
-      const elements = safeExtractFromHtml(html);
-      assert.strictEqual(elements[0]?.type, 'table');
-      if (elements[0]?.type === 'table') {
-        assert.ok(elements[0].markdown.length >= MAX_TEXT_LENGTH);
-        assert.ok(elements[0].markdown.endsWith(TRUNCATED_MARKER));
-      }
+    it('returns empty structured content for empty HTML', () => {
+      assert.deepStrictEqual(safeStructuredFromHtml(''), {});
+      assert.deepStrictEqual(safeStructuredFromHtml(null), {});
+      assert.deepStrictEqual(safeStructuredFromHtml(undefined), {});
     });
   });
 
-  describe('safeExtractFromMarkdown', () => {
-    it('should extract elements from valid markdown', () => {
-      const markdown = '# Title\n\nParagraph';
-      const elements = safeExtractFromMarkdown(markdown);
-      assert.strictEqual(elements.length, 2);
-      assert.strictEqual(elements[0]?.type, 'heading');
-      assert.strictEqual(elements[1]?.type, 'text');
+  describe('safeStructuredFromMarkdown', () => {
+    it('extracts finalized elements from valid markdown', () => {
+      const structured = safeStructuredFromMarkdown('# Title\n\nParagraph');
+      assert.strictEqual(structured.elements?.length, 2);
+      assert.strictEqual(structured.elements?.[0]?.type, 'heading');
+      assert.strictEqual(structured.elements?.[1]?.type, 'text');
+      assert.strictEqual(structured.truncatedElements, undefined);
     });
 
-    it('should respect MAX_ELEMENTS limit', () => {
-      let markdown = '';
-      for (let i = 0; i < MAX_ELEMENTS + 10; i++) {
-        markdown += `Paragraph ${i}\n\n`;
-      }
-      const elements = safeExtractFromMarkdown(markdown);
-      assert.strictEqual(elements.length, MAX_ELEMENTS);
-    });
-
-    it('should truncate long text', () => {
-      const longText = 'a'.repeat(MAX_TEXT_LENGTH + 100);
-      const markdown = longText;
-      const elements = safeExtractFromMarkdown(markdown);
-      assert.strictEqual(elements[0]?.type, 'text');
-      if (elements[0]?.type === 'text') {
-        assert.strictEqual(elements[0].text.length, MAX_TEXT_LENGTH + TRUNCATED_MARKER.length);
-        assert.ok(elements[0].text.endsWith(TRUNCATED_MARKER));
-      }
-    });
-
-    it('should truncate code content', () => {
-      const longText = 'a'.repeat(MAX_TEXT_LENGTH + 100);
-      const markdown = '```\n' + longText + '\n```';
-      const elements = safeExtractFromMarkdown(markdown);
-      assert.strictEqual(elements[0]?.type, 'code');
-      if (elements[0]?.type === 'code') {
-        assert.strictEqual(elements[0].content.length, MAX_TEXT_LENGTH + TRUNCATED_MARKER.length);
-        assert.ok(elements[0].content.endsWith(TRUNCATED_MARKER));
-      }
+    it('returns empty structured content for empty markdown', () => {
+      assert.deepStrictEqual(safeStructuredFromMarkdown(''), {});
+      assert.deepStrictEqual(safeStructuredFromMarkdown(null), {});
+      assert.deepStrictEqual(safeStructuredFromMarkdown(undefined), {});
     });
   });
 
-  describe('wrapTextInElement', () => {
-    it('should wrap text in a TextElement', () => {
-      const elements = wrapTextInElement('Hello world');
-      assert.strictEqual(elements.length, 1);
-      assert.strictEqual(elements[0]?.type, 'text');
-      if (elements[0]?.type === 'text') {
-        assert.strictEqual(elements[0].text, 'Hello world');
-      }
-    });
+  describe('finalizeStructuredContent', () => {
+    it('prioritizes structural elements over low-value text and restores original order', () => {
+      const lowValueText: ContentElement[] = Array.from({ length: MAX_ELEMENTS }, (_, i) => ({
+        type: 'text',
+        text: `Paragraph ${i}`,
+      }));
+      const candidates: ContentElement[] = [
+        lowValueText[0]!,
+        { type: 'heading', level: 2, text: 'Early heading', id: null },
+        ...lowValueText.slice(1),
+        { type: 'table', markdown: '| A |\n| --- |\n| B |', caption: null, rows: 2, cols: 1 },
+        { type: 'code', language: 'ts', content: 'const x = 1;' },
+      ];
 
-    it('should truncate wrapped text', () => {
+      const structured = finalizeStructuredContent(candidates);
+
+      assert.strictEqual(structured.elements?.length, MAX_ELEMENTS);
+      assert.strictEqual(structured.truncatedElements, true);
+      assert.strictEqual(structured.originalElementCount, candidates.length);
+      assert.strictEqual(structured.omittedElementCount, candidates.length - MAX_ELEMENTS);
+      assert.ok(structured.elements?.some((element) => element.type === 'heading'));
+      assert.ok(structured.elements?.some((element) => element.type === 'table'));
+      assert.ok(structured.elements?.some((element) => element.type === 'code'));
+
+      const headingIndex = structured.elements!.findIndex((element) => element.type === 'heading');
+      const tableIndex = structured.elements!.findIndex((element) => element.type === 'table');
+      const codeIndex = structured.elements!.findIndex((element) => element.type === 'code');
+      assert.ok(headingIndex < tableIndex);
+      assert.ok(tableIndex < codeIndex);
+    });
+  });
+
+  describe('wrappers', () => {
+    it('wraps long text with truncation metadata', () => {
       const longText = 'a'.repeat(MAX_TEXT_LENGTH + 100);
-      const elements = wrapTextInElement(longText);
-      assert.strictEqual(elements.length, 1);
-      if (elements[0]?.type === 'text') {
-        assert.strictEqual(elements[0].text.length, MAX_TEXT_LENGTH + TRUNCATED_MARKER.length);
-        assert.ok(elements[0].text.endsWith(TRUNCATED_MARKER));
-      }
+      const structured = wrapTextAsStructuredContent(longText);
+      const text = structured.elements?.[0] as
+        | { type: 'text'; text: string; truncated?: true; originalLength?: number }
+        | undefined;
+
+      assert.strictEqual(text?.type, 'text');
+      assert.strictEqual(text?.truncated, true);
+      assert.strictEqual(text?.originalLength, longText.length);
+      assert.ok(text?.text.endsWith(TRUNCATED_MARKER));
     });
 
-    it('should return empty array for empty text', () => {
-      assert.strictEqual(wrapTextInElement('').length, 0);
-      assert.strictEqual(wrapTextInElement(null).length, 0);
-      assert.strictEqual(wrapTextInElement(undefined).length, 0);
+    it('wraps code directly without text-element mutation', () => {
+      const longCode = 'x'.repeat(MAX_TEXT_LENGTH + 100);
+      const structured = wrapCodeAsStructuredContent(longCode, 'typescript');
+      const code = structured.elements?.[0] as
+        | {
+            type: 'code';
+            language: string | null;
+            content: string;
+            truncated?: true;
+            originalLength?: number;
+          }
+        | undefined;
+
+      assert.strictEqual(code?.type, 'code');
+      assert.strictEqual(code.language, 'typescript');
+      assert.strictEqual(code.truncated, true);
+      assert.strictEqual(code.originalLength, longCode.length);
+      assert.ok(code.content.endsWith(TRUNCATED_MARKER));
+    });
+
+    it('omits structured content for empty wrappers', () => {
+      assert.deepStrictEqual(wrapTextAsStructuredContent(''), {});
+      assert.deepStrictEqual(wrapCodeAsStructuredContent('', 'text'), {});
     });
   });
 });

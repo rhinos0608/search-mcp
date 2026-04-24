@@ -6,7 +6,7 @@ import { retryWithBackoff } from '../retry.js';
 import { assertRateLimitOk, getTracker } from '../rateLimit.js';
 import { rateLimitError, notFoundError, unavailableError, timeoutError } from '../errors.js';
 import type { GitHubRepo, GitHubRelease } from '../types.js';
-import { safeExtractFromMarkdown } from '../utils/elementHelpers.js';
+import { safeStructuredFromMarkdown } from '../utils/elementHelpers.js';
 
 const GITHUB_API = 'https://api.github.com';
 
@@ -227,7 +227,7 @@ export async function getGitHubRepo(
     ? rawTopics.filter((t): t is string => typeof t === 'string')
     : [];
 
-  const readmeElements = safeExtractFromMarkdown(readme);
+  const readmeStructured = safeStructuredFromMarkdown(readme);
 
   const result: GitHubRepo = {
     name: getString(repo_, 'name'),
@@ -245,7 +245,7 @@ export async function getGitHubRepo(
     latestRelease,
     readme,
     readmeError,
-    ...(readmeElements.length > 0 && { elements: readmeElements }),
+    ...readmeStructured,
   };
 
   cache.set(key, result);

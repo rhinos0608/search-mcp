@@ -1,6 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { extractElementsFromMarkdown } from '../src/utils/markdownElements.js';
+import {
+  extractElementsFromMarkdown,
+  MAX_ELEMENTS,
+  MAX_TEXT_LENGTH,
+  TRUNCATED_MARKER,
+} from '../src/utils/markdownElements.js';
 
 test('extracts headings', () => {
   const md = '# H1\n\n## H2\n\nparagraph\n';
@@ -152,4 +157,46 @@ test('handles list continuation lines', () => {
   assert.equal(list.type, 'list');
   assert.equal(list.items.length, 2);
   assert.ok(list.items[0]!.includes('continuation'));
+});
+
+test('keeps late high-signal candidates beyond final element budget', () => {
+  const paragraphs = Array.from({ length: MAX_ELEMENTS + 5 }, (_, i) => `Paragraph ${i}`).join(
+    '\n\n',
+  );
+  const md = `${paragraphs}\n\n## Late heading\n\n| A |\n|---|\n| B |\n`;
+  const elements = extractElementsFromMarkdown(md);
+
+  assert.ok(elements.length > MAX_ELEMENTS);
+  assert.ok(
+    elements.some((element) => element.type === 'heading' && element.text === 'Late heading'),
+  );
+  assert.ok(elements.some((element) => element.type === 'table'));
+});
+
+test('annotates truncated text, code, and table markdown payloads', () => {
+  const longText = 'a'.repeat(MAX_TEXT_LENGTH + 10);
+  const md = `${longText}\n\n\`\`\`ts\n${longText}\n\`\`\`\n\n| A |\n|---|\n| ${longText} |\n`;
+  const elements = extractElementsFromMarkdown(md);
+
+  const text = elements.find((element) => element.type === 'text') as
+    | { type: 'text'; text: string; truncated?: true; originalLength?: number }
+    | undefined;
+  const code = elements.find((element) => element.type === 'code') as
+    | { type: 'code'; content: string; truncated?: true; originalLength?: number }
+    | undefined;
+  const table = elements.find((element) => element.type === 'table') as
+    | { type: 'table'; markdown: string; truncated?: true; originalLength?: number }
+    | undefined;
+
+  assert.equal(text?.truncated, true);
+  assert.equal(text?.originalLength, longText.length);
+  assert.ok(text?.text.endsWith(TRUNCATED_MARKER));
+
+  assert.equal(code?.truncated, true);
+  assert.equal(code?.originalLength, longText.length);
+  assert.ok(code?.content.endsWith(TRUNCATED_MARKER));
+
+  assert.equal(table?.truncated, true);
+  assert.ok((table?.originalLength ?? 0) > MAX_TEXT_LENGTH);
+  assert.ok(table?.markdown.endsWith(TRUNCATED_MARKER));
 });

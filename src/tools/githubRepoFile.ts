@@ -23,7 +23,7 @@ import {
   validationError,
 } from '../errors.js';
 import type { GitHubFileResult } from '../types.js';
-import { wrapTextInElement } from '../utils/elementHelpers.js';
+import { wrapCodeAsStructuredContent } from '../utils/elementHelpers.js';
 
 const GITHUB_API = 'https://api.github.com';
 
@@ -638,10 +638,10 @@ export async function getGitHubRepoFile(
   }
 
   const totalLines = splitLines(decoded).length;
-  const codeElements = wrapTextInElement(finalContent);
-  if (codeElements.length > 0 && codeElements[0]?.type === 'text') {
-    codeElements[0] = { type: 'code', language: detectLanguage(path), content: codeElements[0].text };
-  }
+  const decodedFinalContent = truncated
+    ? decoded.slice(0, MAX_FILE_LENGTH) + TRUNCATED_MARKER
+    : decoded;
+  const structured = wrapCodeAsStructuredContent(decodedFinalContent, detectLanguage(path));
 
   return {
     name,
@@ -660,7 +660,7 @@ export async function getGitHubRepoFile(
     hasMore: truncated,
     byteOffset: null,
     byteLimit: null,
-    ...(codeElements.length > 0 && { elements: codeElements }),
+    ...structured,
   };
 }
 

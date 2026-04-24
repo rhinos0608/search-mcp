@@ -17,7 +17,10 @@ afterEach(() => {
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
-function buildMockResponse(body: unknown, init?: { status?: number; statusText?: string }): Response {
+function buildMockResponse(
+  body: unknown,
+  init?: { status?: number; statusText?: string },
+): Response {
   return new Response(JSON.stringify(body), {
     status: init?.status ?? 200,
     statusText: init?.statusText ?? 'OK',
@@ -60,6 +63,32 @@ test('getGitHubRepoFile returns decoded content when raw=true', async () => {
   assert.equal(result.htmlUrl, 'https://github.com/o/r/blob/main/hello.txt');
 });
 
+test('getGitHubRepoFile emits a code element for decoded raw content', async () => {
+  const fileContent = 'const answer: number = 42;';
+  const encoded = btoa(fileContent);
+
+  globalThis.fetch = async () =>
+    buildMockResponse({
+      name: 'answer.ts',
+      path: 'src/answer.ts',
+      sha: 'abc123',
+      size: encoded.length,
+      encoding: 'base64',
+      content: encoded,
+      html_url: 'https://github.com/o/r/blob/main/src/answer.ts',
+      url: 'https://api.github.com/repos/o/r/contents/src/answer.ts',
+    });
+
+  const result = await getGitHubRepoFile('o', 'r', 'src/answer.ts', 'main', true);
+
+  assert.equal(result.elements?.[0]?.type, 'code');
+  const code = result.elements?.[0];
+  if (code?.type === 'code') {
+    assert.equal(code.language, 'typescript');
+    assert.equal(code.content, fileContent);
+  }
+});
+
 test('getGitHubRepoFile returns base64 when raw=false', async () => {
   const fileContent = 'Hello, world!';
   const encoded = btoa(fileContent);
@@ -81,6 +110,34 @@ test('getGitHubRepoFile returns base64 when raw=false', async () => {
   assert.equal(result.encoding, 'base64');
   assert.equal(result.content, encoded);
   assert.equal(result.isBinary, false);
+});
+
+test('getGitHubRepoFile emits code elements from decoded content when raw=false', async () => {
+  const fileContent = 'print("hello")';
+  const encoded = btoa(fileContent);
+
+  globalThis.fetch = async () =>
+    buildMockResponse({
+      name: 'hello.py',
+      path: 'hello.py',
+      sha: 'abc123',
+      size: encoded.length,
+      encoding: 'base64',
+      content: encoded,
+      html_url: 'https://github.com/o/r/blob/main/hello.py',
+      url: 'https://api.github.com/repos/o/r/contents/hello.py',
+    });
+
+  const result = await getGitHubRepoFile('o', 'r', 'hello.py', 'main', false);
+
+  assert.equal(result.encoding, 'base64');
+  assert.equal(result.content, encoded);
+  assert.equal(result.elements?.[0]?.type, 'code');
+  const code = result.elements?.[0];
+  if (code?.type === 'code') {
+    assert.equal(code.language, 'python');
+    assert.equal(code.content, fileContent);
+  }
 });
 
 test('getGitHubRepoFile returns base64 when raw=true but file is binary', async () => {
@@ -291,9 +348,7 @@ test('getGitHubRepoFile throws validationError when symlink points to a director
       });
     } else {
       // Second call: target is a directory
-      return buildMockResponse([
-        { name: 'file.txt', path: 'subdir/file.txt', type: 'file' },
-      ]);
+      return buildMockResponse([{ name: 'file.txt', path: 'subdir/file.txt', type: 'file' }]);
     }
   };
 
@@ -360,9 +415,7 @@ test('getGitHubRepoFile throws validationError when symlink chain exceeds max de
     async () => getGitHubRepoFile('o', 'r', 'link1.txt', 'main'),
     (err: unknown) => {
       return (
-        err instanceof Error &&
-        /cycle|circular|depth/i.test(err.message) &&
-        /5/i.test(err.message)
+        err instanceof Error && /cycle|circular|depth/i.test(err.message) && /5/i.test(err.message)
       );
     },
   );
@@ -394,6 +447,13 @@ test('getGitHubRepoFile truncates files larger than 50 KB', async () => {
   assert.equal(result.truncated, true);
   assert.ok(result.content.length < encoded.length, 'Content should be shorter than full base64');
   assert.ok(result.content.endsWith(TRUNCATED_MARKER), 'Content should end with truncation marker');
+  assert.equal(result.elements?.[0]?.type, 'code');
+  const code = result.elements?.[0];
+  if (code?.type === 'code') {
+    assert.equal(code.truncated, true);
+    assert.ok((code.originalLength ?? 0) > 50_000);
+    assert.ok(code.content.endsWith(TRUNCATED_MARKER));
+  }
 });
 
 test('getGitHubRepoFile truncates large text file returned as base64 (raw=false)', async () => {
@@ -424,7 +484,17 @@ test('getGitHubRepoFile truncates large text file returned as base64 (raw=false)
   );
   // Decoding the truncated base64 should yield the truncated text with marker
   const decoded = Buffer.from(result.content, 'base64').toString('utf-8');
-  assert.ok(decoded.endsWith(TRUNCATED_MARKER), 'Decoded content should end with truncation marker');
+  assert.ok(
+    decoded.endsWith(TRUNCATED_MARKER),
+    'Decoded content should end with truncation marker',
+  );
+  assert.equal(result.elements?.[0]?.type, 'code');
+  const code = result.elements?.[0];
+  if (code?.type === 'code') {
+    assert.equal(code.truncated, true);
+    assert.equal(code.originalLength, decoded.length);
+    assert.ok(code.content.endsWith(TRUNCATED_MARKER));
+  }
 });
 
 test('getGitHubRepoFile truncates large binary file returned as base64', async () => {
@@ -725,7 +795,9 @@ test('getGitHubRepoFile throws validationError for line range with raw=false', a
   await assert.rejects(
     async () => getGitHubRepoFile('o', 'r', 'file.txt', 'main', false, 0, 10),
     (err: unknown) => {
-      return err instanceof Error && /line ranges/i.test(err.message) && /raw=true/i.test(err.message);
+      return (
+        err instanceof Error && /line ranges/i.test(err.message) && /raw=true/i.test(err.message)
+      );
     },
   );
 });
@@ -734,9 +806,7 @@ test('getGitHubRepoFile throws validationError when both line and byte ranges sp
   await assert.rejects(
     async () => getGitHubRepoFile('o', 'r', 'file.txt', 'main', true, 0, 10, 0, 100),
     (err: unknown) => {
-      return (
-        err instanceof Error && /both/i.test(err.message) && /line ranges/i.test(err.message)
-      );
+      return err instanceof Error && /both/i.test(err.message) && /line ranges/i.test(err.message);
     },
   );
 });
@@ -783,7 +853,17 @@ test('getGitHubRepoFile fetches byte range via raw.githubusercontent.com', async
     });
   };
 
-  const result = await getGitHubRepoFile('o', 'r', 'file.txt', 'main', true, undefined, undefined, 10, 10);
+  const result = await getGitHubRepoFile(
+    'o',
+    'r',
+    'file.txt',
+    'main',
+    true,
+    undefined,
+    undefined,
+    10,
+    10,
+  );
 
   assert.ok(fetchedUrl!.includes('raw.githubusercontent.com'));
   assert.equal(fetchedHeaders!.get('Range'), 'bytes=10-19');
