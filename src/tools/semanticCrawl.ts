@@ -12,6 +12,8 @@ import { rrfMerge } from '../utils/fusion.js';
 import { applySoftLexicalConstraint } from '../utils/lexicalConstraint.js';
 import { buildBm25Index, type Bm25Index } from '../utils/bm25.js';
 import { getOrBuildCorpus, loadCorpusById } from '../utils/corpusCache.js';
+import { finalizeStructuredContent } from '../utils/elementHelpers.js';
+import type { ContentElement, StructuredContent } from '../types.js';
 import type {
   SemanticCrawlResult,
   SemanticCrawlChunk,
@@ -777,6 +779,32 @@ export function pagesToCorpus(pages: CrawlPageResult[]): CorpusChunk[] {
   return chunks;
 }
 
+/** Collects and merges structured elements from all successful pages. */
+export function collectPageElements(pages: CrawlPageResult[]): StructuredContent {
+  const allElements: ContentElement[] = [];
+  let omittedCount = 0;
+  for (const page of pages) {
+    if (!page.success || !page.elements) continue;
+    for (const el of page.elements) {
+      if (el.type === 'text' && 'truncated' in el) {
+        omittedCount++;
+        continue;
+      }
+      allElements.push(el);
+    }
+  }
+  const merged = finalizeStructuredContent(allElements);
+  if (omittedCount > 0) {
+    const keptCount = merged.elements?.length ?? 0;
+    return {
+      ...merged,
+      originalElementCount: keptCount + omittedCount + (merged.omittedElementCount ?? 0),
+      omittedElementCount: omittedCount + (merged.omittedElementCount ?? 0),
+    };
+  }
+  return merged;
+}
+
 // ── Extracted Data Aggregation ───────────────────────────────────────────
 
 function aggregateExtractedData(pages: CrawlPageResult[]): Record<string, Record<string, unknown>[]> | undefined {
@@ -834,6 +862,8 @@ export async function semanticCrawl(
   let cachedCorpusId: string | undefined;
   // Aggregated extracted data from non-cached crawl sources
   let extractedData: Record<string, Record<string, unknown>[]> | undefined;
+  // Track latest pages for structured elements
+  let lastPages: CrawlPageResult[] = [];
 
   switch (opts.source.type) {
     case 'url': {
@@ -845,6 +875,7 @@ export async function semanticCrawl(
       const safeUrls = filterSafeUrls(seedUrls);
       const result = await crawlSeeds(safeUrls, crawl4aiCfg, opts);
       corpusChunks = pagesToCorpus(result.pages);
+      lastPages = result.pages;
       pagesCrawled = result.totalPages;
       successfulPages = result.successfulPages;
       extractedData = aggregateExtractedData(result.pages);
@@ -910,6 +941,7 @@ export async function semanticCrawl(
       const sitemapOpts = { ...opts, maxDepth: 0 };
       const result = await crawlSeeds(safeUrls, crawl4aiCfg, sitemapOpts);
       corpusChunks = pagesToCorpus(result.pages);
+      lastPages = result.pages;
       pagesCrawled = result.totalPages;
       successfulPages = result.successfulPages;
       extractedData = aggregateExtractedData(result.pages);
@@ -940,6 +972,7 @@ export async function semanticCrawl(
       const searchOpts = { ...opts, maxDepth: 0 };
       const result = await crawlSeeds(safeUrls, crawl4aiCfg, searchOpts);
       corpusChunks = pagesToCorpus(result.pages);
+      lastPages = result.pages;
       pagesCrawled = result.totalPages;
       successfulPages = result.successfulPages;
       extractedData = aggregateExtractedData(result.pages);
@@ -1012,6 +1045,7 @@ export async function semanticCrawl(
   if (opts.source.type === 'cached') {
     // Already loaded from cache — just use the pre-computed data directly.
     resolvedCorpusId = cachedCorpusId ?? opts.source.corpusId;
+    // Cached sources have no page-level elements (not persisted in corpus cache)
 
     const topChunks = await embedAndRank(corpusChunks, {
       query: opts.query,
@@ -1086,5 +1120,6 @@ export async function semanticCrawl(
     corpusId: resolvedCorpusId,
     chunks: topChunks,
     ...(extractedData ? { extractedData } : {}),
+    ...collectPageElements(lastPages),
   };
 }

@@ -12,6 +12,7 @@ import path from 'node:path';
 import os from 'node:os';
 import { createHash } from 'node:crypto';
 import {
+  computeCorpusId,
   getOrBuildCorpus,
   loadCorpusById,
   invalidateCorpus,
@@ -127,6 +128,82 @@ test('cache hit: second call does NOT invoke materializeFn again', async () => {
   await getOrBuildCorpus(TEST_SOURCE, materialize, { cacheDir });
 
   assert.equal(callCount, 1, `Expected materializeFn called exactly once, got ${callCount}`);
+});
+
+test('empty materializations are not persisted as cache hits', async () => {
+  const cacheDir = makeTmpCacheDir();
+  let callCount = 0;
+
+  const materialize = async () => {
+    callCount++;
+    return {
+      chunks: [],
+      embeddings: [],
+      model: '',
+      contentHash: computeContentHash([]),
+    };
+  };
+
+  const first = await getOrBuildCorpus(TEST_SOURCE, materialize, { cacheDir });
+  const second = await getOrBuildCorpus(TEST_SOURCE, materialize, { cacheDir });
+
+  assert.equal(callCount, 2, 'empty corpora should be rebuilt rather than served from cache');
+  assert.equal(first.chunks.length, 0);
+  assert.equal(second.chunks.length, 0);
+
+  const corpusFiles = fs
+    .readdirSync(cacheDir)
+    .filter((file) => file.endsWith('.json') || file.endsWith('.bin'));
+  assert.deepEqual(corpusFiles, [], 'empty corpora should not write metadata, embeddings, or source index files');
+});
+
+test('empty corpora already on disk are ignored and rebuilt', async () => {
+  const cacheDir = makeTmpCacheDir();
+  const oldCorpusId = computeCorpusId(TEST_SOURCE, '', 0);
+  const now = Date.now();
+  fs.writeFileSync(
+    path.join(cacheDir, `${oldCorpusId}.json`),
+    JSON.stringify({
+      schemaVersion: 1,
+      corpusId: oldCorpusId,
+      source: TEST_SOURCE,
+      contentHash: computeContentHash([]),
+      model: '',
+      dimensions: 0,
+      createdAt: now,
+      lastAccessedAt: now,
+      chunks: [],
+      bm25Docs: [],
+    }),
+  );
+  const emptyEmbeddings = Buffer.alloc(8);
+  emptyEmbeddings.writeUInt32LE(0, 0);
+  emptyEmbeddings.writeUInt32LE(0, 4);
+  fs.writeFileSync(path.join(cacheDir, `${oldCorpusId}.bin`), emptyEmbeddings);
+  fs.writeFileSync(
+    path.join(cacheDir, 'source-index.json'),
+    JSON.stringify({
+      '{"type":"url","url":"https://example.com"}': [
+        { corpusId: oldCorpusId, model: '', dimensions: 0, createdAt: now },
+      ],
+    }),
+  );
+
+  const chunks = makeChunks(['rebuilt content']);
+  const embeddings = makeEmbeddings(chunks);
+  let callCount = 0;
+  const corpus = await getOrBuildCorpus(
+    TEST_SOURCE,
+    async () => {
+      callCount++;
+      return { chunks, embeddings, model: 'm', contentHash: computeContentHash(chunks) };
+    },
+    { cacheDir },
+  );
+
+  assert.equal(callCount, 1, 'empty disk corpus should not be treated as a cache hit');
+  assert.equal(corpus.chunks.length, 1);
+  assert.equal(corpus.model, 'm');
 });
 
 // ────────────────────────────────────────────────────────────────────

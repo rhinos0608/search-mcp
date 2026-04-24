@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
 import {
   semanticCrawl,
+  collectPageElements,
   isBorderline,
   applyReranking,
   embedAndRank,
@@ -671,6 +672,101 @@ describe('integration: semantic-only regression', () => {
       assert.ok(typeof chunk.scores.bm25.raw === 'number');
       assert.ok(typeof chunk.scores.rrf.raw === 'number');
     }
+  });
+});
+
+describe('collectPageElements', () => {
+  const MAX_ELEMENTS = 50;
+
+  function makePage(overrides: Partial<CrawlPageResult> = {}): CrawlPageResult {
+    return {
+      url: 'https://example.com',
+      success: true,
+      markdown: '# Hello',
+      title: 'Test',
+      description: null,
+      links: [],
+      statusCode: 200,
+      errorMessage: null,
+      ...overrides,
+    };
+  }
+
+  it('returns empty object for pages with no elements', () => {
+    const result = collectPageElements([makePage()]);
+    assert.deepStrictEqual(result, {});
+  });
+
+  it('returns empty object for empty array', () => {
+    const result = collectPageElements([]);
+    assert.deepStrictEqual(result, {});
+  });
+
+  it('skips unsuccessful pages', () => {
+    const result = collectPageElements([
+      makePage({ success: false, elements: [{ type: 'text', text: 'hello' }] }),
+    ]);
+    assert.deepStrictEqual(result, {});
+  });
+
+  it('collects elements from successful pages', () => {
+    const result = collectPageElements([
+      makePage({
+        elements: [
+          { type: 'heading', level: 1, text: 'Title', id: null },
+          { type: 'text', text: 'body' },
+        ],
+      }),
+    ]);
+    assert.ok(result.elements);
+    assert.equal(result.elements!.length, 2);
+    assert.equal(result.elements![0]!.type, 'heading');
+    assert.equal(result.elements![1]!.type, 'text');
+  });
+
+  it('skips truncated text elements and adjusts counts', () => {
+    const result = collectPageElements([
+      makePage({
+        elements: [
+          { type: 'text', text: 'short' },
+          { type: 'text', text: 'long...', truncated: true, originalLength: 20000 },
+          { type: 'heading', level: 2, text: 'Section', id: null },
+        ],
+      }),
+    ]);
+    assert.ok(result.elements);
+    assert.equal(result.elements!.length, 2);
+    assert.equal(result.originalElementCount, 3);
+    assert.equal(result.omittedElementCount, 1);
+  });
+
+  it('merges elements from multiple pages', () => {
+    const result = collectPageElements([
+      makePage({
+        url: 'https://a.com',
+        elements: [{ type: 'text', text: 'from A' }],
+      }),
+      makePage({
+        url: 'https://b.com',
+        elements: [{ type: 'text', text: 'from B' }],
+      }),
+    ]);
+    assert.ok(result.elements);
+    assert.equal(result.elements!.length, 2);
+  });
+
+  it('finalizes when elements exceed MAX_ELEMENTS', () => {
+    const pages = Array.from({ length: MAX_ELEMENTS + 5 }, (_, i) =>
+      makePage({
+        url: `https://example.com/page${i}`,
+        elements: [{ type: 'text', text: `page ${i}` }],
+      }),
+    );
+    const result = collectPageElements(pages);
+    assert.ok(result.elements);
+    assert.equal(result.elements!.length, MAX_ELEMENTS);
+    assert.equal(result.truncatedElements, true);
+    assert.equal(result.originalElementCount, MAX_ELEMENTS + 5);
   });
 });
 

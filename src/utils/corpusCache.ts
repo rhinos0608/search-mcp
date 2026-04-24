@@ -365,6 +365,11 @@ function readCorpusFromDisk(
     return null;
   }
 
+  if (meta.chunks.length === 0) {
+    logger.warn({ corpusId }, 'corpusCache: ignoring empty corpus');
+    return null;
+  }
+
   let embeddings: number[][];
   try {
     const buf = fs.readFileSync(bp);
@@ -581,7 +586,7 @@ export async function getOrBuildCorpus(
       lastAccessedAt: now,
     };
 
-    if (dirOk) {
+    if (dirOk && chunks.length > 0) {
       try {
         evictIfNeeded(cacheDir, ttlMs, maxCorpora, corpusId);
 
@@ -609,6 +614,8 @@ export async function getOrBuildCorpus(
       } catch (err) {
         logger.warn({ err, corpusId }, 'corpusCache: failed to write corpus to disk');
       }
+    } else if (chunks.length === 0) {
+      logger.warn({ source }, 'corpusCache: not persisting empty corpus');
     }
 
     return corpus;

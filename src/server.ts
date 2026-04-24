@@ -115,7 +115,9 @@ function buildLlmFallback(
 }
 
 /** Build extraction warnings: pages that succeeded but returned no extractedData. */
-function extractionWarnings(data: { pages: { url: string; success: boolean; extractedData?: unknown }[] }): string[] {
+function extractionWarnings(data: {
+  pages: { url: string; success: boolean; extractedData?: unknown }[];
+}): string[] {
   const warnings: string[] = [];
   for (const page of data.pages) {
     if (page.success && !page.extractedData) {
@@ -150,7 +152,17 @@ function readabilityFallbackResult(
         links: [],
         statusCode: null,
         errorMessage: null,
-        ...(article.elements !== undefined && article.elements.length > 0 && { elements: article.elements }),
+        ...(article.elements !== undefined &&
+          article.elements.length > 0 && { elements: article.elements }),
+        ...(article.truncatedElements !== undefined && {
+          truncatedElements: article.truncatedElements,
+        }),
+        ...(article.originalElementCount !== undefined && {
+          originalElementCount: article.originalElementCount,
+        }),
+        ...(article.omittedElementCount !== undefined && {
+          omittedElementCount: article.omittedElementCount,
+        }),
       },
     ],
   };
@@ -278,7 +290,9 @@ export function createServer(): McpServer {
           warnings.push(...extractionWarnings(data));
         } else {
           if (extractionConfig) {
-            warnings.push('extractionConfig is ignored when crawl4ai is not configured (Readability fallback does not support structured extraction)');
+            warnings.push(
+              'extractionConfig is ignored when crawl4ai is not configured (Readability fallback does not support structured extraction)',
+            );
           }
           logger.debug('crawl4ai not configured — falling back to webRead (Readability)');
           const article = await webRead(url);
@@ -1297,7 +1311,7 @@ export function createServer(): McpServer {
             .optional()
             .describe(
               'Optional structured data extraction config. Supports css_schema, xpath_schema, regex, and llm strategies. ' +
-              'Requires Crawl4AI sidecar v0.8.x or later.',
+                'Requires Crawl4AI sidecar v0.8.x or later.',
             ),
           waitFor: z
             .string()
@@ -1311,7 +1325,9 @@ export function createServer(): McpServer {
             .max(30)
             .optional()
             .default(0.1)
-            .describe('Extra seconds to wait after page load for dynamic content to settle (0–30, default 0.1)'),
+            .describe(
+              'Extra seconds to wait after page load for dynamic content to settle (0–30, default 0.1)',
+            ),
           pageTimeout: z
             .number()
             .int()
@@ -1328,7 +1344,18 @@ export function createServer(): McpServer {
             ),
         },
       },
-      async ({ url, strategy, maxDepth, maxPages, includeExternalLinks, extractionConfig, waitFor, delayBeforeReturnHtml, pageTimeout, jsCode }) => {
+      async ({
+        url,
+        strategy,
+        maxDepth,
+        maxPages,
+        includeExternalLinks,
+        extractionConfig,
+        waitFor,
+        delayBeforeReturnHtml,
+        pageTimeout,
+        jsCode,
+      }) => {
         logger.info({ tool: 'web_crawl', url, strategy, maxDepth, maxPages }, 'Tool invoked');
         const start = Date.now();
         try {
@@ -1496,7 +1523,9 @@ export function createServer(): McpServer {
             .max(30)
             .optional()
             .default(0.1)
-            .describe('Extra seconds to wait after page load for dynamic content to settle (0–30, default 0.1)'),
+            .describe(
+              'Extra seconds to wait after page load for dynamic content to settle (0–30, default 0.1)',
+            ),
           pageTimeout: z
             .number()
             .int()
@@ -1542,7 +1571,9 @@ export function createServer(): McpServer {
 
           const warnings: string[] = [];
           if (source.type === 'cached' && extractionConfig) {
-            warnings.push('extractionConfig is ignored when using cached source (cached sources skip crawling)');
+            warnings.push(
+              'extractionConfig is ignored when using cached source (cached sources skip crawling)',
+            );
           }
 
           const llmFallback = buildLlmFallback(extractionConfig, cfg.llm);
