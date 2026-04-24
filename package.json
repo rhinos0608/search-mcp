@@ -1,6 +1,6 @@
 {
   "name": "search-mcp",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "description": "MCP server providing web search, web read, GitHub, YouTube, Reddit, Twitter/X, Product Hunt, patent, podcast, and academic research tools",
   "type": "module",
   "main": "dist/index.js",
@@ -27,6 +27,7 @@
     "@modelcontextprotocol/sdk": "^1.28.0",
     "@mozilla/readability": "^0.6.0",
     "cheerio": "^1.2.0",
+    "dotenv": "^16.4.0",
     "jsdom": "^29.0.1",
     "onnxruntime-node": "^1.24.3",
     "pino": "^9.0.0",
