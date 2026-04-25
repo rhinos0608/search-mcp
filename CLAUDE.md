@@ -8,7 +8,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 An MCP (Model Context Protocol) server that exposes web search, web reading, deep crawling, **semantic RAG search**, GitHub (repo, file, tree, search, corpus), YouTube, Reddit, Twitter/X, Product Hunt, patent, podcast, academic research, Hacker News, Stack Overflow, npm, PyPI, and news tools over stdio JSON-RPC. Clients like Claude Desktop or the Claude CLI connect via stdin/stdout; all logging goes to stderr.
 
-V3.0.0 extracts the retrieval pipeline into reusable `src/rag/` modules and adds two new semantic tools: `semantic_youtube` (search + transcripts + RAG) and `semantic_reddit` (search + comments + RAG). V3.0.5 adds the `semantic_jobs` tool with structured job listing extraction (SEEK, Indeed, Jora), three-layer dedup, and constraint-aware weighted ranking. The `semantic_crawl` tool remains the primary crawl entry point. The shared RAG core: bi-encoder embeddings → BM25+ → RRF fusion → top-K.
+V3.0.0 extracts the retrieval pipeline into reusable `src/rag/` modules and adds two new semantic tools: `semantic_youtube` (search + transcripts + RAG) and `semantic_reddit` (search + comments + RAG). V3.0.5 adds the `semantic_jobs` tool with structured job listing extraction (SEEK, Indeed, Jora), three-layer dedup, and constraint-aware weighted ranking. V3.1.0 adds `semantic_github_code` (AST-aware code search via lazy-loaded tree-sitter WASM grammars, lexical-heavy profile). The `semantic_crawl` tool remains the primary crawl entry point. The shared RAG core: bi-encoder embeddings → BM25+ → RRF fusion → top-K.
 
 ## Commands
 
@@ -52,6 +52,7 @@ _GitHub_
 - `github_repo_search` — Search GitHub repos by query string; returns ranked repo list with metadata.
 - `github_repo_tree` — Browse the directory tree of a GitHub repo at a given ref/path.
 - `github_trending` — Scrapes github.com/trending with cheerio (no API).
+- `semantic_github_code` — AST-aware code search over a GitHub repository. Chunks by function/class/method boundaries via lazy-loaded tree-sitter WASM grammars (TS, JS, Python, Go, Rust). Returns ranked code chunks with path, language, line range, symbol metadata, and RAG scores. Defaults to `lexical-heavy` profile. Requires `EMBEDDING_SIDECAR_BASE_URL`; `EMBEDDING_CODE_MODEL` is optional but recommended for conceptual queries.
 
 _Video & Social_
 
@@ -88,21 +89,25 @@ Key env vars:
 - Social: `NITTER_BASE_URL`, `REDDIT_CLIENT_ID`, `REDDIT_CLIENT_SECRET`, `REDDIT_USER_AGENT`
 - Specialist: `LISTENNOTES_API_KEY`, `PRODUCTHUNT_API_TOKEN`, `PATENTSVIEW_API_KEY`, `YOUTUBE_API_KEY`, `STACKEXCHANGE_API_KEY`
 - Crawl: `CRAWL4AI_BASE_URL`, `CRAWL4AI_API_TOKEN`
-- Embedding: `EMBEDDING_SIDECAR_BASE_URL`, `EMBEDDING_SIDECAR_API_TOKEN`, `EMBEDDING_DIMENSIONS` (default 768)
+- Embedding: `EMBEDDING_SIDECAR_BASE_URL`, `EMBEDDING_SIDECAR_API_TOKEN`, `EMBEDDING_DIMENSIONS` (default 768), `EMBEDDING_CODE_MODEL` (optional; code-tuned model endpoint for `semantic_github_code` — without it the tool warns and falls back to the prose model)
 - Persistence: `DATABASE_PATH` (SQLite corpus cache path; defaults under `~/.cache/search-mcp/semantic-crawl/`)
 
 Reddit OAuth is optional: both `REDDIT_CLIENT_ID` and `REDDIT_CLIENT_SECRET` must be set together; setting exactly one is treated as invalid configuration (server starts, health reports degraded, Reddit tools throw `VALIDATION_ERROR` at first use).
 
-**RAG core** (`src/rag/`): shared pipeline used by `semantic_crawl`, `semantic_youtube`, and `semantic_reddit`.
+**RAG core** (`src/rag/`): shared pipeline used by `semantic_crawl`, `semantic_youtube`, `semantic_reddit`, `semantic_jobs`, and `semantic_github_code`.
 
 - `types.ts` — `RagChunk`, `PreparedCorpus`, `RetrievalResponse`, `RetrievalProfileName`, etc.
 - `pipeline.ts` — `prepareCorpus()`, `retrieveCorpus()`, `prepareAndRetrieve()` (embedding → BM25 → RRF → top-K)
 - `embedding.ts` — `embedTexts()`, `embedTextsBatched()` (sidecar client, bypasses SSRF guard)
-- `profiles.ts` — `balanced`, `fast`, `precision`, `recall` retrieval profiles
+- `profiles.ts` — `balanced`, `lexical-heavy`, `semantic-heavy`, `high-precision`, `fast`, `precision`, `recall` retrieval profiles
 - `adapters/text.ts` — crawl pages → `RagChunk[]`
 - `adapters/transcript.ts` — YouTube transcript segments → `RagChunk[]`
 - `adapters/conversation.ts` — Reddit comment trees → `RagChunk[]` (filters deleted/removed, includes parent context)
 - `adapters/job.ts` — Job listing HTML → `JobListingMvp[]` (structured extraction: title, company, location, salary, work mode, caveats, confidence)
+- `adapters/code.ts` — Source files → `RagChunk[]` via tree-sitter AST (functions, classes, methods); defaults to `lexical-heavy` profile; falls back to text chunking on unsupported languages
+- `code/languages.ts` — Extension/shebang → language detection (`typescript`, `javascript`, `python`, `go`, `rust`, `markdown`, `shell`, `unknown`)
+- `code/treeSitter.ts` — Lazy WASM grammar loader (one parser instance per language, loaded on first use)
+- `code/symbols.ts` — AST symbol extraction with line-range metadata (path, symbolName, symbolKind, signature, imports, docstring)
 - `types/job.ts` — `JobListingMvp`, `JobSearchConstraints`, `JobFieldConfidence`, `WorkMode`, `VerificationStatus`
 - `sources/jobSources.ts` — Host-pattern source detection (SEEK, Indeed, Jora) and source reliability profiles
 - `jobRanking.ts` — Hard constraint filters (location, workMode, maxSalary, excludeTitles) + weighted composite scoring

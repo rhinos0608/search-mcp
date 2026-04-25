@@ -31,6 +31,7 @@ import { semanticCrawl } from './tools/semanticCrawl.js';
 import { semanticYoutube } from './tools/semanticYoutube.js';
 import { semanticReddit } from './tools/semanticReddit.js';
 import { semanticJobs } from './tools/semanticJobs.js';
+import { semanticGitHubCode } from './tools/semanticGitHubCode.js';
 import { isToolError } from './errors.js';
 import type { RateLimitInfo } from './rateLimit.js';
 import type { ToolResult } from './types.js';
@@ -543,6 +544,114 @@ export function createServer(): McpServer {
         return successResponse(result);
       } catch (err: unknown) {
         logger.error({ err, tool: 'github_repo_search' }, 'Tool failed');
+        return errorResponse(err);
+      }
+    },
+  );
+
+  // ── semantic_github_code ─────────────────────────────────────────────────
+  server.registerTool(
+    'semantic_github_code',
+    {
+      description:
+        'Search GitHub repository source code with code-aware chunking, tree-sitter symbol extraction, and lexical-heavy retrieval. Returns path, language, line range, symbol metadata, scores, and optional source context.',
+      inputSchema: {
+        query: z.string().describe('Code search query, e.g. an identifier or behavior'),
+        repo: z
+          .string()
+          .regex(/^[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+$/u)
+          .describe('Repository in owner/repo form'),
+        ref: z.string().optional().describe('Git ref, branch, tag, or commit SHA'),
+        language: z
+          .enum(['typescript', 'javascript', 'python', 'go', 'rust', 'markdown', 'shell'])
+          .optional()
+          .describe('Optional language filter'),
+        maxFiles: z
+          .number()
+          .int()
+          .min(1)
+          .max(500)
+          .optional()
+          .default(100)
+          .describe('Maximum files to collect before chunking (1–500, default 100)'),
+        maxFileBytes: z
+          .number()
+          .int()
+          .min(1)
+          .max(500_000)
+          .optional()
+          .default(50_000)
+          .describe(
+            'Maximum bytes to fetch per GitHub file before truncation (1–500000, default 50000)',
+          ),
+        fileFilter: z
+          .array(z.string())
+          .optional()
+          .describe('Optional path prefixes, substrings, or * globs to keep'),
+        topK: z
+          .number()
+          .int()
+          .min(1)
+          .max(50)
+          .optional()
+          .default(10)
+          .describe('Number of code results to return (1–50, default 10)'),
+        profile: z
+          .enum([
+            'balanced',
+            'lexical-heavy',
+            'semantic-heavy',
+            'high-precision',
+            'fast',
+            'precision',
+            'recall',
+          ])
+          .optional()
+          .default('lexical-heavy')
+          .describe('Retrieval profile. Code defaults to lexical-heavy.'),
+        includeContext: z
+          .boolean()
+          .optional()
+          .default(false)
+          .describe('Include source code text in each result'),
+        debug: z.boolean().optional().default(false).describe('Include debug corpus counts'),
+      },
+    },
+    async ({
+      query,
+      repo,
+      ref,
+      language,
+      maxFiles,
+      maxFileBytes,
+      fileFilter,
+      topK,
+      profile,
+      includeContext,
+      debug,
+    }) => {
+      logger.info({ tool: 'semantic_github_code', repo, language, topK }, 'Tool invoked');
+      const start = Date.now();
+      try {
+        const data = await semanticGitHubCode({
+          query,
+          repo,
+          ...(ref !== undefined ? { ref } : {}),
+          ...(language !== undefined ? { language } : {}),
+          maxFiles,
+          maxFileBytes,
+          ...(fileFilter !== undefined ? { fileFilter } : {}),
+          topK,
+          profile,
+          includeContext,
+          debug,
+        });
+        const result = makeResult('semantic_github_code', data, Date.now() - start, {
+          warnings: data.warnings,
+        });
+        return successResponse(result);
+      } catch (err: unknown) {
+        logger.error({ err, tool: 'semantic_github_code', repo }, 'Tool failed');
         return errorResponse(err);
       }
     },

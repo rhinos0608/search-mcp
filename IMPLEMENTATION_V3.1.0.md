@@ -2,67 +2,76 @@
 
 ## Goal
 
-Transform the extraction, caching, and code-parsing layers to be robust enough for production agent workflows. This merges the original Code/AST goals with new research findings (Kill Chain extraction, Contextual Embeddings, Persistence, and Neural Search).
+Turn GitHub-backed semantic retrieval into a production-grade code search path. This release keeps the existing GitHub discovery tools intact while adding a dedicated code adapter and a new semantic code-search tool.
+
+## What the code review changed
+
+- `src/utils/corpusCache.ts` is already SQLite-backed, so the persistence work is done.
+- `src/utils/githubCorpus.ts` already handles the file collector role and already enforces the most important hard caps.
+- `src/chunking.ts` already keeps fenced code blocks atomic.
+- The missing pieces are the code adapter, tree-sitter parsing, profile calibration, GitHub guardrail tightening, and the new tool wiring.
 
 ## Phase 1: Robust Infrastructure [✅ COMPLETED]
 
 ### 1. Persistent Corpus Cache (SQLite)
 
-- [x] **Objective**: Prevent corpus loss on server restart and support larger datasets.
-- [x] **Action**:
-  - [x] Install `better-sqlite3`.
-  - [x] Replace `src/utils/corpusCache.ts` memory structures with SQLite tables.
-  - [x] Implement a byte-weighted LRU eviction policy.
+- [x] Prevent corpus loss on server restart and support larger datasets.
+- [x] Replace memory-backed corpus cache storage with SQLite tables.
+- [x] Implement byte-weighted LRU eviction.
 
 ### 2. Neural Search Integration (Exa)
 
-- [x] **Objective**: Provide a higher-quality semantic web search alternative.
-- [x] **Action**:
-  - [x] Add `EXA_API_KEY` to `src/config.ts`.
-  - [x] Implement `src/tools/exaSearch.ts` and integrate it into the `web_search` tool fallback chain.
+- [x] Add `EXA_API_KEY` to `src/config.ts`.
+- [x] Integrate Exa into the `web_search` fallback chain.
 
-## Phase 2: Advanced Extraction
+## Phase 2: Tree-sitter Foundation [✅ COMPLETED]
 
-### 3. Kill Chain Content Extraction
+### 3. Language detection and parser loading
 
-- **Objective**: Maximize content extraction success across 404s, paywalls, and JS-heavy SPAs.
-- **Action**:
-  - Implement a 4-stage extraction fallback in `semanticCrawl.ts`:
-    1. **Crawl4AI** (Primary)
-    2. **Readability.js** (via jsdom)
-    3. **Wayback Machine API** (for dead links)
-    4. **Google Cache API** (for paywalls/anti-bot)
+- [x] Create a code-language detector for TypeScript, JavaScript, Python, Go, Rust, markdown, JSON, YAML, and shell.
+- [x] Add shebang fallback for scripts.
+- [x] Lazy-load WASM tree-sitter grammars so startup stays fast.
+- [x] Keep unknown languages on a safe text fallback.
+- [x] Add the code-embedding fallback surface and code-profile aliases needed by the V3.1 roadmap gates.
 
-### 4. Contextual Embeddings (Optional)
+## Phase 3: Code Intelligence [✅ COMPLETED]
 
-- **Objective**: Improve retrieval precision by situating chunks within the full document context before embedding.
-- **Action**:
-  - Add an LLM pre-processing step (via existing `llm` config) to generate brief context strings for each chunk.
-  - Prepend context to the chunk text before passing to the embedding sidecar.
+### 4. AST-aware code chunking
 
-## Phase 3: Code Intelligence
+- [x] Create `src/rag/adapters/code.ts`.
+- [x] Chunk by symbol boundaries first, then split oversized symbols by line windows.
+- [x] Preserve symbol metadata: path, language, line range, symbol name, signature, imports, docstring.
+- [x] Keep displayed chunk text as source only; place context in metadata.
 
-### 5. AST-Aware Code Chunking (Tree-sitter)
+### 5. Repo guardrails and code-example metadata
 
-- **Objective**: Semantic chunking for GitHub repositories (functions, classes, methods).
-- **Action**:
-  - Create `src/rag/adapters/code.ts` using WASM-based tree-sitter grammars (TS, JS, Python, Go, Rust).
-  - Ensure WASM grammars are lazy-loaded to preserve fast startup times.
-  - Default to `lexical-heavy` profile for code to prioritize identifier matches.
+- [x] Keep `src/utils/githubCorpus.ts` as the collector.
+- [x] Add `.gitignore` parsing and explicit warnings for broad or under-constrained crawls.
+- [x] Keep byte/file caps as hard stops.
+- [x] Preserve fenced code blocks as atomic units with surrounding context metadata in `src/chunking.ts`.
+- [x] Make `lexical-heavy` the code-default retrieval profile, with tests proving it beats `balanced` on identifier-heavy queries.
 
-### 6. Repo Guardrails & Code Example Extraction
+## Phase 4: `semantic_github_code` [✅ COMPLETED]
 
-- **Objective**: Prevent monorepo indexing blowouts and improve generic markdown code parsing.
-- **Action**:
-  - Implement byte/file caps and `.gitignore` parsing in `src/utils/githubCorpus.ts`.
-  - Update `src/chunking.ts` to treat ` ``` ` blocks as distinct atomic units with `contextBefore` and `contextAfter` metadata.
+### 6. Tool implementation
 
----
+- [x] Create `src/tools/semanticGitHubCode.ts`.
+- [x] Register `semantic_github_code` in `src/server.ts`.
+- [x] Route repository documents through the shared `prepareCorpus()` / `retrieveCorpus()` pipeline.
+- [x] Return structured code results with symbol context and retrieval scores.
 
-## Quality Gates for V3.1 Release
+## Quality Gates for V3.1 Release [✅ ALL PASSED]
 
-- [ ] `cached` source survives a server restart (SQLite works).
-- [ ] Kill chain successfully recovers a known 404 page via Wayback Machine.
-- [ ] Contextual embeddings improve top-3 recall by >15% on golden evaluation queries.
-- [ ] Tree-sitter `adapters/code.ts` successfully extracts classes/functions from a TS file.
-- [ ] Monorepo indexing halts at configured byte/file caps without crashing.
+- [x] `semantic_github_code` returns path, language, line range, symbol metadata, and RAG scores.
+- [x] Tree-sitter grammars load lazily on first use.
+- [x] Unknown file types fall back cleanly to text-style handling.
+- [x] GitHub indexing warns on broad crawls and respects caps.
+- [x] `lexical-heavy` beats `balanced` on identifier-heavy code queries.
+- [x] The code-embedding degradation path is documented in the README and surfaced in runtime warnings when `EMBEDDING_CODE_MODEL` is absent.
+- [x] Existing GitHub discovery tools remain unchanged.
+
+## Execution rules
+
+- TDD for every phase.
+- Batch reviews after each phase.
+- Keep parser, collector, profile tuning, and tool wiring separate so regressions are easier to isolate.

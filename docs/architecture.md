@@ -30,12 +30,37 @@ search-mcp/
 │   ├── server.ts            # McpServer creation and tool registration
 │   ├── logger.ts            # pino logger (always writes to stderr)
 │   ├── types.ts             # shared TypeScript types
+│   ├── chunking.ts          # markdown chunker (atomic code fences, boilerplate heuristics)
+│   ├── rag/                 # shared retrieval pipeline
+│   │   ├── types.ts         # RagChunk, PreparedCorpus, RetrievalResponse, etc.
+│   │   ├── pipeline.ts      # prepareCorpus() + retrieveCorpus()
+│   │   ├── embedding.ts     # sidecar client, batched embeddings
+│   │   ├── profiles.ts      # named retrieval profiles (balanced, lexical-heavy, etc.)
+│   │   ├── adapters/        # source-specific chunk converters
+│   │   │   ├── text.ts      # web pages → RagChunk[]
+│   │   │   ├── transcript.ts# YouTube segments → RagChunk[]
+│   │   │   ├── conversation.ts # Reddit/HN threads → RagChunk[]
+│   │   │   ├── job.ts       # job listing HTML → JobListingMvp[]
+│   │   │   └── code.ts      # source files → RagChunk[] via tree-sitter AST
+│   │   └── code/            # tree-sitter parser helpers
+│   │       ├── languages.ts # extension/shebang → language detection
+│   │       ├── treeSitter.ts# lazy WASM grammar loader
+│   │       └── symbols.ts   # AST symbol extraction (functions, classes, methods)
+│   ├── utils/               # standalone utilities
+│   │   ├── bm25.ts          # BM25+ full-text index
+│   │   ├── fusion.ts        # RRF merge across ranked lists
+│   │   ├── rerank.ts        # cross-encoder reranking (ONNX, dynamically imported)
+│   │   ├── corpusCache.ts   # SQLite-backed corpus cache with byte-weighted LRU eviction
+│   │   ├── githubCorpus.ts  # GitHub API file collector (dynamically imported)
+│   │   ├── lexicalConstraint.ts # IDF-weighted soft token coverage
+│   │   └── sitemap.ts       # XML sitemap parser
 │   └── tools/               # one file per tool
 │       ├── webSearch.ts
 │       ├── webRead.ts
 │       ├── githubRepo.ts
 │       ├── githubTrending.ts
 │       ├── youtubeTranscript.ts
+│       ├── semanticGitHubCode.ts  # semantic_github_code tool
 │       ├── redditSearch.ts
 │       ├── redditComments.ts
 │       ├── redditClient.ts        # shared Reddit transport (public + OAuth paths)
@@ -68,6 +93,19 @@ Wraps pino and forces all output to `process.stderr`. This module is imported by
 ### `src/types.ts`
 
 Shared TypeScript interfaces and type aliases used across tool files (e.g. result shapes, common option types). Centralising types here prevents circular imports and keeps tool files focused on logic.
+
+### `src/rag/`
+
+Shared retrieval pipeline for semantic tools. The pipeline separates corpus preparation from retrieval:
+
+- adapters turn source documents into chunks (`text`, `transcript`, `conversation`, `job`, and `code`)
+- `prepareCorpus()` builds a typed `PreparedCorpus`
+- `retrieveCorpus()` runs BM25/vector fusion and returns ranked chunks with score details
+- profiles such as `balanced`, `lexical-heavy`, `semantic-heavy`, and `high-precision` keep retrieval tuning stable at the API boundary
+
+The code adapter lives under `src/rag/adapters/code.ts` with parser helpers under `src/rag/code/`. It uses lazy-loaded tree-sitter WASM grammars so non-code users do not pay parser startup cost. Supported code languages are TypeScript, JavaScript, Python, Go, and Rust; unsupported files fall back to text chunking.
+
+Code retrieval defaults to `lexical-heavy` because identifiers, function names, and import paths are often more precise than prose-like semantic similarity. If `EMBEDDING_CODE_MODEL` is not configured, code tools warn that they are falling back to the prose embedding model. This warning is intentional: identifier searches remain useful through BM25, but conceptual code queries can degrade without a code-tuned embedding model.
 
 ### `src/tools/`
 
@@ -148,3 +186,6 @@ Swallowing errors silently would make it impossible for the AI client to recover
 | `jsdom`                     | Parses raw HTML into a DOM tree that `@mozilla/readability` can traverse. Used alongside `@mozilla/readability` in `web_read`.                                                      |
 | `cheerio`                   | Fast server-side jQuery-style HTML parsing. Used by `github_trending` to scrape the GitHub trending page, which has no official API.                                                |
 | `youtube-transcript`        | Fetches the auto-generated or manual caption transcript for a YouTube video. Used by `youtube_transcript`.                                                                          |
+| `better-sqlite3`            | Synchronous SQLite bindings. Used by `src/utils/corpusCache.ts` to persist prepared corpora across server restarts.                                                                 |
+| `web-tree-sitter`           | WebAssembly port of the tree-sitter parsing library. Used by the code adapter for AST-aware symbol extraction. Grammars load lazily on first use per language.                      |
+| `tree-sitter-wasms`         | Pre-compiled WASM grammar bundles for TypeScript, JavaScript, Python, Go, Rust, and others. Required by `web-tree-sitter` at runtime; not imported at startup.                      |

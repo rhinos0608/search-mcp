@@ -227,6 +227,97 @@ Fetches `https://github.com/trending/{language}?since={since}` and parses the HT
 
 ---
 
+## `semantic_github_code`
+
+Search a GitHub repository with code-aware retrieval. This tool is optimized for source-code questions such as “find `handleSubmit`”, “where is retry logic implemented?”, or “show the function that formats job listings”.
+
+### Inputs
+
+| Parameter        | Type                                                                                                         | Required | Default           | Description                                                                                |
+| ---------------- | ------------------------------------------------------------------------------------------------------------ | -------- | ----------------- | ------------------------------------------------------------------------------------------ |
+| `query`          | string                                                                                                       | yes      | —                 | Identifier, symbol, or behavior to search for.                                             |
+| `repo`           | string                                                                                                       | yes      | —                 | Repository in `owner/repo` form.                                                           |
+| `ref`            | string                                                                                                       | no       | default branch    | Git branch, tag, or commit SHA.                                                            |
+| `language`       | `"typescript" \| "javascript" \| "python" \| "go" \| "rust" \| "markdown" \| "shell"`                        | no       | —                 | Optional language filter.                                                                  |
+| `maxFiles`       | number                                                                                                       | no       | `100`             | Maximum files to collect before chunking. Maximum value: `500`.                            |
+| `maxFileBytes`   | number                                                                                                       | no       | `50000`           | Maximum bytes to fetch per GitHub file before truncation. Maximum value: `500000`.         |
+| `fileFilter`     | string[]                                                                                                     | no       | —                 | Path prefixes, substrings, or `*` globs to keep after collection.                          |
+| `topK`           | number                                                                                                       | no       | `10`              | Number of code results to return. Maximum value: `50`.                                     |
+| `profile`        | `"balanced" \| "lexical-heavy" \| "semantic-heavy" \| "high-precision" \| "fast" \| "precision" \| "recall"` | no       | `"lexical-heavy"` | Retrieval profile. Code defaults to lexical-heavy so identifier matches carry more weight. |
+| `includeContext` | boolean                                                                                                      | no       | `false`           | Include source text in each result. When false, only metadata and scores are returned.     |
+| `debug`          | boolean                                                                                                      | no       | `false`           | Include collected-file and chunk counts.                                                   |
+
+### Output
+
+```ts
+{
+  query: string;
+  repo: string;
+  profile: RetrievalProfileName;
+  results: Array<{
+    rank: number;
+    score: {
+      fused: number;
+      lexical?: number;
+      vector?: number;
+      rerank?: number;
+    };
+    path: string;
+    url: string;
+    language: string;
+    startLine?: number;
+    endLine?: number;
+    symbolName?: string;
+    symbolKind?: string;
+    signature?: string;
+    docstring?: string;
+    section: string;
+    text?: string; // only when includeContext=true
+  }>;
+  warnings: string[];
+  debug?: {
+    collectedFiles: number;
+    chunkCount: number;
+  };
+}
+```
+
+### Underlying approach
+
+1. Parses `repo` and collects matching files through the existing GitHub corpus collector.
+2. Applies language and path filters, preserving existing GitHub discovery tools unchanged.
+3. Parses supported source files with lazy-loaded tree-sitter WASM grammars for TypeScript, JavaScript, Python, Go, and Rust.
+4. Chunks by symbol boundaries first: functions, methods, classes, structs, impls, and arrow-function constants.
+5. Attaches code metadata such as path, language, line range, symbol name, symbol kind, signature, imports, and docstring.
+6. Ranks chunks through the shared RAG pipeline using `lexical-heavy` by default.
+
+### Rate limits / caveats
+
+- GitHub API rate limits apply. Set `GITHUB_TOKEN` for higher quota and private repository access where supported.
+- Broad repository scans emit warnings. Add `query`, `language`, or `fileFilter` to avoid drifting into examples or generated files.
+- The collector enforces file and byte caps and excludes common generated/vendor directories. `.gitignore` rules are parsed when available by the collector path.
+- `maxFileBytes` defaults to 50KB to keep single-file GitHub fetches bounded; raise it when you need larger files, up to 500KB.
+- `EMBEDDING_CODE_MODEL` is optional but recommended. When it is missing, the tool warns that code retrieval is falling back to the prose embedding model. Identifier-heavy searches still work well through BM25/`lexical-heavy`, but conceptual code queries may degrade.
+- Unsupported or unparsable files fall back to text-style chunking rather than failing the whole request.
+
+### Example
+
+```json
+{
+  "name": "semantic_github_code",
+  "arguments": {
+    "repo": "modelcontextprotocol/typescript-sdk",
+    "query": "handle tool call validation",
+    "language": "typescript",
+    "fileFilter": ["src/"],
+    "topK": 5,
+    "includeContext": true
+  }
+}
+```
+
+---
+
 ## `youtube_transcript`
 
 Fetch the transcript (captions) for a YouTube video.

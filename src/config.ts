@@ -90,6 +90,7 @@ export interface EmbeddingSidecarConfig {
   baseUrl: string;
   apiToken: string;
   dimensions: number;
+  codeModel: string;
 }
 
 export interface SemanticCrawlConfig {
@@ -143,7 +144,7 @@ const DEFAULTS: Omit<SearchConfig, 'rescoreWeights'> = {
     oauthConfigValid: true,
   },
   crawl4ai: { baseUrl: '', apiToken: '' },
-  embeddingSidecar: { baseUrl: '', apiToken: '', dimensions: 768 },
+  embeddingSidecar: { baseUrl: '', apiToken: '', dimensions: 768, codeModel: '' },
   semanticCrawl: {
     defaultMaxBytes: DEFAULT_SEMANTIC_MAX_BYTES,
     maxMaxBytes: DEFAULT_SEMANTIC_MAX_BYTES,
@@ -278,10 +279,12 @@ function loadFromEnv(): EnvConfig {
   const embeddingSidecarUrl = process.env.EMBEDDING_SIDECAR_BASE_URL;
   const embeddingSidecarToken = process.env.EMBEDDING_SIDECAR_API_TOKEN;
   const embeddingDimensions = process.env.EMBEDDING_DIMENSIONS;
+  const embeddingCodeModel = process.env.EMBEDDING_CODE_MODEL;
   if (
     embeddingSidecarUrl !== undefined ||
     embeddingSidecarToken !== undefined ||
-    embeddingDimensions !== undefined
+    embeddingDimensions !== undefined ||
+    embeddingCodeModel !== undefined
   ) {
     const esc: Partial<EmbeddingSidecarConfig> = {};
     if (embeddingSidecarUrl !== undefined) esc.baseUrl = embeddingSidecarUrl;
@@ -292,6 +295,7 @@ function loadFromEnv(): EnvConfig {
         esc.dimensions = dims;
       }
     }
+    if (embeddingCodeModel !== undefined) esc.codeModel = embeddingCodeModel;
     cfg.embeddingSidecar = esc;
   }
 
@@ -422,6 +426,10 @@ export function loadConfig(): SearchConfig {
         envConfig.embeddingSidecar?.dimensions ??
         fileConfig.embeddingSidecar?.dimensions ??
         DEFAULTS.embeddingSidecar.dimensions,
+      codeModel:
+        envConfig.embeddingSidecar?.codeModel ??
+        fileConfig.embeddingSidecar?.codeModel ??
+        DEFAULTS.embeddingSidecar.codeModel,
     },
     semanticCrawl: {
       defaultMaxBytes:
@@ -456,8 +464,19 @@ export function loadConfig(): SearchConfig {
     );
   }
 
+  const codeEmbeddingWarning = getCodeEmbeddingFallbackWarning(cached);
+  if (codeEmbeddingWarning !== undefined) {
+    logger.warn({ env: 'EMBEDDING_CODE_MODEL' }, codeEmbeddingWarning);
+  }
+
   logger.info({ backend: cached.searchBackend }, 'Search config loaded');
   return cached;
+}
+
+export function getCodeEmbeddingFallbackWarning(config: SearchConfig): string | undefined {
+  return config.embeddingSidecar.codeModel.trim().length === 0
+    ? 'EMBEDDING_CODE_MODEL is not configured; code retrieval will fall back to the prose embedding model and rely more heavily on lexical ranking.'
+    : undefined;
 }
 
 function resolveRedditConfig(

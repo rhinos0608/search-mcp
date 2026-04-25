@@ -11,12 +11,26 @@ export interface GitHubCorpusOptions {
   extensions?: string[];
   query?: string;
   maxFiles?: number;
+  maxFileBytes?: number;
+}
+
+export interface GitHubCorpusDependencies {
+  getGitHubRepoTree?: typeof getGitHubRepoTree;
+  getGitHubRepoFile?: typeof getGitHubRepoFile;
+  getGitHubRepoSearch?: typeof getGitHubRepoSearch;
 }
 
 export interface GitHubCorpusDocument {
   path: string;
   content: string;
   url: string;
+}
+
+export interface GitIgnoreRule {
+  pattern: string;
+  negated: boolean;
+  directoryOnly: boolean;
+  anchored: boolean;
 }
 
 const DEFAULT_EXTENSIONS = [
@@ -87,11 +101,57 @@ const SURFACE_DIR_HINTS = new Set([
   'benchmarks',
 ]);
 
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&');
+}
+
+function gitIgnorePatternToRegExp(rule: GitIgnoreRule): RegExp {
+  const trimmedPattern = rule.pattern.replace(/^\/+|\/+$/gu, '');
+  const segments = trimmedPattern.split('/').map((segment) => {
+    if (segment === '**') return '.*';
+    const escaped = escapeRegExp(segment).replace(/\\\*/gu, '[^/]*').replace(/\\\?/gu, '[^/]');
+    return escaped;
+  });
+  const body = segments.join('/');
+  const prefix = rule.anchored ? '^' : '(^|/)';
+  const suffix = rule.directoryOnly ? '(/|$)' : '($|/)';
+  return new RegExp(`${prefix}${body}${suffix}`, 'u');
+}
+
+export function parseGitIgnoreRules(content: string): GitIgnoreRule[] {
+  return content
+    .split(/\r?\n/u)
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0 && !line.startsWith('#'))
+    .map((line) => {
+      const negated = line.startsWith('!');
+      const rawPattern = negated ? line.slice(1) : line;
+      return {
+        pattern: rawPattern,
+        negated,
+        directoryOnly: rawPattern.endsWith('/'),
+        anchored: rawPattern.startsWith('/'),
+      } satisfies GitIgnoreRule;
+    })
+    .filter((rule) => rule.pattern.length > 0);
+}
+
+function isIgnoredByRules(path: string, rules: GitIgnoreRule[]): boolean {
+  let ignored = false;
+  for (const rule of rules) {
+    if (gitIgnorePatternToRegExp(rule).test(path)) {
+      ignored = !rule.negated;
+    }
+  }
+  return ignored;
+}
+
 function scoreBroadCorpusFile(entry: GitHubTreeEntry): number {
   const pathParts = entry.path.toLowerCase().split('/');
   let score = 0;
-  for (const part of pathParts) {
-    if (CORE_DIR_HINTS.has(part)) score += 25;
+  for (const [index, part] of pathParts.entries()) {
+    if (part === 'src') score += index === 0 ? 55 : 35;
+    else if (CORE_DIR_HINTS.has(part)) score += 25;
     if (SURFACE_DIR_HINTS.has(part)) score -= 25;
   }
   score -= pathParts.length * 2;
@@ -105,6 +165,47 @@ export function prioritizeBroadGitHubCorpus(entries: GitHubTreeEntry[]): GitHubT
     if (delta !== 0) return delta;
     return a.path.localeCompare(b.path);
   });
+}
+
+export interface GitHubCorpusWarningInput {
+  repo: string;
+  query?: string | undefined;
+  maxFiles: number;
+  candidateCount: number;
+  selectedPaths: string[];
+}
+
+export function getGitHubCorpusWarnings(input: GitHubCorpusWarningInput): string[] {
+  const warnings: string[] = [];
+  const underConstrained = input.query === undefined || input.query.trim().length === 0;
+  if (underConstrained) {
+    warnings.push(`GitHub crawl for ${input.repo} is broad; add query, language, or file filters.`);
+  }
+
+  if (input.candidateCount > input.maxFiles * 2) {
+    warnings.push(
+      `GitHub crawl for ${input.repo} started with ${String(input.candidateCount)} candidate files but only ${String(input.maxFiles)} were requested.`,
+    );
+  }
+
+  const noisyPaths = input.selectedPaths.filter((selectedPath) =>
+    /(^|\/)(examples?|demos?|samples?|test(s)?|fixtures?|dist|build|generated)(\/|$)/iu.test(
+      selectedPath,
+    ),
+  );
+  if (noisyPaths.length > 0) {
+    warnings.push(`GitHub crawl for ${input.repo} still includes example or generated paths.`);
+  }
+
+  return warnings;
+}
+
+export function shouldIncludeFileWithIgnoreRules(
+  entry: GitHubTreeEntry,
+  extensions: string[],
+  ignoreRules: GitIgnoreRule[],
+): boolean {
+  return shouldIncludeFile(entry, extensions) && !isIgnoredByRules(entry.path, ignoreRules);
 }
 
 export function shouldIncludeFile(entry: GitHubTreeEntry, extensions: string[]): boolean {
@@ -131,14 +232,19 @@ export function shouldIncludeFile(entry: GitHubTreeEntry, extensions: string[]):
 
 export async function fetchGitHubCorpus(
   opts: GitHubCorpusOptions,
+  deps: GitHubCorpusDependencies = {},
 ): Promise<GitHubCorpusDocument[]> {
   const extensions = opts.extensions ?? DEFAULT_EXTENSIONS;
   const maxFiles = opts.maxFiles ?? 100;
+  const maxFileBytes = opts.maxFileBytes ?? 50_000;
+  const getTree = deps.getGitHubRepoTree ?? getGitHubRepoTree;
+  const getFile = deps.getGitHubRepoFile ?? getGitHubRepoFile;
+  const getSearch = deps.getGitHubRepoSearch ?? getGitHubRepoSearch;
 
   let candidateFiles: GitHubTreeEntry[];
 
   if (opts.query) {
-    const searchResult = await getGitHubRepoSearch(
+    const searchResult = await getSearch(
       opts.query,
       opts.owner,
       opts.repo,
@@ -146,17 +252,19 @@ export async function fetchGitHubCorpus(
       undefined,
       Math.min(maxFiles * 2, 100),
     );
-    candidateFiles = searchResult.results
-      .map((r) => ({
-        name: r.name,
-        path: r.path,
-        type: 'file' as const,
-        htmlUrl: r.htmlUrl,
-        apiUrl: r.url,
-      }))
-      .filter((e) => shouldIncludeFile(e, extensions));
+    candidateFiles = prioritizeBroadGitHubCorpus(
+      searchResult.results
+        .map((r) => ({
+          name: r.name,
+          path: r.path,
+          type: 'file' as const,
+          htmlUrl: r.htmlUrl,
+          apiUrl: r.url,
+        }))
+        .filter((e) => shouldIncludeFile(e, extensions)),
+    );
   } else {
-    const treeResult = await getGitHubRepoTree(opts.owner, opts.repo, '', opts.branch, true, 500);
+    const treeResult = await getTree(opts.owner, opts.repo, '', opts.branch, true, 500);
     candidateFiles = prioritizeBroadGitHubCorpus(
       treeResult.entries.filter((e) => shouldIncludeFile(e, extensions)),
     );
@@ -167,7 +275,7 @@ export async function fetchGitHubCorpus(
 
   for (const file of selectedFiles) {
     try {
-      const result = await getGitHubRepoFile(
+      const result = await getFile(
         opts.owner,
         opts.repo,
         file.path,
@@ -176,7 +284,7 @@ export async function fetchGitHubCorpus(
         undefined,
         undefined,
         undefined,
-        50_000,
+        maxFileBytes,
       );
       if (result.isBinary) continue;
       docs.push({

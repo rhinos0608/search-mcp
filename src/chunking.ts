@@ -7,6 +7,11 @@ export interface MarkdownChunk {
   totalChunks: number;
   tokenEstimate: number;
   charOffset: number;
+  metadata?: {
+    contextBefore?: string | undefined;
+    contextAfter?: string | undefined;
+    codeFence?: true | undefined;
+  };
 }
 
 const HEADING_RE = /^(#{1,6})\s+(.*)$/;
@@ -139,6 +144,7 @@ export function chunkMarkdown(markdown: string, url: string): MarkdownChunk[] {
 
   // Context-aware boilerplate filtering (breadcrumbs, link-heavy, etc.)
   processed = filterBoilerplateWithContext(processed);
+  processed = attachCodeFenceContext(processed);
 
   // Re-index after all post-processing so chunkIndex and totalChunks are consistent
   return processed.map((c, i) => ({ ...c, chunkIndex: i, totalChunks: processed.length }));
@@ -738,4 +744,25 @@ function createChunk(
     tokenEstimate: estimateTokens(content),
     charOffset,
   };
+}
+
+function attachCodeFenceContext(chunks: MarkdownChunk[]): MarkdownChunk[] {
+  return chunks.map((chunk) => {
+    const fenceMatch = /```[\s\S]*?```/u.exec(chunk.content);
+    if (fenceMatch?.index === undefined) return chunk;
+
+    const before = chunk.content.slice(0, fenceMatch.index).trim();
+    const after = chunk.content.slice(fenceMatch.index + fenceMatch[0].length).trim();
+    if (before.length === 0 && after.length === 0) return chunk;
+
+    return {
+      ...chunk,
+      metadata: {
+        ...(chunk.metadata ?? {}),
+        contextBefore: before.length > 0 ? before : undefined,
+        contextAfter: after.length > 0 ? after : undefined,
+        codeFence: true,
+      },
+    };
+  });
 }

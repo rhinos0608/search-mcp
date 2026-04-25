@@ -1,257 +1,282 @@
-# V3.1.0 Implementation Plan - Code / GitHub
+# V3.1.0 Implementation Plan — Code / GitHub
 
 **Depends on**: V3.0.0  
-**Goal**: Add code-aware semantic retrieval for GitHub repositories.
+**Goal**: Add code-aware semantic retrieval for GitHub repositories without disturbing the existing GitHub discovery tools.
 
-## Corrections From Spec Review
+## Codebase Review Findings
 
-- `src/utils/githubCorpus.ts` currently accepts an options object and returns `GitHubCorpusDocument[]`. Use it as the source collector; do not assume the older signature.
-- Do not move `githubCorpus.ts` into the adapter in one jump. Keep collection and code chunking separate.
-- Regex-only JavaScript parsing is brittle. Start with conservative symbol-boundary heuristics and line ranges.
-- Existing GitHub tools remain first-class and unchanged.
+This plan is adjusted to match the current repository state:
 
-## Stress-Test Findings That Shape This Plan
+- `src/rag/` already exists and already owns the shared prepare/retrieve pipeline.
+- `src/utils/corpusCache.ts` is already SQLite-backed and ships the persistence work originally listed as V3.1 Phase 1.
+- `src/utils/githubCorpus.ts` already acts as the GitHub file collector and already enforces the most important hard caps (`maxFiles`, extension filtering, size caps, excluded directories).
+- `src/rag/adapters/` already contains text, transcript, conversation, and job adapters, so the V3.1 work should extend the existing adapter surface rather than inventing a second pipeline.
+- `src/chunking.ts` already keeps fenced code blocks atomic. The remaining work is to preserve code context metadata and make code chunks first-class retrieval units.
+- There is no `src/rag/adapters/code.ts` yet, and the repo does not currently include tree-sitter dependencies. Because the user explicitly wants tree-sitter in V3.1.0, this plan adds it now, but keeps the collector separate from the parser.
+- The current retrieval-profile names (`balanced`, `fast`, `precision`, `recall`) do not yet expose the roadmap’s `lexical-heavy` code behavior, so V3.1 must extend the profile layer for code rather than reusing prose defaults unchanged.
+- `EMBEDDING_CODE_MODEL` is not yet modeled in config; V3.1 should add the fallback surface so the README warning is tied to an actual runtime condition.
 
-The week-one semantic tool tests surfaced a few constraints that the code adapter needs to respect from day one:
+## Planning Rules
 
-- Broad GitHub crawls drift into `examples/` and other surface files unless a query/file/language pre-filter is provided.
-- `maxFiles` and byte caps need to be hard stops, not soft guidance.
-- Generated/vendor directories must stay excluded by default.
-- Result quality should degrade visibly via warnings when the crawl was under-constrained, rather than silently returning the wrong file.
-- Query-specific GitHub retrieval is excellent when steered properly; the plan should optimize for that path, not broad monorepo exploration.
+- **TDD first**: every batch starts with failing tests and ends with green tests.
+- **Batch reviews**: review after each phase, not at the end of the release.
+- **Small blast radius**: keep GitHub collection, AST parsing, profile tuning, and tool registration separate.
+- **No silent broad-crawl behavior**: under-constrained GitHub indexing should warn loudly.
+- **Lazy loading**: tree-sitter grammars must load on first use, not at startup.
 
-## Phase 0 - Fixtures and Baseline
+---
 
-Create fixture files under `test/fixtures/code/`:
+## Batch 0 — Fixtures + Failing Tests
 
-- `sample.ts`
-- `sample.js`
-- `sample.py`
-- `sample.go`
-- `sample.rs`
-- `sample.md`
+### Goal
 
-Each fixture should include:
+Create the smallest code fixtures and acceptance tests that define the release before implementation starts.
 
-- imports
-- one class or type
-- two functions
-- one nested or multiline function-like construct
-- comments/docstrings
-- one call site to another function
+### Files
 
-Run:
+- `test/fixtures/code/sample.ts`
+- `test/fixtures/code/sample.js`
+- `test/fixtures/code/sample.py`
+- `test/fixtures/code/sample.go`
+- `test/fixtures/code/sample.rs`
+- `test/fixtures/code/sample.md`
+- `test/codeLanguage.test.ts`
+- `test/codeSymbols.test.ts`
+- `test/codeChunking.test.ts`
+- `test/codeProfiles.test.ts`
+- `test/semanticGitHubCode.test.ts`
+- `test/githubCorpusGuardrails.test.ts`
 
-- `npm run typecheck`
-- `npm test`
+### Test coverage to write first
 
-## Phase 1 - Code Types
+- extension-based language detection
+- shebang fallback for scripts
+- symbol extraction returns function/class boundaries
+- nested or multi-line constructs do not create overlapping line ranges
+- markdown code fences remain atomic and carry context metadata
+- broad GitHub corpora emit warnings and stay inside caps
+- tool registration fails until the new tool exists
+- code profile settings expose a `lexical-heavy` mode that beats `balanced` on identifier-heavy queries
+- config exposes the code-embedding fallback warning path when `EMBEDDING_CODE_MODEL` is missing
 
-Create `src/rag/types/code.ts`.
+### Review checkpoint
 
-Types:
+- Confirm the fixture set exercises TypeScript, JavaScript, Python, Go, Rust, and markdown code examples.
+- Confirm the tests express the expected public behavior, not implementation details.
 
-- `CodeLanguage`
-- `CodeSymbol`
-- `CodeChunk`
-- `CallSite`
-- `CallGraph`
-- `SemanticGitHubCodeOptions`
-- `CodeSearchResult`
+---
 
-Required fields on `CodeChunk`:
+## Batch 1 — Tree-sitter Foundation
 
-- base `RagChunk` fields
-- `path`
-- `language`
-- `startLine`
-- `endLine`
-- `symbolName?`
-- `symbolKind?`
-- `signature?`
-- `imports`
-- `docstring?`
+### Goal
 
-Do not include a required `complexity` field in V3.1.0. Add it later only if measured.
+Add the parser layer and language resolution before the adapter uses it.
 
-Tests:
+### Files to create
 
-- Compile-time assignment tests for optional fields.
+- `src/rag/code/languages.ts`
+- `src/rag/code/treeSitter.ts`
+- `src/rag/code/symbols.ts` (parser-facing helpers only)
+- `src/config.ts` (code-embedding config surface)
+- `src/rag/profiles.ts` (code-specific retrieval profile mapping)
 
-## Phase 2 - Language Detection
+### Implementation notes
 
-Create `src/rag/code/languages.ts`.
+- Map extensions to supported languages: TypeScript, JavaScript, Python, Go, Rust, markdown, JSON, YAML, shell.
+- Add shebang detection for `python`, `bash`, and `node`-style scripts.
+- Load WASM grammars lazily and cache parser instances per language.
+- Keep unrecognized extensions on a safe `unknown` path that falls back to text chunking.
+- Add `EMBEDDING_CODE_MODEL` config support and make the code path warn when it is absent.
+- Add code-specific profile aliases so `lexical-heavy` can be the default for code without breaking existing generic profiles.
 
-Implement:
+### Tests
 
-- extension mapping for TypeScript, JavaScript, Python, Go, Rust, Java, Markdown, JSON, YAML, shell.
-- shebang fallback for shell, Python, Node.
-- content fallback only for obvious cases.
+- extension wins over content heuristics
+- shebang works without file extension
+- unknown extension returns `unknown`
+- first parse of each language triggers a lazy load path, but startup does not import all grammars eagerly
+- code profile settings expose a `lexical-heavy` mode that beats `balanced` on identifier-heavy queries
+- config exposes the code-embedding fallback warning path when `EMBEDDING_CODE_MODEL` is missing
 
-Tests:
+### Review checkpoint
 
-- Extension wins.
-- Shebang works without extension.
-- Unknown extension returns `unknown`.
+- Confirm the parser bootstrap does not increase startup cost for non-code users.
+- Confirm the language detector is deterministic and testable.
 
-## Phase 3 - Symbol Extraction
+---
 
-Create `src/rag/code/symbols.ts`.
+## Batch 2 — Symbol Extraction + Code Chunking
 
-Implement conservative extractors:
+### Goal
 
-- TypeScript/JavaScript:
-  - `function name(...)`
-  - `export function name(...)`
-  - `const name = (...) =>`
-  - `class Name`
-  - method headers inside classes as best effort
-- Python:
-  - `def name(...)`
-  - `async def name(...)`
-  - `class Name`
-- Go:
-  - `func name(...)`
-  - `func (r Receiver) name(...)`
-- Rust:
-  - `fn name(...)`
-  - `impl Type`
+Turn parsed source files into retrieval chunks with stable symbol metadata.
 
-Line-range strategy:
+### Files to create/modify
 
-- Identify symbol header line.
-- End at the next symbol header of equal or lower apparent scope, or file end.
-- Keep fallback chunks for content outside symbols.
+- `src/rag/types.ts` or a narrow code type module if the type surface grows too large
+- `src/rag/adapters/code.ts`
+- `src/rag/code/chunking.ts` or equivalent helper module
+- `src/rag/profiles.ts` (code-specific retrieval profile calibration)
 
-Tests:
+### Behavior
 
-- Symbol names and line ranges match fixtures.
-- Nested functions do not produce negative or overlapping line ranges.
-- Unknown language returns no symbols and falls back to token/line chunking.
+- Chunk by AST symbol boundaries first.
+- Preserve displayed chunk text as source code only.
+- Attach metadata for:
+  - `path`
+  - `language`
+  - `startLine`
+  - `endLine`
+  - `symbolName`
+  - `symbolKind`
+  - `signature`
+  - `imports`
+  - `docstring`
+- Split very large symbols by monotonic line windows.
+- Fall back to text-style chunking when a file cannot be parsed safely.
+- Propagate code-fence context metadata from `src/chunking.ts` for markdown examples.
+- Default the code adapter to `lexical-heavy`, with `balanced` still available for parity and tests.
 
-## Phase 4 - Code Chunking
+### Tests
 
-Create `src/rag/adapters/code.ts`.
+- functions/classes are extracted at the expected boundaries
+- long symbols split without reordering or overlap
+- imports and docstrings are preserved in metadata
+- markdown code blocks stay atomic and include surrounding context metadata
+- code profile settings prove `lexical-heavy` beats `balanced` on identifier-heavy searches
 
-Behavior:
+### Review checkpoint
 
-- Chunk by symbols first.
-- Merge adjacent tiny chunks from the same file when below minimum token threshold.
-- Split very large symbols by line windows, preserving the symbol header in metadata.
-- Prefix embedding text with path, language, symbol signature, imports, and docstring.
-- Keep displayed chunk text as source code only, with metadata carrying context.
+- Confirm code retrieval prefers identifier-rich chunks over arbitrary line windows.
+- Confirm the adapter still degrades gracefully on partial parse failures.
 
-Limits:
+---
 
-- Default `maxFiles` 50.
-- Default max file bytes should follow existing `githubCorpus.ts` behavior.
-- Default chunk target should align with V3.0.0 profile settings.
+## Batch 3 — GitHub Corpus Guardrails
 
-Tests:
+### Goal
 
-- Function/class boundaries are respected.
-- Long symbol split keeps line ranges monotonic.
-- Markdown files fall back to text adapter or a simple markdown code/document chunk path.
+Keep `githubCorpus.ts` as the collector, but tighten selection so broad repositories do not drift into examples or generated files.
 
-## Phase 5 - Call Site Heuristics
+### Files to modify
 
-Create `src/rag/code/callGraph.ts`.
+- `src/utils/githubCorpus.ts`
+- `src/tools/semanticCrawl.ts`
+- `src/types.ts` if any GitHub corpus output metadata needs to be surfaced
 
-Implement:
+### Changes
 
-- Build a symbol index by file and symbol name.
-- Find textual call sites with language-aware patterns.
-- Ignore definitions as call sites.
-- Return bounded call-site lists in result metadata.
+- Preserve the current collector/adapter split.
+- Add `.gitignore` parsing to exclude ignored files and directories when possible.
+- Keep generated/vendor/build exclusions explicit.
+- Keep hard byte/file caps as hard stops.
+- Surface warnings when a crawl is under-constrained or broad enough to risk example-file bias.
+- Keep query and extension filters, and add tool-level file filtering if needed rather than forcing the collector to own every concern.
 
-Scope:
+### Tests
 
-- This is a helper for result context, not a complete call graph.
-- No graph database or persistence in V3.1.0.
+- ignore rules exclude generated/vendor content
+- broad repository crawls emit warnings
+- query-scoped crawls prefer source files over examples
+- cap enforcement remains deterministic under large fixtures
 
-Tests:
+### Review checkpoint
 
-- Fixture call from one function to another is found.
-- Definition line is not counted as a call site.
-- Results are bounded.
+- Confirm no current GitHub tool behavior regresses.
+- Confirm the new warnings are visible enough for the caller to react.
 
-## Phase 6 - GitHub Corpus Collection
+---
 
-Adapt or wrap `src/utils/githubCorpus.ts` for V3.1.0.
+## Batch 4 — `semantic_github_code` Tool
 
-Changes:
+### Goal
 
-- Keep the existing public function unless V3.0.0 already moved it.
-- Add optional branch/default branch resolution only if needed by the tool.
-- Add better extension defaults for code search.
-- Preserve excluded directory behavior and hard-cap traversal by file count and byte budget.
-- Add explicit pre-filter support (`query`, `language`, `fileFilter`) and warnings when the crawl is too broad to target the right code.
-- Keep sequential fetching initially if rate-limit safety matters; introduce bounded concurrency only with tests.
+Add the user-facing code search tool that connects the new adapter to the shared RAG pipeline.
 
-Tests:
+### Files to create/modify
 
-- Existing `test/githubCorpus.test.ts`.
-- File include/exclude behavior for new extensions.
-- Broad repo crawl without a meaningful pre-filter emits warnings and stays within caps.
-- Query/file-filtered crawl lands in the intended code path rather than `examples/` or generated output.
+- `src/tools/semanticGitHubCode.ts`
+- `src/server.ts`
+- `src/rag/adapters/index.ts`
+- `src/rag/adapters/code.ts`
+- `src/rag/profiles.ts`
 
-## Phase 7 - `semantic_github_code` Tool
-
-Create `src/tools/semanticGitHubCode.ts` and register `semantic_github_code`.
-
-Input schema:
+### Tool input
 
 - `query: string`
 - `repo: string` in `owner/repo` form
 - `ref?: string`
 - `language?: string`
-- `maxFiles?: number` default 50, max 200
+- `maxFiles?: number`
 - `fileFilter?: string[]`
-- `topK?: number` default 10, max 50
+- `topK?: number`
 - `profile?: RetrievalProfileName`
-- `includeContext?: boolean` default true
+- `includeContext?: boolean`
 - `debug?: boolean`
 
-Pipeline:
+### Pipeline
 
-1. Parse `repo`.
-2. Collect files through `fetchGitHubCorpus()`.
-3. Filter by language and file filters.
-4. Run code adapter through `prepareCorpus()` and `retrieveCorpus()`.
-5. Add call-site context when `includeContext` is true.
-6. Return `RetrievalResponse<CodeSearchResult>`.
+1. parse `repo`
+2. collect files through `fetchGitHubCorpus()`
+3. apply tool-level filters
+4. parse and chunk with the code adapter
+5. prepare/retrieve through `src/rag/pipeline.ts`
+6. optionally include call-site context
+7. return structured code results plus corpus warnings
 
-Error handling:
+### Tests
 
-- Invalid `repo` format returns a validation error.
-- Empty corpus returns a controlled empty response with warnings.
-- GitHub rate-limit errors keep existing sanitized tool error behavior.
+- invalid repo strings fail validation
+- language filter excludes nonmatching files
+- include-context toggles call-site data
+- empty corpora return a controlled response with warnings
+- `semantic_github_code` registers in the server
+- code queries default to `lexical-heavy` and prove that profile beats `balanced` on identifier-heavy searches
 
-Tests:
+### Review checkpoint
 
-- Stub GitHub corpus documents.
-- Query returns symbol metadata and line ranges.
-- Language filter excludes nonmatching files.
-- Include-context flag controls call-site output.
-- Under-constrained repo queries surface warnings instead of silently selecting shallow example files.
+- Confirm the tool returns path, language, line range, symbol metadata, and RAG scores.
+- Confirm existing GitHub tools remain unchanged.
 
-## Phase 8 - Docs and Verification
+---
 
-Update:
+## Batch 5 — Docs + Release Verification
 
-- `docs/tools.md` with `semantic_github_code`.
-- `docs/architecture.md` with code adapter notes.
+### Goal
 
-Final commands:
+Finish the release with docs, README notes, and full verification.
+
+### Files to update
+
+- `docs/tools.md`
+- `docs/architecture.md`
+- `README.md` or the relevant user-facing docs section for the code-embedding degradation path
+- `ROADMAP.md` if the release status needs a refresh
+- `src/rag/profiles.ts` notes in the architecture docs so code/profile behavior is discoverable
+
+### Verification commands
 
 - `npm run format:check`
 - `npm run lint`
 - `npm run typecheck`
-- `npm test -- test/code*.test.ts test/githubCorpus.test.ts`
+- `npm test -- test/code*.test.ts test/githubCorpus*.test.ts test/semanticGitHubCode.test.ts`
 - `npm test`
 
-Exit criteria:
+### Final release gates
 
 - TypeScript, JavaScript, Python, Go, and Rust fixtures chunk at useful symbol boundaries.
-- `semantic_github_code` returns path, language, line range, symbol metadata, and RAG scores.
-- Existing GitHub tools are unchanged.
+- tree-sitter grammars load lazily.
+- broad GitHub crawls warn instead of silently choosing shallow examples.
+- `semantic_github_code` returns stable structured results with symbol context.
+- `lexical-heavy` beats `balanced` on identifier-heavy code queries.
+- The code-embedding fallback path is documented in the README and reflected in runtime warnings when `EMBEDDING_CODE_MODEL` is absent.
+- existing GitHub discovery tools continue to work unchanged.
+
+---
+
+## Release Notes for Review
+
+- Phase 1 infrastructure work is already complete and should remain untouched.
+- The code adapter is the only major new semantic source in V3.1.0.
+- The GitHub collector is not being replaced; it is being made safer and more code-aware.
+- Batch review will happen after each phase so we can catch parser, profile, or corpus regressions before they spread.

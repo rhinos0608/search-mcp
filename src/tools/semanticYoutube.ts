@@ -5,7 +5,11 @@ import { chunksFromTranscript } from '../rag/adapters/transcript.js';
 import { embedTexts, embedTextsBatched } from '../rag/embedding.js';
 import { prepareCorpus, retrieveCorpus } from '../rag/pipeline.js';
 import type { RagChunk, RetrievalProfileName, RetrievalResponse } from '../rag/types.js';
-import { DEFAULT_SEMANTIC_MAX_BYTES, applySemanticByteBudget, formatSemanticBytes } from '../semanticLimits.js';
+import {
+  DEFAULT_SEMANTIC_MAX_BYTES,
+  applySemanticByteBudget,
+  formatSemanticBytes,
+} from '../semanticLimits.js';
 
 const TRANSCRIPT_CONCURRENCY = 3;
 

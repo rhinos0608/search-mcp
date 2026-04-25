@@ -2,6 +2,7 @@ import type { CorpusChunk, ScoreDetail, RerankScoreDetail, SemanticCrawlChunk } 
 
 export type AdapterType =
   | 'text'
+  | 'code'
   | 'transcript'
   | 'conversation'
   | 'github'
@@ -10,7 +11,14 @@ export type AdapterType =
   | 'search'
   | 'cached';
 
-export type RetrievalProfileName = 'balanced' | 'fast' | 'precision' | 'recall';
+export type RetrievalProfileName =
+  | 'balanced'
+  | 'lexical-heavy'
+  | 'semantic-heavy'
+  | 'high-precision'
+  | 'fast'
+  | 'precision'
+  | 'recall';
 
 export interface RawDocument {
   id: string;

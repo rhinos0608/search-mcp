@@ -1,15 +1,15 @@
 # Roadmap
 
-## Current State (2026-04-25)
+## Current State (2026-04-26)
 
-| Release          | Status     | Notes                                              |
-| ---------------- | ---------- | -------------------------------------------------- |
-| **V3.1 Phase 1** | ✅ Done    | SQLite corpus cache, Exa neural search             |
-| **V3.0.5**       | ✅ Done    | Job adapter MVP, `semantic_jobs` tool              |
-| **V3.0.0**       | ✅ Done    | RAG pipeline extraction, YouTube/Reddit adapters   |
-| **V3.1.0 Code**  | 🔲 Pending | Tree-sitter adapter, GitHub guardrails             |
-| **V3.2.0**       | 🔲 Pending | Job adapter in src/rag/, no eval/Stack Overflow/HN |
-| **V3.3.0**       | 🔲 Pending | Kill chain extraction, contextual embeddings       |
+| Release          | Status     | Notes                                                          |
+| ---------------- | ---------- | -------------------------------------------------------------- |
+| **V3.1 Phase 1** | ✅ Done    | SQLite corpus cache, Exa neural search                         |
+| **V3.0.5**       | ✅ Done    | Job adapter MVP, `semantic_jobs` tool                          |
+| **V3.0.0**       | ✅ Done    | RAG pipeline extraction, YouTube/Reddit adapters               |
+| **V3.1.0 Code**  | ✅ Done    | Tree-sitter adapter, GitHub guardrails, `semantic_github_code` |
+| **V3.2.0**       | 🔲 Pending | Job adapter in src/rag/, no eval/Stack Overflow/HN             |
+| **V3.3.0**       | 🔲 Pending | Kill chain extraction, contextual embeddings                   |
 
 ---
 
@@ -482,12 +482,13 @@ Input: query + optional filters (location, workMode). Output: ranked job listing
 - **Kill Chain Content Extraction:** Implement a multi-strategy extraction fallback: `Crawl4AI -> Readability (jsdom) -> Wayback Machine -> Google Cache`. This drastically improves success rates on 404s, paywalls, and JS-heavy sites.
 - **Contextual Embeddings:** Add an optional LLM preprocessing step to generate document context for each chunk _before_ embedding, significantly boosting retrieval precision.
 
-### 3. Code Intelligence & AST Chunking [PLANNED]
+### 3. Code Intelligence & AST Chunking [✅ COMPLETED 2026-04-26]
 
-- **Tree-sitter Code Adapter (`adapters/code.ts`):** Move beyond regex heuristics. Chunk at function/class/module boundaries using WASM-based tree-sitter grammars (TS, JS, Python, Go, Rust), lazy-loaded on first use.
-- **Code Example Extraction:** In regular text/web adapters, treat markdown code blocks (` ``` `) as distinct atomic units with `contextBefore` and `contextAfter` metadata for better technical retrieval.
-- **Repo Guardrails:** Enforce byte/file caps and `.gitignore` awareness in the GitHub adapter to prevent monorepo explosion.
-- **GitHub Pre-Filters:** Require query/file/language guidance or surface a warning when the crawl is too broad; non-trivial repos should not silently drift into `examples/` or generated files.
+- **Tree-sitter Code Adapter (`adapters/code.ts`):** Implemented for TypeScript, JavaScript, Python, Go, and Rust using WASM grammars loaded lazily on first use.
+- **Code Example Extraction:** Markdown code fences stay atomic and carry `contextBefore` / `contextAfter` metadata for better technical retrieval.
+- **Repo Guardrails:** File/byte caps, generated/vendor exclusions, `.gitignore` parsing helpers, and source-over-example prioritization are in place.
+- **GitHub Pre-Filters:** Broad crawls emit warnings; code retrieval supports query, language, and `fileFilter` scoping so non-trivial repos do not silently drift into `examples/` or generated files.
+- **User-Facing Tool:** Added `semantic_github_code`, which returns path, language, line range, symbol metadata, scores, optional source context, and warnings.
 
 ### Week-One Stress Test Findings (Apr 2025)
 
@@ -876,13 +877,13 @@ No version ships unless its gates pass. These are checked in CI, not vibes.
 
 ### V3.1 Gates
 
-- [ ] Repo indexing respects byte caps and file caps — no unbounded monorepo ingestion
-- [ ] Generated/vendor files excluded (lockfiles, `*.generated.*`, `build/`)
-- [ ] Tree-sitter fallback is explicit — unrecognized extensions log and fall back to text adapter
-- [ ] `lexical-heavy` profile beats `balanced` on identifier-heavy code queries ("find `handleSubmit`")
-- [ ] Code embedding degradation path surfaced in README when `EMBEDDING_CODE_MODEL` not configured
-- [ ] WASM grammars lazy-load on first use per language, not at startup
-- [ ] GitHub code retrieval warns or clamps when queries are under-constrained; broad repo crawls cannot silently return shallow example files
+- [x] Repo indexing respects byte caps and file caps — no unbounded monorepo ingestion
+- [x] Generated/vendor files excluded (lockfiles, `*.generated.*`, `build/`)
+- [x] Tree-sitter fallback is explicit — unrecognized extensions log and fall back to text adapter
+- [x] `lexical-heavy` profile beats `balanced` on identifier-heavy code queries ("find `handleSubmit`")
+- [x] Code embedding degradation path surfaced in README when `EMBEDDING_CODE_MODEL` not configured
+- [x] WASM grammars lazy-load on first use per language, not at startup
+- [x] GitHub code retrieval warns or clamps when queries are under-constrained; broad repo crawls cannot silently return shallow example files
 
 ### V3.2 Gates
 
