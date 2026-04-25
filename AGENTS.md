@@ -1,6 +1,6 @@
 # AGENTS.md
 
-> **Version: 3.1.0** — Intelligence, Extraction, and Code: Persistent SQLite corpus cache, Kill Chain extraction, Neural Search (Exa), schema-aware web extraction, and Tree-sitter AST code chunking.
+> **Version: 3.0.5** — Fixed contextual embedding display split, Tree-sitter code chunking, and SQLite-based persistent corpus cache.
 
 This file provides guidance to AI coding agents (Codex, OpenCode, etc.) when working with code in this repository.
 

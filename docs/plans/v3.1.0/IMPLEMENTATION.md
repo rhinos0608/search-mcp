@@ -10,6 +10,16 @@
 - Regex-only JavaScript parsing is brittle. Start with conservative symbol-boundary heuristics and line ranges.
 - Existing GitHub tools remain first-class and unchanged.
 
+## Stress-Test Findings That Shape This Plan
+
+The week-one semantic tool tests surfaced a few constraints that the code adapter needs to respect from day one:
+
+- Broad GitHub crawls drift into `examples/` and other surface files unless a query/file/language pre-filter is provided.
+- `maxFiles` and byte caps need to be hard stops, not soft guidance.
+- Generated/vendor directories must stay excluded by default.
+- Result quality should degrade visibly via warnings when the crawl was under-constrained, rather than silently returning the wrong file.
+- Query-specific GitHub retrieval is excellent when steered properly; the plan should optimize for that path, not broad monorepo exploration.
+
 ## Phase 0 - Fixtures and Baseline
 
 Create fixture files under `test/fixtures/code/`:
@@ -174,13 +184,16 @@ Changes:
 - Keep the existing public function unless V3.0.0 already moved it.
 - Add optional branch/default branch resolution only if needed by the tool.
 - Add better extension defaults for code search.
-- Preserve excluded directory behavior.
+- Preserve excluded directory behavior and hard-cap traversal by file count and byte budget.
+- Add explicit pre-filter support (`query`, `language`, `fileFilter`) and warnings when the crawl is too broad to target the right code.
 - Keep sequential fetching initially if rate-limit safety matters; introduce bounded concurrency only with tests.
 
 Tests:
 
 - Existing `test/githubCorpus.test.ts`.
 - File include/exclude behavior for new extensions.
+- Broad repo crawl without a meaningful pre-filter emits warnings and stays within caps.
+- Query/file-filtered crawl lands in the intended code path rather than `examples/` or generated output.
 
 ## Phase 7 - `semantic_github_code` Tool
 
@@ -220,6 +233,7 @@ Tests:
 - Query returns symbol metadata and line ranges.
 - Language filter excludes nonmatching files.
 - Include-context flag controls call-site output.
+- Under-constrained repo queries surface warnings instead of silently selecting shallow example files.
 
 ## Phase 8 - Docs and Verification
 

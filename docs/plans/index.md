@@ -1,16 +1,15 @@
 # Search MCP Roadmap — Implementation Plans Index
 
-**Version**: 3.0.5 (implemented 2026-04-25) → V3.1.0 → V3.2.0
+**Version**: 3.0.5 (implemented 2026-04-25) → V3.1.0 → V3.2.0 → V3.3.0
 
 This document indexes all implementation plans for the Search MCP roadmap.
 
-## Current State: V3.0.5 ✅ (2026-04-25)
+## Current State: V3.1.0 Phase 1 Complete ✅ (2026-04-25)
 
-- V3.0.0 Universal RAG core extracted into `src/rag/`
-- V3.0.5 Job Adapter MVP with structured extraction, dedup, and constraint-aware ranking
-- New tool: `semantic_jobs` — search job boards, extract structured listings, rank with weighted scoring
-- All V2.0.0 capabilities preserved; `semantic_crawl`, `semantic_youtube`, `semantic_reddit` fully backward compatible
-- 605 tests pass; typecheck ✅ · lint ✅ · format ✅
+- **V3.0.5** — COMPLETE: job adapter MVP with structured extraction, dedup, constraint-aware ranking, `semantic_jobs` tool
+- **V3.1 Phase 1** — COMPLETE (2026-04-25): persistent corpus cache (SQLite), Exa neural search integration
+- **semantic tools** (2026-04-25): YouTube/Reddit crawlers live but recent — week-one stress testing exposed guardrail gaps
+- 605+ tests pass; typecheck ✅ · lint ✅ · format ✅
 
 ---
 
@@ -85,7 +84,7 @@ This document indexes all implementation plans for the Search MCP roadmap.
 
 ## V3.1.0 — Code / GitHub
 
-**Status**: Not Started  
+**Status**: Not Started · **Phase 1**: Done ✅ (persistence + Exa)  
 **Priority**: High  
 **Depends On**: V3.0.0
 
@@ -209,3 +208,5 @@ This document indexes all implementation plans for the Search MCP roadmap.
 ---
 
 _Generated: 2026-04-24 · Last updated: 2026-04-25 (V3.0.5 complete)_
+
+_Last revision per git log f0a3020: Added stress-test findings to guardrails (V3_REVIEW.md, IMPLEMENTATION.md, ROADMAP.md)._

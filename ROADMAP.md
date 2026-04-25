@@ -1,8 +1,23 @@
 # Roadmap
 
-## V2.0.0 — Semantic Overhaul (current)
+## Current State (2026-04-25)
 
-The semantic layer is live for **web** and **GitHub** sources via `semantic_crawl`:
+| Release          | Status     | Notes                                              |
+| ---------------- | ---------- | -------------------------------------------------- |
+| **V3.1 Phase 1** | ✅ Done    | SQLite corpus cache, Exa neural search             |
+| **V3.0.5**       | ✅ Done    | Job adapter MVP, `semantic_jobs` tool              |
+| **V3.0.0**       | ✅ Done    | RAG pipeline extraction, YouTube/Reddit adapters   |
+| **V3.1.0 Code**  | 🔲 Pending | Tree-sitter adapter, GitHub guardrails             |
+| **V3.2.0**       | 🔲 Pending | Job adapter in src/rag/, no eval/Stack Overflow/HN |
+| **V3.3.0**       | 🔲 Pending | Kill chain extraction, contextual embeddings       |
+
+---
+
+## V2.0.0 — Semantic Overhaul (legacy)
+
+> ⚠️ **Legacy**: V2 capabilities preserved for backward compatibility. Development continues on V3.
+
+The semantic layer was live
 
 - Crawl4AI-powered deep crawling with JS rendering
 - Markdown chunking (400-token max, 20% overlap, atomic units, boilerplate heuristics)
@@ -457,25 +472,40 @@ Input: query + optional filters (location, workMode). Output: ranked job listing
 
 **Goal**: Transform the extraction and caching layers to be robust enough for production agent workflows, moving beyond simple markdown parsing and volatile in-memory storage. This incorporates research findings on Kill Chain extraction and Contextual Embeddings alongside the original Code intelligence goals.
 
-### 1. Robust Infrastructure (Persistence & Neural Search) [✅ COMPLETED]
+### 1. Robust Infrastructure (Persistence & Neural Search) [✅ COMPLETED 2026-04-25]
 
 - **Persistent Corpus Cache:** Migrated `src/utils/corpusCache.ts` from in-process memory to SQLite (`better-sqlite3`). This solves the critical issue where `source: "cached"` dies on server restart. Includes byte-weighted LRU eviction.
 - **Neural Search Integration:** Added Exa as a supported search backend (`EXA_API_KEY`) to enable semantic web/code search before crawling even begins.
 
-### 2. Advanced Extraction (The "Kill Chain")
+### 2. Advanced Extraction (The "Kill Chain") [PLANNED]
 
 - **Kill Chain Content Extraction:** Implement a multi-strategy extraction fallback: `Crawl4AI -> Readability (jsdom) -> Wayback Machine -> Google Cache`. This drastically improves success rates on 404s, paywalls, and JS-heavy sites.
 - **Contextual Embeddings:** Add an optional LLM preprocessing step to generate document context for each chunk _before_ embedding, significantly boosting retrieval precision.
 
-### 3. Code Intelligence & AST Chunking
+### 3. Code Intelligence & AST Chunking [PLANNED]
 
 - **Tree-sitter Code Adapter (`adapters/code.ts`):** Move beyond regex heuristics. Chunk at function/class/module boundaries using WASM-based tree-sitter grammars (TS, JS, Python, Go, Rust), lazy-loaded on first use.
 - **Code Example Extraction:** In regular text/web adapters, treat markdown code blocks (` ``` `) as distinct atomic units with `contextBefore` and `contextAfter` metadata for better technical retrieval.
 - **Repo Guardrails:** Enforce byte/file caps and `.gitignore` awareness in the GitHub adapter to prevent monorepo explosion.
+- **GitHub Pre-Filters:** Require query/file/language guidance or surface a warning when the crawl is too broad; non-trivial repos should not silently drift into `examples/` or generated files.
+
+### Week-One Stress Test Findings (Apr 2025)
+
+The new semantic tools are working but need guardrails:
+
+- `semantic_reddit` reliable with subreddit filter; broad cross-Reddit is noisy
+- `commentLimit` hard-cap at 100 (Reddit API reject >100)
+- `semantic_youtube` channel filter works; transcript chunking returns fragments
+- GitHub with query filters is excellent; broad repo drifts into examples
+- DFS crawl overruns `maxPages` — needs hard stop
+
+**Roadmap impact**: V3.1 implementation plans updated with mandatory pre-filter tests and under-constraint warnings.
 
 ---
 
-## V3.2.0 — Domain Adapters + Structured Retrieval
+## V3.2.0 — Domain Adapters + Structured Retrieval [IN PROGRESS]
+
+> ⚠️ **In Progress**: Job adapter exists in `src/rag/adapters/job.ts`. Still pending: coverage, eval harness, Stack Overflow, HN, academic.
 
 The adapter contract has been hardened by real use across YouTube, Reddit, and GitHub. V3.2 introduces the biggest unlock: **domain adapters that extract structured objects**, not just markdown chunks.
 
@@ -852,6 +882,7 @@ No version ships unless its gates pass. These are checked in CI, not vibes.
 - [ ] `lexical-heavy` profile beats `balanced` on identifier-heavy code queries ("find `handleSubmit`")
 - [ ] Code embedding degradation path surfaced in README when `EMBEDDING_CODE_MODEL` not configured
 - [ ] WASM grammars lazy-load on first use per language, not at startup
+- [ ] GitHub code retrieval warns or clamps when queries are under-constrained; broad repo crawls cannot silently return shallow example files
 
 ### V3.2 Gates
 

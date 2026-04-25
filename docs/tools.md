@@ -520,7 +520,7 @@ Returns a retrieval response with additional metadata. The MCP tool response kee
 
 1. Search YouTube for candidate videos.
 2. Fetch transcripts with bounded concurrency.
-3. Chunk transcript text and embed it through the shared RAG pipeline.
+3. Group adjacent transcript captions into contextual chunks and embed them through the shared RAG pipeline.
 4. Apply dense + lexical retrieval, then trim to `topK`.
 5. Return a compact corpus summary instead of the full internal corpus payload.
 
@@ -529,6 +529,7 @@ Returns a retrieval response with additional metadata. The MCP tool response kee
 - Requires `YOUTUBE_API_KEY` and `EMBEDDING_SIDECAR_BASE_URL`.
 - The corpus budget is capped at 250MB by default so the tool can safely process large transcripts.
 - Transcript failures are tolerated; successful videos still contribute chunks.
+- Captions are grouped into contextual windows before embedding, so results are less fragmented than one-caption-at-a-time retrieval.
 
 ---
 
@@ -538,17 +539,17 @@ Search Reddit posts, fetch their comment trees, and return the most semantically
 
 ### Inputs
 
-| Parameter      | Type                                                                | Required | Default       | Description                                                             |
-| -------------- | ------------------------------------------------------------------- | -------- | ------------- | ----------------------------------------------------------------------- |
-| `query`        | string                                                              | yes      | —             | Semantic search query.                                                  |
-| `subreddit`    | string                                                              | no       | —             | Restrict search to a subreddit.                                         |
-| `sort`         | `"relevance"` \| `"hot"` \| `"new"` \| `"top"`                      | no       | `"relevance"` | Reddit search sort order.                                               |
-| `timeframe`    | `"hour"` \| `"day"` \| `"week"` \| `"month"` \| `"year"` \| `"all"` | no       | `"year"`      | Time filter for search.                                                 |
-| `maxPosts`     | number                                                              | no       | `10`          | Maximum number of posts to fetch comments for. Maximum value: `25`.     |
-| `commentLimit` | number                                                              | no       | `100`         | Maximum comments to fetch per post. Maximum value: `500`.               |
-| `profile`      | `"balanced"` \| `"fast"` \| `"precision"` \| `"recall"`             | no       | `"balanced"`  | Retrieval profile.                                                      |
-| `topK`         | number                                                              | no       | `10`          | Number of semantically relevant comment passages to return.             |
-| `maxBytes`     | number                                                              | no       | `250000000`   | Maximum total comment corpus size in bytes. Maximum value: `250000000`. |
+| Parameter      | Type                                                                | Required | Default       | Description                                                                            |
+| -------------- | ------------------------------------------------------------------- | -------- | ------------- | -------------------------------------------------------------------------------------- |
+| `query`        | string                                                              | yes      | —             | Semantic search query.                                                                 |
+| `subreddit`    | string                                                              | no       | —             | Restrict search to a subreddit.                                                        |
+| `sort`         | `"relevance"` \| `"hot"` \| `"new"` \| `"top"`                      | no       | `"relevance"` | Reddit search sort order.                                                              |
+| `timeframe`    | `"hour"` \| `"day"` \| `"week"` \| `"month"` \| `"year"` \| `"all"` | no       | `"year"`      | Time filter for search.                                                                |
+| `maxPosts`     | number                                                              | no       | `10`          | Maximum number of posts to fetch comments for. Maximum value: `25`.                    |
+| `commentLimit` | number                                                              | no       | `100`         | Maximum comments to fetch per post. Maximum value: `100` (matches the Reddit API cap). |
+| `profile`      | `"balanced"` \| `"fast"` \| `"precision"` \| `"recall"`             | no       | `"balanced"`  | Retrieval profile.                                                                     |
+| `topK`         | number                                                              | no       | `10`          | Number of semantically relevant comment passages to return.                            |
+| `maxBytes`     | number                                                              | no       | `250000000`   | Maximum total comment corpus size in bytes. Maximum value: `250000000`.                |
 
 ### Output
 
@@ -582,6 +583,8 @@ Returns a retrieval response with additional metadata. The MCP tool response kee
 4. Embed chunks and run the shared RAG pipeline.
 5. Trim to `topK` after retrieval.
 6. Return a compact corpus summary instead of the full internal corpus payload.
+
+Note: `commentLimit` is capped at `100` to match the Reddit API's per-request comment limit.
 
 ### Rate limits / caveats
 
@@ -623,6 +626,8 @@ Crawls pages, chunks them, embeds them through the shared sidecar, and ranks pas
 
 - Requires `CRAWL4AI_BASE_URL` and `EMBEDDING_SIDECAR_BASE_URL`.
 - The corpus budget is capped at 250MB by default.
+- Cached corpus IDs are retained for at least 24 hours and are refreshed on access; re-run the original crawl if a corpus has been evicted.
+- Broad GitHub crawls are de-prioritized toward core source directories, but the best results still come from providing a query pre-filter.
 - SSRF protection still applies to fetched seed URLs and discovered pages.
 - If crawl4ai returns shell/placeholder content (for example `Loading...`), the crawler automatically retries once with a more aggressive render profile before indexing; successful recoveries may be reported in `meta.warnings`.
 

@@ -49,6 +49,18 @@ The implementation plans in each stage now assume the current repository shape:
 10. **Documentation polish**
     Fixed the `p#` typo in the V3.1.0 spec heading and added implementation-plan links to the roadmap index.
 
+## Week-One Semantic Tool Stress Test Findings
+
+The new semantic tools are broadly sound, but the week-one tests exposed a few guardrail gaps that should shape the next iteration:
+
+- `semantic_reddit` is reliable with subreddit-scoped queries, but broad cross-Reddit search is noisy enough that it should be treated as an opt-in fallback, not a primary path.
+- `commentLimit` must be hard-capped at 100 for Reddit. The upstream API rejects larger values, so the schema needs to match reality.
+- `semantic_youtube` channel filtering works, but transcript chunking still returns short, decontextualized fragments when captions are split too finely. The plan should preserve YouTube as a search + transcript retrieval flow, not promise sentence-level coherence from raw auto-captions.
+- GitHub code retrieval is highly sensitive to pre-filters. Broad repo crawls drift into examples or surface files; query/file/language filters should be treated as mandatory guidance for non-trivial repos.
+- DFS crawl strategy needs a hard `maxPages` stop. The stress test overran the configured page budget, so page accounting must be part of the acceptance criteria.
+- Structured extraction knobs like `extractionConfig` and cached-corpus reuse should continue to be documented as side-channel features, not assumed to influence semantic ranking.
+- The upside: the failures were shallow and localized. The underlying architecture, scoring breakdowns, and corpus shaping are still strong.
+
 ## Suggested Execution Order
 
 1. V3.0.0: extraction and compatibility.
