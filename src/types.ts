@@ -432,6 +432,7 @@ export interface WebCrawlResult {
   pages: CrawlPageResult[];
   totalPages: number;
   successfulPages: number;
+  warnings?: string[];
 }
 
 // ── Semantic Crawl ────────────────────────────────────────────────────────
@@ -475,6 +476,7 @@ export interface SemanticCrawlResult extends StructuredContent {
   corpusId: string;
   chunks: SemanticCrawlChunk[];
   extractedData?: Record<string, Record<string, unknown>[]>;
+  warnings?: string[];
 }
 
 // ── Semantic Crawl Sources ────────────────────────────────────────────────

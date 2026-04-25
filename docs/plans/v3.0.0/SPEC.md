@@ -298,6 +298,7 @@ Uses `semanticCrawl.ts` extraction as guide but calls new pipeline.
   transcriptLanguage?: string,
   profile?: RetrievalProfile,
   topK?: number,
+  maxBytes?: number,         // default 250MB
   debug?: boolean
 }
 ```
@@ -327,6 +328,7 @@ Uses `semanticCrawl.ts` extraction as guide but calls new pipeline.
   timeframe?: 'hour' | 'day' | 'week' | 'month' | 'year' | 'all',
   profile?: RetrievalProfile,
   topK?: number,
+  maxBytes?: number,         // default 250MB
   debug?: boolean
 }
 ```

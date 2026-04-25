@@ -153,6 +153,36 @@ This document indexes all implementation plans for the Search MCP roadmap.
 
 ---
 
+## V3.3.0 — Extraction Resilience & Search Recall
+
+**Status**: Spec ✅ · Implementation Plan ✅ · Not Started  
+**Priority**: High  
+**Depends On**: V3.0.0
+
+**Summary**: Hardening extraction quality and search recall based on research into [agent-search](https://github.com/brcrusoe72/agent-search) (9-strategy kill chain, domain trust, query expansion, content scrubbing, self-improvement) and [mcp-crawl4ai-rag](https://github.com/coleam00/mcp-crawl4ai-rag) (contextual embeddings, code extraction, persistent storage).
+
+| Document            | Path                                  |
+| ------------------- | ------------------------------------- |
+| Full Spec           | `docs/plans/v3.3.0/SPEC.md`           |
+| Implementation Plan | `docs/plans/v3.3.0/IMPLEMENTATION.md` |
+
+### 8 Independently Shippable Stages
+
+| #   | Stage                           | Source           | Effort | New Files                        | Modified Files                                 |
+| --- | ------------------------------- | ---------------- | ------ | -------------------------------- | ---------------------------------------------- |
+| 1   | **Contextual Embeddings**       | mcp-crawl4ai-rag | Medium | `src/rag/contextualEmbedding.ts` | `semanticCrawl.ts`, `server.ts`, `types.ts`    |
+| 2   | **Domain Trust & Typosquat**    | agent-search     | Low    | `src/utils/domainTrust.ts`       | `semanticCrawl.ts`, `config.ts`, `webCrawl.ts` |
+| 3   | **Query Expansion**             | agent-search     | Low    | `src/tools/queryExpansion.ts`    | `webSearch.ts`, `server.ts`                    |
+| 4   | **External Recovery Fallbacks** | agent-search     | Medium | `src/utils/externalRecovery.ts`  | `webCrawl.ts`, `types.ts`                      |
+| 5   | **Content Scrubbing**           | agent-search     | Medium | `src/utils/contentScrubber.ts`   | `semanticCrawl.ts`, `webRead.ts`, `config.ts`  |
+| 6   | **Cross-Backend Search Merge**  | agent-search     | Medium | `src/utils/searchMerge.ts`       | `webSearch.ts`, `types.ts`, `server.ts`        |
+| 7   | **Code Example Extraction**     | mcp-crawl4ai-rag | Low    | —                                | `chunking.ts`, `types.ts`                      |
+| 8   | **Self-Improvement Tracking**   | agent-search     | Low    | `src/utils/extractionStats.ts`   | `webCrawl.ts`, `semanticCrawl.ts`, `health.ts` |
+
+**Estimated Scope**: ~2,500 LOC new code
+
+---
+
 ## Summary Table
 
 | Version | Focus         | Key Deliverables                                                  | Est. Scope |
@@ -161,8 +191,9 @@ This document indexes all implementation plans for the Search MCP roadmap.
 | V3.0.5  | Jobs MVP      | Job adapter (SEEK, Indeed, Jora), structured extraction           | ~750 LOC   |
 | V3.1.0  | Code/GitHub   | Code adapter, semantic GitHub search                              | ~800 LOC   |
 | V3.2.0  | Completion    | Academic, QA, job full, dedup, constraints, metrics, full eval    | ~2,000 LOC |
+| V3.3.0  | Resilience    | Contextual embeddings, domain trust, query expansion, scrubbing   | ~2,500 LOC |
 
-**Total V3 Series**: ~5,250 LOC new code
+**Total V3 Series**: ~7,750 LOC new code
 
 ---
 
@@ -173,7 +204,8 @@ This document indexes all implementation plans for the Search MCP roadmap.
 - Tools Reference: `docs/tools.md`
 - MCP Quickstart: `docs/mcp-quickstart.md`
 - Composition with RAG: `docs/composition-with-rag-anything.md`
+- Semantic Crawl JS Rendering Recovery: `docs/plans/2026-04-25-semantic-crawl-js-rendering-plan.md`
 
 ---
 
-_Generated: 2026-04-24 · Last updated: 2026-04-25 (V3.0.0 complete)_
+_Generated: 2026-04-24 · Last updated: 2026-04-25 (V3.0.0 complete, V3.3.0 spec added)_

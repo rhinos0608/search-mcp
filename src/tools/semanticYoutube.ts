@@ -5,6 +5,7 @@ import { chunksFromTranscript } from '../rag/adapters/transcript.js';
 import { embedTexts, embedTextsBatched } from '../rag/embedding.js';
 import { prepareCorpus, retrieveCorpus } from '../rag/pipeline.js';
 import type { RagChunk, RetrievalProfileName, RetrievalResponse } from '../rag/types.js';
+import { DEFAULT_SEMANTIC_MAX_BYTES, applySemanticByteBudget, formatSemanticBytes } from '../semanticLimits.js';
 
 const TRANSCRIPT_CONCURRENCY = 3;
 
@@ -20,6 +21,7 @@ export interface SemanticYoutubeOptions {
   transcriptLanguage?: string | undefined;
   profile?: RetrievalProfileName | undefined;
   topK?: number | undefined;
+  maxBytes?: number | undefined;
 }
 
 export interface SemanticYoutubeResult extends RetrievalResponse {
@@ -31,6 +33,7 @@ export async function semanticYoutube(
   opts: SemanticYoutubeOptions,
 ): Promise<SemanticYoutubeResult> {
   const maxVideos = Math.min(opts.maxVideos ?? 20, 50);
+  const maxBytes = opts.maxBytes ?? DEFAULT_SEMANTIC_MAX_BYTES;
   const language = opts.transcriptLanguage ?? 'en';
   const sort = opts.sort ?? 'relevance';
 
@@ -83,7 +86,16 @@ export async function semanticYoutube(
     }
   }
 
-  if (allChunks.length === 0) {
+  const budgeted = applySemanticByteBudget(allChunks, maxBytes);
+  if (budgeted.truncated) {
+    warnings.push(
+      `Transcript corpus budget capped at ${formatSemanticBytes(maxBytes)}; ${String(budgeted.droppedCount)} chunks omitted`,
+    );
+  }
+
+  const chunks = budgeted.items;
+
+  if (chunks.length === 0) {
     const corpus = prepareCorpus({ adapter: 'transcript', chunks: [] });
     const response = retrieveCorpus(corpus, {
       query: opts.query,
@@ -98,8 +110,8 @@ export async function semanticYoutube(
     };
   }
 
-  const chunkTexts = allChunks.map((c) => c.text);
-  const chunkTitles = allChunks.map((c) => c.section);
+  const chunkTexts = chunks.map((c) => c.text);
+  const chunkTitles = chunks.map((c) => c.section);
 
   const [docEmbed, queryEmbed] = await Promise.all([
     embedTextsBatched({
@@ -126,7 +138,7 @@ export async function semanticYoutube(
 
   const corpus = prepareCorpus({
     adapter: 'transcript',
-    chunks: allChunks,
+    chunks,
     embeddings: docEmbed.embeddings,
     model: docEmbed.model,
     dimensions: docEmbed.dimensions,

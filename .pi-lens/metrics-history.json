@@ -1,0 +1,156 @@
+{
+  "version": 1,
+  "files": {
+    "test/webCrawlRecovery.test.ts": {
+      "latest": {
+        "commit": "4dcd04c",
+        "timestamp": "2026-04-25T03:50:19.394Z",
+        "mi": 42.1,
+        "cognitive": 3,
+        "nesting": 3,
+        "lines": 66,
+        "maxCyclomatic": 3,
+        "entropy": 5.73
+      },
+      "history": [
+        {
+          "commit": "4dcd04c",
+          "timestamp": "2026-04-25T03:50:19.394Z",
+          "mi": 42.1,
+          "cognitive": 3,
+          "nesting": 3,
+          "lines": 66,
+          "maxCyclomatic": 3,
+          "entropy": 5.73
+        }
+      ],
+      "trend": "stable"
+    },
+    "src/types.ts": {
+      "latest": {
+        "commit": "4dcd04c",
+        "timestamp": "2026-04-25T03:52:57.414Z",
+        "mi": 22.9,
+        "cognitive": 0,
+        "nesting": 0,
+        "lines": 422,
+        "maxCyclomatic": 1,
+        "entropy": 5.76
+      },
+      "history": [
+        {
+          "commit": "4dcd04c",
+          "timestamp": "2026-04-25T03:52:57.414Z",
+          "mi": 22.9,
+          "cognitive": 0,
+          "nesting": 0,
+          "lines": 422,
+          "maxCyclomatic": 1,
+          "entropy": 5.76
+        }
+      ],
+      "trend": "stable"
+    },
+    "src/tools/webCrawl.ts": {
+      "latest": {
+        "commit": "4dcd04c",
+        "timestamp": "2026-04-25T03:54:14.700Z",
+        "mi": 22.6,
+        "cognitive": 103,
+        "nesting": 4,
+        "lines": 262,
+        "maxCyclomatic": 93,
+        "entropy": 6.81
+      },
+      "history": [
+        {
+          "commit": "4dcd04c",
+          "timestamp": "2026-04-25T03:54:14.700Z",
+          "mi": 22.6,
+          "cognitive": 103,
+          "nesting": 4,
+          "lines": 262,
+          "maxCyclomatic": 93,
+          "entropy": 6.81
+        }
+      ],
+      "trend": "stable"
+    },
+    "src/utils/renderRecovery.ts": {
+      "latest": {
+        "commit": "4dcd04c",
+        "timestamp": "2026-04-25T03:57:15.008Z",
+        "mi": 43.2,
+        "cognitive": 13,
+        "nesting": 3,
+        "lines": 49,
+        "maxCyclomatic": 8,
+        "entropy": 5.57
+      },
+      "history": [
+        {
+          "commit": "4dcd04c",
+          "timestamp": "2026-04-25T03:57:15.008Z",
+          "mi": 43.2,
+          "cognitive": 13,
+          "nesting": 3,
+          "lines": 49,
+          "maxCyclomatic": 8,
+          "entropy": 5.57
+        }
+      ],
+      "trend": "stable"
+    },
+    "src/tools/semanticCrawl.ts": {
+      "latest": {
+        "commit": "4dcd04c",
+        "timestamp": "2026-04-25T03:58:20.500Z",
+        "mi": 4.8,
+        "cognitive": 375,
+        "nesting": 6,
+        "lines": 1079,
+        "maxCyclomatic": 79,
+        "entropy": 8
+      },
+      "history": [
+        {
+          "commit": "4dcd04c",
+          "timestamp": "2026-04-25T03:58:20.500Z",
+          "mi": 4.8,
+          "cognitive": 375,
+          "nesting": 6,
+          "lines": 1079,
+          "maxCyclomatic": 79,
+          "entropy": 8
+        }
+      ],
+      "trend": "stable"
+    },
+    "src/server.ts": {
+      "latest": {
+        "commit": "4dcd04c",
+        "timestamp": "2026-04-25T04:00:13.703Z",
+        "mi": 0,
+        "cognitive": 303,
+        "nesting": 5,
+        "lines": 1757,
+        "maxCyclomatic": 127,
+        "entropy": 7.64
+      },
+      "history": [
+        {
+          "commit": "4dcd04c",
+          "timestamp": "2026-04-25T04:00:13.703Z",
+          "mi": 0,
+          "cognitive": 303,
+          "nesting": 5,
+          "lines": 1757,
+          "maxCyclomatic": 127,
+          "entropy": 7.64
+        }
+      ],
+      "trend": "stable"
+    }
+  },
+  "capturedAt": "2026-04-25T04:00:18.705Z"
+}

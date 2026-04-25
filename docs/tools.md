@@ -472,3 +472,158 @@ Setting exactly one of `REDDIT_CLIENT_ID` / `REDDIT_CLIENT_SECRET` is treated as
   }
 }
 ```
+
+---
+
+## `semantic_youtube`
+
+Search YouTube videos, fetch their transcripts, and return the most semantically relevant transcript passages for a query.
+
+### Inputs
+
+| Parameter            | Type                                                    | Required | Default       | Description                                                                |
+| -------------------- | ------------------------------------------------------- | -------- | ------------- | -------------------------------------------------------------------------- |
+| `query`              | string                                                  | yes      | —             | Semantic search query.                                                     |
+| `maxVideos`          | number                                                  | no       | `20`          | Maximum number of videos to fetch. Maximum value: `50`.                    |
+| `channel`            | string                                                  | no       | —             | Restrict results to channels whose name contains this string.              |
+| `sort`               | `"relevance"` \| `"date"` \| `"viewCount"`              | no       | `"relevance"` | YouTube search sort order.                                                 |
+| `transcriptLanguage` | string                                                  | no       | `"en"`        | BCP-47 language code for transcript captions.                              |
+| `profile`            | `"balanced"` \| `"fast"` \| `"precision"` \| `"recall"` | no       | `"balanced"`  | Retrieval profile.                                                         |
+| `topK`               | number                                                  | no       | `10`          | Number of semantically relevant transcript passages to return.             |
+| `maxBytes`           | number                                                  | no       | `250000000`   | Maximum total transcript corpus size in bytes. Maximum value: `250000000`. |
+
+### Output
+
+Returns a retrieval response with additional metadata. The MCP tool response keeps the ranked `results` and a compact `corpus` summary; the full chunk corpus stays internal so responses remain under transport size limits.
+
+```ts
+{
+  results: Array<...>;
+  corpus: {
+    id: string;
+    status: 'ready' | 'empty' | 'partial' | 'error';
+    adapter: 'transcript';
+    documentCount: number;
+    chunkCount: number;
+    embeddingCount: number;
+    model?: string;
+    modelRevision?: string;
+    dimensions?: number;
+  };
+  videoCount: number;
+  failedTranscripts: number;
+  warnings?: string[];
+}
+```
+
+### Underlying approach
+
+1. Search YouTube for candidate videos.
+2. Fetch transcripts with bounded concurrency.
+3. Chunk transcript text and embed it through the shared RAG pipeline.
+4. Apply dense + lexical retrieval, then trim to `topK`.
+5. Return a compact corpus summary instead of the full internal corpus payload.
+
+### Rate limits / caveats
+
+- Requires `YOUTUBE_API_KEY` and `EMBEDDING_SIDECAR_BASE_URL`.
+- The corpus budget is capped at 250MB by default so the tool can safely process large transcripts.
+- Transcript failures are tolerated; successful videos still contribute chunks.
+
+---
+
+## `semantic_reddit`
+
+Search Reddit posts, fetch their comment trees, and return the most semantically relevant comment passages for a query.
+
+### Inputs
+
+| Parameter      | Type                                                                | Required | Default       | Description                                                             |
+| -------------- | ------------------------------------------------------------------- | -------- | ------------- | ----------------------------------------------------------------------- |
+| `query`        | string                                                              | yes      | —             | Semantic search query.                                                  |
+| `subreddit`    | string                                                              | no       | —             | Restrict search to a subreddit.                                         |
+| `sort`         | `"relevance"` \| `"hot"` \| `"new"` \| `"top"`                      | no       | `"relevance"` | Reddit search sort order.                                               |
+| `timeframe`    | `"hour"` \| `"day"` \| `"week"` \| `"month"` \| `"year"` \| `"all"` | no       | `"year"`      | Time filter for search.                                                 |
+| `maxPosts`     | number                                                              | no       | `10`          | Maximum number of posts to fetch comments for. Maximum value: `25`.     |
+| `commentLimit` | number                                                              | no       | `100`         | Maximum comments to fetch per post. Maximum value: `500`.               |
+| `profile`      | `"balanced"` \| `"fast"` \| `"precision"` \| `"recall"`             | no       | `"balanced"`  | Retrieval profile.                                                      |
+| `topK`         | number                                                              | no       | `10`          | Number of semantically relevant comment passages to return.             |
+| `maxBytes`     | number                                                              | no       | `250000000`   | Maximum total comment corpus size in bytes. Maximum value: `250000000`. |
+
+### Output
+
+Returns a retrieval response with additional metadata. The MCP tool response keeps the ranked `results` and a compact `corpus` summary; the full chunk corpus stays internal so responses remain under transport size limits.
+
+```ts
+{
+  results: Array<...>;
+  corpus: {
+    id: string;
+    status: 'ready' | 'empty' | 'partial' | 'error';
+    adapter: 'conversation';
+    documentCount: number;
+    chunkCount: number;
+    embeddingCount: number;
+    model?: string;
+    modelRevision?: string;
+    dimensions?: number;
+  };
+  postCount: number;
+  failedPosts: number;
+  warnings?: string[];
+}
+```
+
+### Underlying approach
+
+1. Search Reddit for candidate posts.
+2. Fetch comment trees with bounded concurrency.
+3. Flatten comments through the shared conversation adapter.
+4. Embed chunks and run the shared RAG pipeline.
+5. Trim to `topK` after retrieval.
+6. Return a compact corpus summary instead of the full internal corpus payload.
+
+### Rate limits / caveats
+
+- Requires `EMBEDDING_SIDECAR_BASE_URL`.
+- Deleted and removed comments are filtered before embedding.
+- The corpus budget is capped at 250MB by default to support large threads.
+
+---
+
+## `semantic_crawl`
+
+Crawl a URL or corpus source and return the most semantically relevant passages for a query.
+
+### Inputs
+
+| Parameter               | Type               | Required | Default     | Description                                                            |
+| ----------------------- | ------------------ | -------- | ----------- | ---------------------------------------------------------------------- |
+| `source`                | object             | yes      | —           | Crawl source (`url`, `sitemap`, `search`, `github`, or `cached`).      |
+| `query`                 | string             | yes      | —           | Semantic search query.                                                 |
+| `topK`                  | number             | no       | `10`        | Number of passages to return.                                          |
+| `strategy`              | `"bfs"` \| `"dfs"` | no       | `"bfs"`     | Crawl strategy.                                                        |
+| `maxDepth`              | number             | no       | `2`         | Maximum crawl depth.                                                   |
+| `maxPages`              | number             | no       | `20`        | Maximum pages to crawl.                                                |
+| `includeExternalLinks`  | boolean            | no       | `false`     | Follow external links.                                                 |
+| `maxBytes`              | number             | no       | `250000000` | Maximum total source corpus size in bytes. Maximum value: `250000000`. |
+| `useReranker`           | boolean            | no       | `false`     | Apply cross-encoder re-ranking to top candidates.                      |
+| `allowPathDrift`        | boolean            | no       | `false`     | Allow links outside the seed URL path.                                 |
+| `extractionConfig`      | object             | no       | —           | Structured extraction config forwarded to crawl4ai.                    |
+| `waitFor`               | string             | no       | —           | CSS selector or JS predicate to wait for before extraction.            |
+| `delayBeforeReturnHtml` | number             | no       | `0.1`       | Extra seconds to wait for dynamic content to settle.                   |
+| `pageTimeout`           | number             | no       | `60000`     | Page timeout in milliseconds.                                          |
+| `jsCode`                | string             | no       | —           | Custom JavaScript to run before extraction.                            |
+
+### Underlying approach
+
+Crawls pages, chunks them, embeds them through the shared sidecar, and ranks passages with dense + lexical retrieval. Optional cross-encoder re-ranking can be enabled with `useReranker`.
+
+### Rate limits / caveats
+
+- Requires `CRAWL4AI_BASE_URL` and `EMBEDDING_SIDECAR_BASE_URL`.
+- The corpus budget is capped at 250MB by default.
+- SSRF protection still applies to fetched seed URLs and discovered pages.
+- If crawl4ai returns shell/placeholder content (for example `Loading...`), the crawler automatically retries once with a more aggressive render profile before indexing; successful recoveries may be reported in `meta.warnings`.
+
+---

@@ -240,3 +240,28 @@ test('semanticYoutube does not write to stdout', async () => {
 
   assert.equal(written.length, 0, `Unexpected stdout output: ${written.join('')}`);
 });
+
+test('semanticYoutube respects a small maxBytes corpus budget', async () => {
+  const restore = installStub({
+    videos: [{ videoId: 'iiiiiiiiiii', title: 'Budget Video', channel: 'Channel' }],
+  });
+
+  try {
+    const result = await semanticYoutube({
+      query: 'budget test unique query q6',
+      apiKey: 'fake-key',
+      embeddingBaseUrl: 'http://sidecar.local',
+      embeddingDimensions: 4,
+      maxBytes: 1,
+    });
+
+    assert.equal(result.corpus.status, 'empty');
+    assert.equal(result.results.length, 0);
+    assert.ok(
+      result.warnings?.some((w) => w.toLowerCase().includes('budget')),
+      'Expected a warning about the byte budget being exceeded',
+    );
+  } finally {
+    restore();
+  }
+});

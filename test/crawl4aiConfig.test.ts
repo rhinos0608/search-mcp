@@ -2,6 +2,7 @@ import test, { beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 
 import { loadConfig, resetConfig } from '../src/config.js';
+import { DEFAULT_SEMANTIC_MAX_BYTES } from '../src/semanticLimits.js';
 
 const CRAWL4AI_ENV_KEYS = [
   'CRAWL4AI_BASE_URL',
@@ -36,6 +37,8 @@ test('loadConfig exposes empty crawl4ai fields when no env vars are set', () => 
 
   assert.equal(cfg.crawl4ai.baseUrl, '');
   assert.equal(cfg.crawl4ai.apiToken, '');
+  assert.equal(cfg.semanticCrawl.defaultMaxBytes, DEFAULT_SEMANTIC_MAX_BYTES);
+  assert.equal(cfg.semanticCrawl.maxMaxBytes, DEFAULT_SEMANTIC_MAX_BYTES);
 });
 
 test('loadConfig picks up CRAWL4AI_BASE_URL from env', () => {

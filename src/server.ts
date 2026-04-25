@@ -2,6 +2,8 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod/v4';
 import { logger } from './logger.js';
 import { loadConfig } from './config.js';
+import { DEFAULT_SEMANTIC_MAX_BYTES } from './semanticLimits.js';
+import { compactSemanticResponse } from './utils/semanticResponse.js';
 import { webSearch } from './tools/webSearch.js';
 import { getGitHubRepo } from './tools/githubRepo.js';
 import { getGitHubTrending } from './tools/githubTrending.js';
@@ -1087,10 +1089,18 @@ export function createServer(): McpServer {
             .optional()
             .default(10)
             .describe('Number of most-relevant transcript passages to return (1–50, default 10)'),
+          maxBytes: z
+            .number()
+            .int()
+            .min(1)
+            .max(DEFAULT_SEMANTIC_MAX_BYTES)
+            .optional()
+            .default(DEFAULT_SEMANTIC_MAX_BYTES)
+            .describe('Maximum total bytes of transcript chunks to embed (1–250MB, default 250MB)'),
         },
       },
-      async ({ query, maxVideos, channel, sort, transcriptLanguage, profile, topK }) => {
-        logger.info({ tool: 'semantic_youtube', query, maxVideos }, 'Tool invoked');
+      async ({ query, maxVideos, channel, sort, transcriptLanguage, profile, topK, maxBytes }) => {
+        logger.info({ tool: 'semantic_youtube', query, maxVideos, maxBytes }, 'Tool invoked');
         const start = Date.now();
         try {
           const data = await semanticYoutube({
@@ -1105,10 +1115,16 @@ export function createServer(): McpServer {
             transcriptLanguage,
             profile,
             topK,
+            maxBytes,
           });
-          const result = makeResult('semantic_youtube', data, Date.now() - start, {
-            ...(data.warnings && data.warnings.length > 0 ? { warnings: data.warnings } : {}),
-          });
+          const result = makeResult(
+            'semantic_youtube',
+            compactSemanticResponse(data),
+            Date.now() - start,
+            {
+              ...(data.warnings && data.warnings.length > 0 ? { warnings: data.warnings } : {}),
+            },
+          );
           return successResponse(result);
         } catch (err: unknown) {
           logger.error({ err, tool: 'semantic_youtube' }, 'Tool failed');
@@ -1174,10 +1190,28 @@ export function createServer(): McpServer {
             .optional()
             .default(10)
             .describe('Number of most-relevant comment passages to return (1–50, default 10)'),
+          maxBytes: z
+            .number()
+            .int()
+            .min(1)
+            .max(DEFAULT_SEMANTIC_MAX_BYTES)
+            .optional()
+            .default(DEFAULT_SEMANTIC_MAX_BYTES)
+            .describe('Maximum total bytes of comment chunks to embed (1–250MB, default 250MB)'),
         },
       },
-      async ({ query, subreddit, sort, timeframe, maxPosts, commentLimit, profile, topK }) => {
-        logger.info({ tool: 'semantic_reddit', query, maxPosts }, 'Tool invoked');
+      async ({
+        query,
+        subreddit,
+        sort,
+        timeframe,
+        maxPosts,
+        commentLimit,
+        profile,
+        topK,
+        maxBytes,
+      }) => {
+        logger.info({ tool: 'semantic_reddit', query, maxPosts, maxBytes }, 'Tool invoked');
         const start = Date.now();
         try {
           const data = await semanticReddit({
@@ -1192,10 +1226,16 @@ export function createServer(): McpServer {
             embeddingDimensions: cfg.embeddingSidecar.dimensions,
             profile,
             topK,
+            maxBytes,
           });
-          const result = makeResult('semantic_reddit', data, Date.now() - start, {
-            ...(data.warnings && data.warnings.length > 0 ? { warnings: data.warnings } : {}),
-          });
+          const result = makeResult(
+            'semantic_reddit',
+            compactSemanticResponse(data),
+            Date.now() - start,
+            {
+              ...(data.warnings && data.warnings.length > 0 ? { warnings: data.warnings } : {}),
+            },
+          );
           return successResponse(result);
         } catch (err: unknown) {
           logger.error({ err, tool: 'semantic_reddit' }, 'Tool failed');
@@ -1545,7 +1585,7 @@ export function createServer(): McpServer {
             ...(llmFallback ? { llmFallback } : {}),
           });
 
-          const warnings = extractionWarnings(data);
+          const warnings = [...extractionWarnings(data), ...(data.warnings ?? [])];
           const result = makeResult('web_crawl', data, Date.now() - start, { warnings });
           return successResponse(result);
         } catch (err: unknown) {
@@ -1660,9 +1700,10 @@ export function createServer(): McpServer {
             .number()
             .int()
             .min(1)
-            .max(200_000_000)
+            .max(DEFAULT_SEMANTIC_MAX_BYTES)
             .optional()
-            .describe('Maximum total bytes to crawl (1–200MB, default 50MB)'),
+            .default(DEFAULT_SEMANTIC_MAX_BYTES)
+            .describe('Maximum total bytes to crawl (1–250MB, default 250MB)'),
           useReranker: z
             .boolean()
             .optional()
@@ -1745,7 +1786,7 @@ export function createServer(): McpServer {
 
           const llmFallback = buildLlmFallback(extractionConfig, cfg.llm);
 
-          const effectiveMaxBytes = maxBytes ?? cfg.semanticCrawl.defaultMaxBytes;
+          const effectiveMaxBytes = maxBytes;
           const data = await semanticCrawl(
             {
               source,
@@ -1770,7 +1811,9 @@ export function createServer(): McpServer {
             cfg.embeddingSidecar.apiToken,
             cfg.embeddingSidecar.dimensions,
           );
-          const result = makeResult('semantic_crawl', data, Date.now() - start, { warnings });
+          const result = makeResult('semantic_crawl', data, Date.now() - start, {
+            warnings: [...warnings, ...(data.warnings ?? [])],
+          });
           return successResponse(result);
         } catch (err: unknown) {
           logger.error({ err, tool: 'semantic_crawl' }, 'Tool failed');

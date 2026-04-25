@@ -8,6 +8,7 @@ import { prepareCorpus, retrieveCorpus } from '../rag/pipeline.js';
 import type { RetrievalProfileName, RetrievalResponse } from '../rag/types.js';
 import type { NormalizedRedditComment, NormalizedRedditMore } from './redditThreadParser.js';
 import type { RedditClientOptions } from './redditClient.js';
+import { DEFAULT_SEMANTIC_MAX_BYTES, applySemanticByteBudget, formatSemanticBytes } from '../semanticLimits.js';
 
 const COMMENT_FETCH_CONCURRENCY = 3;
 const REDDIT_BASE_URL = 'https://www.reddit.com';
@@ -24,6 +25,7 @@ export interface SemanticRedditOptions {
   embeddingDimensions: number;
   profile?: RetrievalProfileName | undefined;
   topK?: number | undefined;
+  maxBytes?: number | undefined;
   clientOptions?: RedditClientOptions | undefined;
 }
 
@@ -65,6 +67,7 @@ function toConversationInput(comment: NormalizedRedditComment): ConversationComm
 
 export async function semanticReddit(opts: SemanticRedditOptions): Promise<SemanticRedditResult> {
   const maxPosts = Math.min(opts.maxPosts ?? 10, 25);
+  const maxBytes = opts.maxBytes ?? DEFAULT_SEMANTIC_MAX_BYTES;
   const commentLimit = opts.commentLimit ?? 100;
   const sort = opts.sort ?? 'relevance';
   const timeframe = opts.timeframe ?? 'year';
@@ -117,24 +120,17 @@ export async function semanticReddit(opts: SemanticRedditOptions): Promise<Seman
     }
   }
 
-  if (allComments.length === 0) {
-    const corpus = prepareCorpus({ adapter: 'conversation', chunks: [] });
-    const response = retrieveCorpus(corpus, {
-      query: opts.query,
-      topK: opts.topK,
-      profile: opts.profile,
-    });
-    return {
-      ...response,
-      warnings: [...(response.warnings ?? []), ...warnings],
-      postCount: posts.length,
-      failedPosts,
-    };
-  }
-
   const chunks = chunksFromConversation(allComments, { baseUrl: REDDIT_BASE_URL });
+  const budgeted = applySemanticByteBudget(chunks, maxBytes);
+  if (budgeted.truncated) {
+    warnings.push(
+      `Comment corpus budget capped at ${formatSemanticBytes(maxBytes)}; ${String(budgeted.droppedCount)} chunks omitted`,
+    );
+  }
 
-  if (chunks.length === 0) {
+  const budgetedChunks = budgeted.items;
+
+  if (budgetedChunks.length === 0) {
     const corpus = prepareCorpus({ adapter: 'conversation', chunks: [] });
     const response = retrieveCorpus(corpus, {
       query: opts.query,
@@ -149,8 +145,8 @@ export async function semanticReddit(opts: SemanticRedditOptions): Promise<Seman
     };
   }
 
-  const chunkTexts = chunks.map((c) => c.text);
-  const chunkTitles = chunks.map((c) => c.section);
+  const chunkTexts = budgetedChunks.map((c) => c.text);
+  const chunkTitles = budgetedChunks.map((c) => c.section);
 
   const [docEmbed, queryEmbed] = await Promise.all([
     embedTextsBatched({
@@ -177,7 +173,7 @@ export async function semanticReddit(opts: SemanticRedditOptions): Promise<Seman
 
   const corpus = prepareCorpus({
     adapter: 'conversation',
-    chunks,
+    chunks: budgetedChunks,
     embeddings: docEmbed.embeddings,
     model: docEmbed.model,
     dimensions: docEmbed.dimensions,

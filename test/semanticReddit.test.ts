@@ -302,3 +302,34 @@ test('semanticReddit does not write to stdout', async () => {
 
   assert.equal(written.length, 0, `Unexpected stdout output: ${written.join('')}`);
 });
+
+test('semanticReddit respects a small maxBytes corpus budget', async () => {
+  globalThis.fetch = async (input, init) => {
+    const url = String(input instanceof URL ? input.href : input instanceof Request ? input.url : input);
+    if (url.includes('/embed')) {
+      const rawBody = init?.body !== null && init?.body !== undefined ? String(init.body) : '{}';
+      const body = JSON.parse(rawBody) as { texts?: string[] };
+      return Response.json(makeEmbedResponse(body.texts ?? [], 4));
+    }
+    return new Response('not found', { status: 404 });
+  };
+
+  const result = await semanticReddit({
+    query: 'budget test unique query q6',
+    embeddingBaseUrl: 'http://sidecar.local',
+    embeddingDimensions: 4,
+    maxBytes: 1,
+    clientOptions: {
+      fetchImpl: makeRedditFetchImpl({
+        posts: [{ permalink: '/r/test/comments/hhh888/budget_post/', title: 'Budget Post' }],
+      }),
+    },
+  });
+
+  assert.equal(result.corpus.status, 'empty');
+  assert.equal(result.results.length, 0);
+  assert.ok(
+    result.warnings?.some((w) => w.toLowerCase().includes('budget')),
+    'Expected a warning about the byte budget being exceeded',
+  );
+});

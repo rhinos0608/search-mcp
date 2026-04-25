@@ -799,12 +799,18 @@ async function crawlSeeds(
     | 'extractionConfig'
     | 'llmFallback'
   >,
-): Promise<{ pages: CrawlPageResult[]; totalPages: number; successfulPages: number }> {
+): Promise<{
+  pages: CrawlPageResult[];
+  totalPages: number;
+  successfulPages: number;
+  warnings: string[];
+}> {
   if (seedUrls.length === 0) {
-    return { pages: [], totalPages: 0, successfulPages: 0 };
+    return { pages: [], totalPages: 0, successfulPages: 0, warnings: [] };
   }
 
   const allPages: CrawlPageResult[] = [];
+  const warnings: string[] = [];
   let totalPagesAttempted = 0;
   let totalSuccessfulPages = 0;
 
@@ -839,6 +845,7 @@ async function crawlSeeds(
     };
 
     const result = await webCrawl(seedUrl, crawl4aiCfg.baseUrl, crawl4aiCfg.apiToken, crawlOpts);
+    warnings.push(...(result.warnings ?? []));
 
     // Path focus filter
     let pages = filterByPathPrefix(result.pages, seedUrl, opts.allowPathDrift ?? false);
@@ -878,7 +885,12 @@ async function crawlSeeds(
     );
   }
 
-  return { pages: deduped, totalPages: totalPagesAttempted, successfulPages: totalSuccessfulPages };
+  return {
+    pages: deduped,
+    totalPages: totalPagesAttempted,
+    successfulPages: totalSuccessfulPages,
+    warnings,
+  };
 }
 
 export function pagesToCorpus(pages: CrawlPageResult[]): CorpusChunk[] {
@@ -1007,6 +1019,8 @@ export async function semanticCrawl(
   let cachedCorpusId: string | undefined;
   // Aggregated extracted data from non-cached crawl sources
   let extractedData: Record<string, Record<string, unknown>[]> | undefined;
+  // Recovery and crawl warnings collected across seed URLs.
+  const crawlWarnings: string[] = [];
   // Track latest pages for structured elements
   let lastPages: CrawlPageResult[] = [];
 
@@ -1019,6 +1033,7 @@ export async function semanticCrawl(
           : [opts.source.url];
       const safeUrls = filterSafeUrls(seedUrls);
       const result = await crawlSeeds(safeUrls, crawl4aiCfg, opts);
+      crawlWarnings.push(...result.warnings);
       corpusChunks = pagesToCorpus(result.pages);
       lastPages = result.pages;
       pagesCrawled = result.totalPages;
@@ -1085,6 +1100,7 @@ export async function semanticCrawl(
       }
       const sitemapOpts = { ...opts, maxDepth: 0 };
       const result = await crawlSeeds(safeUrls, crawl4aiCfg, sitemapOpts);
+      crawlWarnings.push(...result.warnings);
       corpusChunks = pagesToCorpus(result.pages);
       lastPages = result.pages;
       pagesCrawled = result.totalPages;
@@ -1116,6 +1132,7 @@ export async function semanticCrawl(
       }
       const searchOpts = { ...opts, maxDepth: 0 };
       const result = await crawlSeeds(safeUrls, crawl4aiCfg, searchOpts);
+      crawlWarnings.push(...result.warnings);
       corpusChunks = pagesToCorpus(result.pages);
       lastPages = result.pages;
       pagesCrawled = result.totalPages;
@@ -1209,6 +1226,7 @@ export async function semanticCrawl(
       successfulPages,
       corpusId: resolvedCorpusId,
       chunks: topChunks,
+      ...(crawlWarnings.length > 0 ? { warnings: crawlWarnings } : {}),
     };
   }
 
@@ -1261,6 +1279,7 @@ export async function semanticCrawl(
     successfulPages,
     corpusId: resolvedCorpusId,
     chunks: topChunks,
+    ...(crawlWarnings.length > 0 ? { warnings: crawlWarnings } : {}),
     ...(extractedData ? { extractedData } : {}),
     ...collectPageElements(lastPages),
   };

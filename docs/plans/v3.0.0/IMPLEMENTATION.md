@@ -277,7 +277,7 @@ Tests:
 - Verify failed transcripts increment `corpusStatus.failed`.
 - Verify no stdout logging.
 
-**Implemented**: `src/tools/semanticYoutube.ts` created. `semantic_youtube` registered in `src/server.ts` and gated in `src/health.ts` (`YOUTUBE_API_KEY` + `EMBEDDING_SIDECAR_BASE_URL`). 5 tests in `test/semanticYoutube.test.ts` covering happy path, failed transcripts, channel filter, empty corpus, and multiple-video embedding. Key implementation detail: `youtube-transcript` library validates timedtext hostname ends in `.youtube.com` — stubs must use `https://www.youtube.com/...` not `https://youtube.com/...`. ToolCache keyed on query string — tests use unique queries to avoid cross-test cache hits.
+**Implemented**: `src/tools/semanticYoutube.ts` created. `semantic_youtube` registered in `src/server.ts` and gated in `src/health.ts` (`YOUTUBE_API_KEY` + `EMBEDDING_SIDECAR_BASE_URL`). The tool now accepts a 250MB default `maxBytes` corpus budget to keep large transcript sets tractable while still embedding the full context window. The MCP-facing server response is compacted to a corpus summary so it stays under transport size limits, while the full corpus remains internal to the retrieval pipeline. 5 tests in `test/semanticYoutube.test.ts` covering happy path, failed transcripts, channel filter, empty corpus, and multiple-video embedding. Key implementation detail: `youtube-transcript` library validates timedtext hostname ends in `.youtube.com` — stubs must use `https://www.youtube.com/...` not `https://youtube.com/...`. ToolCache keyed on query string — tests use unique queries to avoid cross-test cache hits.
 
 ## Phase 9 - Add Semantic Reddit Tool ✅
 
@@ -309,13 +309,13 @@ Tests:
 - Verify deleted/removed comments are skipped.
 - Verify parent context is bounded.
 
-**Implemented**: `src/tools/semanticReddit.ts` created. `semantic_reddit` registered in `src/server.ts` and gated in `src/health.ts` (`EMBEDDING_SIDECAR_BASE_URL` only — Reddit API is public). 5 tests in `test/semanticReddit.test.ts` covering happy path, failed posts, deleted comment filtering, empty corpus, and multi-post aggregation. Key implementation details: `redditSearch` returns absolute URLs in the `permalink` field — use `{ url: post.permalink }` not `{ permalink: ... }` when calling `redditComments`. Failure tests must use HTTP 404 (non-retryable), not 500 (retryable), to prevent `retryWithBackoff` masking failures. Tests inject `clientOptions: { fetchImpl }` for Reddit API calls; `globalThis.fetch` stub for embedding sidecar calls.
+**Implemented**: `src/tools/semanticReddit.ts` created. `semantic_reddit` registered in `src/server.ts` and gated in `src/health.ts` (`EMBEDDING_SIDECAR_BASE_URL` only — Reddit API is public). The tool now accepts a 250MB default `maxBytes` corpus budget to handle large threads before embedding. The MCP-facing server response is compacted to a corpus summary so it stays under transport size limits, while the full corpus remains internal to the retrieval pipeline. 5 tests in `test/semanticReddit.test.ts` covering happy path, failed posts, deleted comment filtering, empty corpus, and multi-post aggregation. Key implementation details: `redditSearch` returns absolute URLs in the `permalink` field — use `{ url: post.permalink }` not `{ permalink: ... }` when calling `redditComments`. Failure tests must use HTTP 404 (non-retryable), not 500 (retryable), to prevent `retryWithBackoff` masking failures. Tests inject `clientOptions: { fetchImpl }` for Reddit API calls; `globalThis.fetch` stub for embedding sidecar calls.
 
 ## Phase 10 - Verification and Docs ✅
 
 Update:
 
-- `docs/tools.md` for `semantic_youtube` and `semantic_reddit`.
+- `docs/tools.md` for `semantic_crawl`, `semantic_youtube`, and `semantic_reddit`.
 - `docs/architecture.md` with `src/rag/` module.
 - `AGENTS.md` only if architecture instructions need revision.
 

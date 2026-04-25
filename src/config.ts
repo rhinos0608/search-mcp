@@ -12,6 +12,7 @@ import { createDecipheriv, pbkdf2Sync } from 'node:crypto';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { logger } from './logger.js';
+import { DEFAULT_SEMANTIC_MAX_BYTES } from './semanticLimits.js';
 
 /** Directory containing this file (dist/ or src/). Go up one level to reach project root. */
 const PKG_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -137,7 +138,7 @@ const DEFAULTS: Omit<SearchConfig, 'rescoreWeights'> = {
   },
   crawl4ai: { baseUrl: '', apiToken: '' },
   embeddingSidecar: { baseUrl: '', apiToken: '', dimensions: 768 },
-  semanticCrawl: { defaultMaxBytes: 50_000_000, maxMaxBytes: 200_000_000 },
+  semanticCrawl: { defaultMaxBytes: DEFAULT_SEMANTIC_MAX_BYTES, maxMaxBytes: DEFAULT_SEMANTIC_MAX_BYTES },
   llm: { provider: '', apiToken: '', baseUrl: '' },
 };
 

@@ -1,0 +1,392 @@
+{
+  "success": true,
+  "clones": [
+    {
+      "fileA": "src/utils/rescore.ts",
+      "startA": 150,
+      "fileB": "src/utils/rescore.ts",
+      "startB": 115,
+      "lines": 9,
+      "tokens": 0
+    },
+    {
+      "fileA": "src/utils/rescore.ts",
+      "startA": 165,
+      "fileB": "src/utils/rescore.ts",
+      "startB": 130,
+      "lines": 12,
+      "tokens": 0
+    },
+    {
+      "fileA": "src/utils/htmlElements.ts",
+      "startA": 1,
+      "fileB": "src/utils/markdownElements.ts",
+      "startB": 1,
+      "lines": 16,
+      "tokens": 0
+    },
+    {
+      "fileA": "src/utils/htmlElements.ts",
+      "startA": 222,
+      "fileB": "src/utils/markdownElements.ts",
+      "startB": 201,
+      "lines": 14,
+      "tokens": 0
+    },
+    {
+      "fileA": "src/utils/extractionConfig.ts",
+      "startA": 81,
+      "fileB": "src/utils/extractionConfig.ts",
+      "startB": 72,
+      "lines": 9,
+      "tokens": 0
+    },
+    {
+      "fileA": "src/tools/webRead.ts",
+      "startA": 180,
+      "fileB": "src/tools/webRead.ts",
+      "startB": 142,
+      "lines": 10,
+      "tokens": 0
+    },
+    {
+      "fileA": "src/tools/stackoverflowSearch.ts",
+      "startA": 69,
+      "fileB": "src/tools/youtubeSearch.ts",
+      "startB": 46,
+      "lines": 13,
+      "tokens": 0
+    },
+    {
+      "fileA": "src/tools/semanticReddit.ts",
+      "startA": 134,
+      "fileB": "src/tools/semanticYoutube.ts",
+      "startB": 99,
+      "lines": 10,
+      "tokens": 0
+    },
+    {
+      "fileA": "src/tools/semanticReddit.ts",
+      "startA": 149,
+      "fileB": "src/tools/semanticYoutube.ts",
+      "startB": 114,
+      "lines": 27,
+      "tokens": 0
+    },
+    {
+      "fileA": "src/tools/semanticReddit.ts",
+      "startA": 176,
+      "fileB": "src/tools/semanticYoutube.ts",
+      "startB": 141,
+      "lines": 17,
+      "tokens": 0
+    },
+    {
+      "fileA": "src/tools/redditThreadParser.ts",
+      "startA": 352,
+      "fileB": "src/tools/redditThreadParser.ts",
+      "startB": 289,
+      "lines": 9,
+      "tokens": 0
+    },
+    {
+      "fileA": "src/tools/redditSearchParser.ts",
+      "startA": 4,
+      "fileB": "src/tools/redditThreadParser.ts",
+      "startB": 1,
+      "lines": 11,
+      "tokens": 0
+    },
+    {
+      "fileA": "src/tools/redditSearch.ts",
+      "startA": 144,
+      "fileB": "src/tools/webSearch.ts",
+      "startB": 106,
+      "lines": 7,
+      "tokens": 0
+    },
+    {
+      "fileA": "src/tools/redditComments.ts",
+      "startA": 22,
+      "fileB": "src/tools/redditThreadParser.ts",
+      "startB": 316,
+      "lines": 21,
+      "tokens": 0
+    },
+    {
+      "fileA": "src/tools/redditComments.ts",
+      "startA": 130,
+      "fileB": "src/tools/redditSearch.ts",
+      "startB": 115,
+      "lines": 15,
+      "tokens": 0
+    },
+    {
+      "fileA": "src/tools/redditClient.ts",
+      "startA": 64,
+      "fileB": "src/tools/redditClient.ts",
+      "startB": 47,
+      "lines": 10,
+      "tokens": 0
+    },
+    {
+      "fileA": "src/tools/pypiSearch.ts",
+      "startA": 40,
+      "fileB": "src/tools/youtubeSearch.ts",
+      "startB": 46,
+      "lines": 16,
+      "tokens": 0
+    },
+    {
+      "fileA": "src/tools/patentSearch.ts",
+      "startA": 66,
+      "fileB": "src/tools/podcastSearch.ts",
+      "startB": 79,
+      "lines": 13,
+      "tokens": 0
+    },
+    {
+      "fileA": "src/tools/npmSearch.ts",
+      "startA": 30,
+      "fileB": "src/tools/youtubeSearch.ts",
+      "startB": 46,
+      "lines": 14,
+      "tokens": 0
+    },
+    {
+      "fileA": "src/tools/newsSearch.ts",
+      "startA": 73,
+      "fileB": "src/tools/youtubeSearch.ts",
+      "startB": 46,
+      "lines": 17,
+      "tokens": 0
+    },
+    {
+      "fileA": "src/tools/hackernewsSearch.ts",
+      "startA": 74,
+      "fileB": "src/tools/youtubeSearch.ts",
+      "startB": 46,
+      "lines": 18,
+      "tokens": 0
+    },
+    {
+      "fileA": "src/tools/hackernewsSearch.ts",
+      "startA": 167,
+      "fileB": "src/tools/webSearch.ts",
+      "startB": 106,
+      "lines": 7,
+      "tokens": 0
+    },
+    {
+      "fileA": "src/tools/githubTrending.ts",
+      "startA": 49,
+      "fileB": "src/tools/twitterSearch.ts",
+      "startB": 49,
+      "lines": 30,
+      "tokens": 0
+    },
+    {
+      "fileA": "src/tools/githubTrending.ts",
+      "startA": 114,
+      "fileB": "src/tools/twitterSearch.ts",
+      "startB": 137,
+      "lines": 19,
+      "tokens": 0
+    },
+    {
+      "fileA": "src/tools/githubRepoTree.ts",
+      "startA": 193,
+      "fileB": "src/tools/githubRepoTree.ts",
+      "startB": 135,
+      "lines": 17,
+      "tokens": 0
+    },
+    {
+      "fileA": "src/tools/githubRepoSearch.ts",
+      "startA": 15,
+      "fileB": "src/tools/githubRepoTree.ts",
+      "startB": 10,
+      "lines": 7,
+      "tokens": 0
+    },
+    {
+      "fileA": "src/tools/githubRepoSearch.ts",
+      "startA": 21,
+      "fileB": "src/tools/githubRepoTree.ts",
+      "startB": 16,
+      "lines": 25,
+      "tokens": 0
+    },
+    {
+      "fileA": "src/tools/githubRepoSearch.ts",
+      "startA": 45,
+      "fileB": "src/tools/githubRepoTree.ts",
+      "startB": 40,
+      "lines": 14,
+      "tokens": 0
+    },
+    {
+      "fileA": "src/tools/githubRepoSearch.ts",
+      "startA": 58,
+      "fileB": "src/tools/githubRepoTree.ts",
+      "startB": 53,
+      "lines": 8,
+      "tokens": 0
+    },
+    {
+      "fileA": "src/tools/githubRepoSearch.ts",
+      "startA": 102,
+      "fileB": "src/tools/githubRepoTree.ts",
+      "startB": 94,
+      "lines": 15,
+      "tokens": 0
+    },
+    {
+      "fileA": "src/tools/githubRepoFile.ts",
+      "startA": 32,
+      "fileB": "src/tools/githubRepoTree.ts",
+      "startB": 22,
+      "lines": 92,
+      "tokens": 0
+    },
+    {
+      "fileA": "src/tools/githubRepo.ts",
+      "startA": 15,
+      "fileB": "src/tools/githubRepoTree.ts",
+      "startB": 22,
+      "lines": 76,
+      "tokens": 0
+    },
+    {
+      "fileA": "src/tools/githubRepo.ts",
+      "startA": 90,
+      "fileB": "src/tools/githubRepoTree.ts",
+      "startB": 99,
+      "lines": 20,
+      "tokens": 0
+    },
+    {
+      "fileA": "src/tools/arxivSearch.ts",
+      "startA": 46,
+      "fileB": "src/tools/arxivSearch.ts",
+      "startB": 24,
+      "lines": 13,
+      "tokens": 0
+    },
+    {
+      "fileA": "src/tools/arxivSearch.ts",
+      "startA": 114,
+      "fileB": "src/tools/newsSearch.ts",
+      "startB": 72,
+      "lines": 15,
+      "tokens": 0
+    },
+    {
+      "fileA": "src/tools/academicSearch.ts",
+      "startA": 72,
+      "fileB": "src/tools/arxivSearch.ts",
+      "startB": 17,
+      "lines": 7,
+      "tokens": 0
+    },
+    {
+      "fileA": "src/tools/academicSearch.ts",
+      "startA": 79,
+      "fileB": "src/tools/arxivSearch.ts",
+      "startB": 23,
+      "lines": 14,
+      "tokens": 0
+    },
+    {
+      "fileA": "src/tools/academicSearch.ts",
+      "startA": 155,
+      "fileB": "src/tools/arxivSearch.ts",
+      "startB": 133,
+      "lines": 12,
+      "tokens": 0
+    },
+    {
+      "fileA": "src/tools/academicSearch.ts",
+      "startA": 183,
+      "fileB": "src/tools/arxivSearch.ts",
+      "startB": 160,
+      "lines": 13,
+      "tokens": 0
+    },
+    {
+      "fileA": "src/tools/academicSearch.ts",
+      "startA": 196,
+      "fileB": "src/tools/arxivSearch.ts",
+      "startB": 173,
+      "lines": 10,
+      "tokens": 0
+    },
+    {
+      "fileA": "src/tools/academicSearch.ts",
+      "startA": 276,
+      "fileB": "src/tools/youtubeSearch.ts",
+      "startB": 46,
+      "lines": 19,
+      "tokens": 0
+    },
+    {
+      "fileA": "sidecar/embedding/main.py",
+      "startA": 40,
+      "fileB": "sidecar/openai-embedding-proxy/main.py",
+      "startB": 45,
+      "lines": 39,
+      "tokens": 0
+    },
+    {
+      "fileA": "sidecar/embedding/main.py",
+      "startA": 78,
+      "fileB": "sidecar/openai-embedding-proxy/main.py",
+      "startB": 87,
+      "lines": 18,
+      "tokens": 0
+    },
+    {
+      "fileA": "src/rateLimit.ts",
+      "startA": 58,
+      "fileB": "src/rateLimit.ts",
+      "startB": 35,
+      "lines": 11,
+      "tokens": 0
+    },
+    {
+      "fileA": "src/rateLimit.ts",
+      "startA": 128,
+      "fileB": "src/rateLimit.ts",
+      "startB": 36,
+      "lines": 8,
+      "tokens": 0
+    },
+    {
+      "fileA": "src/chunking.ts",
+      "startA": 203,
+      "fileB": "src/chunking.ts",
+      "startB": 67,
+      "lines": 18,
+      "tokens": 0
+    },
+    {
+      "fileA": "scripts/decrypt-config.ts",
+      "startA": 13,
+      "fileB": "scripts/encrypt-config.ts",
+      "startB": 18,
+      "lines": 11,
+      "tokens": 0
+    },
+    {
+      "fileA": "scripts/decrypt-config.ts",
+      "startA": 42,
+      "fileB": "src/config.ts",
+      "startB": 156,
+      "lines": 14,
+      "tokens": 0
+    }
+  ],
+  "duplicatedLines": 792,
+  "totalLines": 15427,
+  "percentage": 5.13
+}
