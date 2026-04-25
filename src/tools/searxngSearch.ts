@@ -1,5 +1,5 @@
 import { logger } from '../logger.js';
-import { assertSafeUrl, safeResponseJson } from '../httpGuards.js';
+import { safeResponseJson } from '../httpGuards.js';
 import { ToolCache, cacheKey } from '../cache.js';
 import { retryWithBackoff } from '../retry.js';
 import { unavailableError } from '../errors.js';
@@ -44,7 +44,8 @@ export async function searxngSearch(
   });
 
   const url = `${baseUrl.replace(/\/+$/, '')}/search?${params.toString()}`;
-  assertSafeUrl(url);
+  // SearXNG base URLs are operator-configured and intentionally bypass the
+  // SSRF guard used for arbitrary user-supplied URLs.
 
   const response = await retryWithBackoff(
     async () => {

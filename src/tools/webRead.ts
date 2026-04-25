@@ -136,8 +136,10 @@ export async function webRead(url: string): Promise<ArticleResult> {
     const article = reader.parse();
 
     if (article !== null) {
-      let content = article.content ?? '';
-      let textContent = article.textContent ?? '';
+      const rawContent = article.content ?? '';
+      const rawTextContent = article.textContent ?? '';
+      let content = rawContent;
+      let textContent = rawTextContent;
 
       if (content.length > MAX_CONTENT_LENGTH) {
         content = content.slice(0, MAX_CONTENT_LENGTH) + TRUNCATED_MARKER;
@@ -146,7 +148,7 @@ export async function webRead(url: string): Promise<ArticleResult> {
         textContent = textContent.slice(0, MAX_CONTENT_LENGTH) + TRUNCATED_MARKER;
       }
 
-      const structured = safeStructuredFromHtml(content, url);
+      const structured = safeStructuredFromHtml(rawContent, url);
 
       result = {
         title: article.title ?? metadata.title,

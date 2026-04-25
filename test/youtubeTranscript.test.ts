@@ -6,7 +6,7 @@ import {
   getYouTubeTranscript,
   transcriptSegmentsToStructuredContent,
 } from '../src/tools/youtubeTranscript.js';
-import { MAX_ELEMENTS, MAX_TEXT_LENGTH, TRUNCATED_MARKER } from '../src/utils/elementHelpers.js';
+import { MAX_ELEMENTS, MAX_TEXT_LENGTH, TRUNCATED_MARKER } from '../src/utils/htmlElements.js';
 import type { TranscriptSegment } from '../src/types.js';
 
 const YoutubeTranscript = (
