@@ -53,6 +53,60 @@ const EXCLUDED_DIRS = new Set([
   'venv',
 ]);
 
+const CORE_DIR_HINTS = new Set([
+  'src',
+  'lib',
+  'app',
+  'core',
+  'internal',
+  'pkg',
+  'cmd',
+  'server',
+  'client',
+  'cli',
+  'packages',
+]);
+
+const SURFACE_DIR_HINTS = new Set([
+  'examples',
+  'example',
+  'demo',
+  'demos',
+  'sample',
+  'samples',
+  'test',
+  'tests',
+  'spec',
+  'specs',
+  'fixture',
+  'fixtures',
+  'doc',
+  'docs',
+  'playground',
+  'benchmark',
+  'benchmarks',
+]);
+
+function scoreBroadCorpusFile(entry: GitHubTreeEntry): number {
+  const pathParts = entry.path.toLowerCase().split('/');
+  let score = 0;
+  for (const part of pathParts) {
+    if (CORE_DIR_HINTS.has(part)) score += 25;
+    if (SURFACE_DIR_HINTS.has(part)) score -= 25;
+  }
+  score -= pathParts.length * 2;
+  score -= entry.path.length / 1000;
+  return score;
+}
+
+export function prioritizeBroadGitHubCorpus(entries: GitHubTreeEntry[]): GitHubTreeEntry[] {
+  return [...entries].sort((a, b) => {
+    const delta = scoreBroadCorpusFile(b) - scoreBroadCorpusFile(a);
+    if (delta !== 0) return delta;
+    return a.path.localeCompare(b.path);
+  });
+}
+
 export function shouldIncludeFile(entry: GitHubTreeEntry, extensions: string[]): boolean {
   if (entry.type !== 'file') return false;
 
@@ -103,7 +157,9 @@ export async function fetchGitHubCorpus(
       .filter((e) => shouldIncludeFile(e, extensions));
   } else {
     const treeResult = await getGitHubRepoTree(opts.owner, opts.repo, '', opts.branch, true, 500);
-    candidateFiles = treeResult.entries.filter((e) => shouldIncludeFile(e, extensions));
+    candidateFiles = prioritizeBroadGitHubCorpus(
+      treeResult.entries.filter((e) => shouldIncludeFile(e, extensions)),
+    );
   }
 
   const selectedFiles = candidateFiles.slice(0, maxFiles);

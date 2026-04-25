@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { shouldIncludeFile } from '../src/utils/githubCorpus.js';
+import { prioritizeBroadGitHubCorpus, shouldIncludeFile } from '../src/utils/githubCorpus.js';
 import type { GitHubTreeEntry } from '../src/types.js';
 
 describe('shouldIncludeFile', () => {
@@ -85,5 +85,28 @@ describe('shouldIncludeFile', () => {
       apiUrl: 'https://api.github.com/repos/o/r/contents/src',
     };
     assert.ok(!shouldIncludeFile(entry, ['.md']));
+  });
+
+  it('prioritizes core files ahead of examples in broad crawls', () => {
+    const ordered = prioritizeBroadGitHubCorpus([
+      {
+        name: 'README.md',
+        path: 'examples/README.md',
+        type: 'file',
+        htmlUrl: 'https://github.com/o/r/blob/main/examples/README.md',
+        apiUrl: 'https://api.github.com/repos/o/r/contents/examples/README.md',
+        size: 1000,
+      },
+      {
+        name: 'index.ts',
+        path: 'src/index.ts',
+        type: 'file',
+        htmlUrl: 'https://github.com/o/r/blob/main/src/index.ts',
+        apiUrl: 'https://api.github.com/repos/o/r/contents/src/index.ts',
+        size: 1000,
+      },
+    ]);
+
+    assert.equal(ordered[0]?.path, 'src/index.ts');
   });
 });
