@@ -8,7 +8,11 @@ import { prepareCorpus, retrieveCorpus } from '../rag/pipeline.js';
 import type { RetrievalProfileName, RetrievalResponse } from '../rag/types.js';
 import type { NormalizedRedditComment, NormalizedRedditMore } from './redditThreadParser.js';
 import type { RedditClientOptions } from './redditClient.js';
-import { DEFAULT_SEMANTIC_MAX_BYTES, applySemanticByteBudget, formatSemanticBytes } from '../semanticLimits.js';
+import {
+  DEFAULT_SEMANTIC_MAX_BYTES,
+  applySemanticByteBudget,
+  formatSemanticBytes,
+} from '../semanticLimits.js';
 
 const COMMENT_FETCH_CONCURRENCY = 3;
 const REDDIT_BASE_URL = 'https://www.reddit.com';
@@ -68,10 +72,15 @@ function toConversationInput(comment: NormalizedRedditComment): ConversationComm
 export async function semanticReddit(opts: SemanticRedditOptions): Promise<SemanticRedditResult> {
   const maxPosts = Math.min(opts.maxPosts ?? 10, 25);
   const maxBytes = opts.maxBytes ?? DEFAULT_SEMANTIC_MAX_BYTES;
-  const commentLimit = opts.commentLimit ?? 100;
+  const commentLimit = Math.min(Math.max(opts.commentLimit ?? 100, 1), 100);
   const sort = opts.sort ?? 'relevance';
   const timeframe = opts.timeframe ?? 'year';
   const clientOptions = opts.clientOptions ?? {};
+
+  const warnings: string[] = [];
+  if (opts.commentLimit !== undefined && opts.commentLimit > 100) {
+    warnings.push('commentLimit capped at 100 to match the Reddit API limit');
+  }
 
   const posts = await redditSearch(
     opts.query,
@@ -87,7 +96,6 @@ export async function semanticReddit(opts: SemanticRedditOptions): Promise<Seman
     'Fetching comments',
   );
 
-  const warnings: string[] = [];
   let failedPosts = 0;
   const allComments: ConversationCommentInput[] = [];
 

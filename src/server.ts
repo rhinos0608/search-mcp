@@ -1174,10 +1174,10 @@ export function createServer(): McpServer {
             .number()
             .int()
             .min(1)
-            .max(500)
+            .max(100)
             .optional()
             .default(100)
-            .describe('Maximum comments to fetch per post (1–500, default 100)'),
+            .describe('Maximum comments to fetch per post (1–100, default 100)'),
           profile: z
             .enum(['balanced', 'fast', 'precision', 'recall'])
             .optional()

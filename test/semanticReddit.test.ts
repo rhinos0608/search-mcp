@@ -101,12 +101,22 @@ function makeRedditFetchImpl(options: {
   comments?: { id: string; body: string; author: string }[];
   failPermalinks?: string[];
 }): typeof fetch {
-  const { posts, comments = [{ id: 'c1', body: 'relevant comment text', author: 'alice' }], failPermalinks = [] } = options;
+  const {
+    posts,
+    comments = [{ id: 'c1', body: 'relevant comment text', author: 'alice' }],
+    failPermalinks = [],
+  } = options;
 
   return async (input) => {
-    const url = String(input instanceof URL ? input.href : input instanceof Request ? input.url : input);
+    const url = String(
+      input instanceof URL ? input.href : input instanceof Request ? input.url : input,
+    );
 
-    if (url.includes('/search.json') || url.includes('reddit.com/search') || url.includes('/r/') && url.includes('/search')) {
+    if (
+      url.includes('/search.json') ||
+      url.includes('reddit.com/search') ||
+      (url.includes('/r/') && url.includes('/search'))
+    ) {
       return Response.json(makeSearchListing(posts));
     }
 
@@ -124,7 +134,9 @@ function makeRedditFetchImpl(options: {
 
 test('semanticReddit returns ranked results for a happy-path query', async () => {
   globalThis.fetch = async (input, init) => {
-    const url = String(input instanceof URL ? input.href : input instanceof Request ? input.url : input);
+    const url = String(
+      input instanceof URL ? input.href : input instanceof Request ? input.url : input,
+    );
     if (url.includes('/embed')) {
       const rawBody = init?.body !== null && init?.body !== undefined ? String(init.body) : '{}';
       const body = JSON.parse(rawBody) as { texts?: string[] };
@@ -163,7 +175,9 @@ test('semanticReddit returns ranked results for a happy-path query', async () =>
 
 test('semanticReddit records failed posts in failedPosts and warnings', async () => {
   globalThis.fetch = async (input, init) => {
-    const url = String(input instanceof URL ? input.href : input instanceof Request ? input.url : input);
+    const url = String(
+      input instanceof URL ? input.href : input instanceof Request ? input.url : input,
+    );
     if (url.includes('/embed')) {
       const rawBody = init?.body !== null && init?.body !== undefined ? String(init.body) : '{}';
       const body = JSON.parse(rawBody) as { texts?: string[] };
@@ -178,7 +192,9 @@ test('semanticReddit records failed posts in failedPosts and warnings', async ()
   ];
 
   const fetchImpl: typeof fetch = async (input) => {
-    const url = String(input instanceof URL ? input.href : input instanceof Request ? input.url : input);
+    const url = String(
+      input instanceof URL ? input.href : input instanceof Request ? input.url : input,
+    );
     if (url.includes('/search.json') || (url.includes('reddit.com') && url.includes('search'))) {
       return Response.json(makeSearchListing(posts));
     }
@@ -186,7 +202,9 @@ test('semanticReddit records failed posts in failedPosts and warnings', async ()
     if (url.includes('ddd444')) {
       return new Response('not found', { status: 404 });
     }
-    return Response.json(makeCommentsListing([{ id: 'c1', body: 'good comment text', author: 'alice' }]));
+    return Response.json(
+      makeCommentsListing([{ id: 'c1', body: 'good comment text', author: 'alice' }]),
+    );
   };
 
   const result = await semanticReddit({
@@ -196,14 +214,19 @@ test('semanticReddit records failed posts in failedPosts and warnings', async ()
     clientOptions: { fetchImpl },
   });
 
-  assert.ok(result.failedPosts >= 1, `Expected at least one failed post, got ${String(result.failedPosts)}`);
+  assert.ok(
+    result.failedPosts >= 1,
+    `Expected at least one failed post, got ${String(result.failedPosts)}`,
+  );
   assert.equal(result.postCount, 2);
   assert.ok(result.warnings && result.warnings.length > 0, 'Should have warnings for failed posts');
 });
 
 test('semanticReddit filters deleted and removed comments', async () => {
   globalThis.fetch = async (input, init) => {
-    const url = String(input instanceof URL ? input.href : input instanceof Request ? input.url : input);
+    const url = String(
+      input instanceof URL ? input.href : input instanceof Request ? input.url : input,
+    );
     if (url.includes('/embed')) {
       const rawBody = init?.body !== null && init?.body !== undefined ? String(init.body) : '{}';
       const body = JSON.parse(rawBody) as { texts?: string[] };
@@ -230,16 +253,23 @@ test('semanticReddit filters deleted and removed comments', async () => {
   });
 
   // Only the real comment should appear; deleted/removed should be filtered
-  assert.ok(result.corpus.chunks.length === 1, `Expected 1 chunk (real comment), got ${String(result.corpus.chunks.length)}`);
   assert.ok(
-    result.corpus.chunks.every((c) => !c.text.includes('[deleted]') && !c.text.includes('[removed]')),
+    result.corpus.chunks.length === 1,
+    `Expected 1 chunk (real comment), got ${String(result.corpus.chunks.length)}`,
+  );
+  assert.ok(
+    result.corpus.chunks.every(
+      (c) => !c.text.includes('[deleted]') && !c.text.includes('[removed]'),
+    ),
     'Chunks should not contain deleted or removed comments',
   );
 });
 
 test('semanticReddit returns empty corpus when all comments are deleted', async () => {
   globalThis.fetch = async (input, init) => {
-    const url = String(input instanceof URL ? input.href : input instanceof Request ? input.url : input);
+    const url = String(
+      input instanceof URL ? input.href : input instanceof Request ? input.url : input,
+    );
     if (url.includes('/embed')) {
       const rawBody = init?.body !== null && init?.body !== undefined ? String(init.body) : '{}';
       const body = JSON.parse(rawBody) as { texts?: string[] };
@@ -276,7 +306,9 @@ test('semanticReddit does not write to stdout', async () => {
   };
 
   globalThis.fetch = async (input, init) => {
-    const url = String(input instanceof URL ? input.href : input instanceof Request ? input.url : input);
+    const url = String(
+      input instanceof URL ? input.href : input instanceof Request ? input.url : input,
+    );
     if (url.includes('/embed')) {
       const rawBody = init?.body !== null && init?.body !== undefined ? String(init.body) : '{}';
       const body = JSON.parse(rawBody) as { texts?: string[] };
@@ -305,7 +337,9 @@ test('semanticReddit does not write to stdout', async () => {
 
 test('semanticReddit respects a small maxBytes corpus budget', async () => {
   globalThis.fetch = async (input, init) => {
-    const url = String(input instanceof URL ? input.href : input instanceof Request ? input.url : input);
+    const url = String(
+      input instanceof URL ? input.href : input instanceof Request ? input.url : input,
+    );
     if (url.includes('/embed')) {
       const rawBody = init?.body !== null && init?.body !== undefined ? String(init.body) : '{}';
       const body = JSON.parse(rawBody) as { texts?: string[] };
@@ -332,4 +366,53 @@ test('semanticReddit respects a small maxBytes corpus budget', async () => {
     result.warnings?.some((w) => w.toLowerCase().includes('budget')),
     'Expected a warning about the byte budget being exceeded',
   );
+});
+
+test('semanticReddit clamps commentLimit to the Reddit API cap', async () => {
+  let capturedCommentsUrl = '';
+
+  globalThis.fetch = async (input, init) => {
+    const url = String(
+      input instanceof URL ? input.href : input instanceof Request ? input.url : input,
+    );
+    if (url.includes('/embed')) {
+      const rawBody = init?.body !== null && init?.body !== undefined ? String(init.body) : '{}';
+      const body = JSON.parse(rawBody) as { texts?: string[] };
+      return Response.json(makeEmbedResponse(body.texts ?? [], 4));
+    }
+    return new Response('not found', { status: 404 });
+  };
+
+  const fetchImpl: typeof fetch = async (input) => {
+    const url = String(
+      input instanceof URL ? input.href : input instanceof Request ? input.url : input,
+    );
+    if (
+      url.includes('/search.json') ||
+      url.includes('reddit.com/search') ||
+      (url.includes('/r/') && url.includes('/search'))
+    ) {
+      return Response.json(
+        makeSearchListing([
+          { permalink: '/r/test/comments/hhh888/budget_post/', title: 'Budget Post' },
+        ]),
+      );
+    }
+
+    capturedCommentsUrl = url;
+    return Response.json(
+      makeCommentsListing([{ id: 'c1', body: 'relevant comment text', author: 'alice' }]),
+    );
+  };
+
+  await semanticReddit({
+    query: 'comment limit clamp unique query q7',
+    embeddingBaseUrl: 'http://sidecar.local',
+    embeddingDimensions: 4,
+    commentLimit: 300,
+    clientOptions: { fetchImpl },
+  });
+
+  const parsedUrl = new URL(capturedCommentsUrl);
+  assert.equal(parsedUrl.searchParams.get('limit'), '100');
 });
