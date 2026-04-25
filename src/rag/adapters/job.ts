@@ -1,5 +1,6 @@
 import * as cheerio from 'cheerio';
 
+import type { RawDocument, RagChunk } from '../types.js';
 import type {
   JobFieldConfidence,
   JobListingMvp,
@@ -251,6 +252,55 @@ export function extractTextContent(html: string): string {
   const $ = loadHtml(html);
   $('script, style, noscript').remove();
   return normalizeText($.root().text()) ?? '';
+}
+
+export function documentsFromJobListings(listings: JobListingMvp[]): RawDocument[] {
+  return listings.map((listing, index) => {
+    const text = buildJobListingText(listing);
+    const documentId = listing.jobId ?? listing.sourceUrl ?? `job-${String(index)}`;
+    return {
+      id: documentId,
+      adapter: 'search',
+      text,
+      url: listing.sourceUrl ?? `job:${listing.source}:${documentId}`,
+      title: listing.title,
+      metadata: {
+        source: listing.source,
+        sourceUrl: listing.sourceUrl,
+        jobId: listing.jobId,
+        confidence: listing.confidence,
+        verificationStatus: listing.verificationStatus,
+        caveats: [...listing.caveats],
+      },
+    };
+  });
+}
+
+export function chunksFromJobListings(listings: JobListingMvp[]): RagChunk[] {
+  return listings.map((listing, index) => ({
+    text: buildJobListingText(listing),
+    url: listing.sourceUrl ?? `job:${listing.source}:${String(listing.jobId ?? index)}`,
+    section: listing.company ? `${listing.company} > ${listing.title}` : listing.title,
+    charOffset: 0,
+    chunkIndex: index,
+    totalChunks: listings.length,
+    metadata: {
+      ...listing,
+    },
+  }));
+}
+
+function buildJobListingText(listing: JobListingMvp): string {
+  return [
+    listing.title,
+    listing.company,
+    listing.location,
+    listing.workMode,
+    listing.salaryRaw,
+    listing.extractedText,
+  ]
+    .filter((part): part is string => typeof part === 'string' && part.trim().length > 0)
+    .join('\n\n');
 }
 
 function buildListing(

@@ -5,7 +5,10 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import { detectJobSource, getSourceProfile } from '../src/rag/sources/jobSources.js';
+import type { JobListingMvp } from '../src/rag/types/job.js';
 import {
+  chunksFromJobListings,
+  documentsFromJobListings,
   extractCompany,
   extractCaveats,
   extractJobId,
@@ -141,4 +144,74 @@ test('extractJobId reads ids from url path and data attributes', () => {
   const html = loadFixture('seek-basic.html');
   assert.equal(extractJobId('https://www.seek.com.au/job/12345', html), '12345');
   assert.equal(extractJobId('https://www.seek.com.au/job/12345?foo=bar', html), '12345');
+});
+
+test('documentsFromJobListings builds embedding-friendly documents', () => {
+  const listings: JobListingMvp[] = [
+    {
+      title: 'Frontend Developer',
+      company: 'Atlas Digital Pty Ltd',
+      location: 'Sydney NSW',
+      workMode: 'hybrid',
+      salaryRaw: '$35-45.60/hr',
+      source: 'seek',
+      sourceUrl: 'https://www.seek.com.au/job/12345',
+      jobId: '12345',
+      extractedText: 'Build user interfaces',
+      confidence: { title: 0.95, location: 0.8, workMode: 0.9, salary: 0.85, overall: 0.87 },
+      verificationStatus: 'listing_page_fetched',
+      caveats: ['contract'],
+    },
+  ];
+
+  const documents = documentsFromJobListings(listings);
+
+  assert.equal(documents.length, 1);
+  assert.equal(documents[0]?.adapter, 'search');
+  assert.equal(documents[0]?.id, '12345');
+  assert.equal(documents[0]?.url, 'https://www.seek.com.au/job/12345');
+  assert.equal(documents[0]?.title, 'Frontend Developer');
+  assert.match(documents[0]?.text ?? '', /Frontend Developer/);
+  assert.match(documents[0]?.text ?? '', /Atlas Digital Pty Ltd/);
+  assert.match(documents[0]?.text ?? '', /Sydney NSW/);
+  assert.match(documents[0]?.text ?? '', /hybrid/);
+  assert.match(documents[0]?.text ?? '', /\$35-45\.60\/hr/);
+  assert.match(documents[0]?.text ?? '', /Build user interfaces/);
+  assert.deepEqual(documents[0]?.metadata, {
+    source: 'seek',
+    sourceUrl: 'https://www.seek.com.au/job/12345',
+    jobId: '12345',
+    confidence: { title: 0.95, location: 0.8, workMode: 0.9, salary: 0.85, overall: 0.87 },
+    verificationStatus: 'listing_page_fetched',
+    caveats: ['contract'],
+  });
+});
+
+test('chunksFromJobListings builds one chunk per listing', () => {
+  const listings: JobListingMvp[] = [
+    {
+      title: 'Frontend Developer',
+      company: 'Atlas Digital Pty Ltd',
+      location: 'Sydney NSW',
+      workMode: 'hybrid',
+      source: 'seek',
+      sourceUrl: 'https://www.seek.com.au/job/12345',
+      jobId: '12345',
+      extractedText: 'Build user interfaces',
+      confidence: { title: 0.95, location: 0.8, workMode: 0.9, salary: 0.85, overall: 0.87 },
+      verificationStatus: 'listing_page_fetched',
+      caveats: ['contract'],
+    },
+  ];
+
+  const chunks = chunksFromJobListings(listings);
+
+  assert.equal(chunks.length, 1);
+  assert.equal(chunks[0]?.section, 'Atlas Digital Pty Ltd > Frontend Developer');
+  assert.equal(chunks[0]?.chunkIndex, 0);
+  assert.equal(chunks[0]?.totalChunks, 1);
+  assert.equal(chunks[0]?.url, 'https://www.seek.com.au/job/12345');
+  assert.deepEqual(chunks[0]?.metadata, listings[0]);
+  assert.match(chunks[0]?.text ?? '', /Frontend Developer/);
+  assert.match(chunks[0]?.text ?? '', /Build user interfaces/);
 });
