@@ -1,11 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-// @ts-expect-error — no types for direct dist path; mirrors the production import workaround.
 import * as ytModule from 'youtube-transcript/dist/youtube-transcript.esm.js';
 import {
   getYouTubeTranscript,
   transcriptSegmentsToStructuredContent,
 } from '../src/tools/youtubeTranscript.js';
+import { chunksFromTranscript } from '../src/rag/adapters/transcript.js';
 import { MAX_ELEMENTS, MAX_TEXT_LENGTH, TRUNCATED_MARKER } from '../src/utils/htmlElements.js';
 import type { TranscriptSegment } from '../src/types.js';
 
@@ -63,4 +63,23 @@ test('getYouTubeTranscript computes structured truncation metadata from all fetc
   assert.equal(result.truncatedElements, true);
   assert.equal(result.originalElementCount, raw.length);
   assert.equal(result.omittedElementCount, raw.length - MAX_ELEMENTS);
+});
+
+test('chunksFromTranscript groups adjacent caption segments into contextual chunks', () => {
+  const chunks = chunksFromTranscript({
+    videoId: 'abc123def45',
+    title: 'Example Video',
+    segments: [
+      { text: 'Welcome', offset: 0, duration: 1 },
+      { text: 'to the demo', offset: 1, duration: 1 },
+      { text: 'where we explain the design', offset: 2, duration: 1 },
+      { text: 'and show the API', offset: 3, duration: 1 },
+    ],
+  });
+
+  assert.ok(chunks.length < 4, 'segments should be grouped into fewer chunks');
+  assert.ok(chunks[0]);
+  assert.ok(chunks[0].text.includes('Welcome'));
+  assert.ok(chunks[0].text.includes('to the demo'));
+  assert.equal(chunks[0].metadata?.offset, 0);
 });

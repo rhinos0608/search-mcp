@@ -1,7 +1,6 @@
 // youtube-transcript@1.3.0 has a broken package.json:
 // "type": "module" but "main" points to the CJS bundle, causing Node ESM to fail.
 // Import the ESM dist directly as a workaround.
-// @ts-expect-error — no types for direct dist path; top-level types still used below
 import * as _ytModule from 'youtube-transcript/dist/youtube-transcript.esm.js';
 import type { YoutubeTranscript as YoutubeTranscriptType } from 'youtube-transcript';
 

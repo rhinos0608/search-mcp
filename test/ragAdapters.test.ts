@@ -36,27 +36,54 @@ test('transcript adapter records segment offset and duration metadata', () => {
     ],
   });
 
-  assert.equal(chunks.length, 2);
-  assert.equal(chunks[0]?.text, 'Opening words');
+  assert.equal(chunks.length, 1);
+  assert.equal(chunks[0]?.text, 'Opening words Second segment');
   assert.equal(chunks[0]?.metadata?.offset, 12.5);
-  assert.equal(chunks[0]?.metadata?.duration, 3.25);
+  assert.equal(chunks[0]?.metadata?.duration, 7.25);
+  assert.equal(chunks[0]?.metadata?.segmentCount, 2);
   assert.equal(chunks[0]?.metadata?.videoId, 'abc123');
 });
 
 test('conversation adapter filters deleted comments and includes bounded parent context', () => {
   const chunks = chunksFromConversation(
     [
-      { id: 'root', body: 'Root topic mentions retrieval', author: 'a', permalink: '/root', parentId: null },
-      { id: 'deleted', body: '[deleted]', author: '[deleted]', permalink: '/deleted', parentId: 'root' },
+      {
+        id: 'root',
+        body: 'Root topic mentions retrieval',
+        author: 'a',
+        permalink: '/root',
+        parentId: null,
+      },
+      {
+        id: 'deleted',
+        body: '[deleted]',
+        author: '[deleted]',
+        permalink: '/deleted',
+        parentId: 'root',
+      },
       { id: 'removed', body: '[removed]', author: 'mod', permalink: '/removed', parentId: 'root' },
-      { id: 'child', body: 'Child answer expands ranking', author: 'b', permalink: '/child', parentId: 'root' },
-      { id: 'grandchild', body: 'Grandchild adds fusion detail', author: 'c', permalink: '/grandchild', parentId: 'child' },
+      {
+        id: 'child',
+        body: 'Child answer expands ranking',
+        author: 'b',
+        permalink: '/child',
+        parentId: 'root',
+      },
+      {
+        id: 'grandchild',
+        body: 'Grandchild adds fusion detail',
+        author: 'c',
+        permalink: '/grandchild',
+        parentId: 'child',
+      },
     ],
     { parentContextDepth: 1, baseUrl: 'https://reddit.com' },
   );
 
   assert.deepEqual(
-    chunks.map((chunk: { metadata?: Record<string, unknown> | undefined }) => chunk.metadata?.commentId),
+    chunks.map(
+      (chunk: { metadata?: Record<string, unknown> | undefined }) => chunk.metadata?.commentId,
+    ),
     ['root', 'child', 'grandchild'],
   );
   assert.equal(chunks[2]?.metadata?.parentContext, 'Child answer expands ranking');
