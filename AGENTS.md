@@ -1,6 +1,6 @@
 # AGENTS.md
 
-> **Version: 2.0.0** — Semantic overhaul: RAG pipeline, embedding sidecar, hybrid ranking, corpus cache, GitHub corpus adapter, structured crawl extraction.
+> **Version: 3.0.5** — Universal RAG core + Job Adapter MVP: shared pipeline, multi-adapter retrieval, structured job listing extraction, constraint-aware ranking, dedup.
 
 This file provides guidance to AI coding agents (Codex, OpenCode, etc.) when working with code in this repository.
 
@@ -36,12 +36,14 @@ Append `--json` (via `dev:json` / `start:json`) for structured JSON logging inst
 **Tools** (one file each in `src/tools/`):
 
 _Search & Read_
+
 - `web_search` — Multi-backend search with fallback chain: primary backend (configured) → remaining backend. Supports Brave and SearXNG.
 - `web_read` — Fetches a URL and extracts article content via Mozilla Readability + jsdom.
 - `web_crawl` — Deep multi-page crawl via Crawl4AI (JS rendering). Returns raw markdown per page. Requires `CRAWL4AI_BASE_URL`.
 - `semantic_crawl` — Full RAG pipeline over a crawled corpus. Source types: `url`, `sitemap`, `search`, `github`, `cached`. Returns top-K semantically ranked chunks with bi-encoder, BM25, and RRF scores. Requires `CRAWL4AI_BASE_URL` + `EMBEDDING_SIDECAR_BASE_URL`.
 
 _GitHub_
+
 - `github_repo` — Repo metadata, latest release, optional README.
 - `github_repo_file` — Fetch raw content of a specific file from a GitHub repo.
 - `github_repo_search` — Search GitHub repos by query string.
@@ -49,6 +51,7 @@ _GitHub_
 - `github_trending` — Scrapes github.com/trending.
 
 _Video & Social_
+
 - `youtube_search` — YouTube Data API v3. Requires `YOUTUBE_API_KEY`. Pairs with `youtube_transcript`.
 - `youtube_transcript` — Fetches video captions via youtube-transcript library.
 - `reddit_search` — Reddit search (public JSON API or OAuth).
@@ -56,6 +59,7 @@ _Video & Social_
 - `twitter_search` — Searches Twitter/X via Nitter (cheerio). Requires `NITTER_BASE_URL`.
 
 _Research & Discovery_
+
 - `academic_search` — ArXiv + Semantic Scholar (merged, deduplicated).
 - `arxiv_search` — ArXiv-only, faster, supports `submittedDate` + category filtering.
 - `hackernews_search` — HN Algolia API.
@@ -63,11 +67,13 @@ _Research & Discovery_
 - `news_search` — GDELT Global Knowledge Graph API.
 
 _Packages & Products_
+
 - `npm_search` — npm registry search.
 - `pypi_search` — PyPI search via HTML scraping + JSON API enrichment.
 - `producthunt_search` — Product Hunt via GraphQL or public leaderboard.
 
 _Specialist_
+
 - `patent_search` — USPTO PatentsView API. Requires `PATENTSVIEW_API_KEY`.
 - `podcast_search` — ListenNotes API. Requires `LISTENNOTES_API_KEY`.
 
@@ -78,6 +84,7 @@ Key env vars: `BRAVE_API_KEY`, `SEARXNG_BASE_URL`, `SEARCH_BACKEND`, `NITTER_BAS
 Reddit OAuth requires both `REDDIT_CLIENT_ID` and `REDDIT_CLIENT_SECRET` — setting exactly one is invalid (health reports degraded, tools throw at first use).
 
 **Semantic pipeline** (`src/tools/semanticCrawl.ts` + `src/chunking.ts` + `src/utils/`):
+
 1. Crawl pages → strip cookie banners → `chunkMarkdown()` (400-token max, 20% overlap, atomic units for code/tables, boilerplate heuristics)
 2. Batch embed documents via sidecar (max 512/batch, asymmetric document/query mode)
 3. BM25+ index + bi-encoder cosine → RRF fusion → semantic coherence filter → soft lexical constraint
@@ -87,6 +94,7 @@ Reddit OAuth requires both `REDDIT_CLIENT_ID` and `REDDIT_CLIENT_SECRET` — set
 GitHub corpus: fetches files via GitHub API, chunks with path-prefixed sections. Code-aware path filter by extension.
 
 **Sidecar services** (`sidecar/`):
+
 - `sidecar/embedding/` — Python FastAPI server exposing `POST /embed`.
 - `sidecar/openai-embedding-proxy/` — OpenAI-compatible proxy routing `/v1/embeddings` to the sidecar.
 

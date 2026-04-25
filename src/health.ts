@@ -72,6 +72,13 @@ const GATED_TOOLS: Record<string, GateRule> = {
     check: (cfg) => cfg.embeddingSidecar.baseUrl.length > 0,
     remediation: 'Set EMBEDDING_SIDECAR_BASE_URL to use semantic_reddit.',
   },
+  semantic_jobs: {
+    check: (cfg) =>
+      cfg.embeddingSidecar.baseUrl.length > 0 &&
+      (cfg.brave.apiKey.length > 0 || cfg.searxng.baseUrl.length > 0),
+    remediation:
+      'Set EMBEDDING_SIDECAR_BASE_URL and a search backend (BRAVE_API_KEY or SEARXNG_BASE_URL) to use semantic_jobs.',
+  },
 };
 
 // ── Optional config (works without, degraded) ──────────────────────────────

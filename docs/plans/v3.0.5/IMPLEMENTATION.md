@@ -2,6 +2,9 @@
 
 **Depends on**: V3.0.0  
 **Goal**: Add a structured job-search MVP on top of the shared RAG pipeline.
+**Status**: COMPLETE ✅ — 2026-04-25
+**Branch**: `v3.0.5-job-adapter`
+**Final verification**: typecheck ✅ · lint ✅ · 605/605 tests pass
 
 ## Corrections From Spec Review
 

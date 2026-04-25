@@ -1,16 +1,16 @@
 # Search MCP Roadmap — Implementation Plans Index
 
-**Version**: 3.0.0 (implemented in worktree, pending merge) → V3.0.5 → V3.1.0 → V3.2.0
+**Version**: 3.0.5 (implemented 2026-04-25) → V3.1.0 → V3.2.0
 
 This document indexes all implementation plans for the Search MCP roadmap.
 
-## Current State: V3.0.0 ✅ (worktree `v3-implementation`, 2026-04-25)
+## Current State: V3.0.5 ✅ (2026-04-25)
 
-- Universal RAG core extracted into `src/rag/` (types, pipeline, embedding, adapters, profiles)
-- Adapters: `text` (crawl pages), `transcript` (YouTube), `conversation` (Reddit comments)
-- New tools: `semantic_youtube`, `semantic_reddit` (both gated by config health)
-- All existing V2.0.0 capabilities preserved; `semantic_crawl` fully backward compatible
-- 564/565 tests pass; typecheck ✅ · lint ✅ · format ✅
+- V3.0.0 Universal RAG core extracted into `src/rag/`
+- V3.0.5 Job Adapter MVP with structured extraction, dedup, and constraint-aware ranking
+- New tool: `semantic_jobs` — search job boards, extract structured listings, rank with weighted scoring
+- All V2.0.0 capabilities preserved; `semantic_crawl`, `semantic_youtube`, `semantic_reddit` fully backward compatible
+- 605 tests pass; typecheck ✅ · lint ✅ · format ✅
 
 ---
 
@@ -54,7 +54,7 @@ This document indexes all implementation plans for the Search MCP roadmap.
 
 ## V3.0.5 — Job Adapter MVP
 
-**Status**: Ready to Start (V3.0.0 complete)  
+**Status**: Complete ✅ (2026-04-25, branch `v3.0.5-job-adapter`)  
 **Priority**: High  
 **Depends On**: V3.0.0
 
@@ -208,4 +208,4 @@ This document indexes all implementation plans for the Search MCP roadmap.
 
 ---
 
-_Generated: 2026-04-24 · Last updated: 2026-04-25 (V3.0.0 complete, V3.3.0 spec added)_
+_Generated: 2026-04-24 · Last updated: 2026-04-25 (V3.0.5 complete)_

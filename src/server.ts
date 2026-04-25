@@ -30,6 +30,7 @@ import { webRead } from './tools/webRead.js';
 import { semanticCrawl } from './tools/semanticCrawl.js';
 import { semanticYoutube } from './tools/semanticYoutube.js';
 import { semanticReddit } from './tools/semanticReddit.js';
+import { semanticJobs } from './tools/semanticJobs.js';
 import { isToolError } from './errors.js';
 import type { RateLimitInfo } from './rateLimit.js';
 import type { ToolResult } from './types.js';
@@ -1239,6 +1240,122 @@ export function createServer(): McpServer {
           return successResponse(result);
         } catch (err: unknown) {
           logger.error({ err, tool: 'semantic_reddit' }, 'Tool failed');
+          return errorResponse(err);
+        }
+      },
+    );
+
+  // ── semantic_jobs ────────────────────────────────────────────────────────
+  if (!gated.has('semantic_jobs'))
+    server.registerTool(
+      'semantic_jobs',
+      {
+        description:
+          'Search for job listings across job boards (SEEK, Indeed, Jora), extract structured fields (title, company, location, salary, work mode), ' +
+          'apply constraint filters, rank with weighted composite scoring, and return structured job results. ' +
+          'Uses web search + crawl for discovery, then extracts structured data from listing pages. ' +
+          'Requires EMBEDDING_SIDECAR_BASE_URL for semantic ranking. Falls back to constraint-only ranking without it.',
+        inputSchema: {
+          query: z
+            .string()
+            .describe('The job search query (e.g. "frontend developer", "data entry admin")'),
+          location: z
+            .array(z.string())
+            .optional()
+            .describe(
+              'Preferred locations (e.g. ["Sydney", "Melbourne"]). Used for ranking boost, not hard filter.',
+            ),
+          workMode: z
+            .array(z.enum(['remote', 'hybrid', 'onsite']))
+            .optional()
+            .describe('Preferred work modes. Used for ranking boost, not hard filter.'),
+          maxSalary: z
+            .number()
+            .positive()
+            .optional()
+            .describe(
+              'Maximum annual salary. Listings with parseable salary exceeding this are filtered out.',
+            ),
+          excludeTitles: z
+            .array(z.string())
+            .optional()
+            .describe('Title keywords to exclude (e.g. ["senior", "principal", "manager"])'),
+          maxPages: z
+            .number()
+            .int()
+            .min(1)
+            .max(50)
+            .optional()
+            .default(20)
+            .describe('Maximum number of job listing pages to crawl (1–50, default 20)'),
+          topK: z
+            .number()
+            .int()
+            .min(1)
+            .max(50)
+            .optional()
+            .default(10)
+            .describe('Number of top-ranked job listings to return (1–50, default 10)'),
+          maxBytes: z
+            .number()
+            .int()
+            .min(1)
+            .max(DEFAULT_SEMANTIC_MAX_BYTES)
+            .optional()
+            .default(DEFAULT_SEMANTIC_MAX_BYTES)
+            .describe('Maximum total bytes of listing text to embed (1–250MB, default 250MB)'),
+        },
+      },
+      async ({ query, location, workMode, maxSalary, excludeTitles, maxPages, topK, maxBytes }) => {
+        logger.info({ tool: 'semantic_jobs', query, maxPages, topK }, 'Tool invoked');
+        const start = Date.now();
+        try {
+          const data = await semanticJobs({
+            query,
+            embeddingBaseUrl: cfg.embeddingSidecar.baseUrl,
+            ...(cfg.embeddingSidecar.apiToken
+              ? { embeddingApiToken: cfg.embeddingSidecar.apiToken }
+              : {}),
+            embeddingDimensions: cfg.embeddingSidecar.dimensions,
+            ...(location?.length ? { location } : {}),
+            ...(workMode?.length ? { workMode } : {}),
+            ...(maxSalary !== undefined ? { maxSalary } : {}),
+            ...(excludeTitles?.length ? { excludeTitles } : {}),
+            maxPages,
+            topK,
+            maxBytes,
+          });
+          const elapsed = Date.now() - start;
+          const result = makeResult(
+            'semantic_jobs',
+            {
+              results: data.results.map((scored, index) => ({
+                rank: index + 1,
+                overallScore: Math.round(scored.overallScore * 1000) / 1000,
+                matchedConstraints: scored.matchedConstraints,
+                caveats: scored.caveats,
+                listing: {
+                  title: scored.listing.title,
+                  company: scored.listing.company,
+                  location: scored.listing.location,
+                  workMode: scored.listing.workMode,
+                  salaryRaw: scored.listing.salaryRaw,
+                  source: scored.listing.source,
+                  sourceUrl: scored.listing.sourceUrl,
+                  confidence: scored.listing.confidence,
+                  verificationStatus: scored.listing.verificationStatus,
+                },
+              })),
+              corpusStatus: data.corpusStatus,
+            },
+            elapsed,
+            {
+              ...(data.warnings.length > 0 ? { warnings: data.warnings } : {}),
+            },
+          );
+          return successResponse(result);
+        } catch (err: unknown) {
+          logger.error({ err, tool: 'semantic_jobs' }, 'Tool failed');
           return errorResponse(err);
         }
       },
