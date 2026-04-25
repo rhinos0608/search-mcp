@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-> **Version: 3.0.5** — Universal RAG core + Job Adapter MVP: shared pipeline, multi-adapter retrieval, structured job listing extraction, constraint-aware ranking, dedup.
+> **Version: 3.1.0** — Intelligence, Extraction, and Code: Persistent SQLite corpus cache, Kill Chain extraction, Neural Search (Exa), and Tree-sitter AST code chunking.
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
@@ -114,7 +114,7 @@ Reddit OAuth is optional: both `REDDIT_CLIENT_ID` and `REDDIT_CLIENT_SECRET` mus
 3. Hybrid ranking: bi-encoder cosine → BM25+ (`src/utils/bm25.ts`) → RRF fusion via `src/rag/pipeline.ts` (internal `retrieveSemanticChunks()` wrapper)
 4. Post-filtering: semantic coherence filter (centroid similarity for borderline chunks) → soft IDF-weighted lexical constraint (`src/utils/lexicalConstraint.ts`)
 5. Optional cross-encoder reranking (`src/utils/rerank.ts`, ONNX-based, local, default off)
-6. Corpus cache (`src/utils/corpusCache.ts`): 24h TTL, max 50 corpora, stores chunks + embeddings + BM25 index. Re-query via `source: { type: 'cached', corpusId }`.
+6. Corpus cache (`src/utils/corpusCache.ts`): Persistent via SQLite (`better-sqlite3`), configurable TTL, byte-weighted LRU eviction. Re-query via `source: { type: 'cached', corpusId }`.
 
 GitHub corpus (`src/utils/githubCorpus.ts`): fetches repo files via GitHub API, uses `chunkMarkdown` with path-prefixed sections. Supports branch, file extension filter, and query pre-filter.
 
@@ -151,4 +151,4 @@ GitHub corpus (`src/utils/githubCorpus.ts`): fetches repo files via GitHub API, 
 - `config.json` and `config.enc` are gitignored — never commit API keys
 - `rerank.ts` and `githubCorpus.ts` are dynamically imported (`await import(...)`) to keep startup fast when those features are unused
 - Embedding sidecar URLs bypass SSRF guards — they come from operator config, not user input
-- Corpus cache is in-process only (no persistence across server restarts); the `cached` source type only works within the same server process lifetime
+- Corpus cache is persistent via SQLite; the `cached` source type works across server restarts

@@ -26,6 +26,7 @@ The core decision remains: `src/rag/` shared pipeline, not per-tool RAG implemen
 **Facts vs interpretation**: the tool produces facts (extracted fields, source URLs, fetch status, confidence scores, coverage). The calling agent produces interpretation ("good foot-in-the-door rate", "worth applying"). Both are useful, but they must not live in the same layer. A `JobListing` carries what was extracted from the listing page; whether $36/hr is "competitive" is a judgment the agent adds on top. This separation keeps the tool honest and the results composable.
 
 **V3.0-alpha extraction order**:
+
 1. Start by making `semantic_crawl` call the new `src/rag/` pipeline internally while preserving its exact external interface — parity testing against current behavior
 2. Split the pipeline into `prepareCorpus()` and `retrieveCorpus()` phases
 3. Move cache, BM25, fusion, rerank, lexical constraints, and chunking behind stable internal interfaces
@@ -39,11 +40,11 @@ Each source has a different failure ecology. YouTube has transcript rate limits 
 
 **V3.0.0** ships in three internal milestones to reduce delivery risk:
 
-| Milestone | Scope | Gate |
-|-----------|-------|------|
-| **V3.0-alpha** | Extract `src/rag/`, preserve existing `semantic_crawl` behavior, prove no regression | All existing semantic_crawl tests pass; zero behavioral change on web corpus |
-| **V3.0-beta** | Add one new adapter + tool (YouTube), validate adapter contract end-to-end | YouTube golden-query eval passes; adapter registration works; cache keys versioned |
-| **V3.0** | Add Reddit, evals enforced in CI, debug traces stable | Both adapters pass evals; partial-failure behavior tested; cache invalidation verified per pipeline stage |
+| Milestone      | Scope                                                                                | Gate                                                                                                      |
+| -------------- | ------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------- |
+| **V3.0-alpha** | Extract `src/rag/`, preserve existing `semantic_crawl` behavior, prove no regression | All existing semantic_crawl tests pass; zero behavioral change on web corpus                              |
+| **V3.0-beta**  | Add one new adapter + tool (YouTube), validate adapter contract end-to-end           | YouTube golden-query eval passes; adapter registration works; cache keys versioned                        |
+| **V3.0**       | Add Reddit, evals enforced in CI, debug traces stable                                | Both adapters pass evals; partial-failure behavior tested; cache invalidation verified per pipeline stage |
 
 The problem this solves: YouTube and Reddit both involve external fetch weirdness, partial data, adaptive concurrency, cache invalidation, and different chunking behavior. Doing both while also refactoring the core pipeline is where bugs breed in the walls.
 
@@ -109,12 +110,12 @@ This means `semantic_youtube` is not "learn YouTube from scratch" — it is "bui
 
 ```ts
 interface CorpusStatus {
-  requested: number;    // total items the tool tried to fetch
-  fetched: number;      // successfully fetched and processed
-  failed: number;       // fetch/parse failures
-  skipped: number;      // filtered out (deleted, too short, wrong type)
-  cacheHit: boolean;    // was this corpus served from cache?
-  warnings: string[];   // machine-readable warnings for observability
+  requested: number; // total items the tool tried to fetch
+  fetched: number; // successfully fetched and processed
+  failed: number; // fetch/parse failures
+  skipped: number; // filtered out (deleted, too short, wrong type)
+  cacheHit: boolean; // was this corpus served from cache?
+  warnings: string[]; // machine-readable warnings for observability
 }
 
 interface RetrievalTrace {
@@ -147,12 +148,12 @@ Corpus status and retrieval trace belong to the retrieval response envelope, not
 interface RetrievalResponse<T> {
   results: RetrievalResult<T>[];
   corpusStatus: CorpusStatus;
-  coverage?: Coverage;              // V3.2: multi-source coverage reporting
-  retrievalTrace?: RetrievalTrace;  // only when opts.debug = true
+  coverage?: Coverage; // V3.2: multi-source coverage reporting
+  retrievalTrace?: RetrievalTrace; // only when opts.debug = true
 }
 
 interface RetrievalResult<T> {
-  item: T;                    // the chunk, or structured object (V3.2)
+  item: T; // the chunk, or structured object (V3.2)
   semanticScore: number;
   bm25Score: number;
   fusedScore: number;
@@ -172,17 +173,17 @@ Named profiles keep the public API sane while avoiding hardcoded adapter constan
 
 ```ts
 type RetrievalProfile =
-  | 'balanced'          // default: equal RRF weight
-  | 'lexical-heavy'     // BM25-weighted RRF, higher lexical constraint
-  | 'semantic-heavy'    // vector-weighted RRF, looser lexical constraint
-  | 'high-precision'    // reranking enabled, tighter coherence filter
-  | 'fast';             // skip reranking, fewer BM25 candidates
+  | 'balanced' // default: equal RRF weight
+  | 'lexical-heavy' // BM25-weighted RRF, higher lexical constraint
+  | 'semantic-heavy' // vector-weighted RRF, looser lexical constraint
+  | 'high-precision' // reranking enabled, tighter coherence filter
+  | 'fast'; // skip reranking, fewer BM25 candidates
 
 type RetrievalOpts = {
   adapter: AdapterType;
-  topK?: number;              // default 10
+  topK?: number; // default 10
   profile?: RetrievalProfile; // default 'balanced'
-  debug?: boolean;            // include RetrievalTrace in results
+  debug?: boolean; // include RetrievalTrace in results
 };
 ```
 
@@ -200,11 +201,11 @@ Cache keys must include every retrieval-invalidating factor, not just query and 
 type CacheKey = {
   source: SourceType;
   query: string;
-  filters: Record<string, unknown>;   // date range, subreddit, channel, etc.
+  filters: Record<string, unknown>; // date range, subreddit, channel, etc.
   adapter: AdapterType;
-  adapterVersion: string;             // bump when adapter logic changes
-  chunkerVersion: string;             // bump when chunking params change
-  embeddingModel: string;             // which model produced the embeddings
+  adapterVersion: string; // bump when adapter logic changes
+  chunkerVersion: string; // bump when chunking params change
+  embeddingModel: string; // which model produced the embeddings
   embeddingMode: EmbeddingMode;
   corpusFetchParams: Record<string, unknown>; // maxVideos, maxPosts, language, branch, etc.
 };
@@ -216,12 +217,12 @@ Corpus cache limits: 24h TTL, **byte-weighted LRU eviction** (not count-based). 
 
 ```ts
 const CACHE_LIMITS = {
-  maxCorpora: 100,              // soft cap, eviction is byte-weighted LRU
-  maxCorpusBytes: 50 * 1024 * 1024,   // 50 MB per corpus
+  maxCorpora: 100, // soft cap, eviction is byte-weighted LRU
+  maxCorpusBytes: 50 * 1024 * 1024, // 50 MB per corpus
   maxTotalCacheBytes: 500 * 1024 * 1024, // 500 MB across all corpora
   maxChunksPerCorpus: 10_000,
-  maxEmbeddingVectors: 100_000,   // across all cached corpora
-  ttlMs: 24 * 60 * 60 * 1000,    // 24h
+  maxEmbeddingVectors: 100_000, // across all cached corpora
+  ttlMs: 24 * 60 * 60 * 1000, // 24h
 };
 ```
 
@@ -239,8 +240,8 @@ type AdapterType = 'text' | 'code' | 'transcript' | 'conversation' | 'academic' 
 interface Adapter {
   type: AdapterType;
   chunk(docs: RawDocument[], opts: ChunkOpts): Chunk[];
-  section(chunk: Chunk): string;          // section metadata builder
-  preferredProfile: RetrievalProfile;     // default profile for this adapter
+  section(chunk: Chunk): string; // section metadata builder
+  preferredProfile: RetrievalProfile; // default profile for this adapter
   profileOverrides: Record<RetrievalProfile, ProfileSettings>; // internal tuning
 }
 ```
@@ -278,6 +279,7 @@ For Reddit, HN, and similar threaded discussion platforms. Handles comment tree 
 **Flagship tool**. Proves the pipeline handles multi-document corpus building, timestamps, caching, transcript chunking, and a real user-visible win.
 
 Pipeline:
+
 1. `youtube_search` returns up to 100 video IDs
 2. `youtube_transcript` fetched with **adaptive concurrency**: start at 8, increase to 20 only if success rate and latency look healthy, back off globally on rate-limit-ish failures (429s, timeouts, empty responses). Not blind `Promise.all` with cap 20.
 3. Transcript adapter chunks each transcript
@@ -292,6 +294,7 @@ New tool input: query + optional channel/date/maxVideos filters. Output: top-K t
 **Second flagship**. Proves conversation-thread context, partial corpus handling, and adaptive fetching on a platform with thread structure and deleted comments.
 
 Pipeline:
+
 1. `reddit_search` returns post list
 2. Fetch full comment trees in parallel (adaptive concurrency, same pattern as YouTube)
 3. Conversation adapter: flatten comment tree, filter deleted/removed, prefix parent context into chunk text, set section to `post_title > parent_snippet`
@@ -318,6 +321,7 @@ src/rag/__tests__/eval/
 ```
 
 Eval checks per adapter:
+
 - Golden query returns expected source/chunk in top 3 or top 10
 - Latency budget per stage (fetch, chunk, embed, rank)
 - Cache hit/miss behavior
@@ -390,16 +394,16 @@ interface JobListingMVP {
   company?: string;
   location?: string;
   workMode: 'onsite' | 'hybrid' | 'remote' | 'unknown';
-  salaryRaw?: string;           // "$35-45.60/hr", "$80k + super" — raw text
+  salaryRaw?: string; // "$35-45.60/hr", "$80k + super" — raw text
   source: 'seek' | 'indeed' | 'jora' | 'linkedin' | 'other';
   sourceUrl?: string;
   jobId?: string;
-  postedRaw?: string;           // raw date string from listing
-  extractedText: string;        // full listing body for embedding
+  postedRaw?: string; // raw date string from listing
+  extractedText: string; // full listing body for embedding
 
   // Confidence per field
   confidence: {
-    title: number;              // 0-1
+    title: number; // 0-1
     location: number;
     workMode: number;
     salary: number;
@@ -408,13 +412,13 @@ interface JobListingMVP {
 
   // Provenance — how strong is this result?
   verificationStatus:
-    | 'listing_page_fetched'    // we hit the actual listing page
-    | 'search_result_only'      // search snippet, not full page
-    | 'aggregator_result'       // copied from another board (Jora from SEEK)
-    | 'needs_manual_check';     // extraction unreliable, low confidence
+    | 'listing_page_fetched' // we hit the actual listing page
+    | 'search_result_only' // search snippet, not full page
+    | 'aggregator_result' // copied from another board (Jora from SEEK)
+    | 'needs_manual_check'; // extraction unreliable, low confidence
 
   // Caveats extracted from the listing
-  caveats: string[];            // ["temp contract", "via agency", "closing soon"]
+  caveats: string[]; // ["temp contract", "via agency", "closing soon"]
 }
 ```
 
@@ -426,11 +430,11 @@ No full constraint pipeline yet. A weighted composite that already beats pure se
 
 ```ts
 score =
-  semanticScore * 0.45 +    // vector similarity to query
-  locationScore * 0.20 +    // query location match
-  workModeScore * 0.15 +    // query work-mode preference match
-  recencyScore * 0.10 +     // posted recently
-  completenessScore * 0.10; // fields actually populated (salary, location)
+  semanticScore * 0.45 + // vector similarity to query
+  locationScore * 0.2 + // query location match
+  workModeScore * 0.15 + // query work-mode preference match
+  recencyScore * 0.1 + // posted recently
+  completenessScore * 0.1; // fields actually populated (salary, location)
 ```
 
 This is the minimum viable constraint-aware ranking. V3.2 replaces it with the full hard-filter → soft-boost → quality-signal → explanation pipeline.
@@ -438,6 +442,7 @@ This is the minimum viable constraint-aware ranking. V3.2 replaces it with the f
 ### Tool: `semantic_jobs` (MVP)
 
 Pipeline:
+
 1. `web_search` + `web_crawl` for SEEK, Indeed, Jora pages (source profiles inform strategy)
 2. Job MVP adapter parses each page → `JobListingMVP[]`
 3. Filter by hard constraints (location, workMode) if provided
@@ -448,35 +453,25 @@ Input: query + optional filters (location, workMode). Output: ranked job listing
 
 ---
 
-## V3.1.0 — Code / GitHub
+## V3.1.0 — Intelligence, Extraction, and Code
 
-Tree-sitter alone is a sprint's worth of work across the language matrix. Code-aware chunking is its own beast, not a cute garnish.
+**Goal**: Transform the extraction and caching layers to be robust enough for production agent workflows, moving beyond simple markdown parsing and volatile in-memory storage. This incorporates research findings on Kill Chain extraction and Contextual Embeddings alongside the original Code intelligence goals.
 
-### Code Adapter (`adapters/code.ts`)
+### 1. Robust Infrastructure (Persistence & Neural Search)
 
-- Chunk at function/class/module boundaries using **tree-sitter** (`node-tree-sitter` + language grammars). Regex heuristics misfire on multi-line functions, nested classes, and decorated methods.
-- Language detected from file extension → selects the correct grammar. Supported: TypeScript/JavaScript, Python, Go, Rust, Java.
-- **Defensive language detection** (`languageDetect.ts`): `.ts` vs `.tsx`, `.ipynb` containing Python, template files with embedded JS all have edge cases. Unrecognized or ambiguous extensions fall back to the text adapter with an explicit log: `"Unknown extension .<ext> for <file> — using text adapter"`.
-- **WASM grammar bundles** add non-trivial binary weight — lazy-load on first use per language, not at startup.
-- Section metadata: `${filePath} > ${kind}:${name}`. Docstrings/leading comments attached to the chunk, not split from their function.
-- Embed with code mode when `EMBEDDING_CODE_MODEL` is configured, standard sidecar otherwise.
-- BM25 is particularly strong for code (identifier exact match); the `lexical-heavy` profile is the adapter default.
+- **Persistent Corpus Cache:** Migrate `src/utils/corpusCache.ts` from in-process memory to SQLite (`better-sqlite3`). This solves the critical issue where `source: "cached"` dies on server restart. Includes byte-weighted LRU eviction.
+- **Neural Search Integration:** Add Exa as a supported search backend (`EXA_API_KEY`) to enable semantic web/code search before crawling even begins.
 
-### Repo Guardrails
+### 2. Advanced Extraction (The "Kill Chain")
 
-"Semantic search over arbitrary repos" hides dragons. The GitHub adapter enforces:
-- Repo size cap (max total files indexed)
-- File size cap (skip files over N bytes)
-- Binary/vendor exclusions (images, fonts, compiled assets)
-- `.gitignore`-style filtering (respect the repo's own exclusions)
-- Generated-file detection (lockfiles, `*.generated.*`, `build/`)
-- Max total indexed bytes limit
+- **Kill Chain Content Extraction:** Implement a multi-strategy extraction fallback: `Crawl4AI -> Readability (jsdom) -> Wayback Machine -> Google Cache`. This drastically improves success rates on 404s, paywalls, and JS-heavy sites.
+- **Contextual Embeddings:** Add an optional LLM preprocessing step to generate document context for each chunk _before_ embedding, significantly boosting retrieval precision.
 
-Someone pointing `semantic_github` at a monorepo should get a bounded result, not a toaster with ambitions.
+### 3. Code Intelligence & AST Chunking
 
-### `semantic_github`
-
-Input: owner/repo + query + optional branch/extensions. Output: top-K code chunks with file path, function name, line range, scores, and `corpusStatus`.
+- **Tree-sitter Code Adapter (`adapters/code.ts`):** Move beyond regex heuristics. Chunk at function/class/module boundaries using WASM-based tree-sitter grammars (TS, JS, Python, Go, Rust), lazy-loaded on first use.
+- **Code Example Extraction:** In regular text/web adapters, treat markdown code blocks (` ``` `) as distinct atomic units with `contextBefore` and `contextAfter` metadata for better technical retrieval.
+- **Repo Guardrails:** Enforce byte/file caps and `.gitignore` awareness in the GitHub adapter to prevent monorepo explosion.
 
 ---
 
@@ -490,15 +485,15 @@ Every multi-source response includes coverage statistics. A superior tool should
 
 ```ts
 interface Coverage {
-  sourcesAttempted: string[];      // ["seek", "indeed", "jora", "linkedin"]
-  sourcesSucceeded: string[];      // ["seek", "jora"]
-  sourcesPartial: string[];         // ["indeed"]
-  sourcesFailed: string[];           // ["linkedin"]
-  documentsFound: number;           // total from all sources
-  documentsIndexed: number;        // after filtering + dedup
-  chunksIndexed: number;            // final chunk count
+  sourcesAttempted: string[]; // ["seek", "indeed", "jora", "linkedin"]
+  sourcesSucceeded: string[]; // ["seek", "jora"]
+  sourcesPartial: string[]; // ["indeed"]
+  sourcesFailed: string[]; // ["linkedin"]
+  documentsFound: number; // total from all sources
+  documentsIndexed: number; // after filtering + dedup
+  chunksIndexed: number; // final chunk count
   duplicateDocumentsRemoved: number; // removed by dedup pipeline
-  warnings: string[];             // "Indeed returned mostly dynamic shell pages", ...
+  warnings: string[]; // "Indeed returned mostly dynamic shell pages", ...
 }
 ```
 
@@ -533,7 +528,7 @@ interface JobListing {
 
   // Metadata
   seniority: 'entry' | 'mid' | 'senior' | 'lead' | 'executive' | 'unknown';
-  requirements: string[];        // extracted skills/requirements
+  requirements: string[]; // extracted skills/requirements
   niceToHave?: string[];
 
   // Source info
@@ -552,14 +547,14 @@ interface JobListing {
 
   // Confidence scores (expanded from MVP)
   confidence: {
-    salary: number;      // 0-1: did we find a salary?
-    workMode: number;   // 0-1: confident in WFH/hybrid/onsite?
-    seniority: number;  // 0-1: confident in level?
+    salary: number; // 0-1: did we find a salary?
+    workMode: number; // 0-1: confident in WFH/hybrid/onsite?
+    seniority: number; // 0-1: confident in level?
     completeness: number; // overall extraction quality
   };
 
   // Caveats (from V3.0.5 MVP — expanded here)
-  caveats: string[];    // ["temp contract", "via agency", "closing soon"]
+  caveats: string[]; // ["temp contract", "via agency", "closing soon"]
 
   // For retrieval
   extractedText: string;
@@ -578,40 +573,42 @@ Standard semantic search blends everything into one vector. V3.2 separates ranki
 
 ```ts
 interface RetrievalResult<T> {
-  item: T;                    // the structured object (JobListing, etc.)
-  
+  item: T; // the structured object (JobListing, etc.)
+
   // Component scores
-  semanticScore: number;     // vector similarity to query
-  constraintScore: number;  // how well it matches hard constraints
-  
+  semanticScore: number; // vector similarity to query
+  constraintScore: number; // how well it matches hard constraints
+
   // Quality signals
-  qualityScore: number;      // completeness, recency, source trust
-  duplicateScore: number;     // is this a dedup winner or merged?
-  
+  qualityScore: number; // completeness, recency, source trust
+  duplicateScore: number; // is this a dedup winner or merged?
+
   // Final ranking
-  overallScore: number;      // weighted combination
-  rank: number;              // final position
-  
+  overallScore: number; // weighted combination
+  rank: number; // final position
+
   // Why this ranked here
   explanation: {
-    matched: string[];        // "data-entry/admin role", "Parramatta", "hybrid"
-    caveats: string[];       // "temp contract", "not fully WFH"
+    matched: string[]; // "data-entry/admin role", "Parramatta", "hybrid"
+    caveats: string[]; // "temp contract", "not fully WFH"
   };
 }
 
 interface QueryConstraints {
-  hard: {                    // must match — filter stage
-    location?: string[];       // ["Sydney", "Inner West", "Western Sydney"]
-    workMode?: WorkMode[];    // ["remote", "hybrid"]
+  hard: {
+    // must match — filter stage
+    location?: string[]; // ["Sydney", "Inner West", "Western Sydney"]
+    workMode?: WorkMode[]; // ["remote", "hybrid"]
     maxSalary?: number;
     minExperience?: number;
-    excludeTitles?: string[];  // ["senior manager", "principal"]
+    excludeTitles?: string[]; // ["senior manager", "principal"]
   };
-  
-  soft: {                     // prefer — boost stage
-    titleKeywords?: string[];  // ["data entry", "admin", "reception"]
-    locations?: string[];      // preferred locations (rank boost)
-    recentOnly?: boolean;     // posted within N days
+
+  soft: {
+    // prefer — boost stage
+    titleKeywords?: string[]; // ["data entry", "admin", "reception"]
+    locations?: string[]; // preferred locations (rank boost)
+    recentOnly?: boolean; // posted within N days
   };
 }
 ```
@@ -656,23 +653,23 @@ Mandatory for jobs, news, Reddit mirrors, HN reposts, academic papers, Stack Ove
 // src/rag/dedup.ts
 interface Deduplicator {
   // Layer 1: URL canonicalization
-  canonicalize(url: string): string;  // remove tracking params, normalize domains
-  
+  canonicalize(url: string): string; // remove tracking params, normalize domains
+
   // Layer 2: structured fingerprint
   fingerprint(item: JobListing | NewsArticle | AcademicPaper): string;
   // - jobs: title + company + location normalized
   // - news: title + publisher + date
   // - papers: DOI or arXiv ID or title hash
-  
+
   // Layer 3: semantic near-dupe
   findNearDuplicates(items: T[], threshold: number): Map<string, string[]>;
   // embedding similarity above threshold → same cluster
 }
 
 interface DedupResult {
-  canonicalId: string;      // the "winner" ID to keep
-  mergedFrom: string[];      // all IDs merged into this one
-  reason: string;           // "exact URL match", "same job posting", "semantic near-dup"
+  canonicalId: string; // the "winner" ID to keep
+  mergedFrom: string[]; // all IDs merged into this one
+  reason: string; // "exact URL match", "same job posting", "semantic near-dup"
 }
 ```
 
@@ -694,36 +691,36 @@ Every source has different failure modes. The orchestrator should know them upfr
 ```ts
 const sourceProfiles: Record<Source, SourceProfile> = {
   seek: {
-    dynamicRisk: "medium",           // JS-rendered content possible
-    duplicateRisk: "medium",          // cross-posts to other SEEK owned sites
-    structuredDataLikely: true,     // structured job fields present
-    freshnessImportant: true,           // jobs expire quickly
-    crawlReliability: "high",
+    dynamicRisk: 'medium', // JS-rendered content possible
+    duplicateRisk: 'medium', // cross-posts to other SEEK owned sites
+    structuredDataLikely: true, // structured job fields present
+    freshnessImportant: true, // jobs expire quickly
+    crawlReliability: 'high',
   },
   indeed: {
-    dynamicRisk: "high",             // heavy JS, dynamic shells
-    duplicateRisk: "high",           // scraped content, mirrors
-    structuredDataLikely: false,     // unstructured, scattered
-    fallbackPreferred: "web_search",   // prefers web_search to web_crawl
-    crawlReliability: "medium",
+    dynamicRisk: 'high', // heavy JS, dynamic shells
+    duplicateRisk: 'high', // scraped content, mirrors
+    structuredDataLikely: false, // unstructured, scattered
+    fallbackPreferred: 'web_search', // prefers web_search to web_crawl
+    crawlReliability: 'medium',
   },
   linkedin: {
-    dynamicRisk: "very_high",
-    authWallRisk: "very_high",
-    structuredDataLikely: "partial", // some structured fields
-    crawlReliability: "low",
+    dynamicRisk: 'very_high',
+    authWallRisk: 'very_high',
+    structuredDataLikely: 'partial', // some structured fields
+    crawlReliability: 'low',
   },
   jora: {
-    dynamicRisk: "low",
-    duplicateRisk: "high",            // aggregator with SEEK duplicates
+    dynamicRisk: 'low',
+    duplicateRisk: 'high', // aggregator with SEEK duplicates
     structuredDataLikely: true,
-    crawlReliability: "high",
+    crawlReliability: 'high',
   },
   reddit: {
-    dynamicRisk: "none",
-    duplicateRisk: "medium",           // cross-posts to r/Australia r/Brisbane
-    structuredDataLikely: false,      // comment trees
-    crawlReliability: "high",
+    dynamicRisk: 'none',
+    duplicateRisk: 'medium', // cross-posts to r/Australia r/Brisbane
+    structuredDataLikely: false, // comment trees
+    crawlReliability: 'high',
   },
   // ... per source
 };
@@ -744,11 +741,11 @@ Source profiles are defined once in `src/rag/sources.ts` and consulted by every 
 interface SourceHealth {
   source: Source;
   // Rolling observations (updated per crawl session)
-  crawlSuccessRate: number;       // last 50 fetches: how many succeeded?
+  crawlSuccessRate: number; // last 50 fetches: how many succeeded?
   averageExtractionQuality: number; // structured fields actually populated
-  authWallFrequency: number;       // how often we hit auth walls?
-  duplicateRate: number;           // how often dedup fires for this source?
-  freshnessReliability: number;    // does the age we see match reality?
+  authWallFrequency: number; // how often we hit auth walls?
+  duplicateRate: number; // how often dedup fires for this source?
+  freshnessReliability: number; // does the age we see match reality?
   avgResponseLatencyMs: number;
   lastHealthyAt: Date;
   lastDegradedAt?: Date;
@@ -790,6 +787,7 @@ Static profiles handle the initial heuristics ("LinkedIn has auth wall risk — 
 The job search use case that motivated domain adapters, constraint-aware ranking, and coverage reporting. V3.0.5 proved the extraction contract; V3.2 adds the full pipeline: multi-source fetch, three-layer dedup, hard/soft constraint ranking, coverage reporting, and explanation generation.
 
 Pipeline:
+
 1. Multi-source fetch: SEEK, Indeed, Jora, LinkedIn (if accessible) in parallel via source profiles
 2. Job adapter parses each response → structured `JobListing` objects
 3. Deduplicate across all sources via three-layer system

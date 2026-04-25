@@ -1,6 +1,6 @@
 # AGENTS.md
 
-> **Version: 3.0.5** — Universal RAG core + Job Adapter MVP: shared pipeline, multi-adapter retrieval, structured job listing extraction, constraint-aware ranking, dedup.
+> **Version: 3.1.0** — Intelligence, Extraction, and Code: Persistent SQLite corpus cache, Kill Chain extraction, Neural Search (Exa), schema-aware web extraction, and Tree-sitter AST code chunking.
 
 This file provides guidance to AI coding agents (Codex, OpenCode, etc.) when working with code in this repository.
 
@@ -37,10 +37,11 @@ Append `--json` (via `dev:json` / `start:json`) for structured JSON logging inst
 
 _Search & Read_
 
-- `web_search` — Multi-backend search with fallback chain: primary backend (configured) → remaining backend. Supports Brave and SearXNG.
+- `web_search` — Multi-backend search with fallback chain: primary backend (configured) → remaining backend. Supports Brave, SearXNG, and **Exa (Neural Search)**.
 - `web_read` — Fetches a URL and extracts article content via Mozilla Readability + jsdom.
+- `web_extract` — **(New in V3.1.0)** Extracts structured data from a URL using a provided Zod schema or natural language description.
 - `web_crawl` — Deep multi-page crawl via Crawl4AI (JS rendering). Returns raw markdown per page. Requires `CRAWL4AI_BASE_URL`.
-- `semantic_crawl` — Full RAG pipeline over a crawled corpus. Source types: `url`, `sitemap`, `search`, `github`, `cached`. Returns top-K semantically ranked chunks with bi-encoder, BM25, and RRF scores. Requires `CRAWL4AI_BASE_URL` + `EMBEDDING_SIDECAR_BASE_URL`.
+- `semantic_crawl` — Full RAG pipeline over a crawled corpus. Source types: `url`, `sitemap`, `search`, `github`, `cached`. Returns top-K semantically ranked chunks with bi-encoder, BM25, and RRF scores. Requires `CRAWL4AI_BASE_URL` + `EMBEDDING_SIDECAR_BASE_URL`. Supports multi-vector retrieval (summary + chunk).
 
 _GitHub_
 
@@ -79,19 +80,19 @@ _Specialist_
 
 **Config resolution** (`src/config.ts`): encrypted file (`config.enc` + `SEARCH_MCP_CONFIG_KEY`) → individual env vars → defaults. Config is cached after first load.
 
-Key env vars: `BRAVE_API_KEY`, `SEARXNG_BASE_URL`, `SEARCH_BACKEND`, `NITTER_BASE_URL`, `REDDIT_CLIENT_ID`, `REDDIT_CLIENT_SECRET`, `REDDIT_USER_AGENT`, `LISTENNOTES_API_KEY`, `PRODUCTHUNT_API_TOKEN`, `PATENTSVIEW_API_KEY`, `YOUTUBE_API_KEY`, `STACKEXCHANGE_API_KEY`, `CRAWL4AI_BASE_URL`, `CRAWL4AI_API_TOKEN`, `EMBEDDING_SIDECAR_BASE_URL`, `EMBEDDING_SIDECAR_API_TOKEN`, `EMBEDDING_DIMENSIONS`.
+Key env vars: `BRAVE_API_KEY`, `SEARXNG_BASE_URL`, `EXA_API_KEY`, `SEARCH_BACKEND`, `NITTER_BASE_URL`, `REDDIT_CLIENT_ID`, `REDDIT_CLIENT_SECRET`, `REDDIT_USER_AGENT`, `LISTENNOTES_API_KEY`, `PRODUCTHUNT_API_TOKEN`, `PATENTSVIEW_API_KEY`, `YOUTUBE_API_KEY`, `STACKEXCHANGE_API_KEY`, `CRAWL4AI_BASE_URL`, `CRAWL4AI_API_TOKEN`, `EMBEDDING_SIDECAR_BASE_URL`, `EMBEDDING_SIDECAR_API_TOKEN`, `EMBEDDING_DIMENSIONS`, `DATABASE_PATH`.
 
 Reddit OAuth requires both `REDDIT_CLIENT_ID` and `REDDIT_CLIENT_SECRET` — setting exactly one is invalid (health reports degraded, tools throw at first use).
 
 **Semantic pipeline** (`src/tools/semanticCrawl.ts` + `src/chunking.ts` + `src/utils/`):
 
-1. Crawl pages → strip cookie banners → `chunkMarkdown()` (400-token max, 20% overlap, atomic units for code/tables, boilerplate heuristics)
+1. Crawl pages (via Kill Chain: Crawl4AI/Readability/Wayback/Cache) → strip cookie banners → `chunkMarkdown()` (with Contextual Embedding pre-processing)
 2. Batch embed documents via sidecar (max 512/batch, asymmetric document/query mode)
 3. BM25+ index + bi-encoder cosine → RRF fusion → semantic coherence filter → soft lexical constraint
 4. Optional cross-encoder reranking (ONNX, local, default off)
-5. Corpus cache: 24h TTL, max 50 corpora, stores chunks + embeddings + BM25 index
+5. Corpus cache: **Persistent (SQLite)**, configurable TTL, stores chunks + embeddings + BM25 index + multi-vector summaries.
 
-GitHub corpus: fetches files via GitHub API, chunks with path-prefixed sections. Code-aware path filter by extension.
+GitHub corpus: fetches files via GitHub API, chunks with path-prefixed sections. **AST-aware code chunking** for improved semantic relevance in supported languages (TS, JS, Python, Go).
 
 **Sidecar services** (`sidecar/`):
 
@@ -110,4 +111,4 @@ GitHub corpus: fetches files via GitHub API, chunks with path-prefixed sections.
 - youtube-transcript broken ESM: import directly from `youtube-transcript/dist/youtube-transcript.esm.js` with `@ts-expect-error`
 - `config.json` and `config.enc` are gitignored — never commit API keys
 - `rerank.ts` and `githubCorpus.ts` are dynamically imported — do not add static imports
-- Corpus cache is in-process only; `cached` source type only works within the same server process lifetime
+- Corpus cache is persistent via SQLite; `cached` source type works across server restarts.
