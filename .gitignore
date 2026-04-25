@@ -9,4 +9,5 @@ config.enc
 stderr.log
 .worktrees/
 models/
+.pi/
 .cache/semantic-crawl/
