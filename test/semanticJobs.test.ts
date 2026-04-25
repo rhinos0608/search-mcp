@@ -263,3 +263,39 @@ test('processJobSearchResults applies hard constraints', async () => {
     ['Sydney Developer'],
   );
 });
+
+test('processJobSearchResults uses html field when present over markdown', async () => {
+  installEmbeddingStub();
+  const html = makeListingHtml({ title: 'HTML Engineer', company: 'Acme', location: 'Sydney' });
+
+  const result = await processJobSearchResults(
+    [{ url: 'https://au.seek.com.au/job/1', html, success: true }],
+    'software engineer Sydney',
+    {},
+    'http://embedding.local',
+    undefined,
+    4,
+  );
+
+  assert.ok(result.results.length > 0, 'expected at least one job result');
+  assert.equal(result.results[0]?.listing.title, 'HTML Engineer');
+});
+
+test('processJobSearchResults warns when page html has no angle brackets (markdown fallback)', async () => {
+  installEmbeddingStub();
+  const markdown = '# Data Entry Clerk\n\nCompany: Acme\nLocation: Sydney NSW';
+
+  const result = await processJobSearchResults(
+    [{ url: 'https://au.seek.com.au/job/2', html: markdown, success: true }],
+    'data entry',
+    {},
+    'http://embedding.local',
+    undefined,
+    4,
+  );
+
+  const hasMarkdownWarning = result.warnings.some((w) =>
+    w.includes('markdown only'),
+  );
+  assert.ok(hasMarkdownWarning, 'expected a markdown-only warning');
+});

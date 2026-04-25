@@ -112,6 +112,16 @@ export async function processJobSearchResults(
   );
   const failedPages = crawledPages.length - successfulPages.length;
 
+  const markdownOnlyCount = successfulPages.filter(
+    (page) => (page.html ?? '').length > 0 && !(page.html ?? '').includes('<'),
+  ).length;
+  if (markdownOnlyCount > 0) {
+    warnings.push(
+      `semantic_jobs: ${String(markdownOnlyCount)} page(s) fetched as markdown only — ` +
+        `HTML extraction unavailable; upgrade Crawl4AI sidecar to v0.8.x for structured data`,
+    );
+  }
+
   for (const page of crawledPages) {
     if (!page.success) {
       warnings.push(`Crawl failed for "${page.url}": ${page.error ?? 'unknown crawl failure'}`);
@@ -301,7 +311,7 @@ async function defaultCrawl(urls: string[]): Promise<SemanticJobsCrawledPage[]> 
       const page = result.pages[0];
       return {
         url,
-        html: page?.markdown ?? '',
+        html: page?.html ?? page?.markdown ?? '',
         success: page?.success ?? false,
         ...(page?.errorMessage !== null && page?.errorMessage !== undefined
           ? { error: page.errorMessage }
