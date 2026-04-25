@@ -416,6 +416,7 @@ export interface CrawlPageResult extends StructuredContent {
   url: string;
   success: boolean;
   markdown: string;
+  html?: string;
   title: string | null;
   description: string | null;
   links: { href: string; text: string }[];
@@ -465,6 +466,25 @@ export interface SemanticCrawlChunk {
   };
 }
 
+export type SemanticCrawlSizeWarning =
+  | {
+      code: 'SEMANTIC_CRAWL_RESPONSE_SIZE_GUARD';
+      message: string;
+      requestedMaxPages: number;
+      cappedMaxPages: number;
+      estimatedBytes: number;
+      safeBytes: number;
+      avgPageBytes: number;
+    }
+  | {
+      code: 'SEMANTIC_CRAWL_RESPONSE_SIZE_LIMIT_APPROACHED';
+      message: string;
+      requestedMaxPages: number;
+      pagesReturned: number;
+      safeBytes: number;
+      accumulatedBytes: number;
+    };
+
 export interface SemanticCrawlResult extends StructuredContent {
   seedUrl: string;
   query: string;
@@ -477,6 +497,8 @@ export interface SemanticCrawlResult extends StructuredContent {
   chunks: SemanticCrawlChunk[];
   extractedData?: Record<string, Record<string, unknown>[]>;
   warnings?: string[];
+  structuredWarnings?: SemanticCrawlSizeWarning[];
+  omittedPages?: { url: string; reason: string; estimatedBytes?: number }[];
 }
 
 // ── Semantic Crawl Sources ────────────────────────────────────────────────
