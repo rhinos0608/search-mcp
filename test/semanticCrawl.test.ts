@@ -12,13 +12,27 @@ import {
   pagesToCorpus,
   type SemanticCrawlOptions,
 } from '../src/tools/semanticCrawl.js';
-import type { SemanticCrawlChunk, SemanticCrawlResult, CorpusChunk, CrawlPageResult, SemanticCrawlSource, ScoreDetail } from '../src/types.js';
+import type {
+  SemanticCrawlChunk,
+  SemanticCrawlResult,
+  CorpusChunk,
+  CrawlPageResult,
+  SemanticCrawlSource,
+  ScoreDetail,
+} from '../src/types.js';
 import type { Crawl4aiConfig } from '../src/config.js';
 import { rrfMerge } from '../src/utils/fusion.js';
 import { getOrBuildCorpus, computeCorpusId, loadCorpusById } from '../src/utils/corpusCache.js';
 
 const DUMMY_CRAWL4AI: Crawl4aiConfig = { baseUrl: '', apiToken: '' };
 const DUMMY_EMBEDDING = { baseUrl: '', apiToken: '', dimensions: 768 };
+
+function buildMockResponse(body: unknown): Response {
+  return new Response(JSON.stringify(body), {
+    status: 200,
+    headers: { 'content-type': 'application/json' },
+  });
+}
 
 describe('semanticCrawl source API', () => {
   it('accepts url source type', () => {
@@ -193,9 +207,7 @@ describe('isBorderline', () => {
   });
 
   it('does not mark high link density as borderline (already caught by structural filter)', () => {
-    const chunk = makeChunk(
-      '[Link A](/a) [Link B](/b) [Link C](/c) [Link D](/d) [Link E](/e)',
-    );
+    const chunk = makeChunk('[Link A](/a) [Link B](/b) [Link C](/c) [Link D](/d) [Link E](/e)');
     assert.ok(!isBorderline(chunk));
   });
 });
@@ -251,9 +263,18 @@ describe('RRF fusion', () => {
     // Chunk A: only appears in bi-encoder ranking (high cosine sim, no keyword match)
     // Chunk B: only appears in BM25 ranking (exact keyword match, low cosine sim)
     // Chunk C: appears in both (should rank highest)
-    const chunkA: TextItem = { url: 'https://example.com/a', text: 'Semantically similar but no keywords' };
-    const chunkB: TextItem = { url: 'https://example.com/b', text: 'exact keyword match bm25 only' };
-    const chunkC: TextItem = { url: 'https://example.com/c', text: 'both semantic and keyword match' };
+    const chunkA: TextItem = {
+      url: 'https://example.com/a',
+      text: 'Semantically similar but no keywords',
+    };
+    const chunkB: TextItem = {
+      url: 'https://example.com/b',
+      text: 'exact keyword match bm25 only',
+    };
+    const chunkC: TextItem = {
+      url: 'https://example.com/c',
+      text: 'both semantic and keyword match',
+    };
 
     // Bi-encoder ranking: C first, then A
     const biEncoderRanking: TextItem[] = [chunkC, chunkA];
@@ -268,12 +289,19 @@ describe('RRF fusion', () => {
     const fusedTexts = fused.map((r) => r.item.text);
 
     // All three items should appear in the fused output
-    assert.ok(fusedTexts.includes(chunkA.text), 'bi-encoder-only chunk A should appear in fused output');
+    assert.ok(
+      fusedTexts.includes(chunkA.text),
+      'bi-encoder-only chunk A should appear in fused output',
+    );
     assert.ok(fusedTexts.includes(chunkB.text), 'BM25-only chunk B should appear in fused output');
     assert.ok(fusedTexts.includes(chunkC.text), 'chunk C (in both) should appear in fused output');
 
     // Chunk C should be ranked first (appears in both rankings)
-    assert.strictEqual(fused[0]?.item.text, chunkC.text, 'chunk appearing in both rankings should rank first');
+    assert.strictEqual(
+      fused[0]?.item.text,
+      chunkC.text,
+      'chunk appearing in both rankings should rank first',
+    );
 
     // The RRF score for C should be higher than A and B (it appears in both)
     const scoreC = fused.find((r) => r.item.text === chunkC.text)?.rrfScore ?? 0;
@@ -308,18 +336,33 @@ describe('RRF fusion', () => {
 describe('embedAndRank', () => {
   it('throws when precomputedEmbeddings length does not match chunk count', async () => {
     const chunks: CorpusChunk[] = [
-      { text: 'chunk one', url: 'https://example.com', section: '## A', charOffset: 0, chunkIndex: 0, totalChunks: 1 },
-      { text: 'chunk two', url: 'https://example.com', section: '## B', charOffset: 0, chunkIndex: 1, totalChunks: 2 },
+      {
+        text: 'chunk one',
+        url: 'https://example.com',
+        section: '## A',
+        charOffset: 0,
+        chunkIndex: 0,
+        totalChunks: 1,
+      },
+      {
+        text: 'chunk two',
+        url: 'https://example.com',
+        section: '## B',
+        charOffset: 0,
+        chunkIndex: 1,
+        totalChunks: 2,
+      },
     ];
     await assert.rejects(
-      () => embedAndRank(chunks, {
-        query: 'test',
-        topK: 5,
-        embeddingBaseUrl: '',
-        embeddingApiToken: '',
-        embeddingDimensions: 4,
-        precomputedEmbeddings: [[0.1, 0.2, 0.3, 0.4]], // length 1, but chunks has 2
-      }),
+      () =>
+        embedAndRank(chunks, {
+          query: 'test',
+          topK: 5,
+          embeddingBaseUrl: '',
+          embeddingApiToken: '',
+          embeddingDimensions: 4,
+          precomputedEmbeddings: [[0.1, 0.2, 0.3, 0.4]], // length 1, but chunks has 2
+        }),
       (err: Error) => err.message.includes('does not match chunk count'),
     );
   });
@@ -327,11 +370,17 @@ describe('embedAndRank', () => {
 
 describe('isDirectChild', () => {
   it('accepts exactly one deeper segment', () => {
-    assert.strictEqual(isDirectChild('/reference/dockerfile/build/', '/reference/dockerfile/'), true);
+    assert.strictEqual(
+      isDirectChild('/reference/dockerfile/build/', '/reference/dockerfile/'),
+      true,
+    );
   });
 
   it('rejects two deeper segments', () => {
-    assert.strictEqual(isDirectChild('/reference/dockerfile/build/args/', '/reference/dockerfile/'), false);
+    assert.strictEqual(
+      isDirectChild('/reference/dockerfile/build/args/', '/reference/dockerfile/'),
+      false,
+    );
   });
 
   it('rejects sibling paths', () => {
@@ -419,7 +468,10 @@ describe('maxPages client-side enforcement', () => {
     assert.strictEqual(pages[0]?.url, seedUrl, 'seed URL should remain first after truncation');
     assert.strictEqual(pages.length, perSeedPages, 'pages should be truncated to perSeedPages');
     // Verify seed is still present and first
-    assert.ok(pages.some((p) => p.url === seedUrl), 'seed URL should still be in the truncated list');
+    assert.ok(
+      pages.some((p) => p.url === seedUrl),
+      'seed URL should still be in the truncated list',
+    );
   });
 
   it('truncates correctly when seed is not originally first', () => {
@@ -447,7 +499,64 @@ describe('maxPages client-side enforcement', () => {
     assert.strictEqual(pages[0]?.url, seedUrl, 'seed URL should be first after reordering');
     assert.strictEqual(pages.length, perSeedPages, 'pages should be truncated to perSeedPages');
     // Only the seed should remain since it was moved to front and we truncated to 2
-    assert.ok(pages.some((p) => p.url === seedUrl), 'seed URL should be in truncated list');
+    assert.ok(
+      pages.some((p) => p.url === seedUrl),
+      'seed URL should be in truncated list',
+    );
+  });
+
+  it('counts only kept pages toward the maxPages budget for dfs crawls', async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(
+        input instanceof URL ? input.href : input instanceof Request ? input.url : input,
+      );
+
+      if (url.includes('/crawl')) {
+        const results = Array.from({ length: 47 }, (_, i) => ({
+          url: i === 0 ? 'https://example.com/docs/' : `https://example.com/docs/page-${i}/`,
+          success: true,
+          markdown: `# Page ${i}\n\nContent for page ${i}.`,
+          metadata: { title: `Page ${i}` },
+          links: { internal: [], external: [] },
+        }));
+        return buildMockResponse({ results });
+      }
+
+      if (url.includes('/embed')) {
+        const body = init?.body ? JSON.parse(await new Response(init.body).text()) : { texts: [] };
+        return buildMockResponse({
+          embeddings: body.texts.map(() => Array.from({ length: 768 }, () => Math.random())),
+          model: 'test-model',
+        });
+      }
+
+      return buildMockResponse({
+        result: { url: 'https://example.com/docs/', success: true, markdown: '# Seed' },
+      });
+    };
+
+    try {
+      const result = await semanticCrawl(
+        {
+          source: { type: 'url', url: 'https://example.com/docs/' },
+          query: 'page budget query',
+          topK: 1,
+          strategy: 'dfs',
+          maxDepth: 5,
+          maxPages: 25,
+          includeExternalLinks: false,
+        },
+        { baseUrl: 'https://crawl4ai.example.com', apiToken: '' },
+        'https://embedding.example.com',
+        '',
+        768,
+      );
+
+      assert.equal(result.pagesCrawled, 25);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
   });
 });
 
@@ -492,7 +601,11 @@ describe('filterByPathPrefix', () => {
 describe('reranker smoke test', () => {
   it('validates smoke score comparison logic', () => {
     // Extract the validation logic into a pure function for testability.
-    function validateSmokeScores(scoreA: number, scoreB: number, epsilon = 0.1): { ok: boolean; reason?: string } {
+    function validateSmokeScores(
+      scoreA: number,
+      scoreB: number,
+      epsilon = 0.1,
+    ): { ok: boolean; reason?: string } {
       if (scoreA <= scoreB + epsilon) {
         return { ok: false, reason: `good=${String(scoreA)}, bad=${String(scoreB)}` };
       }
@@ -525,8 +638,20 @@ describe('cache persistence', () => {
       source,
       async () => {
         buildCount++;
-        const chunks = [{ text: 'hello world', url: 'https://example.com', section: '## A', charOffset: 0, chunkIndex: 0, totalChunks: 1 }];
-        const contentHash = crypto.createHash('sha256').update(chunks.map((c) => c.text).join('\n')).digest('hex');
+        const chunks = [
+          {
+            text: 'hello world',
+            url: 'https://example.com',
+            section: '## A',
+            charOffset: 0,
+            chunkIndex: 0,
+            totalChunks: 1,
+          },
+        ];
+        const contentHash = crypto
+          .createHash('sha256')
+          .update(chunks.map((c) => c.text).join('\n'))
+          .digest('hex');
         return {
           chunks,
           embeddings: [[0.1, 0.2, 0.3, 0.4]],
@@ -563,7 +688,11 @@ describe('cache persistence', () => {
       { ttlMs: 60_000, maxCorpora: 10, cacheDir: testCacheDir },
     );
 
-    assert.strictEqual(corpus2.corpusId, corpus.corpusId, 'second call should return same corpusId');
+    assert.strictEqual(
+      corpus2.corpusId,
+      corpus.corpusId,
+      'second call should return same corpusId',
+    );
 
     // Note: buildCount may be 1 or 2 depending on whether the thundering-herd
     // guard is active. The key validation is that loadCorpusById works (disk
@@ -769,4 +898,3 @@ describe('collectPageElements', () => {
     assert.equal(result.originalElementCount, MAX_ELEMENTS + 5);
   });
 });
-

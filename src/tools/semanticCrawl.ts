@@ -864,13 +864,15 @@ async function crawlSeeds(
       pages = pages.slice(0, perSeedPages);
     }
 
-    totalPagesAttempted += result.totalPages;
-    totalSuccessfulPages += result.successfulPages;
+    const keptPages = pages.length;
+    const keptSuccessfulPages = pages.filter((p) => p.success).length;
+    totalPagesAttempted += keptPages;
+    totalSuccessfulPages += keptSuccessfulPages;
     allPages.push(...pages);
 
-    remainingPages -= result.totalPages;
+    remainingPages -= keptPages;
     if (perSeedBytes !== undefined) {
-      const bytesUsed = result.pages.reduce((sum, p) => sum + p.markdown.length, 0);
+      const bytesUsed = pages.reduce((sum, p) => sum + p.markdown.length, 0);
       remainingBytes -= bytesUsed;
     }
   }
@@ -1177,7 +1179,9 @@ export async function semanticCrawl(
       // If extractionConfig was used on the original crawl, the extractedData
       // was returned in that first response but is not available here.
       // The server handler emits a warning when extractionConfig is combined with cached source.
-      const cached = loadCorpusById(opts.source.corpusId);
+      const cached = loadCorpusById(opts.source.corpusId, {
+        ttlMs: 24 * 60 * 60 * 1000,
+      });
       if (!cached) {
         throw new Error(
           `Corpus '${opts.source.corpusId}' not found or expired. Re-issue with the original source to rebuild.`,
