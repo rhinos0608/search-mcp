@@ -217,7 +217,7 @@ export function shouldIncludeFile(entry: GitHubTreeEntry, extensions: string[]):
   }
 
   const lowerName = entry.name.toLowerCase();
-  const matchedExt = extensions.find((e) => lowerName.endsWith(e.toLowerCase()));
+  const matchedExt = extensions.find((e) => lowerName.endsWith(e));
   if (!matchedExt) return false;
 
   if (entry.size !== undefined) {
@@ -234,7 +234,8 @@ export async function fetchGitHubCorpus(
   opts: GitHubCorpusOptions,
   deps: GitHubCorpusDependencies = {},
 ): Promise<GitHubCorpusDocument[]> {
-  const extensions = opts.extensions ?? DEFAULT_EXTENSIONS;
+  // Pre-convert extensions to lowercase for efficient matching
+  const extensions = (opts.extensions ?? DEFAULT_EXTENSIONS).map((e) => e.toLowerCase());
   const maxFiles = opts.maxFiles ?? 100;
   const maxFileBytes = opts.maxFileBytes ?? 50_000;
   const getTree = deps.getGitHubRepoTree ?? getGitHubRepoTree;

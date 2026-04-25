@@ -115,6 +115,14 @@ export async function semanticGitHubCode(
     throw validationError("repo must be in 'owner/repo' form");
   }
 
+  // Validate maxFiles and topK bounds
+  if (input.maxFiles !== undefined && (input.maxFiles < 1 || input.maxFiles > 200)) {
+    throw validationError('maxFiles must be between 1 and 200');
+  }
+  if (input.topK !== undefined && (input.topK < 1 || input.topK > 50)) {
+    throw validationError('topK must be between 1 and 50');
+  }
+
   const extensions = languageExtensions(input.language);
   const fetchCorpus = deps.fetchCorpus ?? fetchGitHubCorpus;
   const maxFiles = input.maxFiles ?? 100;

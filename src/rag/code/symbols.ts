@@ -59,7 +59,9 @@ function extractImports(lines: string[], language: CodeLanguage): string[] {
 }
 
 function extractLeadingDocstring(lines: string[], startLine: number): string | undefined {
-  const previous = lines[startLine - 2];
+  const previousIndex = startLine - 2;
+  if (previousIndex < 0 || previousIndex >= lines.length) return undefined;
+  const previous = lines[previousIndex];
   if (previous === undefined) return undefined;
 
   const trimmed = previous.trim();
@@ -95,7 +97,7 @@ function extractLeadingDocstring(lines: string[], startLine: number): string | u
 function extractPythonBodyDocstring(node: Parser.SyntaxNode): string | undefined {
   const body = node.childForFieldName('body');
   const first = body?.namedChild(0);
-  const text = first?.text.trim();
+  const text = first?.text?.trim();
   if (text === undefined) return undefined;
   return text.startsWith('"""') || text.startsWith("'''") ? normalizeLine(text) : undefined;
 }

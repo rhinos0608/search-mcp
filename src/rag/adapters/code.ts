@@ -30,6 +30,8 @@ function fileImports(symbols: CodeSymbol[]): string[] {
 function sliceLines(content: string, startLine: number, endLine: number): string {
   const lines = content.split(/\r?\n/u);
   const startIndex = Math.max(0, startLine - 1);
+  // Validate bounds: if startLine is beyond file length, return empty string
+  if (startIndex >= lines.length) return '';
   const endIndex = Math.min(lines.length, endLine);
   return lines.slice(startIndex, endIndex).join('\n').trimEnd();
 }
@@ -76,6 +78,15 @@ function chunkSymbolsFromFile(
   const language = detectCodeLanguage(file.path, file.content);
   const chunks: RagChunk[] = [];
 
+  // First pass: count total chunks to set correct totalChunks
+  let totalChunkCount = 0;
+  for (const symbol of symbols) {
+    const windows = symbolLineWindows(symbol, maxLinesPerChunk);
+    totalChunkCount += windows.length;
+  }
+
+  // Second pass: create chunks with correct indices
+  let chunkIndexCounter = startingChunkIndex;
   for (const symbol of symbols) {
     const windows = symbolLineWindows(symbol, maxLinesPerChunk);
     for (const window of windows) {
@@ -87,8 +98,8 @@ function chunkSymbolsFromFile(
             ? `${file.path} > ${symbol.name}`
             : `${file.path} > ${symbol.name} (${String(window.splitIndex + 1)}/${String(window.splitTotal)})`,
         charOffset: 0,
-        chunkIndex: startingChunkIndex + chunks.length,
-        totalChunks: symbols.length,
+        chunkIndex: chunkIndexCounter++,
+        totalChunks: totalChunkCount,
         metadata: {
           path: file.path,
           language,
@@ -108,8 +119,7 @@ function chunkSymbolsFromFile(
     }
   }
 
-  const totalChunks = chunks.length;
-  return chunks.map((chunk) => ({ ...chunk, totalChunks }));
+  return chunks;
 }
 
 function fallbackChunksFromFile(
@@ -182,7 +192,15 @@ export async function chunksFromCodeFilesAsync(
 
   for (const file of files) {
     const language = detectCodeLanguage(file.path, file.content);
-    const symbols = await extractCodeSymbolsWithTreeSitter(file.content, language, file.path);
+
+    // Try Tree-sitter first, fall back to regex extraction on error
+    let symbols: CodeSymbol[];
+    try {
+      symbols = await extractCodeSymbolsWithTreeSitter(file.content, language, file.path);
+    } catch {
+      symbols = extractCodeSymbols(file.content, language, file.path);
+    }
+
     const imports = fileImports(symbols);
 
     if (symbols.length === 0) {

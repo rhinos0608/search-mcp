@@ -45,7 +45,7 @@ function detectFromShebang(content: string): CodeLanguage | undefined {
   if (/\bpython(?:\d+(?:\.\d+)*)?\b/u.test(firstLine)) return 'python';
   if (/\b(?:bash|sh|zsh)\b/u.test(firstLine)) return 'shell';
   if (/\bnode\b/u.test(firstLine)) return 'javascript';
-  return 'shell';
+  return undefined; // Unknown shebang - let caller handle it
 }
 
 export function detectCodeLanguage(path: string, content = ''): CodeLanguage {
