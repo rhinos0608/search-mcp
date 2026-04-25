@@ -112,7 +112,12 @@ async function getSession(): Promise<SessionState> {
       const smokeGood = 'hello world';
       const smokeBad = 'xyz abc def';
 
-      const smokeBatch = tokenizePairs(tokenizer, smokeQuery, [smokeGood, smokeBad], DEFAULT_MAX_LENGTH);
+      const smokeBatch = tokenizePairs(
+        tokenizer,
+        smokeQuery,
+        [smokeGood, smokeBad],
+        DEFAULT_MAX_LENGTH,
+      );
       const smokeScores = await runInference(
         { session: session as unknown as SessionLike, tokenizer, hasTokenTypeIds, outputName },
         smokeBatch,

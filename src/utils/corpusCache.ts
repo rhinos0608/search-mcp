@@ -40,7 +40,7 @@ export interface CachedCorpus {
   chunks: CorpusChunk[];
   embeddings: number[][];
   bm25Index: Bm25Index;
-  createdAt: number;    // Unix ms
+  createdAt: number; // Unix ms
   lastAccessedAt: number; // Unix ms
   /**
    * Aggregated extractedData from the original crawl, keyed by URL.
@@ -124,7 +124,7 @@ function stableStringify(value: unknown): string {
   }
   const obj = value as Record<string, unknown>;
   const keys = Object.keys(obj).sort();
-  return '{' + keys.map(k => JSON.stringify(k) + ':' + stableStringify(obj[k])).join(',') + '}';
+  return '{' + keys.map((k) => JSON.stringify(k) + ':' + stableStringify(obj[k])).join(',') + '}';
 }
 
 /**
@@ -145,7 +145,14 @@ function normalizeSource(source: SemanticCrawlSource): SemanticCrawlSource {
     return { type: 'sitemap', url: source.url };
   }
   if (source.type === 'github') {
-    return { type: 'github', owner: source.owner, repo: source.repo, branch: source.branch, extensions: source.extensions, query: source.query };
+    return {
+      type: 'github',
+      owner: source.owner,
+      repo: source.repo,
+      branch: source.branch,
+      extensions: source.extensions,
+      query: source.query,
+    };
   }
   return { type: 'cached', corpusId: source.corpusId };
 }
@@ -161,9 +168,18 @@ export function computeCorpusId(
 ): string {
   const payload =
     stableStringify(normalizeSource(source)) +
-    '|' + model + '|' + String(dimensions) +
-    '|' + String(MAX_TOKENS) + '|' + String(MIN_TOKENS) +
-    '|' + String(OVERLAP_RATIO) + '|' + String(TOKEN_RATIO);
+    '|' +
+    model +
+    '|' +
+    String(dimensions) +
+    '|' +
+    String(MAX_TOKENS) +
+    '|' +
+    String(MIN_TOKENS) +
+    '|' +
+    String(OVERLAP_RATIO) +
+    '|' +
+    String(TOKEN_RATIO);
   return crypto.createHash('sha256').update(payload).digest('hex');
 }
 
@@ -223,17 +239,13 @@ function writeSourceIndex(cacheDir: string, index: Record<string, SourceIndexEnt
  * Add or update an entry in the source index for a given source key.
  * Entries are kept sorted by createdAt descending (most recent first).
  */
-function addToSourceIndex(
-  cacheDir: string,
-  sourceKey: string,
-  entry: SourceIndexEntry,
-): void {
+function addToSourceIndex(cacheDir: string, sourceKey: string, entry: SourceIndexEntry): void {
   const index = readSourceIndex(cacheDir);
   const existing = index[sourceKey] ?? [];
   // Remove any entry with the same corpusId (replace case)
-  const filtered = existing.filter(e => e.corpusId !== entry.corpusId);
+  const filtered = existing.filter((e) => e.corpusId !== entry.corpusId);
   // Insert in descending createdAt order
-  const insertAt = filtered.findIndex(e => e.createdAt < entry.createdAt);
+  const insertAt = filtered.findIndex((e) => e.createdAt < entry.createdAt);
   if (insertAt === -1) {
     filtered.push(entry);
   } else {
@@ -247,10 +259,7 @@ function addToSourceIndex(
  * Look up corpusIds for a source key from the source index.
  * Returns entries sorted by createdAt descending.
  */
-function findInSourceIndex(
-  cacheDir: string,
-  sourceKey: string,
-): SourceIndexEntry[] {
+function findInSourceIndex(cacheDir: string, sourceKey: string): SourceIndexEntry[] {
   return readSourceIndex(cacheDir)[sourceKey] ?? [];
 }
 
@@ -295,11 +304,7 @@ function deserializeEmbeddings(buf: Buffer): number[][] {
 // Write / read corpus files
 // ────────────────────────────────────────────────────────────────────
 
-function writeCorpus(
-  cacheDir: string,
-  meta: CorpusMetadata,
-  embeddings: number[][],
-): void {
+function writeCorpus(cacheDir: string, meta: CorpusMetadata, embeddings: number[][]): void {
   const jsonTmp = metaPath(cacheDir, meta.corpusId) + '.tmp';
   const binTmp = binPath(cacheDir, meta.corpusId) + '.tmp';
   const jsonFinal = metaPath(cacheDir, meta.corpusId);
@@ -349,14 +354,23 @@ function readCorpusFromDisk(
 
   // Schema version check
   if (meta.schemaVersion !== SCHEMA_VERSION) {
-    logger.warn({ corpusId, found: meta.schemaVersion, expected: SCHEMA_VERSION }, 'corpusCache: schema version mismatch');
+    logger.warn(
+      { corpusId, found: meta.schemaVersion, expected: SCHEMA_VERSION },
+      'corpusCache: schema version mismatch',
+    );
     return null;
   }
 
   // Content hash validation
-  const recomputedHash = crypto.createHash('sha256').update(meta.chunks.map(c => c.text).join('\n')).digest('hex');
+  const recomputedHash = crypto
+    .createHash('sha256')
+    .update(meta.chunks.map((c) => c.text).join('\n'))
+    .digest('hex');
   if (recomputedHash !== meta.contentHash) {
-    logger.warn({ corpusId, expected: meta.contentHash, actual: recomputedHash }, 'corpusCache: content hash mismatch');
+    logger.warn(
+      { corpusId, expected: meta.contentHash, actual: recomputedHash },
+      'corpusCache: content hash mismatch',
+    );
     return null;
   }
 
@@ -564,7 +578,7 @@ export async function getOrBuildCorpus(
     const corpusId = computeCorpusId(source, model, dimensions);
     const now = Date.now();
 
-    const bm25Docs = chunks.map(c => ({ id: chunkToBm25Id(c), text: c.text }));
+    const bm25Docs = chunks.map((c) => ({ id: chunkToBm25Id(c), text: c.text }));
     let bm25Index: Bm25Index;
     try {
       bm25Index = buildBm25Index(bm25Docs);
@@ -631,10 +645,7 @@ export async function getOrBuildCorpus(
  * Load a previously cached corpus by its deterministic ID.
  * Returns null if not found, corrupted, or TTL-expired.
  */
-export function loadCorpusById(
-  corpusId: string,
-  opts?: CacheOpts,
-): CachedCorpus | null {
+export function loadCorpusById(corpusId: string, opts?: CacheOpts): CachedCorpus | null {
   const ttlMs = opts?.ttlMs ?? DEFAULT_TTL_MS;
   const cacheDir = opts?.cacheDir ?? DEFAULT_CACHE_DIR;
   return readCorpusFromDisk(cacheDir, corpusId, ttlMs);

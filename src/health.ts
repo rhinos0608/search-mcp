@@ -63,6 +63,15 @@ const GATED_TOOLS: Record<string, GateRule> = {
     remediation:
       'Set CRAWL4AI_BASE_URL and EMBEDDING_SIDECAR_BASE_URL. The embedding sidecar requires a running crawl4ai sidecar.',
   },
+  semantic_youtube: {
+    check: (cfg) => cfg.youtube.apiKey.length > 0 && cfg.embeddingSidecar.baseUrl.length > 0,
+    remediation:
+      'Set YOUTUBE_API_KEY (Google Cloud Console) and EMBEDDING_SIDECAR_BASE_URL to use semantic_youtube.',
+  },
+  semantic_reddit: {
+    check: (cfg) => cfg.embeddingSidecar.baseUrl.length > 0,
+    remediation: 'Set EMBEDDING_SIDECAR_BASE_URL to use semantic_reddit.',
+  },
 };
 
 // ── Optional config (works without, degraded) ──────────────────────────────
@@ -218,7 +227,10 @@ function checkRateLimit(backend: RateLimitedBackend): ToolHealth | null {
 
 const PROBE_TIMEOUT_MS = 5_000;
 
-async function probeExtractionSupport(crawl4aiBaseUrl: string, apiToken: string): Promise<ToolHealth> {
+async function probeExtractionSupport(
+  crawl4aiBaseUrl: string,
+  apiToken: string,
+): Promise<ToolHealth> {
   const endpoint = `${crawl4aiBaseUrl.replace(/\/+$/, '')}/crawl`;
   const body = {
     urls: ['data:text/html,<html><body><div class="item">Test</div></body></html>'],
@@ -266,7 +278,10 @@ async function probeExtractionSupport(crawl4aiBaseUrl: string, apiToken: string)
       };
     }
 
-    const raw = (await res.json()) as { result?: { extracted_content?: unknown }; results?: { extracted_content?: unknown }[] };
+    const raw = (await res.json()) as {
+      result?: { extracted_content?: unknown };
+      results?: { extracted_content?: unknown }[];
+    };
     const page = raw.result ?? raw.results?.[0];
     if (page && 'extracted_content' in page) {
       return {
@@ -436,7 +451,10 @@ export async function runHealthProbes(cfg: SearchConfig): Promise<HealthReport> 
 
   // Extraction capability probe (only when crawl4ai is configured)
   if (cfg.crawl4ai.baseUrl.length > 0) {
-    const extractionHealth = await probeExtractionSupport(cfg.crawl4ai.baseUrl, cfg.crawl4ai.apiToken);
+    const extractionHealth = await probeExtractionSupport(
+      cfg.crawl4ai.baseUrl,
+      cfg.crawl4ai.apiToken,
+    );
     tools.web_crawl_extraction = extractionHealth;
     tools.semantic_crawl_extraction = extractionHealth;
   }

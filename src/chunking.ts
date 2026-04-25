@@ -242,7 +242,9 @@ export function filterBoilerplateWithContext(chunks: MarkdownChunk[]): MarkdownC
   });
 
   // Pass 3: individual boilerplate filtering (link-heavy, sidebar, etc.)
-  const filtered = chunks.filter((c) => c.content.length > 0 && !isBoilerplateWithBreadcrumbCheck(c.content));
+  const filtered = chunks.filter(
+    (c) => c.content.length > 0 && !isBoilerplateWithBreadcrumbCheck(c.content),
+  );
   // Fallback: if all chunks would be filtered, keep the originals — structured
   // pages (job listings, tables, etc.) can be misclassified as boilerplate.
   if (filtered.length === 0 && chunks.length > 0) {

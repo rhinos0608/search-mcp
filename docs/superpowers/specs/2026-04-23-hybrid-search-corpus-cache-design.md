@@ -115,9 +115,9 @@ interface CachedCorpus {
   dimensions: number;
   chunks: CorpusChunk[];
   embeddings: number[][]; // loaded from .bin
-  bm25Index: Bm25Index;    // rebuilt from chunks on load
-  createdAt: number;        // Unix ms
-  lastAccessedAt: number;   // Unix ms
+  bm25Index: Bm25Index; // rebuilt from chunks on load
+  createdAt: number; // Unix ms
+  lastAccessedAt: number; // Unix ms
 }
 
 export async function getOrBuildCorpus(
@@ -143,6 +143,7 @@ export interface CachedSource {
 ```
 
 When `semanticCrawl` receives a `cached` source, it:
+
 1. Loads the corpus from disk via `loadCorpusById`.
 2. If miss (TTL expiry, LRU eviction, or never existed): returns a structured error telling the caller the corpus is gone — the client can re-issue with the original source.
 3. If hit: proceeds directly to the fusion phase (bi-encoder + BM25+ RRF), skipping crawl, chunk, dedup, and embed.
@@ -165,6 +166,7 @@ After:
 ```
 
 **RRF details:**
+
 - `k = 60` (standard default, robust without tuning)
 - Both rankings use the same deduplication key (chunk URL + text hash)
 - RRF produces a fused ranked list; coherence filter runs on the fused results
@@ -204,14 +206,14 @@ semanticCrawl({ source: { type: 'url', url: 'https://react.dev/learn' }, query: 
 
 ## Error Handling
 
-| Scenario | Behavior |
-|----------|----------|
-| Cache miss on `cached` source | Return `isError: true` with message: `Corpus 'abc123' not found or expired. Re-issue with the original source to rebuild.` |
-| Content hash mismatch (stale cache) | Treat as miss, re-materialize transparently, log warning |
-| BM25 index build failure (unlikely) | Log warning, fall back to pure bi-encoder ranking |
-| Embedding binary read failure | Log error, treat as miss, re-materialize |
-| Cache directory not writable | Log warning, continue without caching (materialize every time) |
-| Thundering herd (concurrent misses) | Single materialization via promise dedup; all callers await same result |
+| Scenario                            | Behavior                                                                                                                   |
+| ----------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| Cache miss on `cached` source       | Return `isError: true` with message: `Corpus 'abc123' not found or expired. Re-issue with the original source to rebuild.` |
+| Content hash mismatch (stale cache) | Treat as miss, re-materialize transparently, log warning                                                                   |
+| BM25 index build failure (unlikely) | Log warning, fall back to pure bi-encoder ranking                                                                          |
+| Embedding binary read failure       | Log error, treat as miss, re-materialize                                                                                   |
+| Cache directory not writable        | Log warning, continue without caching (materialize every time)                                                             |
+| Thundering herd (concurrent misses) | Single materialization via promise dedup; all callers await same result                                                    |
 
 ## Testing Strategy
 
@@ -222,21 +224,22 @@ semanticCrawl({ source: { type: 'url', url: 'https://react.dev/learn' }, query: 
 
 ## Files to Create / Modify
 
-| File | Action | Purpose |
-|------|--------|---------|
-| `src/utils/bm25.ts` | Create | BM25+ index builder and scorer |
-| `src/utils/corpusCache.ts` | Create | Disk-backed corpus cache with LRU+TTL |
-| `src/tools/semanticCrawl.ts` | Modify | Add BM25+ scoring, RRF fusion, `cached` source type, cache integration |
-| `src/types.ts` | Modify | Add `CachedSource` to `SemanticCrawlSource` union |
-| `src/server.ts` | Modify | Register updated `semantic_crawl` Zod schema (add `cached` source variant) |
-| `test/bm25.test.ts` | Create | BM25+ correctness tests |
-| `test/corpusCache.test.ts` | Create | Cache serialize/deserialize, eviction, lock tests |
-| `test/semanticCrawl.test.ts` | Modify | Add `cached` source integration tests |
-| `.gitignore` | Modify | Add `.cache/semantic-crawl/` |
+| File                         | Action | Purpose                                                                    |
+| ---------------------------- | ------ | -------------------------------------------------------------------------- |
+| `src/utils/bm25.ts`          | Create | BM25+ index builder and scorer                                             |
+| `src/utils/corpusCache.ts`   | Create | Disk-backed corpus cache with LRU+TTL                                      |
+| `src/tools/semanticCrawl.ts` | Modify | Add BM25+ scoring, RRF fusion, `cached` source type, cache integration     |
+| `src/types.ts`               | Modify | Add `CachedSource` to `SemanticCrawlSource` union                          |
+| `src/server.ts`              | Modify | Register updated `semantic_crawl` Zod schema (add `cached` source variant) |
+| `test/bm25.test.ts`          | Create | BM25+ correctness tests                                                    |
+| `test/corpusCache.test.ts`   | Create | Cache serialize/deserialize, eviction, lock tests                          |
+| `test/semanticCrawl.test.ts` | Modify | Add `cached` source integration tests                                      |
+| `.gitignore`                 | Modify | Add `.cache/semantic-crawl/`                                               |
 
 ## Scope Boundaries
 
 **In scope:**
+
 - BM25+ inline implementation
 - Corpus disk cache with binary embedding storage
 - Deterministic `corpusId` from source params + model
@@ -248,6 +251,7 @@ semanticCrawl({ source: { type: 'url', url: 'https://react.dev/learn' }, query: 
 - All tests
 
 **Out of scope (future):**
+
 - Cross-corpus queries (multiple corpora in one call)
 - HTTP HEAD/ETag freshness validation (content hash covers the same concern)
 - LanceDB or other vector database integration
@@ -260,15 +264,15 @@ semanticCrawl({ source: { type: 'url', url: 'https://react.dev/learn' }, query: 
 
 ## Performance Characteristics
 
-| Step | Approximate Cost |
-|------|------------------|
-| BM25+ index build | ~2ms per 1000 chunks |
-| BM25+ scoring (per query) | ~1ms per 1000 chunks |
-| Embedding binary read (1000 chunks × 768-dim) | ~6MB, ~5ms from SSD |
-| JSON embedding read (same) | ~45MB, ~40ms from SSD |
-| RRF merge (two lists of 1000) | ~1ms |
-| **Cold cache total** | Crawl + embed dominate |
-| **Warm cache total** | ~10ms (I/O + BM25 + RRF + rerank) |
+| Step                                          | Approximate Cost                  |
+| --------------------------------------------- | --------------------------------- |
+| BM25+ index build                             | ~2ms per 1000 chunks              |
+| BM25+ scoring (per query)                     | ~1ms per 1000 chunks              |
+| Embedding binary read (1000 chunks × 768-dim) | ~6MB, ~5ms from SSD               |
+| JSON embedding read (same)                    | ~45MB, ~40ms from SSD             |
+| RRF merge (two lists of 1000)                 | ~1ms                              |
+| **Cold cache total**                          | Crawl + embed dominate            |
+| **Warm cache total**                          | ~10ms (I/O + BM25 + RRF + rerank) |
 
 ## API Changes
 
@@ -283,7 +287,7 @@ export interface SemanticCrawlResult {
   pagesCrawled: number;
   totalChunks: number;
   successfulPages: number;
-  corpusId: string;        // NEW: deterministic handle for follow-up queries
+  corpusId: string; // NEW: deterministic handle for follow-up queries
   chunks: SemanticCrawlChunk[];
 }
 ```
@@ -298,7 +302,7 @@ export type SemanticCrawlSource =
   | SitemapSource
   | SearchSeedSource
   | GitHubSource
-  | CachedSource;    // NEW
+  | CachedSource; // NEW
 ```
 
 ## Notes

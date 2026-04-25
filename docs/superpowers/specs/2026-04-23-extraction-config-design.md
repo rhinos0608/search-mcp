@@ -49,6 +49,7 @@ extractionConfig?: ExtractionConfig | ExtractionConfig[];
 ```
 
 **Validation rules (server-side):**
+
 - `schema` is required when `type` is `css_schema` or `xpath_schema`. Must have `baseSelector` (string) and `fields` (array).
 - At least one of `patterns` or `customPatterns` is required when `type` is `regex`.
 - `instruction` is required when `type` is `llm`.
@@ -111,12 +112,12 @@ const body = {
 
 **Mapping table:**
 
-| Our type | Crawl4AI class | Body shape |
-|----------|----------------|------------|
-| `css_schema` | `JsonCssExtractionStrategy` | `{ type: 'JsonCssExtractionStrategy', params: { schema } }` |
-| `xpath_schema` | `JsonXPathExtractionStrategy` | `{ type: 'JsonXPathExtractionStrategy', params: { schema } }` |
-| `regex` | `RegexExtractionStrategy` | `{ type: 'RegexExtractionStrategy', params: { pattern: bitflags, custom: customPatterns } }` |
-| `llm` | `LLMExtractionStrategy` | `{ type: 'LLMExtractionStrategy', params: { instruction, schema: outputSchema, llm_config: { provider: llmProvider ?? cfg.llm.provider, api_token: cfg.llm.apiToken } } }` |
+| Our type       | Crawl4AI class                | Body shape                                                                                                                                                                 |
+| -------------- | ----------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `css_schema`   | `JsonCssExtractionStrategy`   | `{ type: 'JsonCssExtractionStrategy', params: { schema } }`                                                                                                                |
+| `xpath_schema` | `JsonXPathExtractionStrategy` | `{ type: 'JsonXPathExtractionStrategy', params: { schema } }`                                                                                                              |
+| `regex`        | `RegexExtractionStrategy`     | `{ type: 'RegexExtractionStrategy', params: { pattern: bitflags, custom: customPatterns } }`                                                                               |
+| `llm`          | `LLMExtractionStrategy`       | `{ type: 'LLMExtractionStrategy', params: { instruction, schema: outputSchema, llm_config: { provider: llmProvider ?? cfg.llm.provider, api_token: cfg.llm.apiToken } } }` |
 
 **Regex bitflag mapping note:** The Crawl4AI `RegexExtractionStrategy` uses Python `IntFlag` attributes. Our string enum values must map to the corresponding bitflag integers. This mapping requires reading Crawl4AI's source or documentation for the exact integer values. The mapping lives in `utils/extractionConfig.ts`.
 
@@ -139,12 +140,14 @@ interface CrawlPageResult {
 ```
 
 **Rules:**
+
 - `markdown` is always the full page content. Never replaced or truncated by extraction.
 - `extractedData` is present only when `extractionConfig` was supplied and extraction succeeded.
 - On extraction failure (malformed schema, no matches, LLM error), `extractedData` is omitted and a warning is added to `meta.warnings`.
 - The value is the parsed JSON returned by Crawl4AI in `result.extracted_content`. If Crawl4AI returns a single object, it is wrapped into a single-element array. If it returns an array, it is used directly.
 
 **Per-strategy output shapes:**
+
 - `css_schema` / `xpath_schema`: Array of objects whose keys match the `name` fields in the schema's `fields` array. Values are strings (or nulls for missing fields with no default).
 - `regex`: Array of `{ url: string, label: string, value: string, span: [number, number] }`.
 - `llm`: Array of objects shaped by `outputSchema` if provided, otherwise unstructured objects. Crawl4AI returns the parsed JSON directly.
@@ -155,7 +158,7 @@ Add a new optional `llm` section to `SearchConfig`:
 
 ```ts
 export interface LlmConfig {
-  provider: string;   // e.g. "openai/gpt-4o"
+  provider: string; // e.g. "openai/gpt-4o"
   apiToken: string;
 }
 
@@ -171,6 +174,7 @@ const DEFAULTS: Omit<SearchConfig, 'rescoreWeights'> = {
 ```
 
 Environment variable resolution:
+
 - `LLM_PROVIDER` -> `cfg.llm.provider`
 - `LLM_API_TOKEN` -> `cfg.llm.apiToken`
 
@@ -184,12 +188,12 @@ When `source.type === 'cached'`, `extractionConfig` is silently ignored with a w
 
 ### 6. Error Handling
 
-| Failure mode | Behavior |
-|--------------|----------|
-| `extractionConfig` fails validation | `VALIDATION_ERROR` before any network call |
-| Crawl4AI returns extraction error | Page `success: true`, `markdown` present, `extractedData` omitted, warning in `meta.warnings` |
-| LLM credentials missing | `VALIDATION_ERROR` at call time |
-| Crawl4AI sidecar is v0.7.x without extraction support | `parseError` with remediation hint (upgrade sidecar to v0.8.x) |
+| Failure mode                                                         | Behavior                                                                                                |
+| -------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
+| `extractionConfig` fails validation                                  | `VALIDATION_ERROR` before any network call                                                              |
+| Crawl4AI returns extraction error                                    | Page `success: true`, `markdown` present, `extractedData` omitted, warning in `meta.warnings`           |
+| LLM credentials missing                                              | `VALIDATION_ERROR` at call time                                                                         |
+| Crawl4AI sidecar is v0.7.x without extraction support                | `parseError` with remediation hint (upgrade sidecar to v0.8.x)                                          |
 | `semantic_crawl` with `source: 'cached'` receives `extractionConfig` | `extractionConfig` is silently ignored with a warning in `meta.warnings` (cached sources skip crawling) |
 
 ### 7. Cache Key Invalidation
@@ -232,10 +236,20 @@ LLM extraction can take 5-30 seconds depending on page size and provider. It sha
       "baseSelector": "article[data-automation='jobCard']",
       "fields": [
         { "name": "title", "selector": "a[data-automation='jobTitle']", "type": "text" },
-        { "name": "url", "selector": "a[data-automation='jobTitle']", "type": "attribute", "attribute": "href" },
+        {
+          "name": "url",
+          "selector": "a[data-automation='jobTitle']",
+          "type": "attribute",
+          "attribute": "href"
+        },
         { "name": "company", "selector": "[data-automation='jobCompany']", "type": "text" },
         { "name": "location", "selector": "[data-automation='jobLocation']", "type": "text" },
-        { "name": "salary", "selector": "[data-automation='jobSalary']", "type": "text", "default": "" }
+        {
+          "name": "salary",
+          "selector": "[data-automation='jobSalary']",
+          "type": "text",
+          "default": ""
+        }
       ]
     }
   }

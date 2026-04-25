@@ -117,19 +117,19 @@ Structured extraction remains best-effort:
 
 ## File Impact
 
-| File | Planned responsibility |
-|------|------------------------|
-| `src/types.ts` | Add truncation metadata to shared structured types |
-| `src/utils/htmlElements.ts` | Emit full candidate sets and annotate element-local truncation |
-| `src/utils/markdownElements.ts` | Same for markdown extraction |
-| `src/utils/elementHelpers.ts` | Finalization, prioritization, budgeting, and wrapper helpers |
-| `src/tools/webRead.ts` | Use finalized HTML helper output |
-| `src/tools/webCrawl.ts` | Use finalized markdown helper output |
-| `src/tools/githubRepo.ts` | Spread finalized markdown output |
-| `src/tools/githubRepoFile.ts` | Use dedicated finalized code wrapping |
-| `src/tools/redditSearchParser.ts` | Spread finalized markdown output |
-| `src/tools/stackoverflowSearch.ts` | Spread finalized HTML output |
-| `src/tools/youtubeTranscript.ts` | Use finalized text wrapping |
+| File                               | Planned responsibility                                         |
+| ---------------------------------- | -------------------------------------------------------------- |
+| `src/types.ts`                     | Add truncation metadata to shared structured types             |
+| `src/utils/htmlElements.ts`        | Emit full candidate sets and annotate element-local truncation |
+| `src/utils/markdownElements.ts`    | Same for markdown extraction                                   |
+| `src/utils/elementHelpers.ts`      | Finalization, prioritization, budgeting, and wrapper helpers   |
+| `src/tools/webRead.ts`             | Use finalized HTML helper output                               |
+| `src/tools/webCrawl.ts`            | Use finalized markdown helper output                           |
+| `src/tools/githubRepo.ts`          | Spread finalized markdown output                               |
+| `src/tools/githubRepoFile.ts`      | Use dedicated finalized code wrapping                          |
+| `src/tools/redditSearchParser.ts`  | Spread finalized markdown output                               |
+| `src/tools/stackoverflowSearch.ts` | Spread finalized HTML output                                   |
+| `src/tools/youtubeTranscript.ts`   | Use finalized text wrapping                                    |
 
 ## Acceptance Criteria
 

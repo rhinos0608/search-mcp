@@ -26,6 +26,8 @@ import { newsSearch } from './tools/newsSearch.js';
 import { webCrawl } from './tools/webCrawl.js';
 import { webRead } from './tools/webRead.js';
 import { semanticCrawl } from './tools/semanticCrawl.js';
+import { semanticYoutube } from './tools/semanticYoutube.js';
+import { semanticReddit } from './tools/semanticReddit.js';
 import { isToolError } from './errors.js';
 import type { RateLimitInfo } from './rateLimit.js';
 import type { ToolResult } from './types.js';
@@ -1032,6 +1034,171 @@ export function createServer(): McpServer {
           return successResponse(result);
         } catch (err: unknown) {
           logger.error({ err, tool: 'youtube_search' }, 'Tool failed');
+          return errorResponse(err);
+        }
+      },
+    );
+
+  // ── semantic_youtube ─────────────────────────────────────────────────────
+  if (!gated.has('semantic_youtube'))
+    server.registerTool(
+      'semantic_youtube',
+      {
+        description:
+          'Search YouTube for videos, fetch their transcripts, and return the most semantically relevant transcript passages for a specific query. ' +
+          'Uses the same RAG pipeline as semantic_crawl: embed → BM25 → RRF fusion → top-K trim. ' +
+          'Requires YOUTUBE_API_KEY and EMBEDDING_SIDECAR_BASE_URL.',
+        inputSchema: {
+          query: z.string().describe('The semantic search query — what are you looking for?'),
+          maxVideos: z
+            .number()
+            .int()
+            .min(1)
+            .max(50)
+            .optional()
+            .default(20)
+            .describe('Maximum number of videos to search (1–50, default 20)'),
+          channel: z
+            .string()
+            .optional()
+            .describe(
+              'Filter results to videos from channels whose name contains this string (case-insensitive)',
+            ),
+          sort: z
+            .enum(['relevance', 'date', 'viewCount'])
+            .optional()
+            .default('relevance')
+            .describe('Sort order for video search: relevance | date | viewCount'),
+          transcriptLanguage: z
+            .string()
+            .optional()
+            .default('en')
+            .describe('BCP-47 language code for transcript captions (default "en")'),
+          profile: z
+            .enum(['balanced', 'fast', 'precision', 'recall'])
+            .optional()
+            .default('balanced')
+            .describe('Retrieval profile: balanced | fast | precision | recall'),
+          topK: z
+            .number()
+            .int()
+            .min(1)
+            .max(50)
+            .optional()
+            .default(10)
+            .describe('Number of most-relevant transcript passages to return (1–50, default 10)'),
+        },
+      },
+      async ({ query, maxVideos, channel, sort, transcriptLanguage, profile, topK }) => {
+        logger.info({ tool: 'semantic_youtube', query, maxVideos }, 'Tool invoked');
+        const start = Date.now();
+        try {
+          const data = await semanticYoutube({
+            query,
+            apiKey: cfg.youtube.apiKey,
+            embeddingBaseUrl: cfg.embeddingSidecar.baseUrl,
+            embeddingApiToken: cfg.embeddingSidecar.apiToken || undefined,
+            embeddingDimensions: cfg.embeddingSidecar.dimensions,
+            maxVideos,
+            channel: channel !== '' ? channel : undefined,
+            sort,
+            transcriptLanguage,
+            profile,
+            topK,
+          });
+          const result = makeResult('semantic_youtube', data, Date.now() - start, {
+            ...(data.warnings && data.warnings.length > 0 ? { warnings: data.warnings } : {}),
+          });
+          return successResponse(result);
+        } catch (err: unknown) {
+          logger.error({ err, tool: 'semantic_youtube' }, 'Tool failed');
+          return errorResponse(err);
+        }
+      },
+    );
+
+  // ── semantic_reddit ──────────────────────────────────────────────────────
+  if (!gated.has('semantic_reddit'))
+    server.registerTool(
+      'semantic_reddit',
+      {
+        description:
+          'Search Reddit for posts, fetch their comment threads, and return the most semantically relevant comments for a specific query. ' +
+          'Uses the same RAG pipeline as semantic_crawl: embed → BM25 → RRF fusion → top-K trim. ' +
+          'Deleted and removed comments are automatically filtered. Requires EMBEDDING_SIDECAR_BASE_URL.',
+        inputSchema: {
+          query: z.string().describe('The semantic search query — what are you looking for?'),
+          subreddit: z
+            .string()
+            .optional()
+            .default('')
+            .describe(
+              'Restrict search to this subreddit (without r/ prefix). Leave empty to search all of Reddit.',
+            ),
+          sort: z
+            .enum(['relevance', 'hot', 'new', 'top'])
+            .optional()
+            .default('relevance')
+            .describe('Sort order for post search: relevance | hot | new | top'),
+          timeframe: z
+            .enum(['hour', 'day', 'week', 'month', 'year', 'all'])
+            .optional()
+            .default('year')
+            .describe('Time window for results: hour | day | week | month | year | all'),
+          maxPosts: z
+            .number()
+            .int()
+            .min(1)
+            .max(25)
+            .optional()
+            .default(10)
+            .describe('Maximum number of posts to fetch comments for (1–25, default 10)'),
+          commentLimit: z
+            .number()
+            .int()
+            .min(1)
+            .max(500)
+            .optional()
+            .default(100)
+            .describe('Maximum comments to fetch per post (1–500, default 100)'),
+          profile: z
+            .enum(['balanced', 'fast', 'precision', 'recall'])
+            .optional()
+            .default('balanced')
+            .describe('Retrieval profile: balanced | fast | precision | recall'),
+          topK: z
+            .number()
+            .int()
+            .min(1)
+            .max(50)
+            .optional()
+            .default(10)
+            .describe('Number of most-relevant comment passages to return (1–50, default 10)'),
+        },
+      },
+      async ({ query, subreddit, sort, timeframe, maxPosts, commentLimit, profile, topK }) => {
+        logger.info({ tool: 'semantic_reddit', query, maxPosts }, 'Tool invoked');
+        const start = Date.now();
+        try {
+          const data = await semanticReddit({
+            query,
+            subreddit: subreddit || undefined,
+            sort,
+            timeframe,
+            maxPosts,
+            commentLimit,
+            embeddingBaseUrl: cfg.embeddingSidecar.baseUrl,
+            embeddingApiToken: cfg.embeddingSidecar.apiToken || undefined,
+            embeddingDimensions: cfg.embeddingSidecar.dimensions,
+            profile,
+            topK,
+          });
+          const result = makeResult('semantic_reddit', data, Date.now() - start, {
+            ...(data.warnings && data.warnings.length > 0 ? { warnings: data.warnings } : {}),
+          });
+          return successResponse(result);
+        } catch (err: unknown) {
+          logger.error({ err, tool: 'semantic_reddit' }, 'Tool failed');
           return errorResponse(err);
         }
       },

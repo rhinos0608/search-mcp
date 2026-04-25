@@ -12,6 +12,9 @@ import { rrfMerge } from '../utils/fusion.js';
 import { applySoftLexicalConstraint } from '../utils/lexicalConstraint.js';
 import { buildBm25Index, type Bm25Index } from '../utils/bm25.js';
 import { getOrBuildCorpus, loadCorpusById } from '../utils/corpusCache.js';
+import { embedTexts as ragEmbedTexts } from '../rag/embedding.js';
+import { prepareCorpus, retrieveCorpus } from '../rag/pipeline.js';
+import type { RagChunk } from '../rag/types.js';
 import { finalizeStructuredContent } from '../utils/elementHelpers.js';
 import type { ContentElement, StructuredContent } from '../types.js';
 import type {
@@ -137,14 +140,7 @@ async function embedTextsBatched(
   for (let i = 0; i < texts.length; i += MAX_EMBEDDING_BATCH) {
     const batchTexts = texts.slice(i, i + MAX_EMBEDDING_BATCH);
     const batchTitles = titles ? titles.slice(i, i + MAX_EMBEDDING_BATCH) : undefined;
-    const response = await embedTexts(
-      baseUrl,
-      apiToken,
-      batchTexts,
-      mode,
-      dimensions,
-      batchTitles,
-    );
+    const response = await embedTexts(baseUrl, apiToken, batchTexts, mode, dimensions, batchTitles);
     embeddings.push(...response.embeddings);
     model = response.model;
   }
@@ -241,6 +237,144 @@ function median(values: number[]): number {
 function normalizeScore(raw: number, min: number, max: number): number {
   if (max === min) return 0;
   return (raw - min) / (max - min);
+}
+
+interface RetrieveSemanticChunksOptions {
+  query: string;
+  topK: number;
+  useReranker?: boolean;
+  embeddingBaseUrl: string;
+  embeddingApiToken: string;
+  embeddingDimensions: number;
+  precomputedEmbeddings: number[][];
+}
+
+async function retrieveSemanticChunks(
+  chunks: CorpusChunk[],
+  opts: RetrieveSemanticChunksOptions,
+): Promise<SemanticCrawlChunk[]> {
+  if (chunks.length === 0) return [];
+
+  const queryResponse = await ragEmbedTexts({
+    baseUrl: opts.embeddingBaseUrl,
+    apiToken: opts.embeddingApiToken,
+    texts: [opts.query],
+    mode: 'query',
+    dimensions: opts.embeddingDimensions,
+  });
+  const queryEmbedding = queryResponse.embeddings[0];
+  if (!queryEmbedding) {
+    throw new Error('Embedding sidecar returned empty query embedding');
+  }
+
+  const ragChunks = chunks as unknown as RagChunk[];
+  const prepared = prepareCorpus({
+    adapter: 'text',
+    chunks: ragChunks,
+    embeddings: opts.precomputedEmbeddings,
+  });
+
+  // Fetch all fused candidates for post-filtering (trimmed to topK at the end)
+  const response = retrieveCorpus(prepared, {
+    query: opts.query,
+    queryEmbedding,
+    topK: chunks.length,
+  });
+
+  if (response.results.length === 0) return [];
+
+  // Compute corpus-level score stats from all fused candidates
+  const vectorScores = response.results.map((r) => r.score.vector ?? 0);
+  const bm25Scores = response.results.map((r) => r.score.lexical ?? 0);
+  const rrfScores = response.results.map((r) => r.score.fused);
+
+  const vecMin = Math.min(...vectorScores);
+  const vecMax = Math.max(...vectorScores);
+  const vecMedian = median(vectorScores);
+  const bm25Min = Math.min(...bm25Scores);
+  const bm25Max = Math.max(...bm25Scores);
+  const bm25Median = median(bm25Scores);
+  const rrfMin = Math.min(...rrfScores);
+  const rrfMax = Math.max(...rrfScores);
+  const rrfMedian = median(rrfScores);
+
+  // Build lookup: chunkIndex → embedding
+  const embeddingByIndex = new Map<number, number[]>();
+  for (let i = 0; i < chunks.length; i++) {
+    const emb = opts.precomputedEmbeddings[i];
+    if (emb !== undefined) embeddingByIndex.set(i, emb);
+  }
+
+  // Map retrieval results to SemanticCrawlChunk with full score details
+  const scoredChunks: SemanticCrawlChunk[] = response.results.map(({ item, score }) => ({
+    text: item.text,
+    url: item.url,
+    section: item.section,
+    charOffset: item.charOffset,
+    chunkIndex: item.chunkIndex,
+    totalChunks: item.totalChunks,
+    scores: {
+      biEncoder: {
+        raw: score.vector ?? 0,
+        normalized: normalizeScore(score.vector ?? 0, vecMin, vecMax),
+        corpusMin: vecMin,
+        corpusMax: vecMax,
+        median: vecMedian,
+      },
+      bm25: {
+        raw: score.lexical ?? 0,
+        normalized: normalizeScore(score.lexical ?? 0, bm25Min, bm25Max),
+        corpusMin: bm25Min,
+        corpusMax: bm25Max,
+        median: bm25Median,
+      },
+      rrf: {
+        raw: score.fused,
+        normalized: normalizeScore(score.fused, rrfMin, rrfMax),
+        corpusMin: rrfMin,
+        corpusMax: rrfMax,
+        median: rrfMedian,
+      },
+    },
+  }));
+
+  // Semantic coherence filter (removes off-topic borderline chunks)
+  const fusedPaired: ChunkWithEmbedding[] = [];
+  for (const chunk of scoredChunks) {
+    const emb = embeddingByIndex.get(chunk.chunkIndex);
+    if (emb !== undefined) fusedPaired.push({ chunk, embedding: emb });
+  }
+
+  const coherent = fusedPaired.length > 0 ? filterBySemanticCoherence(fusedPaired) : scoredChunks;
+  if (coherent.length < scoredChunks.length) {
+    logger.info(
+      { before: scoredChunks.length, after: coherent.length },
+      'Semantic coherence filter removed off-topic chunks',
+    );
+  }
+
+  // Soft lexical constraint (IDF-weighted token coverage)
+  const lexicalResult = applySoftLexicalConstraint(coherent, opts.query, chunks);
+  if (lexicalResult.warning) {
+    logger.warn(lexicalResult.warning);
+  }
+  if (lexicalResult.filtered.length < coherent.length) {
+    logger.info(
+      { before: coherent.length, after: lexicalResult.filtered.length },
+      'Soft lexical constraint filtered chunks',
+    );
+  }
+  const afterLexical = lexicalResult.filtered;
+
+  // Optional cross-encoder reranking
+  if (opts.useReranker === true && afterLexical.length > 1) {
+    return applyReranking(
+      opts.query,
+      afterLexical.slice(0, Math.min(RERANK_CANDIDATES, afterLexical.length)),
+      opts.topK,
+    );
+  }
+  return afterLexical.slice(0, opts.topK);
 }
 
 export async function embedAndRank(
@@ -393,7 +527,12 @@ export async function embedAndRank(
   const rrfMedian = median(rrfScores);
 
   logger.info(
-    { biEncoderCount: biEncoderTopN.length, bm25Count: bm25TopK.length, fusedCount: fused.length, poolSize },
+    {
+      biEncoderCount: biEncoderTopN.length,
+      bm25Count: bm25TopK.length,
+      fusedCount: fused.length,
+      poolSize,
+    },
     'RRF fusion completed with restricted candidate pool',
   );
 
@@ -690,7 +829,9 @@ async function crawlSeeds(
       includeExternalLinks: opts.includeExternalLinks,
       ...(perSeedBytes !== undefined ? { maxBytes: perSeedBytes } : {}),
       ...(opts.waitFor !== undefined ? { waitFor: opts.waitFor } : {}),
-      ...(opts.delayBeforeReturnHtml !== undefined ? { delayBeforeReturnHtml: opts.delayBeforeReturnHtml } : {}),
+      ...(opts.delayBeforeReturnHtml !== undefined
+        ? { delayBeforeReturnHtml: opts.delayBeforeReturnHtml }
+        : {}),
       ...(opts.pageTimeout !== undefined ? { pageTimeout: opts.pageTimeout } : {}),
       ...(opts.jsCode !== undefined ? { jsCode: opts.jsCode } : {}),
       ...(opts.extractionConfig !== undefined ? { extractionConfig: opts.extractionConfig } : {}),
@@ -772,7 +913,10 @@ export function pagesToCorpus(pages: CrawlPageResult[]): CorpusChunk[] {
   }
   if (pagesWithContent < pages.filter((p) => p.success).length - droppedBannerPages) {
     logger.info(
-      { pagesWithContent, successfulPages: pages.filter((p) => p.success).length - droppedBannerPages },
+      {
+        pagesWithContent,
+        successfulPages: pages.filter((p) => p.success).length - droppedBannerPages,
+      },
       'Some successfully crawled pages produced no meaningful chunks (likely boilerplate or empty)',
     );
   }
@@ -807,7 +951,9 @@ export function collectPageElements(pages: CrawlPageResult[]): StructuredContent
 
 // ── Extracted Data Aggregation ───────────────────────────────────────────
 
-function aggregateExtractedData(pages: CrawlPageResult[]): Record<string, Record<string, unknown>[]> | undefined {
+function aggregateExtractedData(
+  pages: CrawlPageResult[],
+): Record<string, Record<string, unknown>[]> | undefined {
   const byUrl: Record<string, Record<string, unknown>[]> = {};
   for (const page of pages) {
     if (page.extractedData !== undefined && page.extractedData.length > 0) {
@@ -858,7 +1004,6 @@ export async function semanticCrawl(
   let seedUrl: string;
   // Pre-computed data from cache (populated for 'cached' source only)
   let precomputedEmbeddings: number[][] | undefined;
-  let bm25IndexFromCache: Bm25Index | undefined;
   let cachedCorpusId: string | undefined;
   // Aggregated extracted data from non-cached crawl sources
   let extractedData: Record<string, Record<string, unknown>[]> | undefined;
@@ -1023,7 +1168,6 @@ export async function semanticCrawl(
       }
       corpusChunks = cached.chunks;
       precomputedEmbeddings = cached.embeddings;
-      bm25IndexFromCache = cached.bm25Index;
       cachedCorpusId = cached.corpusId;
       pagesCrawled = 0;
       successfulPages = 0;
@@ -1047,15 +1191,14 @@ export async function semanticCrawl(
     resolvedCorpusId = cachedCorpusId ?? opts.source.corpusId;
     // Cached sources have no page-level elements (not persisted in corpus cache)
 
-    const topChunks = await embedAndRank(corpusChunks, {
+    const topChunks = await retrieveSemanticChunks(corpusChunks, {
       query: opts.query,
       topK: opts.topK,
       ...(opts.useReranker !== undefined ? { useReranker: opts.useReranker } : {}),
       embeddingBaseUrl,
       embeddingApiToken,
       embeddingDimensions,
-      precomputedEmbeddings,
-      bm25Index: bm25IndexFromCache,
+      precomputedEmbeddings: precomputedEmbeddings ?? [],
     });
 
     return {
@@ -1100,7 +1243,7 @@ export async function semanticCrawl(
   resolvedCorpusId = corpus.corpusId;
 
   // Use cached embeddings + BM25 index from the corpus
-  const topChunks = await embedAndRank(corpus.chunks, {
+  const topChunks = await retrieveSemanticChunks(corpus.chunks, {
     query: opts.query,
     topK: opts.topK,
     ...(opts.useReranker !== undefined ? { useReranker: opts.useReranker } : {}),
@@ -1108,7 +1251,6 @@ export async function semanticCrawl(
     embeddingApiToken,
     embeddingDimensions,
     precomputedEmbeddings: corpus.embeddings,
-    bm25Index: corpus.bm25Index,
   });
 
   return {

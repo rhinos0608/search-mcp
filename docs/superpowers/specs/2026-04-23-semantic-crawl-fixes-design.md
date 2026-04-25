@@ -8,19 +8,13 @@
 This spec addresses quality and maturity gaps discovered through live testing of the `semantic_crawl` tool against real documentation sites. The issues fall into three severity tiers based on observed impact:
 
 **P0 — Active harm (breaks core value proposition):**
+
 1. **Reranker is a no-op** — Every test with `useReranker=true` produced bit-for-bit identical results to `useReranker=false` (same chunks, same ordering, same biEncoderScores). The reranker code path exists but silently produces identity.
 2. **RRF fusion overweights noisy BM25 matches** — The bi-encoder is working correctly (e.g., "USER instruction" chunk scores 0.686, highest in corpus). But RRF merges bi-encoder + BM25 rankings, and BM25 finds keyword matches in cookie banners and nav content. On large noisy corpora (116 chunks), a cookie banner chunk (0.426) outranks the semantically best chunk (0.686) because the banner also matched query terms like "configure".
 
-**P1 — Silent failure (infrastructure broken):**
-3. **Cache is in-memory only** — Corpora built in one call are evicted by the next call seconds later. Disk cache files exist but are never read back. The cache is a tiny in-memory LRU with no persistence.
-4. **Crawler focus drift** — Multi-page crawls follow navigation links away from the seed URL's content area and never return (Dockerfile reference → CLI config pages).
-5. **Noise chunk contamination** — Cookie banners, language selectors, and social media footers are indexed as content and survive all boilerplate filters.
+**P1 — Silent failure (infrastructure broken):** 3. **Cache is in-memory only** — Corpora built in one call are evicted by the next call seconds later. Disk cache files exist but are never read back. The cache is a tiny in-memory LRU with no persistence. 4. **Crawler focus drift** — Multi-page crawls follow navigation links away from the seed URL's content area and never return (Dockerfile reference → CLI config pages). 5. **Noise chunk contamination** — Cookie banners, language selectors, and social media footers are indexed as content and survive all boilerplate filters.
 
-**P2 — Quality gaps (original spec, lower priority until P0/P1 fixed):**
-6. **Keyword blindness** — Semantic retrieval alone misses exact keyword matches, numbers, and named entities.
-7. **maxPages bug** — crawl4ai returns more pages than requested.
-8. **Cache ephemerality** — 24h TTL, no schema versioning, `process.cwd()` path.
-9. **Score invisibility** — BM25, RRF, and reranker scores absent from output.
+**P2 — Quality gaps (original spec, lower priority until P0/P1 fixed):** 6. **Keyword blindness** — Semantic retrieval alone misses exact keyword matches, numbers, and named entities. 7. **maxPages bug** — crawl4ai returns more pages than requested. 8. **Cache ephemerality** — 24h TTL, no schema versioning, `process.cwd()` path. 9. **Score invisibility** — BM25, RRF, and reranker scores absent from output.
 
 ### Key Finding: Bi-encoder Works; Downstream Is Broken
 
@@ -35,21 +29,24 @@ Live testing confirms the semantic retrieval pipeline (crawl → chunk → embed
 ## 1. Rendered-UI Filtering (Cookie Banners, Consent Managers)
 
 ### Problem
+
 crawl4ai captures JavaScript-rendered cookie consent UIs as document content. OneTrust, Cookiebot, and similar consent managers produce multi-paragraph text that survives all existing boilerplate filters because it has low link density and looks like prose. These chunks then pollute BM25 matching and RRF fusion.
 
 ### Solution
+
 Add a **page-level pre-chunking filter** that detects and drops pages dominated by cookie-banner content. If this filter is effective, the RRF candidate pool restriction (§3) becomes less critical because the corpus will already be clean.
 
 **Detection:**
 A page is dropped if >40% of its non-empty lines match any of these patterns (case-insensitive):
+
 - Exact substrings: `"OneTrust"`, `"Cookiebot"`, `"cookie consent"`, `"Your Privacy Choices"`, `"Manage Cookies"`, `"Accept All Cookies"`, `"We use cookies to"`, `"By continuing to use this site"`
 - Structural: 3+ consecutive lines where every line contains one of `cookie`, `consent`, `privacy`, `tracking`, `gdpr`, `ccpa`, and at least one line contains a button pattern (`[Accept]`, `[Reject]`, `[Manage]`)
 
 ```typescript
 function isCookieBannerPage(markdown: string): boolean {
-  const lines = markdown.split('\n').filter(l => l.trim().length > 0);
+  const lines = markdown.split('\n').filter((l) => l.trim().length > 0);
   if (lines.length === 0) return false;
-  const bannerLines = lines.filter(l => COOKIE_PATTERNS.some(p => p.test(l)));
+  const bannerLines = lines.filter((l) => COOKIE_PATTERNS.some((p) => p.test(l)));
   return bannerLines.length / lines.length > 0.4;
 }
 ```
@@ -59,6 +56,7 @@ Runs in `pagesToCorpus` before `chunkMarkdown`. Dropped pages are logged with a 
 **Interaction with §3:** If §1 is effective and removes the dominant noise source (cookie banners), the RRF candidate pool restriction becomes a safety margin rather than a critical fix. Both should be implemented, but §1 has higher marginal value per page removed.
 
 ### Backwards compatibility
+
 No API change. Some noisy pages are dropped — this is desirable.
 
 ---
@@ -66,12 +64,15 @@ No API change. Some noisy pages are dropped — this is desirable.
 ## 2. Crawler Focus Filter
 
 ### Problem
+
 Multi-page crawls follow navigation links away from the seed URL's content area. Crawling `docs.docker.com/reference/dockerfile/` with `maxPages=20` returned CLI config pages instead of Dockerfile content.
 
 ### Solution
+
 Add a **URL path-prefix filter** after `webCrawl` returns, before page deduplication.
 
 **Algorithm:**
+
 1. Extract the seed URL's pathname (e.g., `/reference/dockerfile/`).
 2. Keep only pages whose pathname starts with the seed pathname or is a direct child (one segment deeper).
 3. Log count of dropped pages.
@@ -83,13 +84,15 @@ function isDirectChild(pagePath: string, seedPath: string): boolean {
   // e.g. seed=/reference/dockerfile/ -> /reference/dockerfile/build/args/ is NOT direct
   const seedParts = seedPath.split('/').filter(Boolean);
   const pageParts = pagePath.split('/').filter(Boolean);
-  return pageParts.length === seedParts.length + 1 &&
-         pageParts.slice(0, seedParts.length).join('/') === seedParts.join('/');
+  return (
+    pageParts.length === seedParts.length + 1 &&
+    pageParts.slice(0, seedParts.length).join('/') === seedParts.join('/')
+  );
 }
 
 function filterByPathPrefix(pages: CrawlPageResult[], seedUrl: string): CrawlPageResult[] {
   const seedPath = new URL(seedUrl).pathname;
-  return pages.filter(p => {
+  return pages.filter((p) => {
     const pagePath = new URL(p.url).pathname;
     return pagePath.startsWith(seedPath) || isDirectChild(pagePath, seedPath);
   });
@@ -101,6 +104,7 @@ function filterByPathPrefix(pages: CrawlPageResult[], seedUrl: string): CrawlPag
 **Escape hatch:** `allowPathDrift: boolean` parameter (default `false`).
 
 ### Backwards compatibility
+
 No API change. Default behavior tightens focus. Old behavior via `allowPathDrift: true`.
 
 ---
@@ -108,14 +112,17 @@ No API change. Default behavior tightens focus. Old behavior via `allowPathDrift
 ## 3. RRF Candidate Pool Restriction
 
 ### Problem
+
 RRF merges bi-encoder and BM25 rankings over the full corpus. On noisy corpora, BM25 finds keyword matches in cookie banners and nav content. A chunk with high bi-encoder score but no BM25 match can be outranked by a noisy chunk with medium bi-encoder score + a BM25 match.
 
 Example (116-chunk Dockerfile corpus, query "configure PORT=8080"):
+
 - USER instruction chunk: bi-encoder rank 1 (0.686), no BM25 match → RRF ≈ 0.016
 - Cookie banner chunk: bi-encoder rank ~30 (0.426), BM25 rank ~5 (matches "configure") → RRF ≈ 0.016 + 0.016 = 0.032
 - Result: cookie banner outranks the semantically best chunk.
 
 ### Solution
+
 Restrict the RRF candidate pool to the **top-N bi-encoder results** instead of the full corpus, then inject BM25 matches. This limits BM25's ability to surface noise from the long tail.
 
 ```
@@ -128,9 +135,10 @@ Pipeline step (after bi-encoder ranking):
 
 - `N = max(topK * 3, 30)` ensures the pool is large enough for diversity but small enough to exclude long-tail noise.
 - BM25 results that fall outside `biEncoderTopN` are still included via the union.
-- This is a guarantee of *pool inclusion*, not *output inclusion*.
+- This is a guarantee of _pool inclusion_, not _output inclusion_.
 
 ### Backwards compatibility
+
 No API change. The set of returned chunks may shrink (only from the candidate pool), and lexical matches may rise in rank.
 
 ---
@@ -138,33 +146,42 @@ No API change. The set of returned chunks may shrink (only from the candidate po
 ## 4. Cache Persistence Fix
 
 ### Problem
+
 Corpora built in one call are evicted by the next call seconds later. Disk cache files exist (`.cache/semantic-crawl/`) but are never read back. The cache is a tiny in-memory LRU with no persistence.
 
 ### Root Cause Analysis
+
 `getOrBuildCorpus` calls `readCorpusFromDisk` only after scanning `.json` files and matching by source. The scan uses `stableStringify(e.source) === sourceKey`. If the metadata JSON doesn't round-trip through `stableStringify` identically (e.g., URL ordering differences in `urls` array, or field ordering), the match fails. Additionally, `contentHash` is written but never validated on read.
 
 ### Solution
+
 **Validate content hash on read:**
+
 - Recompute hash from `meta.chunks.map(c => c.text).join('\n')` in `readCorpusFromDisk`.
 - If mismatch → log warning, return `null`, trigger rebuild.
 
 **Add schema version check:**
+
 - `readCorpusFromDisk` rejects caches without `schemaVersion: 1`.
 
 **Fix source matching:**
+
 - Instead of scanning `.json` files and comparing `stableStringify(source)`, compute the `corpusId` deterministically and check if `{corpusId}.json` exists directly.
 - This removes the fragile source-matching scan entirely.
 
 **Environment variable overrides:**
+
 - `SEMANTIC_CRAWL_CACHE_DIR` — cache directory (default: `path.join(os.homedir(), '.cache', 'search-mcp', 'semantic-crawl')`).
 - `SEMANTIC_CRAWL_CACHE_TTL_MS` — TTL in ms (default: 7 days).
 
 **Include chunking parameters in corpusId:**
+
 ```
 sha256(stableStringify(source) + "|" + model + "|" + dimensions + "|" + MAX_TOKENS + "|" + MIN_TOKENS + "|" + OVERLAP_RATIO + "|" + TOKEN_RATIO)
 ```
 
 ### Backwards compatibility
+
 Old caches are silently discarded and rebuilt. This is a one-time migration cost.
 
 ---
@@ -172,14 +189,18 @@ Old caches are silently discarded and rebuilt. This is a one-time migration cost
 ## 5. Reranker Fix or Removal
 
 ### Problem
+
 `useReranker=true` produces identical output to `useReranker=false`. The reranker is either silently failing (catch block swallows error) or the ONNX model is producing identity rankings.
 
 ### Diagnosis
+
 1. The catch block in `embedAndRank` logs `logger.warn({ err }, 'Cross-encoder re-ranking failed...')` and falls back to bi-encoder order.
 2. The model `Xenova/ms-marco-MiniLM-L-6-v2` may be a bi-encoder ONNX export rather than a cross-encoder. Feeding `[query, doc]` pairs to a bi-encoder and reading `output.data[0]` as a score produces uncorrelated values.
 
 ### Solution
+
 **Immediate: Add smoke-test on model load.**
+
 - After `getSession()` loads the model, run a validation inference:
   - `query="hello world", doc="hello world"` → score A
   - `query="hello world", doc="xyz abc def"` → score B
@@ -188,13 +209,16 @@ Old caches are silently discarded and rebuilt. This is a one-time migration cost
 - If assertion fails, log `fatal` error and refuse to use reranker for process lifetime.
 
 **Make reranker opt-in:**
+
 - Change `embedAndRank` default: `useReranker` defaults to `false`.
 - When explicitly enabled and smoke-test passes, log `info` that reranker is active.
 
 **Model replacement (if smoke-test fails):**
+
 - If `Xenova/ms-marco-MiniLM-L-6-v2` fails smoke-test, replace with a verified cross-encoder ONNX export (e.g., `cross-encoder/ms-marco-MiniLM-L-6-v2` via Optimum quantization).
 
 ### Backwards compatibility
+
 Reranker becomes opt-in (`false` by default). Callers that explicitly set `useReranker: true` will still get reranked results if the model passes smoke-test, with a warning if it fails.
 
 ---
@@ -202,23 +226,27 @@ Reranker becomes opt-in (`false` by default). Callers that explicitly set `useRe
 ## 6. maxPages Client-Side Enforcement
 
 ### Problem
+
 crawl4ai returns more pages than requested, especially in DFS mode.
 
 ### Solution
+
 Client-side truncation per-seed after crawl4ai returns:
 
 ```typescript
 let pages = crawlResult.pages;
 // Guarantee the seed URL is first before truncating, since crawl4ai does not
 // guarantee ordering (especially in DFS mode the seed may not be first).
-const seedIndex = pages.findIndex(p => p.url === seedUrl);
+const seedIndex = pages.findIndex((p) => p.url === seedUrl);
 if (seedIndex > 0) {
   const [seedPage] = pages.splice(seedIndex, 1);
   pages.unshift(seedPage);
 }
 if (pages.length > perSeedPages) {
-  logger.warn({ requested: perSeedPages, received: pages.length, seedUrl },
-    'semantic_crawl: crawl4ai returned more pages than requested; truncating client-side');
+  logger.warn(
+    { requested: perSeedPages, received: pages.length, seedUrl },
+    'semantic_crawl: crawl4ai returned more pages than requested; truncating client-side',
+  );
   pages = pages.slice(0, perSeedPages);
 }
 ```
@@ -226,6 +254,7 @@ if (pages.length > perSeedPages) {
 Applied in `crawlSeeds` per-seed, not globally.
 
 ### Backwards compatibility
+
 No API change. Returned pages now strictly respect `maxPages`.
 
 ---
@@ -233,23 +262,25 @@ No API change. Returned pages now strictly respect `maxPages`.
 ## 7. Score Observability
 
 ### Problem
+
 Consumers cannot interpret or compare scores. Reranker logits are uncalibrated, BM25 scores are absent, and RRF scores are internal-only.
 
 ### Solution
+
 Add a `scores` object to every `SemanticCrawlChunk`:
 
 ```typescript
 export interface ScoreDetail {
-  raw: number;           // original score (cosine, BM25, RRF sum, logit)
-  normalized: number;    // 0-1 scale: (raw - minQuery) / (maxQuery - minQuery), or 0 if max === min
+  raw: number; // original score (cosine, BM25, RRF sum, logit)
+  normalized: number; // 0-1 scale: (raw - minQuery) / (maxQuery - minQuery), or 0 if max === min
   minQuery: number;
   maxQuery: number;
   median: number;
 }
 
 export interface RerankScoreDetail extends ScoreDetail {
-  medianDelta: number;   // raw - median
-  rank: number;          // 1-based position after reranking
+  medianDelta: number; // raw - median
+  rank: number; // 1-based position after reranking
 }
 
 export interface SemanticCrawlChunk {
@@ -271,6 +302,7 @@ export interface SemanticCrawlChunk {
 **Old fields removed:** `biEncoderScore` and `rerankScore`.
 
 ### Backwards compatibility
+
 Breaking change to output schema. Callers must update to use `scores.biEncoder.raw`, etc.
 
 ---
@@ -278,9 +310,11 @@ Breaking change to output schema. Callers must update to use `scores.biEncoder.r
 ## 8. Soft Lexical Constraint
 
 ### Problem
+
 Without a lexical filter, noise chunks with spurious keyword matches can survive to the output.
 
 ### Solution
+
 Replace hard filter with IDF-weighted token coverage (same as original spec §2):
 
 1. Tokenize query, remove stopwords.
@@ -290,6 +324,7 @@ Replace hard filter with IDF-weighted token coverage (same as original spec §2)
 5. After RRF fusion, filter the **RRF-restricted candidate pool** (not the full corpus). If fewer than `topK` satisfy, return all satisfying chunks from that pool.
 
 **Edge cases:**
+
 - Query has < 3 non-stopword tokens → require all.
 - Query has only stopwords → skip constraint.
 - No chunk satisfies → return the full RRF-restricted candidate pool (the pre-filtered ranked list) + warning in `meta.warnings`. The fallback is relative to the RRF pool, not the original corpus.
@@ -297,23 +332,24 @@ Replace hard filter with IDF-weighted token coverage (same as original spec §2)
 **Interaction with §3:** Because §3 already restricts the candidate pool to top-N bi-encoder + top-K BM25 results, the soft constraint operates on a relatively clean subset. For small `topK` on noisy corpora, zero-satisfaction is possible; the fallback prevents returning empty results.
 
 ### Backwards compatibility
+
 No API change. `meta.warnings` is additive.
 
 ---
 
 ## Error Handling
 
-| Scenario | Behavior |
-|----------|----------|
-| Cookie-banner page detected | Drop page with warning, continue |
-| Crawler path drift detected | Filter to path-prefix pages, log count of dropped pages |
-| Cache content-hash mismatch | Log warning, rebuild silently |
-| Cache schemaVersion missing | Reject, rebuild silently |
-| Cache directory creation fails | Log warning, continue without disk cache |
-| Reranker smoke test fails | Log fatal, refuse reranker for process lifetime |
-| Soft lexical constraint yields zero matches | Return unfiltered result + warning |
-| Score normalization denominator is zero | Set `normalized = 0`, continue |
-| crawl4ai returns > maxPages | Truncate client-side, log warning, continue |
+| Scenario                                    | Behavior                                                |
+| ------------------------------------------- | ------------------------------------------------------- |
+| Cookie-banner page detected                 | Drop page with warning, continue                        |
+| Crawler path drift detected                 | Filter to path-prefix pages, log count of dropped pages |
+| Cache content-hash mismatch                 | Log warning, rebuild silently                           |
+| Cache schemaVersion missing                 | Reject, rebuild silently                                |
+| Cache directory creation fails              | Log warning, continue without disk cache                |
+| Reranker smoke test fails                   | Log fatal, refuse reranker for process lifetime         |
+| Soft lexical constraint yields zero matches | Return unfiltered result + warning                      |
+| Score normalization denominator is zero     | Set `normalized = 0`, continue                          |
+| crawl4ai returns > maxPages                 | Truncate client-side, log warning, continue             |
 
 ---
 

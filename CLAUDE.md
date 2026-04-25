@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-> **Version: 2.0.0** — Semantic overhaul: RAG pipeline, embedding sidecar, hybrid ranking, corpus cache, GitHub corpus adapter, structured crawl extraction.
+> **Version: 3.0.0** — Universal RAG core: `src/rag/` extraction, `semantic_youtube`, `semantic_reddit`.
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
@@ -8,7 +8,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 An MCP (Model Context Protocol) server that exposes web search, web reading, deep crawling, **semantic RAG search**, GitHub (repo, file, tree, search, corpus), YouTube, Reddit, Twitter/X, Product Hunt, patent, podcast, academic research, Hacker News, Stack Overflow, npm, PyPI, and news tools over stdio JSON-RPC. Clients like Claude Desktop or the Claude CLI connect via stdin/stdout; all logging goes to stderr.
 
-V2.0.0 adds a full retrieval pipeline: Crawl4AI-powered deep crawling → markdown chunking → embedding sidecar (document/query asymmetric) → BM25+ full-text index → RRF hybrid fusion → optional cross-encoder reranking → corpus cache. The `semantic_crawl` tool is the primary entry point; `github_repo_file`, `github_repo_search`, `github_repo_tree`, and `web_crawl` are supporting tools.
+V3.0.0 extracts the retrieval pipeline into reusable `src/rag/` modules and adds two new semantic tools: `semantic_youtube` (search + transcripts + RAG) and `semantic_reddit` (search + comments + RAG). The `semantic_crawl` tool remains the primary crawl entry point. The shared RAG core: bi-encoder embeddings → BM25+ → RRF fusion → top-K.
 
 ## Commands
 
@@ -40,6 +40,8 @@ _Search & Read_
 - `web_read` — Fetches a URL and extracts article content via Mozilla Readability + jsdom.
 - `web_crawl` — Deep multi-page crawl via Crawl4AI (JS rendering). Returns raw markdown per page. Requires `CRAWL4AI_BASE_URL`.
 - `semantic_crawl` — Full RAG pipeline over a crawled corpus. Source types: `url`, `sitemap`, `search` (search-then-crawl), `github` (code-aware), `cached` (re-use corpus by ID). Returns top-K semantically ranked chunks with bi-encoder, BM25, and RRF scores. Requires `CRAWL4AI_BASE_URL` + `EMBEDDING_SIDECAR_BASE_URL`.
+- `semantic_youtube` — YouTube video search + transcript fetch + RAG pipeline. Returns top-K semantically ranked transcript passages. Requires `YOUTUBE_API_KEY` + `EMBEDDING_SIDECAR_BASE_URL`.
+- `semantic_reddit` — Reddit post search + comment thread fetch + RAG pipeline. Deleted/removed comments auto-filtered. Returns top-K semantically ranked comment passages. Requires `EMBEDDING_SIDECAR_BASE_URL`.
 
 _GitHub_
 - `github_repo` — GitHub API (unauthenticated) for repo metadata, latest release, optional README.
@@ -82,10 +84,19 @@ Key env vars:
 
 Reddit OAuth is optional: both `REDDIT_CLIENT_ID` and `REDDIT_CLIENT_SECRET` must be set together; setting exactly one is treated as invalid configuration (server starts, health reports degraded, Reddit tools throw `VALIDATION_ERROR` at first use).
 
+**RAG core** (`src/rag/`): shared pipeline used by `semantic_crawl`, `semantic_youtube`, and `semantic_reddit`.
+- `types.ts` — `RagChunk`, `PreparedCorpus`, `RetrievalResponse`, `RetrievalProfileName`, etc.
+- `pipeline.ts` — `prepareCorpus()`, `retrieveCorpus()`, `prepareAndRetrieve()` (embedding → BM25 → RRF → top-K)
+- `embedding.ts` — `embedTexts()`, `embedTextsBatched()` (sidecar client, bypasses SSRF guard)
+- `profiles.ts` — `balanced`, `fast`, `precision`, `recall` retrieval profiles
+- `adapters/text.ts` — crawl pages → `RagChunk[]`
+- `adapters/transcript.ts` — YouTube transcript segments → `RagChunk[]`
+- `adapters/conversation.ts` — Reddit comment trees → `RagChunk[]` (filters deleted/removed, includes parent context)
+
 **Semantic pipeline** (`src/tools/semanticCrawl.ts` + `src/chunking.ts` + `src/utils/`):
 1. Corpus ingestion: crawl pages via Crawl4AI → strip cookie banners → `chunkMarkdown()` (400-token max, 20% overlap, atomic units for code blocks/tables, boilerplate heuristics)
 2. Embedding: batched document embeddings via sidecar (max 512/batch, document/query asymmetric, title-aware). Query embedded in parallel.
-3. Hybrid ranking: bi-encoder cosine → BM25+ (`src/utils/bm25.ts`) → RRF fusion (`src/utils/fusion.ts`) with restricted candidate pools (bi-encoder: `max(topK*3, 30)`, BM25: topK)
+3. Hybrid ranking: bi-encoder cosine → BM25+ (`src/utils/bm25.ts`) → RRF fusion via `src/rag/pipeline.ts` (internal `retrieveSemanticChunks()` wrapper)
 4. Post-filtering: semantic coherence filter (centroid similarity for borderline chunks) → soft IDF-weighted lexical constraint (`src/utils/lexicalConstraint.ts`)
 5. Optional cross-encoder reranking (`src/utils/rerank.ts`, ONNX-based, local, default off)
 6. Corpus cache (`src/utils/corpusCache.ts`): 24h TTL, max 50 corpora, stores chunks + embeddings + BM25 index. Re-query via `source: { type: 'cached', corpusId }`.

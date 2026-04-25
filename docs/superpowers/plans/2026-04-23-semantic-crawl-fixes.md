@@ -12,25 +12,26 @@
 
 ## File Structure
 
-| File | Responsibility |
-|------|----------------|
-| `src/utils/cookieBanner.ts` | **New.** Page-level cookie banner detection (`isCookieBannerPage`). |
-| `src/utils/lexicalConstraint.ts` | **New.** IDF-weighted soft lexical constraint (`applySoftLexicalConstraint`). |
-| `src/chunking.ts` | Export chunking constants so `corpusCache.ts` can include them in `corpusId`. No behavioral change to chunking itself. |
-| `src/types.ts` | Add `ScoreDetail`, `RerankScoreDetail`, update `SemanticCrawlChunk` with `scores` object. Remove `biEncoderScore` and `rerankScore`. |
-| `src/utils/corpusCache.ts` | Fix disk read (content hash validation, schema version, deterministic lookup via source index, env vars for dir/TTL, chunking params in corpusId). |
-| `src/utils/rerank.ts` | Add smoke-test on model load; make `rerank` safe to call even when smoke-test fails. |
-| `src/tools/semanticCrawl.ts` | Integrate all filters and scoring. Modify `crawlSeeds` (path filter, maxPages truncation), `pagesToCorpus` (cookie banner drop), `embedAndRank` (RRF pool restriction, score observability, soft lexical constraint, reranker opt-in). |
-| `src/server.ts` | Update Zod schema: `useReranker` default `false`; add `allowPathDrift` parameter. |
-| `test/cookieBanner.test.ts` | **New.** Cookie banner detection tests. |
-| `test/lexicalConstraint.test.ts` | **New.** Soft lexical constraint tests. |
-| `test/semanticCrawl.test.ts` | Update existing tests for new `scores` shape; add RRF pool, maxPages, integration tests. |
+| File                             | Responsibility                                                                                                                                                                                                                         |
+| -------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `src/utils/cookieBanner.ts`      | **New.** Page-level cookie banner detection (`isCookieBannerPage`).                                                                                                                                                                    |
+| `src/utils/lexicalConstraint.ts` | **New.** IDF-weighted soft lexical constraint (`applySoftLexicalConstraint`).                                                                                                                                                          |
+| `src/chunking.ts`                | Export chunking constants so `corpusCache.ts` can include them in `corpusId`. No behavioral change to chunking itself.                                                                                                                 |
+| `src/types.ts`                   | Add `ScoreDetail`, `RerankScoreDetail`, update `SemanticCrawlChunk` with `scores` object. Remove `biEncoderScore` and `rerankScore`.                                                                                                   |
+| `src/utils/corpusCache.ts`       | Fix disk read (content hash validation, schema version, deterministic lookup via source index, env vars for dir/TTL, chunking params in corpusId).                                                                                     |
+| `src/utils/rerank.ts`            | Add smoke-test on model load; make `rerank` safe to call even when smoke-test fails.                                                                                                                                                   |
+| `src/tools/semanticCrawl.ts`     | Integrate all filters and scoring. Modify `crawlSeeds` (path filter, maxPages truncation), `pagesToCorpus` (cookie banner drop), `embedAndRank` (RRF pool restriction, score observability, soft lexical constraint, reranker opt-in). |
+| `src/server.ts`                  | Update Zod schema: `useReranker` default `false`; add `allowPathDrift` parameter.                                                                                                                                                      |
+| `test/cookieBanner.test.ts`      | **New.** Cookie banner detection tests.                                                                                                                                                                                                |
+| `test/lexicalConstraint.test.ts` | **New.** Soft lexical constraint tests.                                                                                                                                                                                                |
+| `test/semanticCrawl.test.ts`     | Update existing tests for new `scores` shape; add RRF pool, maxPages, integration tests.                                                                                                                                               |
 
 ---
 
 ## Task 1: Cookie Banner Page Detection
 
 **Files:**
+
 - Create: `src/utils/cookieBanner.ts`
 - Create: `test/cookieBanner.test.ts`
 - Modify: `src/tools/semanticCrawl.ts:563-589` (`pagesToCorpus`)
@@ -46,7 +47,8 @@ import { isCookieBannerPage } from '../src/utils/cookieBanner.js';
 
 describe('isCookieBannerPage', () => {
   it('returns false for normal content', () => {
-    const md = '# Getting Started\n\nThis is normal documentation.\n\n## Installation\n\nRun `npm install`.\n';
+    const md =
+      '# Getting Started\n\nThis is normal documentation.\n\n## Installation\n\nRun `npm install`.\n';
     assert.strictEqual(isCookieBannerPage(md), false);
   });
 
@@ -67,7 +69,8 @@ describe('isCookieBannerPage', () => {
   });
 
   it('returns false when banner lines are below 40%', () => {
-    const md = 'OneTrust\n\nNormal documentation line 1.\nNormal documentation line 2.\nNormal documentation line 3.\n';
+    const md =
+      'OneTrust\n\nNormal documentation line 1.\nNormal documentation line 2.\nNormal documentation line 3.\n';
     // 1 banner line out of 4 = 25%
     assert.strictEqual(isCookieBannerPage(md), false);
   });
@@ -236,6 +239,7 @@ git commit -m "feat: detect and drop cookie-banner pages before chunking"
 ## Task 2: Crawler Path Focus Filter
 
 **Files:**
+
 - Modify: `src/tools/semanticCrawl.ts` (add `isDirectChild`, `filterByPathPrefix`, integrate in `crawlSeeds`)
 - Modify: `src/types.ts` (no changes needed — `allowPathDrift` goes on `SemanticCrawlOptions`)
 - Modify: `src/server.ts` (add `allowPathDrift` to Zod schema)
@@ -249,11 +253,17 @@ import { filterByPathPrefix, isDirectChild } from '../src/tools/semanticCrawl.js
 
 describe('isDirectChild', () => {
   it('accepts exactly one deeper segment', () => {
-    assert.strictEqual(isDirectChild('/reference/dockerfile/build/', '/reference/dockerfile/'), true);
+    assert.strictEqual(
+      isDirectChild('/reference/dockerfile/build/', '/reference/dockerfile/'),
+      true,
+    );
   });
 
   it('rejects two deeper segments', () => {
-    assert.strictEqual(isDirectChild('/reference/dockerfile/build/args/', '/reference/dockerfile/'), false);
+    assert.strictEqual(
+      isDirectChild('/reference/dockerfile/build/args/', '/reference/dockerfile/'),
+      false,
+    );
   });
 
   it('rejects sibling paths', () => {
@@ -305,6 +315,7 @@ describe('filterByPathPrefix', () => {
 ```
 
 Run:
+
 ```bash
 npm test test/semanticCrawl.test.ts
 ```
@@ -371,35 +382,36 @@ export interface SemanticCrawlOptions {
 Modify `crawlSeeds` (around line 538, after `webCrawl` returns):
 
 ```typescript
-    const result = await webCrawl(seedUrl, crawl4aiCfg.baseUrl, crawl4aiCfg.apiToken, crawlOpts);
+const result = await webCrawl(seedUrl, crawl4aiCfg.baseUrl, crawl4aiCfg.apiToken, crawlOpts);
 
-    // Path focus filter
-    let pages = filterByPathPrefix(result.pages, seedUrl, opts.allowPathDrift ?? false);
+// Path focus filter
+let pages = filterByPathPrefix(result.pages, seedUrl, opts.allowPathDrift ?? false);
 
-    // maxPages client-side enforcement (guarantee seed-first, then truncate)
-    const seedIndex = pages.findIndex((p) => p.url === seedUrl);
-    if (seedIndex > 0) {
-      const [seedPage] = pages.splice(seedIndex, 1);
-      if (seedPage) pages.unshift(seedPage);
-    }
-    if (pages.length > perSeedPages) {
-      logger.warn(
-        { requested: perSeedPages, received: pages.length, seedUrl },
-        'semantic_crawl: crawl4ai returned more pages than requested; truncating client-side',
-      );
-      pages = pages.slice(0, perSeedPages);
-    }
+// maxPages client-side enforcement (guarantee seed-first, then truncate)
+const seedIndex = pages.findIndex((p) => p.url === seedUrl);
+if (seedIndex > 0) {
+  const [seedPage] = pages.splice(seedIndex, 1);
+  if (seedPage) pages.unshift(seedPage);
+}
+if (pages.length > perSeedPages) {
+  logger.warn(
+    { requested: perSeedPages, received: pages.length, seedUrl },
+    'semantic_crawl: crawl4ai returned more pages than requested; truncating client-side',
+  );
+  pages = pages.slice(0, perSeedPages);
+}
 
-    totalPagesAttempted += result.totalPages;
-    totalSuccessfulPages += result.successfulPages;
-    allPages.push(...pages);
+totalPagesAttempted += result.totalPages;
+totalSuccessfulPages += result.successfulPages;
+allPages.push(...pages);
 ```
 
 Replace the old lines:
+
 ```typescript
-    totalPagesAttempted += result.totalPages;
-    totalSuccessfulPages += result.successfulPages;
-    allPages.push(...result.pages);
+totalPagesAttempted += result.totalPages;
+totalSuccessfulPages += result.successfulPages;
+allPages.push(...result.pages);
 ```
 
 ### Step 4: Update server.ts Zod schema
@@ -459,6 +471,7 @@ git commit -m "feat: add crawler path focus filter with allowPathDrift escape ha
 **Note:** The enforcement was already added in Task 2 (Step 3) as part of the `crawlSeeds` integration. This task is the test and any refinement.
 
 **Files:**
+
 - Modify: `test/semanticCrawl.test.ts`
 
 ### Step 1: Write the failing test
@@ -473,9 +486,36 @@ describe('maxPages client-side enforcement', () => {
     // Instead, test the truncation logic via a standalone function.
     // For now, verify the seed-first ordering in filterByPathPrefix context.
     const pages = [
-      { url: 'https://example.com/page2', success: true, markdown: 'p2', title: null, description: null, links: [], statusCode: 200, errorMessage: null },
-      { url: 'https://example.com/', success: true, markdown: 'seed', title: null, description: null, links: [], statusCode: 200, errorMessage: null },
-      { url: 'https://example.com/page3', success: true, markdown: 'p3', title: null, description: null, links: [], statusCode: 200, errorMessage: null },
+      {
+        url: 'https://example.com/page2',
+        success: true,
+        markdown: 'p2',
+        title: null,
+        description: null,
+        links: [],
+        statusCode: 200,
+        errorMessage: null,
+      },
+      {
+        url: 'https://example.com/',
+        success: true,
+        markdown: 'seed',
+        title: null,
+        description: null,
+        links: [],
+        statusCode: 200,
+        errorMessage: null,
+      },
+      {
+        url: 'https://example.com/page3',
+        success: true,
+        markdown: 'p3',
+        title: null,
+        description: null,
+        links: [],
+        statusCode: 200,
+        errorMessage: null,
+      },
     ];
     // Simulate the seed-first reordering that happens inside crawlSeeds
     const seedUrl = 'https://example.com/';
@@ -512,6 +552,7 @@ git commit -m "test: add maxPages enforcement and seed-first ordering tests"
 ## Task 4: Cache Persistence Fix
 
 **Files:**
+
 - Modify: `src/chunking.ts` (export constants)
 - Modify: `src/utils/corpusCache.ts` (major rework)
 - Modify: `test/semanticCrawl.test.ts` (add cache persistence test)
@@ -545,8 +586,20 @@ describe('cache persistence', () => {
       source,
       async () => {
         buildCount++;
-        const chunks = [{ text: 'hello world', url: 'https://example.com', section: '## A', charOffset: 0, chunkIndex: 0, totalChunks: 1 }];
-        const contentHash = crypto.createHash('sha256').update(chunks.map((c) => c.text).join('\n')).digest('hex');
+        const chunks = [
+          {
+            text: 'hello world',
+            url: 'https://example.com',
+            section: '## A',
+            charOffset: 0,
+            chunkIndex: 0,
+            totalChunks: 1,
+          },
+        ];
+        const contentHash = crypto
+          .createHash('sha256')
+          .update(chunks.map((c) => c.text).join('\n'))
+          .digest('hex');
         return {
           chunks,
           embeddings: [[0.1, 0.2, 0.3, 0.4]],
@@ -565,8 +618,20 @@ describe('cache persistence', () => {
       source,
       async () => {
         buildCount++;
-        const chunks = [{ text: 'hello world', url: 'https://example.com', section: '## A', charOffset: 0, chunkIndex: 0, totalChunks: 1 }];
-        const contentHash = crypto.createHash('sha256').update(chunks.map((c) => c.text).join('\n')).digest('hex');
+        const chunks = [
+          {
+            text: 'hello world',
+            url: 'https://example.com',
+            section: '## A',
+            charOffset: 0,
+            chunkIndex: 0,
+            totalChunks: 1,
+          },
+        ];
+        const contentHash = crypto
+          .createHash('sha256')
+          .update(chunks.map((c) => c.text).join('\n'))
+          .digest('hex');
         return {
           chunks,
           embeddings: [[0.1, 0.2, 0.3, 0.4]],
@@ -586,6 +651,7 @@ describe('cache persistence', () => {
 ```
 
 Run:
+
 ```bash
 npm test test/semanticCrawl.test.ts
 ```
@@ -667,12 +733,7 @@ interface SourceIndexEntry {
 
 const DEFAULT_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
 const DEFAULT_MAX_CORPORA = 50;
-const DEFAULT_CACHE_DIR = path.join(
-  os.homedir(),
-  '.cache',
-  'search-mcp',
-  'semantic-crawl',
-);
+const DEFAULT_CACHE_DIR = path.join(os.homedir(), '.cache', 'search-mcp', 'semantic-crawl');
 
 const SCHEMA_VERSION = 1;
 
@@ -803,11 +864,7 @@ function writeSourceIndex(cacheDir: string, index: Map<string, SourceIndexEntry[
   }
 }
 
-function addToSourceIndex(
-  cacheDir: string,
-  sourceKey: string,
-  entry: SourceIndexEntry,
-): void {
+function addToSourceIndex(cacheDir: string, sourceKey: string, entry: SourceIndexEntry): void {
   const index = readSourceIndex(cacheDir);
   const existing = index.get(sourceKey) ?? [];
   // Remove any previous entry for this corpusId
@@ -819,10 +876,7 @@ function addToSourceIndex(
   writeSourceIndex(cacheDir, index);
 }
 
-function findInSourceIndex(
-  cacheDir: string,
-  sourceKey: string,
-): SourceIndexEntry | undefined {
+function findInSourceIndex(cacheDir: string, sourceKey: string): SourceIndexEntry | undefined {
   const index = readSourceIndex(cacheDir);
   const entries = index.get(sourceKey);
   if (!entries || entries.length === 0) return undefined;
@@ -870,11 +924,7 @@ function deserializeEmbeddings(buf: Buffer): number[][] {
 // Write / read corpus files
 // ────────────────────────────────────────────────────────────────────
 
-function writeCorpus(
-  cacheDir: string,
-  meta: CorpusMetadata,
-  embeddings: number[][],
-): void {
+function writeCorpus(cacheDir: string, meta: CorpusMetadata, embeddings: number[][]): void {
   fs.writeFileSync(metaPath(cacheDir, meta.corpusId), JSON.stringify(meta), 'utf-8');
   fs.writeFileSync(binPath(cacheDir, meta.corpusId), serializeEmbeddings(embeddings));
 }
@@ -902,7 +952,10 @@ function readCorpusFromDisk(
 
   // Schema version check
   if (meta.schemaVersion !== SCHEMA_VERSION) {
-    logger.warn({ corpusId, schemaVersion: meta.schemaVersion }, 'corpusCache: schema version mismatch');
+    logger.warn(
+      { corpusId, schemaVersion: meta.schemaVersion },
+      'corpusCache: schema version mismatch',
+    );
     return null;
   }
 
@@ -919,7 +972,10 @@ function readCorpusFromDisk(
     .update(meta.chunks.map((c) => c.text).join('\n'))
     .digest('hex');
   if (recomputedHash !== meta.contentHash) {
-    logger.warn({ corpusId, expected: meta.contentHash, actual: recomputedHash }, 'corpusCache: content hash mismatch');
+    logger.warn(
+      { corpusId, expected: meta.contentHash, actual: recomputedHash },
+      'corpusCache: content hash mismatch',
+    );
     return null;
   }
 
@@ -1176,10 +1232,7 @@ export async function getOrBuildCorpus(
  * Load a previously cached corpus by its deterministic ID.
  * Returns null if not found, corrupted, or TTL-expired.
  */
-export function loadCorpusById(
-  corpusId: string,
-  opts?: CacheOpts,
-): Promise<CachedCorpus | null> {
+export function loadCorpusById(corpusId: string, opts?: CacheOpts): Promise<CachedCorpus | null> {
   const ttlMs = opts?.ttlMs ?? DEFAULT_TTL_MS;
   const cacheDir = opts?.cacheDir ?? DEFAULT_CACHE_DIR;
   return Promise.resolve(readCorpusFromDisk(cacheDir, corpusId, ttlMs));
@@ -1222,6 +1275,7 @@ git commit -m "fix: cache persistence — source index, content hash validation,
 ## Task 5: Reranker Smoke Test + Opt-In
 
 **Files:**
+
 - Modify: `src/utils/rerank.ts`
 - Modify: `src/tools/semanticCrawl.ts` (change `useReranker` default)
 - Modify: `src/server.ts` (change `useReranker` default in Zod schema)
@@ -1236,7 +1290,11 @@ describe('reranker smoke test', () => {
     // Extract the validation logic into a pure function for testability.
     // After the fix, getSession() should run a smoke test and throw if
     // the model produces A <= B + 0.1 for the validation pairs.
-    function validateSmokeScores(scoreA: number, scoreB: number, epsilon = 0.1): { ok: boolean; reason?: string } {
+    function validateSmokeScores(
+      scoreA: number,
+      scoreB: number,
+      epsilon = 0.1,
+    ): { ok: boolean; reason?: string } {
       if (scoreA <= scoreB + epsilon) {
         return { ok: false, reason: `good=${String(scoreA)}, bad=${String(scoreB)}` };
       }
@@ -1266,35 +1324,43 @@ This is a documentation test since we can't mock ONNX without heavy infrastructu
 Modify `src/utils/rerank.ts`. After the `getSession()` function loads the model (around line 107, after `logger.info`), add:
 
 ```typescript
-    // Smoke test: validate that the model behaves as a cross-encoder
-    // query="hello world", doc="hello world" → score A
-    // query="hello world", doc="xyz abc def" → score B
-    // Assert A > B + 0.1
-    try {
-      const smokeQuery = 'hello world';
-      const smokeGood = 'hello world';
-      const smokeBad = 'xyz abc def';
+// Smoke test: validate that the model behaves as a cross-encoder
+// query="hello world", doc="hello world" → score A
+// query="hello world", doc="xyz abc def" → score B
+// Assert A > B + 0.1
+try {
+  const smokeQuery = 'hello world';
+  const smokeGood = 'hello world';
+  const smokeBad = 'xyz abc def';
 
-      const smokeBatch = tokenizePairs(tokenizer, smokeQuery, [smokeGood, smokeBad], DEFAULT_MAX_LENGTH);
-      const smokeScores = await runInference({ session, tokenizer, hasTokenTypeIds, outputName }, smokeBatch);
+  const smokeBatch = tokenizePairs(
+    tokenizer,
+    smokeQuery,
+    [smokeGood, smokeBad],
+    DEFAULT_MAX_LENGTH,
+  );
+  const smokeScores = await runInference(
+    { session, tokenizer, hasTokenTypeIds, outputName },
+    smokeBatch,
+  );
 
-      const scoreA = smokeScores[0] ?? 0;
-      const scoreB = smokeScores[1] ?? 0;
+  const scoreA = smokeScores[0] ?? 0;
+  const scoreB = smokeScores[1] ?? 0;
 
-      if (scoreA <= scoreB + 0.1) {
-        const msg = `Cross-encoder smoke test failed: good=${String(scoreA)}, bad=${String(scoreB)}. The model is not producing meaningful cross-encoder scores.`;
-        logger.fatal({ scoreA, scoreB }, msg);
-        sessionPromise = null;
-        throw unavailableError(msg);
-      }
+  if (scoreA <= scoreB + 0.1) {
+    const msg = `Cross-encoder smoke test failed: good=${String(scoreA)}, bad=${String(scoreB)}. The model is not producing meaningful cross-encoder scores.`;
+    logger.fatal({ scoreA, scoreB }, msg);
+    sessionPromise = null;
+    throw unavailableError(msg);
+  }
 
-      logger.info({ scoreA, scoreB }, 'Cross-encoder smoke test passed');
-    } catch (err) {
-      if (err instanceof Error && err.message.includes('smoke test failed')) {
-        throw err;
-      }
-      logger.warn({ err }, 'Cross-encoder smoke test error');
-    }
+  logger.info({ scoreA, scoreB }, 'Cross-encoder smoke test passed');
+} catch (err) {
+  if (err instanceof Error && err.message.includes('smoke test failed')) {
+    throw err;
+  }
+  logger.warn({ err }, 'Cross-encoder smoke test error');
+}
 ```
 
 **Important:** The `runInference` call needs the `SessionState` shape. The smoke test uses the raw `session`, `tokenizer`, `hasTokenTypeIds`, `outputName` variables available in scope.
@@ -1302,11 +1368,13 @@ Modify `src/utils/rerank.ts`. After the `getSession()` function loads the model 
 Also, make `useReranker` default to `false` in `src/tools/semanticCrawl.ts`:
 
 In `EmbedAndRankOptions` interface (line 223):
+
 ```typescript
   useReranker?: boolean | undefined;
 ```
 
 And in `embedAndRank` (line 395):
+
 ```typescript
   if (opts.useReranker === true && coherent.length > 1) {
 ```
@@ -1345,6 +1413,7 @@ git commit -m "feat: reranker smoke test + make opt-in (default false)"
 ## Task 6: Score Observability Types
 
 **Files:**
+
 - Modify: `src/types.ts`
 - Modify: `test/semanticCrawl.test.ts` (update `makeChunk` helpers)
 
@@ -1391,6 +1460,7 @@ Remove `biEncoderScore` and `rerankScore` from the old interface.
 In `test/semanticCrawl.test.ts`, update `makeChunk` helpers to use the new `scores` shape.
 
 Old:
+
 ```typescript
 const makeChunk = (text: string, score: number): SemanticCrawlChunk => ({
   text,
@@ -1404,6 +1474,7 @@ const makeChunk = (text: string, score: number): SemanticCrawlChunk => ({
 ```
 
 New:
+
 ```typescript
 const makeScore = (raw: number): ScoreDetail => ({
   raw,
@@ -1448,6 +1519,7 @@ git commit -m "feat: add ScoreDetail and RerankScoreDetail types; replace scalar
 ## Task 7: RRF Candidate Pool Restriction + Score Integration
 
 **Files:**
+
 - Modify: `src/tools/semanticCrawl.ts` (major `embedAndRank` rework)
 - Modify: `test/semanticCrawl.test.ts`
 
@@ -1469,7 +1541,13 @@ describe('RRF candidate pool restriction', () => {
         chunkIndex: i,
         totalChunks: 5,
         scores: {
-          biEncoder: { raw: 0.8 - i * 0.01, normalized: 0.8 - i * 0.01, corpusMin: 0, corpusMax: 1, median: 0.5 },
+          biEncoder: {
+            raw: 0.8 - i * 0.01,
+            normalized: 0.8 - i * 0.01,
+            corpusMin: 0,
+            corpusMax: 1,
+            median: 0.5,
+          },
           bm25: { raw: 0, normalized: 0, corpusMin: 0, corpusMax: 0, median: 0 },
           rrf: { raw: 0, normalized: 0, corpusMin: 0, corpusMax: 0, median: 0 },
         },
@@ -1689,7 +1767,12 @@ export async function embedAndRank(
   const rrfMedian = median(rrfScores);
 
   logger.info(
-    { biEncoderCount: biEncoderTopN.length, bm25Count: bm25TopK.length, fusedCount: fused.length, poolSize },
+    {
+      biEncoderCount: biEncoderTopN.length,
+      bm25Count: bm25TopK.length,
+      fusedCount: fused.length,
+      poolSize,
+    },
     'RRF fusion completed with restricted candidate pool',
   );
 
@@ -1892,6 +1975,7 @@ git commit -m "feat: RRF candidate pool restriction and score observability"
 ## Task 8: Soft Lexical Constraint
 
 **Files:**
+
 - Create: `src/utils/lexicalConstraint.ts`
 - Create: `test/lexicalConstraint.test.ts`
 - Modify: `src/tools/semanticCrawl.ts` (integrate after RRF)
@@ -1922,9 +2006,30 @@ describe('applySoftLexicalConstraint', () => {
   });
 
   const corpusChunks = [
-    { text: 'how to configure PORT=8080', url: 'https://example.com', section: '## A', charOffset: 0, chunkIndex: 0, totalChunks: 1 },
-    { text: 'docker build instructions', url: 'https://example.com', section: '## B', charOffset: 0, chunkIndex: 1, totalChunks: 2 },
-    { text: 'the quick brown fox', url: 'https://example.com', section: '## C', charOffset: 0, chunkIndex: 2, totalChunks: 3 },
+    {
+      text: 'how to configure PORT=8080',
+      url: 'https://example.com',
+      section: '## A',
+      charOffset: 0,
+      chunkIndex: 0,
+      totalChunks: 1,
+    },
+    {
+      text: 'docker build instructions',
+      url: 'https://example.com',
+      section: '## B',
+      charOffset: 0,
+      chunkIndex: 1,
+      totalChunks: 2,
+    },
+    {
+      text: 'the quick brown fox',
+      url: 'https://example.com',
+      section: '## C',
+      charOffset: 0,
+      chunkIndex: 2,
+      totalChunks: 3,
+    },
   ];
 
   it('filters chunks that lack top-IDF tokens', () => {
@@ -1955,6 +2060,7 @@ describe('applySoftLexicalConstraint', () => {
 ```
 
 Run:
+
 ```bash
 npm test test/lexicalConstraint.test.ts
 ```
@@ -1969,16 +2075,94 @@ Create `src/utils/lexicalConstraint.ts`:
 import type { SemanticCrawlChunk, CorpusChunk } from '../types.js';
 
 const STOPWORDS = new Set([
-  'the', 'a', 'an', 'is', 'are', 'was', 'were', 'be', 'been', 'being',
-  'have', 'has', 'had', 'do', 'does', 'did', 'will', 'would', 'could',
-  'should', 'may', 'might', 'must', 'shall', 'can', 'need', 'dare',
-  'ought', 'used', 'to', 'of', 'in', 'for', 'on', 'with', 'at', 'by',
-  'from', 'as', 'into', 'through', 'during', 'before', 'after', 'above',
-  'below', 'between', 'under', 'and', 'but', 'or', 'yet', 'so', 'if',
-  'because', 'although', 'though', 'while', 'where', 'when', 'that',
-  'which', 'who', 'whom', 'whose', 'what', 'this', 'these', 'those',
-  'i', 'you', 'he', 'she', 'it', 'we', 'they', 'me', 'him', 'her',
-  'us', 'them', 'my', 'your', 'his', 'her', 'its', 'our', 'their',
+  'the',
+  'a',
+  'an',
+  'is',
+  'are',
+  'was',
+  'were',
+  'be',
+  'been',
+  'being',
+  'have',
+  'has',
+  'had',
+  'do',
+  'does',
+  'did',
+  'will',
+  'would',
+  'could',
+  'should',
+  'may',
+  'might',
+  'must',
+  'shall',
+  'can',
+  'need',
+  'dare',
+  'ought',
+  'used',
+  'to',
+  'of',
+  'in',
+  'for',
+  'on',
+  'with',
+  'at',
+  'by',
+  'from',
+  'as',
+  'into',
+  'through',
+  'during',
+  'before',
+  'after',
+  'above',
+  'below',
+  'between',
+  'under',
+  'and',
+  'but',
+  'or',
+  'yet',
+  'so',
+  'if',
+  'because',
+  'although',
+  'though',
+  'while',
+  'where',
+  'when',
+  'that',
+  'which',
+  'who',
+  'whom',
+  'whose',
+  'what',
+  'this',
+  'these',
+  'those',
+  'i',
+  'you',
+  'he',
+  'she',
+  'it',
+  'we',
+  'they',
+  'me',
+  'him',
+  'her',
+  'us',
+  'them',
+  'my',
+  'your',
+  'his',
+  'her',
+  'its',
+  'our',
+  'their',
 ]);
 
 function tokenize(text: string): string[] {
@@ -2081,6 +2265,7 @@ After the semantic coherence filter and before the reranker step (around line 39
 Update the rest of the reranker block to use `candidates` from `afterLexical`.
 
 Also update the final fallback:
+
 ```typescript
   } else {
     topChunks = afterLexical.slice(0, opts.topK);
@@ -2108,6 +2293,7 @@ git commit -m "feat: soft lexical constraint with IDF-weighted token coverage"
 ## Task 9: Final Integration & Regression Tests
 
 **Files:**
+
 - Modify: `test/semanticCrawl.test.ts`
 
 ### Step 1: Add integration tests
@@ -2164,6 +2350,7 @@ git commit -m "test: integration tests for score observability and semantic-only
 ## Self-Review Checklist
 
 **1. Spec coverage:**
+
 - §1 Cookie banner filtering → Task 1
 - §2 Crawler focus filter → Task 2
 - §3 RRF candidate pool restriction → Task 7
@@ -2174,17 +2361,20 @@ git commit -m "test: integration tests for score observability and semantic-only
 - §8 Soft lexical constraint → Task 8
 
 **2. Placeholder scan:**
+
 - No "TBD", "TODO", "implement later" found.
 - All steps include exact code blocks.
 - No vague instructions like "add appropriate error handling".
 
 **3. Type consistency:**
+
 - `SemanticCrawlChunk` uses `scores` object across all tasks.
 - `computeCorpusId` includes chunking params consistently.
 - `useReranker` requires `=== true` consistently.
 - `filterByPathPrefix` signature matches usage in `crawlSeeds`.
 
 **4. Known open questions (from spec):**
+
 - `isDirectChild` depth limit: one segment only (implemented exactly as spec'd).
 - Smoke-test epsilon: `0.1` (implemented).
 - §3 + §8 interaction: soft constraint operates on RRF-restricted pool, fallback returns pre-filtered pool (documented in Task 8).

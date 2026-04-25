@@ -2,10 +2,28 @@ import { z } from 'zod/v4';
 import { validationError } from '../errors.js';
 
 export const REGEX_PATTERNS = [
-  'email', 'phone-international', 'phone-us', 'url', 'ipv4', 'ipv6',
-  'uuid', 'currency', 'percentage', 'number', 'date-iso', 'date-us',
-  'time-24h', 'postal-us', 'postal-uk', 'hex-color', 'twitter-handle',
-  'hashtag', 'mac-address', 'iban', 'credit-card', 'all',
+  'email',
+  'phone-international',
+  'phone-us',
+  'url',
+  'ipv4',
+  'ipv6',
+  'uuid',
+  'currency',
+  'percentage',
+  'number',
+  'date-iso',
+  'date-us',
+  'time-24h',
+  'postal-us',
+  'postal-uk',
+  'hex-color',
+  'twitter-handle',
+  'hashtag',
+  'mac-address',
+  'iban',
+  'credit-card',
+  'all',
 ] as const;
 
 export type RegexPattern = (typeof REGEX_PATTERNS)[number];
@@ -102,15 +120,20 @@ export function validateExtractionConfig(
       throw validationError(`${config.type} extractionConfig requires schema.baseSelector`);
     }
     if (!Array.isArray(config.schema.fields) || config.schema.fields.length === 0) {
-      throw validationError(`${config.type} extractionConfig requires schema.fields array with at least one field`);
+      throw validationError(
+        `${config.type} extractionConfig requires schema.fields array with at least one field`,
+      );
     }
   }
 
   if (config.type === 'regex') {
     const hasPatterns = config.patterns !== undefined && config.patterns.length > 0;
-    const hasCustom = config.customPatterns !== undefined && Object.keys(config.customPatterns).length > 0;
+    const hasCustom =
+      config.customPatterns !== undefined && Object.keys(config.customPatterns).length > 0;
     if (!hasPatterns && !hasCustom) {
-      throw validationError('regex extractionConfig requires at least one of patterns or customPatterns');
+      throw validationError(
+        'regex extractionConfig requires at least one of patterns or customPatterns',
+      );
     }
   }
 
@@ -120,12 +143,16 @@ export function validateExtractionConfig(
     }
     const provider = config.llmProvider ?? serverLlm?.provider ?? '';
     if (!provider) {
-      throw validationError('llm extractionConfig requires llmProvider (tool param) or LLM_PROVIDER env var');
+      throw validationError(
+        'llm extractionConfig requires llmProvider (tool param) or LLM_PROVIDER env var',
+      );
     }
     // Local providers (via baseUrl) may not require an API token.
     const baseUrl = config.llmBaseUrl ?? serverLlm?.baseUrl ?? '';
     if (!serverLlm?.apiToken && !baseUrl) {
-      throw validationError('llm extractionConfig requires LLM_API_TOKEN env var, or LLM_BASE_URL for local providers (not accepted as tool parameter)');
+      throw validationError(
+        'llm extractionConfig requires LLM_API_TOKEN env var, or LLM_BASE_URL for local providers (not accepted as tool parameter)',
+      );
     }
   }
 }

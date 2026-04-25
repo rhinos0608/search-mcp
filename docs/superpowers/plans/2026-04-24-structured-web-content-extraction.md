@@ -13,6 +13,7 @@
 ### Task 1: Shared Interfaces & Extractor Helpers
 
 **Files:**
+
 - Modify: `src/types.ts`
 - Create: `src/utils/elementHelpers.ts`
 - Test: `test/elementHelpers.test.ts`
@@ -25,7 +26,7 @@ Modify `src/types.ts` to add the `StructuredContent` interface and extend releva
 // Add near line 49 in src/types.ts
 export interface StructuredContent {
   /**
-   * Structured document elements (headings, tables, images, code, lists) 
+   * Structured document elements (headings, tables, images, code, lists)
    * for multimodal downstream consumption.
    */
   elements?: ContentElement[];
@@ -33,9 +34,9 @@ export interface StructuredContent {
 
 // Update the following interfaces to extend StructuredContent:
 // GitHubRepo, GitHubFileResult, GitHubCodeResult, YouTubeResult, RedditPost,
-// NormalizedRedditComment, PatentResult, PodcastResult, AcademicPaper, 
-// ArXivPaper, StackOverflowQuestion, SemanticCrawlChunk, SearchResult, 
-// TrendingRepo, TwitterPost, ProductHuntProduct, HackerNewsItem, YouTubeVideo, 
+// NormalizedRedditComment, PatentResult, PodcastResult, AcademicPaper,
+// ArXivPaper, StackOverflowQuestion, SemanticCrawlChunk, SearchResult,
+// TrendingRepo, TwitterPost, ProductHuntProduct, HackerNewsItem, YouTubeVideo,
 // NpmPackage, PypiPackage, NewsArticle.
 ```
 
@@ -55,7 +56,7 @@ const MAX_TEXT_LENGTH = 10000;
 
 export function safeExtractFromHtml(html: string | null | undefined): ContentElement[] | undefined {
   if (!html || html.trim().length === 0) return undefined;
-  
+
   try {
     const dom = new JSDOM(html);
     try {
@@ -71,9 +72,11 @@ export function safeExtractFromHtml(html: string | null | undefined): ContentEle
   }
 }
 
-export function safeExtractFromMarkdown(markdown: string | null | undefined): ContentElement[] | undefined {
+export function safeExtractFromMarkdown(
+  markdown: string | null | undefined,
+): ContentElement[] | undefined {
   if (!markdown || markdown.trim().length === 0) return undefined;
-  
+
   try {
     const elements = extractElementsFromMarkdown(markdown);
     if (elements.length === 0) return undefined;
@@ -87,7 +90,12 @@ export function safeExtractFromMarkdown(markdown: string | null | undefined): Co
 export function wrapTextInElement(text: string | null | undefined): ContentElement[] | undefined {
   if (!text || text.trim().length === 0) return undefined;
   const trimmed = text.trim();
-  return [{ type: 'text', text: trimmed.length > MAX_TEXT_LENGTH ? trimmed.slice(0, MAX_TEXT_LENGTH) + '...' : trimmed }];
+  return [
+    {
+      type: 'text',
+      text: trimmed.length > MAX_TEXT_LENGTH ? trimmed.slice(0, MAX_TEXT_LENGTH) + '...' : trimmed,
+    },
+  ];
 }
 ```
 
@@ -97,7 +105,11 @@ Create `test/elementHelpers.test.ts`.
 
 ```typescript
 import { expect } from 'chai';
-import { safeExtractFromHtml, safeExtractFromMarkdown, wrapTextInElement } from '../src/utils/elementHelpers.js';
+import {
+  safeExtractFromHtml,
+  safeExtractFromMarkdown,
+  wrapTextInElement,
+} from '../src/utils/elementHelpers.js';
 
 describe('elementHelpers', () => {
   it('should extract from HTML safely', () => {
@@ -139,6 +151,7 @@ git commit -m "feat: add shared StructuredContent interface and extractor helper
 ### Task 2: Wire up GitHub & Source Code
 
 **Files:**
+
 - Modify: `src/tools/githubRepo.ts`
 - Modify: `src/tools/githubRepoFile.ts`
 
@@ -160,11 +173,13 @@ Modify `src/tools/githubRepoFile.ts`.
 ```typescript
 // In githubRepoFile tool handler
 if (!result.isBinary) {
-  result.elements = [{
-    type: 'code',
-    language: detectLanguage(result.path), // Use existing or simple ext-based detection
-    content: result.content
-  }];
+  result.elements = [
+    {
+      type: 'code',
+      language: detectLanguage(result.path), // Use existing or simple ext-based detection
+      content: result.content,
+    },
+  ];
 }
 ```
 
@@ -185,6 +200,7 @@ git commit -m "feat: add structured elements to GitHub tools"
 ### Task 3: Wire up Reddit & StackOverflow
 
 **Files:**
+
 - Modify: `src/tools/redditComments.ts`
 - Modify: `src/tools/redditClient.ts`
 - Modify: `src/tools/stackoverflowSearch.ts`
@@ -222,6 +238,7 @@ git commit -m "feat: add structured elements to Reddit and StackOverflow"
 ### Task 4: Text Wrapping for Long-tail Tools
 
 **Files:**
+
 - Modify: `src/tools/youtubeSearch.ts`, `src/tools/academicSearch.ts`, `src/tools/arxivSearch.ts`, `src/tools/patentSearch.ts`, `src/tools/podcastSearch.ts`, `src/tools/producthuntSearch.ts`, `src/tools/newsSearch.ts`, `src/tools/npmSearch.ts`, `src/tools/pypiSearch.ts`, `src/tools/twitterSearch.ts`, `src/tools/hackerNewsSearch.ts`
 
 - [ ] **Step 1: Apply wrapTextInElement or safeExtractFromHtml/Markdown**
@@ -240,6 +257,7 @@ git commit -m "feat: add structured elements fallback to all remaining content t
 ### Task 5: Semantic Crawl Preservation
 
 **Files:**
+
 - Modify: `src/tools/semanticCrawl.ts`
 - Modify: `src/tools/webCrawl.ts`
 

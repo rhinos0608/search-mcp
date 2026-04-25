@@ -27,7 +27,7 @@ const B = 0.75;
 const DELTA = 1.0;
 
 function tokenize(text: string): string[] {
-  return (text.match(/\b\w+\b/g) ?? []).map(t => t.toLowerCase());
+  return (text.match(/\b\w+\b/g) ?? []).map((t) => t.toLowerCase());
 }
 
 function buildTermFreq(tokens: string[]): Map<string, number> {
