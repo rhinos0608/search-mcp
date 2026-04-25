@@ -1,7 +1,7 @@
 import test, { afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { webCrawl } from '../src/tools/webCrawl.js';
+import { webCrawl, computeCrawlTimeout } from '../src/tools/webCrawl.js';
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -300,4 +300,90 @@ test('webCrawl passes waitFor, delayBeforeReturnHtml, pageTimeout, and jsCode to
   assert.equal(body.crawler_config.params.delay_before_return_html, 2.5);
   assert.equal(body.crawler_config.params.page_timeout, 120000);
   assert.equal(body.crawler_config.params.js_code, 'window.scrollTo(0, document.body.scrollHeight);');
+});
+
+// ── HTML field threading ──────────────────────────────────────────────────────
+
+test('webCrawl sets html from fit_html when all three HTML fields present', async () => {
+  globalThis.fetch = async () =>
+    buildMockResponse({
+      result: {
+        url: 'https://example.com',
+        success: true,
+        markdown: '# Hello',
+        fit_html: '<html><body><h1>Fit</h1></body></html>',
+        cleaned_html: '<html><body><h1>Cleaned</h1></body></html>',
+        html: '<html><body><h1>Raw</h1></body></html>',
+      },
+    });
+
+  const result = await webCrawl('https://example.com', 'https://crawl4ai.example.com', '', defaultOpts);
+  assert.ok(result.pages[0]);
+  assert.equal(result.pages[0].html, '<html><body><h1>Fit</h1></body></html>');
+});
+
+test('webCrawl falls back to cleaned_html when fit_html absent', async () => {
+  globalThis.fetch = async () =>
+    buildMockResponse({
+      result: {
+        url: 'https://example.com',
+        success: true,
+        markdown: '# Hello',
+        cleaned_html: '<html><body><h1>Cleaned</h1></body></html>',
+        html: '<html><body><h1>Raw</h1></body></html>',
+      },
+    });
+
+  const result = await webCrawl('https://example.com', 'https://crawl4ai.example.com', '', defaultOpts);
+  assert.ok(result.pages[0]);
+  assert.equal(result.pages[0].html, '<html><body><h1>Cleaned</h1></body></html>');
+});
+
+test('webCrawl falls back to html when cleaned_html absent', async () => {
+  globalThis.fetch = async () =>
+    buildMockResponse({
+      result: {
+        url: 'https://example.com',
+        success: true,
+        markdown: '# Hello',
+        html: '<html><body><h1>Raw</h1></body></html>',
+      },
+    });
+
+  const result = await webCrawl('https://example.com', 'https://crawl4ai.example.com', '', defaultOpts);
+  assert.ok(result.pages[0]);
+  assert.equal(result.pages[0].html, '<html><body><h1>Raw</h1></body></html>');
+});
+
+test('webCrawl sets html to undefined when no HTML fields present', async () => {
+  globalThis.fetch = async () =>
+    buildMockResponse({
+      result: {
+        url: 'https://example.com',
+        success: true,
+        markdown: '# Hello',
+      },
+    });
+
+  const result = await webCrawl('https://example.com', 'https://crawl4ai.example.com', '', defaultOpts);
+  assert.ok(result.pages[0]);
+  assert.equal(result.pages[0].html, undefined);
+});
+
+// ── Timeout formula ───────────────────────────────────────────────────────────
+
+test('computeCrawlTimeout: 1 page → 45s', () => {
+  assert.equal(computeCrawlTimeout(1), 45_000);
+});
+
+test('computeCrawlTimeout: 10 pages → 180s', () => {
+  assert.equal(computeCrawlTimeout(10), 180_000);
+});
+
+test('computeCrawlTimeout: 25 pages → capped at 300s', () => {
+  assert.equal(computeCrawlTimeout(25), 300_000);
+});
+
+test('computeCrawlTimeout: 50 pages → capped at 300s', () => {
+  assert.equal(computeCrawlTimeout(50), 300_000);
 });

@@ -37,6 +37,9 @@ interface Crawl4aiPage {
   url?: string;
   success?: boolean;
   markdown?: string | { raw_markdown?: string; fit_markdown?: string } | null;
+  html?: string | null;
+  cleaned_html?: string | null;
+  fit_html?: string | null;
   metadata?: {
     title?: string;
     description?: string;
@@ -94,10 +97,15 @@ function normalizePage(page: Crawl4aiPage): CrawlPageResult {
   const success = page.success ?? markdown.trim().length > 0;
   const structured = safeStructuredFromMarkdown(markdown);
 
+  const html = [page.fit_html, page.cleaned_html, page.html]
+    .map((s) => s?.trim())
+    .find((s): s is string => s !== undefined && s.length > 0);
+
   return {
     url: page.url ?? '',
     success,
     markdown,
+    ...(html !== undefined ? { html } : {}),
     title: page.metadata?.title ?? null,
     description: page.metadata?.description ?? null,
     links: [...internalLinks, ...externalLinks],
@@ -267,6 +275,10 @@ function normalizeCrawlResponse(data: Crawl4aiResponse, opts: WebCrawlOptions): 
   return pages;
 }
 
+export function computeCrawlTimeout(maxPages: number): number {
+  return Math.min(30_000 + maxPages * 15_000, 300_000);
+}
+
 async function crawlOnce(
   url: string,
   endpoint: string,
@@ -289,7 +301,7 @@ async function crawlOnce(
           method: 'POST',
           headers,
           body: JSON.stringify(buildRequestBody(url, opts)),
-          signal: AbortSignal.timeout(120_000),
+          signal: AbortSignal.timeout(computeCrawlTimeout(opts.maxPages)),
         }),
       { label: 'crawl4ai', maxAttempts: 2, initialDelayMs: 500 },
     );
@@ -315,7 +327,8 @@ async function crawlOnce(
     }
   } catch (err) {
     if (err instanceof Error && (err.name === 'AbortError' || err.name === 'TimeoutError')) {
-      throw networkError(`crawl4ai request timed out after 120 seconds for "${url}"`);
+      const timeoutSecs = Math.ceil(computeCrawlTimeout(opts.maxPages) / 1000);
+      throw networkError(`crawl4ai request timed out after ${timeoutSecs} seconds for "${url}"`);
     }
     throw err;
   }
