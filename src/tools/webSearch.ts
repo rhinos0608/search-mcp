@@ -2,6 +2,7 @@ import { logger } from '../logger.js';
 import { loadConfig, type SearchBackend } from '../config.js';
 import { braveSearch } from './braveSearch.js';
 import { searxngSearch } from './searxngSearch.js';
+import { exaSearch } from './exaSearch.js';
 import { normalizeUrl, rrfMerge } from '../utils/fusion.js';
 import { multiSignalRescore, extractWebSearchSignals } from '../utils/rescore.js';
 import type { SearchResult } from '../types.js';
@@ -9,7 +10,7 @@ import type { SearchResult } from '../types.js';
 // ── Fallback order ───────────────────────────────────────────────────────────
 
 /** Backend priority when the primary fails. */
-const FALLBACK_ORDER: SearchBackend[] = ['brave', 'searxng'];
+const FALLBACK_ORDER: SearchBackend[] = ['exa', 'brave', 'searxng'];
 
 function backendAvailable(backend: SearchBackend): boolean {
   const cfg = loadConfig();
@@ -18,6 +19,8 @@ function backendAvailable(backend: SearchBackend): boolean {
       return cfg.brave.apiKey.length > 0;
     case 'searxng':
       return cfg.searxng.baseUrl.length > 0;
+    case 'exa':
+      return cfg.exa.apiKey.length > 0;
   }
 }
 
@@ -34,6 +37,8 @@ async function runBackend(
       return deps.braveSearch(query, cfg.brave.apiKey, limit, safeSearch);
     case 'searxng':
       return deps.searxngSearch(query, cfg.searxng.baseUrl, limit, safeSearch);
+    case 'exa':
+      return deps.exaSearch(query, cfg.exa.apiKey, limit, safeSearch);
   }
 }
 
@@ -42,6 +47,7 @@ async function runBackend(
 export interface WebSearchDeps {
   braveSearch: typeof import('./braveSearch.js').braveSearch;
   searxngSearch: typeof import('./searxngSearch.js').searxngSearch;
+  exaSearch: typeof import('./exaSearch.js').exaSearch;
 }
 
 // ── Core search with fusion ──────────────────────────────────────────────────
@@ -93,7 +99,7 @@ export async function searchWithBackends(
 
   if (valid.length === 0) {
     throw new Error(
-      `All search backends failed. Ensure at least one backend is configured (BRAVE_API_KEY or SEARXNG_BASE_URL).\n${errors.join('\n')}`,
+      `All search backends failed. Ensure at least one backend is configured (EXA_API_KEY, BRAVE_API_KEY, or SEARXNG_BASE_URL).\n${errors.join('\n')}`,
     );
   }
 
@@ -131,5 +137,6 @@ export async function webSearch(
   return searchWithBackends(query, limit, safeSearch, {
     braveSearch,
     searxngSearch,
+    exaSearch,
   });
 }

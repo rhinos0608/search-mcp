@@ -1,9 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {
-  searchWithBackends,
-  type WebSearchDeps,
-} from '../src/tools/webSearch.js';
+import { searchWithBackends, type WebSearchDeps } from '../src/tools/webSearch.js';
 import { resetConfig } from '../src/config.js';
 import type { SearchResult } from '../src/types.js';
 
@@ -40,6 +37,9 @@ test('skips unconfigured backends when overrideBackends is omitted', async () =>
       searxngSearch: async () => {
         throw new Error('should not be called');
       },
+      exaSearch: async () => {
+        throw new Error('should not be called');
+      },
     };
 
     const results = await searchWithBackends('query', 1, 'moderate', deps);
@@ -63,12 +63,10 @@ test('merges and dedupes results from both backends', async () => {
   const deps: WebSearchDeps = {
     braveSearch: async () => [a, b],
     searxngSearch: async () => [c, { ...b, source: 'searxng' as const }],
+    exaSearch: async () => [],
   };
 
-  const results = await searchWithBackends('query', 2, 'moderate', deps, [
-    'brave',
-    'searxng',
-  ]);
+  const results = await searchWithBackends('query', 2, 'moderate', deps, ['brave', 'searxng']);
 
   assert.equal(results.length, 2);
   assert.equal(results[0]!.url, b.url, 'b should be first (RRF winner via both lists)');
@@ -86,12 +84,12 @@ test('returns surviving results when one backend fails', async () => {
     searxngSearch: async () => {
       throw new Error('searxng down');
     },
+    exaSearch: async () => {
+      throw new Error('exa down');
+    },
   };
 
-  const results = await searchWithBackends('query', 2, 'moderate', deps, [
-    'brave',
-    'searxng',
-  ]);
+  const results = await searchWithBackends('query', 2, 'moderate', deps, ['brave', 'searxng']);
 
   assert.equal(results.length, 2);
   assert.equal(results[0]!.url, x.url);
@@ -106,11 +104,13 @@ test('throws when all backends fail', async () => {
     searxngSearch: async () => {
       throw new Error('searxng down');
     },
+    exaSearch: async () => {
+      throw new Error('exa down');
+    },
   };
 
   await assert.rejects(
-    async () =>
-      searchWithBackends('query', 2, 'moderate', deps, ['brave', 'searxng']),
+    async () => searchWithBackends('query', 2, 'moderate', deps, ['brave', 'searxng']),
     /All search backends failed/,
   );
 });
@@ -126,12 +126,10 @@ test('limits results to requested count', async () => {
   const deps: WebSearchDeps = {
     braveSearch: async () => [r1, r2, r3],
     searxngSearch: async () => [r4, r5, r6],
+    exaSearch: async () => [],
   };
 
-  const results = await searchWithBackends('query', 2, 'moderate', deps, [
-    'brave',
-    'searxng',
-  ]);
+  const results = await searchWithBackends('query', 2, 'moderate', deps, ['brave', 'searxng']);
 
   assert.equal(results.length, 2);
   assert.equal(results[0]!.url, r1.url);
@@ -158,10 +156,54 @@ test('searchWithBackends with rescoring: fresher results bubble up', async () =>
     {
       braveSearch: async () => braveResults,
       searxngSearch: async () => searxResults,
+      exaSearch: async () => [],
     },
     ['brave', 'searxng'],
   );
 
   // With rescoring, newer result should outrank older one
   assert.equal(results[0]!.url, 'https://example.com/new');
+});
+
+test('uses Exa as configured primary backend and marks source as exa', async () => {
+  const origBackend = process.env.SEARCH_BACKEND;
+  const origExa = process.env.EXA_API_KEY;
+  const origBrave = process.env.BRAVE_API_KEY;
+  const origSearx = process.env.SEARXNG_BASE_URL;
+
+  try {
+    process.env.SEARCH_BACKEND = 'exa';
+    process.env.EXA_API_KEY = 'exa-test-key';
+    delete process.env.BRAVE_API_KEY;
+    delete process.env.SEARXNG_BASE_URL;
+    resetConfig();
+
+    let exaCalled = false;
+    const results = await searchWithBackends('neural query', 1, 'moderate', {
+      braveSearch: async () => {
+        throw new Error('should not call brave');
+      },
+      searxngSearch: async () => {
+        throw new Error('should not call searxng');
+      },
+      exaSearch: async () => {
+        exaCalled = true;
+        return [{ ...makeResult('https://exa.example/result', 1), source: 'exa' as const }];
+      },
+    });
+
+    assert.equal(exaCalled, true);
+    assert.equal(results[0]!.source, 'exa');
+    assert.equal(results[0]!.url, 'https://exa.example/result');
+  } finally {
+    if (origBackend !== undefined) process.env.SEARCH_BACKEND = origBackend;
+    else delete process.env.SEARCH_BACKEND;
+    if (origExa !== undefined) process.env.EXA_API_KEY = origExa;
+    else delete process.env.EXA_API_KEY;
+    if (origBrave !== undefined) process.env.BRAVE_API_KEY = origBrave;
+    else delete process.env.BRAVE_API_KEY;
+    if (origSearx !== undefined) process.env.SEARXNG_BASE_URL = origSearx;
+    else delete process.env.SEARXNG_BASE_URL;
+    resetConfig();
+  }
 });
