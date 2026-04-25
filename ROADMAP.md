@@ -457,10 +457,10 @@ Input: query + optional filters (location, workMode). Output: ranked job listing
 
 **Goal**: Transform the extraction and caching layers to be robust enough for production agent workflows, moving beyond simple markdown parsing and volatile in-memory storage. This incorporates research findings on Kill Chain extraction and Contextual Embeddings alongside the original Code intelligence goals.
 
-### 1. Robust Infrastructure (Persistence & Neural Search)
+### 1. Robust Infrastructure (Persistence & Neural Search) [✅ COMPLETED]
 
-- **Persistent Corpus Cache:** Migrate `src/utils/corpusCache.ts` from in-process memory to SQLite (`better-sqlite3`). This solves the critical issue where `source: "cached"` dies on server restart. Includes byte-weighted LRU eviction.
-- **Neural Search Integration:** Add Exa as a supported search backend (`EXA_API_KEY`) to enable semantic web/code search before crawling even begins.
+- **Persistent Corpus Cache:** Migrated `src/utils/corpusCache.ts` from in-process memory to SQLite (`better-sqlite3`). This solves the critical issue where `source: "cached"` dies on server restart. Includes byte-weighted LRU eviction.
+- **Neural Search Integration:** Added Exa as a supported search backend (`EXA_API_KEY`) to enable semantic web/code search before crawling even begins.
 
 ### 2. Advanced Extraction (The "Kill Chain")
 
