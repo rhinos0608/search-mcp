@@ -40,13 +40,13 @@ function makeChunks(texts: string[]): CorpusChunk[] {
 }
 
 function makeEmbeddings(chunks: CorpusChunk[], dims = 4): number[][] {
-  return chunks.map((_, i) =>
-    Array.from({ length: dims }, (__, d) => (i + 1) * 0.1 + d * 0.01),
-  );
+  return chunks.map((_, i) => Array.from({ length: dims }, (__, d) => (i + 1) * 0.1 + d * 0.01));
 }
 
 function computeContentHash(chunks: CorpusChunk[]): string {
-  return createHash('sha256').update(chunks.map((c) => c.text).join('\n')).digest('hex');
+  return createHash('sha256')
+    .update(chunks.map((c) => c.text).join('\n'))
+    .digest('hex');
 }
 
 const TEST_SOURCE: SemanticCrawlSource = {
@@ -63,7 +63,7 @@ const TEST_SOURCE_2: SemanticCrawlSource = {
 // 1. Serialize/deserialize roundtrip
 // ────────────────────────────────────────────────────────────────────
 
-test('roundtrip: getOrBuildCorpus writes; loadCorpusById returns identical data', async () => {
+test('roundtrip: getOrBuildCorpus writes SQLite db; loadCorpusById returns identical data', async () => {
   const cacheDir = makeTmpCacheDir();
   const chunks = makeChunks(['hello world', 'foo bar baz']);
   const embeddings = makeEmbeddings(chunks);
@@ -83,6 +83,15 @@ test('roundtrip: getOrBuildCorpus writes; loadCorpusById returns identical data'
   assert.equal(corpus.contentHash, computeContentHash(chunks));
   assert.equal(corpus.chunks.length, 2);
   assert.equal(corpus.embeddings.length, 2);
+  assert.ok(
+    fs.existsSync(path.join(cacheDir, 'corpus-cache.sqlite')),
+    'Expected SQLite cache database to exist',
+  );
+  assert.deepEqual(
+    fs.readdirSync(cacheDir).filter((file) => file.endsWith('.json') || file.endsWith('.bin')),
+    [],
+    'SQLite cache should not write per-corpus JSON/BIN files',
+  );
 
   // Load by ID — should get same data back
   const loaded = await loadCorpusById(corpus.corpusId, { cacheDir });
@@ -154,40 +163,59 @@ test('empty materializations are not persisted as cache hits', async () => {
   const corpusFiles = fs
     .readdirSync(cacheDir)
     .filter((file) => file.endsWith('.json') || file.endsWith('.bin'));
-  assert.deepEqual(corpusFiles, [], 'empty corpora should not write metadata, embeddings, or source index files');
+  assert.deepEqual(
+    corpusFiles,
+    [],
+    'empty corpora should not write metadata, embeddings, or source index files',
+  );
 });
 
-test('empty corpora already on disk are ignored and rebuilt', async () => {
+test('empty corpora already in SQLite are ignored and rebuilt', async () => {
   const cacheDir = makeTmpCacheDir();
   const oldCorpusId = computeCorpusId(TEST_SOURCE, '', 0);
   const now = Date.now();
-  fs.writeFileSync(
-    path.join(cacheDir, `${oldCorpusId}.json`),
-    JSON.stringify({
-      schemaVersion: 1,
-      corpusId: oldCorpusId,
-      source: TEST_SOURCE,
-      contentHash: computeContentHash([]),
-      model: '',
-      dimensions: 0,
-      createdAt: now,
-      lastAccessedAt: now,
-      chunks: [],
-      bm25Docs: [],
-    }),
+  const Database = (await import('better-sqlite3')).default;
+  const db = new Database(path.join(cacheDir, 'corpus-cache.sqlite'));
+  db.exec(`
+    CREATE TABLE corpora (
+      corpus_id TEXT PRIMARY KEY,
+      source_key TEXT NOT NULL,
+      source_json TEXT NOT NULL,
+      content_hash TEXT NOT NULL,
+      model TEXT NOT NULL,
+      dimensions INTEGER NOT NULL,
+      created_at INTEGER NOT NULL,
+      last_accessed_at INTEGER NOT NULL,
+      total_bytes INTEGER NOT NULL
+    );
+    CREATE TABLE source_index (
+      source_key TEXT NOT NULL,
+      corpus_id TEXT NOT NULL,
+      model TEXT NOT NULL,
+      dimensions INTEGER NOT NULL,
+      created_at INTEGER NOT NULL,
+      PRIMARY KEY (source_key, corpus_id)
+    );
+  `);
+  db.prepare(`INSERT INTO corpora VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
+    oldCorpusId,
+    '{"type":"url","url":"https://example.com"}',
+    JSON.stringify(TEST_SOURCE),
+    computeContentHash([]),
+    '',
+    0,
+    now,
+    now,
+    0,
   );
-  const emptyEmbeddings = Buffer.alloc(8);
-  emptyEmbeddings.writeUInt32LE(0, 0);
-  emptyEmbeddings.writeUInt32LE(0, 4);
-  fs.writeFileSync(path.join(cacheDir, `${oldCorpusId}.bin`), emptyEmbeddings);
-  fs.writeFileSync(
-    path.join(cacheDir, 'source-index.json'),
-    JSON.stringify({
-      '{"type":"url","url":"https://example.com"}': [
-        { corpusId: oldCorpusId, model: '', dimensions: 0, createdAt: now },
-      ],
-    }),
+  db.prepare(`INSERT INTO source_index VALUES (?, ?, ?, ?, ?)`).run(
+    '{"type":"url","url":"https://example.com"}',
+    oldCorpusId,
+    '',
+    0,
+    now,
   );
+  db.close();
 
   const chunks = makeChunks(['rebuilt content']);
   const embeddings = makeEmbeddings(chunks);
@@ -222,10 +250,13 @@ test('TTL expiry: loadCorpusById returns null when createdAt exceeds ttlMs', asy
   );
 
   // Manipulate the metadata on disk to set createdAt far in the past
-  const metaPath = path.join(cacheDir, `${corpus.corpusId}.json`);
-  const meta = JSON.parse(fs.readFileSync(metaPath, 'utf-8')) as Record<string, unknown>;
-  meta['createdAt'] = Date.now() - 100_000; // 100 seconds ago
-  fs.writeFileSync(metaPath, JSON.stringify(meta));
+  const Database = (await import('better-sqlite3')).default;
+  const db = new Database(path.join(cacheDir, 'corpus-cache.sqlite'));
+  db.prepare('UPDATE corpora SET created_at = ? WHERE corpus_id = ?').run(
+    Date.now() - 100_000,
+    corpus.corpusId,
+  );
+  db.close();
 
   // Load with 10ms TTL — should be expired
   const result = await loadCorpusById(corpus.corpusId, { cacheDir, ttlMs: 10 });
@@ -258,11 +289,11 @@ test('LRU eviction: writing when at maxCorpora evicts least-recently-accessed', 
     );
     corpora.push(corpus);
     // Small delay so timestamps are distinguishable
-    await new Promise(r => setTimeout(r, 5));
+    await new Promise((r) => setTimeout(r, 5));
   }
 
   // Access the first corpus to make it "recently used" — b.com becomes LRU
-  await new Promise(r => setTimeout(r, 5));
+  await new Promise((r) => setTimeout(r, 5));
   await loadCorpusById(corpora[0]!.corpusId, { cacheDir });
 
   // Now add a 4th corpus — should evict LRU (b.com / index 1)
@@ -270,7 +301,12 @@ test('LRU eviction: writing when at maxCorpora evicts least-recently-accessed', 
   const newEmbeddings = makeEmbeddings(newChunks);
   await getOrBuildCorpus(
     { type: 'url', url: 'https://d.com' },
-    async () => ({ chunks: newChunks, embeddings: newEmbeddings, model: 'm', contentHash: computeContentHash(newChunks) }),
+    async () => ({
+      chunks: newChunks,
+      embeddings: newEmbeddings,
+      model: 'm',
+      contentHash: computeContentHash(newChunks),
+    }),
     { cacheDir, maxCorpora: 3 },
   );
 
@@ -299,7 +335,7 @@ test('async lock: concurrent calls for same source invoke materializeFn exactly 
   const materialize = async () => {
     callCount++;
     // Small delay to allow concurrency overlap
-    await new Promise(r => setTimeout(r, 20));
+    await new Promise((r) => setTimeout(r, 20));
     return { chunks, embeddings, model: 'm', contentHash: computeContentHash(chunks) };
   };
 
@@ -314,7 +350,7 @@ test('async lock: concurrent calls for same source invoke materializeFn exactly 
 
   assert.equal(callCount, 1, `Expected materializeFn called exactly once, got ${callCount}`);
   // All results should have same corpusId
-  const ids = new Set(results.map(r => r.corpusId));
+  const ids = new Set(results.map((r) => r.corpusId));
   assert.equal(ids.size, 1, 'Expected all results to share same corpusId');
 });
 
@@ -333,15 +369,33 @@ test('invalidateCorpus: removes corpus from disk', async () => {
     { cacheDir },
   );
 
-  const metaFilePath = path.join(cacheDir, `${corpus.corpusId}.json`);
-  const binFilePath = path.join(cacheDir, `${corpus.corpusId}.bin`);
-  assert.ok(fs.existsSync(metaFilePath), 'Expected .json file to exist before invalidation');
-  assert.ok(fs.existsSync(binFilePath), 'Expected .bin file to exist before invalidation');
+  const Database = (await import('better-sqlite3')).default;
+  const dbPath = path.join(cacheDir, 'corpus-cache.sqlite');
+  let db = new Database(dbPath, { readonly: true });
+  assert.equal(
+    (
+      db
+        .prepare('SELECT COUNT(*) AS count FROM corpora WHERE corpus_id = ?')
+        .get(corpus.corpusId) as { count: number }
+    ).count,
+    1,
+    'Expected SQLite corpus row before invalidation',
+  );
+  db.close();
 
   invalidateCorpus(corpus.corpusId, { cacheDir, source: TEST_SOURCE });
 
-  assert.ok(!fs.existsSync(metaFilePath), 'Expected .json file to be removed after invalidation');
-  assert.ok(!fs.existsSync(binFilePath), 'Expected .bin file to be removed after invalidation');
+  db = new Database(dbPath, { readonly: true });
+  assert.equal(
+    (
+      db
+        .prepare('SELECT COUNT(*) AS count FROM corpora WHERE corpus_id = ?')
+        .get(corpus.corpusId) as { count: number }
+    ).count,
+    0,
+    'Expected SQLite corpus row to be removed after invalidation',
+  );
+  db.close();
 
   const reloaded = await loadCorpusById(corpus.corpusId, { cacheDir });
   assert.equal(reloaded, null, 'Expected null after invalidation');
@@ -402,17 +456,25 @@ test('BM25 index: loaded corpus has functional bm25Index', async () => {
   assert.ok(loaded !== null, 'Expected loaded corpus');
 
   const results = loaded.bm25Index.search('machine learning', 5);
-  assert.ok(results.length >= 2, `Expected at least 2 results for 'machine learning', got ${results.length}`);
+  assert.ok(
+    results.length >= 2,
+    `Expected at least 2 results for 'machine learning', got ${results.length}`,
+  );
 
   // The ML-related chunks should outrank the cooking chunk
   assert.ok(results[0]!.score > 0, 'Expected ML chunks to rank in top results');
 
   // Cooking chunk should not be top result
-  const cookingScore = results.find((r: { id: string; score: number }) =>
-    r.id.includes('page1') || r.id === `${chunks[1]!.url}:${chunks[1]!.chunkIndex}`,
-  )?.score ?? 0;
+  const cookingScore =
+    results.find(
+      (r: { id: string; score: number }) =>
+        r.id.includes('page1') || r.id === `${chunks[1]!.url}:${chunks[1]!.chunkIndex}`,
+    )?.score ?? 0;
   const mlScore = results[0]!.score;
-  assert.ok(mlScore > cookingScore, `Expected ML chunk (${mlScore}) to outrank cooking (${cookingScore})`);
+  assert.ok(
+    mlScore > cookingScore,
+    `Expected ML chunk (${mlScore}) to outrank cooking (${cookingScore})`,
+  );
 });
 
 // ────────────────────────────────────────────────────────────────────
@@ -426,7 +488,12 @@ test('corpusId is deterministic: same source produces same id on different calls
 
   const corpus1 = await getOrBuildCorpus(
     TEST_SOURCE,
-    async () => ({ chunks, embeddings, model: 'model-abc', contentHash: computeContentHash(chunks) }),
+    async () => ({
+      chunks,
+      embeddings,
+      model: 'model-abc',
+      contentHash: computeContentHash(chunks),
+    }),
     { cacheDir },
   );
 
@@ -435,11 +502,20 @@ test('corpusId is deterministic: same source produces same id on different calls
 
   const corpus2 = await getOrBuildCorpus(
     TEST_SOURCE,
-    async () => ({ chunks, embeddings, model: 'model-abc', contentHash: computeContentHash(chunks) }),
+    async () => ({
+      chunks,
+      embeddings,
+      model: 'model-abc',
+      contentHash: computeContentHash(chunks),
+    }),
     { cacheDir },
   );
 
-  assert.equal(corpus1.corpusId, corpus2.corpusId, 'Expected same corpusId for same source + model');
+  assert.equal(
+    corpus1.corpusId,
+    corpus2.corpusId,
+    'Expected same corpusId for same source + model',
+  );
 });
 
 // ────────────────────────────────────────────────────────────────────
@@ -463,16 +539,20 @@ test('corpusId differs for different sources', async () => {
     { cacheDir },
   );
 
-  assert.notEqual(corpus1.corpusId, corpus2.corpusId, 'Expected different corpusIds for different sources');
+  assert.notEqual(
+    corpus1.corpusId,
+    corpus2.corpusId,
+    'Expected different corpusIds for different sources',
+  );
 });
 
 // ────────────────────────────────────────────────────────────────────
-// 11. Truncated .bin file triggers re-materialize (returns null)
+// 11. Corrupted SQLite embedding blob triggers cache miss
 // ────────────────────────────────────────────────────────────────────
 
-test('loadCorpusById: truncated .bin returns null', async () => {
+test('loadCorpusById: corrupted embedding blob returns null', async () => {
   const cacheDir = makeTmpCacheDir();
-  const chunks = makeChunks(['truncated bin test']);
+  const chunks = makeChunks(['truncated embedding test']);
   const embeddings = makeEmbeddings(chunks, 4); // 1 chunk × 4 dims
 
   const corpus = await getOrBuildCorpus(
@@ -481,18 +561,16 @@ test('loadCorpusById: truncated .bin returns null', async () => {
     { cacheDir },
   );
 
-  // Overwrite the .bin with a valid header (N=1, D=4) but only 4 bytes of float
-  // data instead of the expected 1×4×4 = 16 bytes.
-  const truncatedBuf = Buffer.allocUnsafe(8 + 4); // header + 4 bytes (should be 16)
-  truncatedBuf.writeUInt32LE(1, 0); // N = 1
-  truncatedBuf.writeUInt32LE(4, 4); // D = 4
-  truncatedBuf.writeFloatLE(0.1, 8); // only 1 float instead of 4
-  const bp = path.join(cacheDir, `${corpus.corpusId}.bin`);
-  fs.writeFileSync(bp, truncatedBuf);
+  const Database = (await import('better-sqlite3')).default;
+  const db = new Database(path.join(cacheDir, 'corpus-cache.sqlite'));
+  db.prepare('UPDATE embeddings SET vector = ? WHERE corpus_id = ? AND position = 0').run(
+    Buffer.alloc(3),
+    corpus.corpusId,
+  );
+  db.close();
 
-  // loadCorpusById should return null due to truncated binary data
   const result = await loadCorpusById(corpus.corpusId, { cacheDir });
-  assert.equal(result, null, 'Expected null for corpus with truncated .bin file');
+  assert.equal(result, null, 'Expected null for corpus with corrupted embedding blob');
 });
 
 // ────────────────────────────────────────────────────────────────────
@@ -526,7 +604,7 @@ test('roundtrip: original source is preserved through cache read/write', async (
 // 13. Atomic writes leave no temp files behind
 // ────────────────────────────────────────────────────────────────────
 
-test('atomic writes: no .tmp files remain after successful write', async () => {
+test('SQLite cache: no legacy per-corpus files or temp files remain after successful write', async () => {
   const cacheDir = makeTmpCacheDir();
   const chunks = makeChunks(['atomic write test']);
   const embeddings = makeEmbeddings(chunks);
@@ -538,6 +616,50 @@ test('atomic writes: no .tmp files remain after successful write', async () => {
   );
 
   const files = fs.readdirSync(cacheDir);
-  const tmpFiles = files.filter((f) => f.endsWith('.tmp'));
-  assert.deepStrictEqual(tmpFiles, [], 'Expected no .tmp files in cache directory');
+  const legacyFiles = files.filter(
+    (f) => f.endsWith('.tmp') || f.endsWith('.json') || f.endsWith('.bin'),
+  );
+  assert.deepStrictEqual(legacyFiles, [], 'Expected no legacy/temp files in cache directory');
+  assert.ok(files.includes('corpus-cache.sqlite'), 'Expected SQLite database in cache directory');
+});
+
+test('byte-weighted LRU eviction uses maxTotalBytes, not only corpus count', async () => {
+  const cacheDir = makeTmpCacheDir();
+  const firstChunks = makeChunks(['a'.repeat(1200)]);
+  const firstEmbeddings = makeEmbeddings(firstChunks, 8);
+  const first = await getOrBuildCorpus(
+    { type: 'url', url: 'https://bytes-a.com' },
+    async () => ({
+      chunks: firstChunks,
+      embeddings: firstEmbeddings,
+      model: 'm',
+      contentHash: computeContentHash(firstChunks),
+    }),
+    { cacheDir, maxCorpora: 10, maxTotalBytes: 2000 },
+  );
+
+  await new Promise((r) => setTimeout(r, 5));
+
+  const secondChunks = makeChunks(['b'.repeat(1200)]);
+  const secondEmbeddings = makeEmbeddings(secondChunks, 8);
+  const second = await getOrBuildCorpus(
+    { type: 'url', url: 'https://bytes-b.com' },
+    async () => ({
+      chunks: secondChunks,
+      embeddings: secondEmbeddings,
+      model: 'm',
+      contentHash: computeContentHash(secondChunks),
+    }),
+    { cacheDir, maxCorpora: 10, maxTotalBytes: 2000 },
+  );
+
+  assert.equal(
+    await loadCorpusById(first.corpusId, { cacheDir }),
+    null,
+    'Expected oldest corpus evicted by total byte cap',
+  );
+  assert.ok(
+    await loadCorpusById(second.corpusId, { cacheDir }),
+    'Expected newest corpus to remain',
+  );
 });

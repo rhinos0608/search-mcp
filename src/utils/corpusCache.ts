@@ -1,31 +1,30 @@
 /**
- * Disk-backed corpus cache.
+ * SQLite-backed corpus cache.
  *
  * Storage:
- *   {cacheDir}/source-index.json  — source key → corpusId mapping (fast lookup)
- *   {cacheDir}/{corpusId}.json     — metadata + chunks + bm25Docs
- *   {cacheDir}/{corpusId}.bin      — raw Float32Array embeddings
+ *   {cacheDir}/corpus-cache.sqlite by default, or DATABASE_PATH when set.
  *
- * Binary layout (.bin):
- *   [4 bytes: uint32 numEmbeddings]
- *   [4 bytes: uint32 dimensionsPerEmbedding]
- *   [N × D × 4 bytes: float32 values row-major]
+ * The cache stores corpus metadata, chunks, embedding vectors, and source-key
+ * lookup rows in one durable database. BM25 is rebuilt on load from cached
+ * chunk text, keeping the database schema small while preserving fast reads.
  */
 
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import crypto from 'node:crypto';
+import Database from 'better-sqlite3';
+import type { Database as BetterSqliteDatabase } from 'better-sqlite3';
 import type { CorpusChunk, SemanticCrawlSource } from '../types.js';
 import { buildBm25Index, type Bm25Index } from './bm25.js';
 import { logger } from '../logger.js';
 import { MAX_TOKENS, MIN_TOKENS, TOKEN_RATIO, OVERLAP_RATIO } from '../chunking.js';
 
 // ────────────────────────────────────────────────────────────────────
-// Schema version — increment when the on-disk format changes
+// Schema version — increment when the SQLite schema changes
 // ────────────────────────────────────────────────────────────────────
 
-const SCHEMA_VERSION = 1;
+const SCHEMA_VERSION = 2;
 
 // ────────────────────────────────────────────────────────────────────
 // Public types
@@ -42,39 +41,37 @@ export interface CachedCorpus {
   bm25Index: Bm25Index;
   createdAt: number; // Unix ms
   lastAccessedAt: number; // Unix ms
-  /**
-   * Aggregated extractedData from the original crawl, keyed by URL.
-   * Only present when the original crawl used an extractionConfig.
-   * Absent for older cached corpora or those built without extraction.
-   *
-   * **Known limitation**: extractedData is not currently persisted to disk cache.
-   * Re-querying with `source: { type: 'cached', corpusId }` will return no
-   * extractedData even if the original crawl produced some. To get extractedData
-   * again, re-issue the request with the original source type (e.g. 'url').
-   */
+  /** Aggregated extractedData from the original crawl, keyed by URL. */
   extractedData?: Record<string, Record<string, unknown>[]>;
 }
 
 // ────────────────────────────────────────────────────────────────────
-// Internal metadata shape (what we write to .json)
+// SQLite row shapes
 // ────────────────────────────────────────────────────────────────────
 
-interface CorpusMetadata {
-  schemaVersion: number;
-  corpusId: string;
-  source: SemanticCrawlSource;
-  contentHash: string;
+interface CorpusRow {
+  corpus_id: string;
+  source_key: string;
+  source_json: string;
+  content_hash: string;
   model: string;
   dimensions: number;
-  createdAt: number;
-  lastAccessedAt: number;
-  chunks: CorpusChunk[];
-  bm25Docs: { id: string; text: string }[];
+  created_at: number;
+  last_accessed_at: number;
+  total_bytes: number;
 }
 
-// ────────────────────────────────────────────────────────────────────
-// Source index entry (stored in source-index.json)
-// ────────────────────────────────────────────────────────────────────
+interface ChunkRow {
+  position: number;
+  chunk_json: string;
+  bm25_id: string;
+  bm25_text: string;
+}
+
+interface EmbeddingRow {
+  position: number;
+  vector: Buffer;
+}
 
 interface SourceIndexEntry {
   corpusId: string;
@@ -83,11 +80,34 @@ interface SourceIndexEntry {
   createdAt: number;
 }
 
+interface SourceIndexRow {
+  corpus_id: string;
+  model: string;
+  dimensions: number;
+  created_at: number;
+}
+
+interface EvictionRow {
+  corpus_id: string;
+  last_accessed_at: number;
+  created_at: number;
+  total_bytes: number;
+}
+
+interface CacheOpts {
+  ttlMs?: number;
+  maxCorpora?: number;
+  maxTotalBytes?: number;
+  cacheDir?: string;
+  databasePath?: string;
+}
+
 // ────────────────────────────────────────────────────────────────────
 // Options
 // ────────────────────────────────────────────────────────────────────
 
 const DEFAULT_MAX_CORPORA = 50;
+const DEFAULT_MAX_TOTAL_BYTES = 500 * 1024 * 1024;
 
 const DEFAULT_CACHE_DIR =
   process.env.SEMANTIC_CRAWL_CACHE_DIR ??
@@ -97,12 +117,6 @@ const DEFAULT_TTL_MS =
   process.env.SEMANTIC_CRAWL_CACHE_TTL_MS !== undefined
     ? parseInt(process.env.SEMANTIC_CRAWL_CACHE_TTL_MS, 10)
     : 7 * 24 * 60 * 60 * 1000;
-
-interface CacheOpts {
-  ttlMs?: number;
-  maxCorpora?: number;
-  cacheDir?: string;
-}
 
 // ────────────────────────────────────────────────────────────────────
 // In-memory dedup map (stableStringify(source) → pending Promise)
@@ -188,335 +202,404 @@ function chunkToBm25Id(chunk: CorpusChunk): string {
   return chunk.url + ':' + String(chunk.chunkIndex);
 }
 
-// ────────────────────────────────────────────────────────────────────
-// Cache directory helpers
-// ────────────────────────────────────────────────────────────────────
+function contentHashForChunks(chunks: CorpusChunk[]): string {
+  return crypto
+    .createHash('sha256')
+    .update(chunks.map((c) => c.text).join('\n'))
+    .digest('hex');
+}
 
-function ensureCacheDir(cacheDir: string): boolean {
+function resolveDatabasePath(opts?: CacheOpts): string {
+  if (opts?.databasePath !== undefined) return opts.databasePath;
+  if (opts?.cacheDir !== undefined) return path.join(opts.cacheDir, 'corpus-cache.sqlite');
+  return process.env.DATABASE_PATH ?? path.join(DEFAULT_CACHE_DIR, 'corpus-cache.sqlite');
+}
+
+function ensureDatabaseDir(databasePath: string): boolean {
   try {
-    fs.mkdirSync(cacheDir, { recursive: true });
+    fs.mkdirSync(path.dirname(databasePath), { recursive: true });
     return true;
   } catch (err) {
-    logger.warn({ err, cacheDir }, 'corpusCache: failed to create cache directory');
+    logger.warn({ err, databasePath }, 'corpusCache: failed to create database directory');
     return false;
   }
 }
 
-function metaPath(cacheDir: string, corpusId: string): string {
-  return path.join(cacheDir, `${corpusId}.json`);
+function openDatabase(databasePath: string): BetterSqliteDatabase {
+  const db = new Database(databasePath);
+  db.pragma('foreign_keys = ON');
+  db.pragma('journal_mode = WAL');
+  initSchema(db);
+  return db;
 }
 
-function binPath(cacheDir: string, corpusId: string): string {
-  return path.join(cacheDir, `${corpusId}.bin`);
+function initSchema(db: BetterSqliteDatabase): void {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS cache_meta (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS corpora (
+      corpus_id TEXT PRIMARY KEY,
+      source_key TEXT NOT NULL,
+      source_json TEXT NOT NULL,
+      content_hash TEXT NOT NULL,
+      model TEXT NOT NULL,
+      dimensions INTEGER NOT NULL,
+      created_at INTEGER NOT NULL,
+      last_accessed_at INTEGER NOT NULL,
+      total_bytes INTEGER NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS chunks (
+      corpus_id TEXT NOT NULL,
+      position INTEGER NOT NULL,
+      chunk_json TEXT NOT NULL,
+      bm25_id TEXT NOT NULL,
+      bm25_text TEXT NOT NULL,
+      PRIMARY KEY (corpus_id, position),
+      FOREIGN KEY (corpus_id) REFERENCES corpora(corpus_id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS embeddings (
+      corpus_id TEXT NOT NULL,
+      position INTEGER NOT NULL,
+      vector BLOB NOT NULL,
+      PRIMARY KEY (corpus_id, position),
+      FOREIGN KEY (corpus_id) REFERENCES corpora(corpus_id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS source_index (
+      source_key TEXT NOT NULL,
+      corpus_id TEXT NOT NULL,
+      model TEXT NOT NULL,
+      dimensions INTEGER NOT NULL,
+      created_at INTEGER NOT NULL,
+      PRIMARY KEY (source_key, corpus_id),
+      FOREIGN KEY (corpus_id) REFERENCES corpora(corpus_id) ON DELETE CASCADE
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_source_index_lookup
+      ON source_index(source_key, created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_corpora_lru
+      ON corpora(last_accessed_at ASC, created_at ASC);
+  `);
+
+  const current = db.prepare('SELECT value FROM cache_meta WHERE key = ?').get('schemaVersion') as
+    | { value: string }
+    | undefined;
+  if (current === undefined) {
+    db.prepare('INSERT INTO cache_meta (key, value) VALUES (?, ?)').run(
+      'schemaVersion',
+      String(SCHEMA_VERSION),
+    );
+  } else if (Number(current.value) !== SCHEMA_VERSION) {
+    logger.warn(
+      { found: current.value, expected: SCHEMA_VERSION },
+      'corpusCache: SQLite schema version changed; existing compatible tables will be reused',
+    );
+    db.prepare('UPDATE cache_meta SET value = ? WHERE key = ?').run(
+      String(SCHEMA_VERSION),
+      'schemaVersion',
+    );
+  }
 }
 
-function indexPath(cacheDir: string): string {
-  return path.join(cacheDir, 'source-index.json');
-}
-
-// ────────────────────────────────────────────────────────────────────
-// Source index helpers
-// ────────────────────────────────────────────────────────────────────
-
-/** Read the full source-index.json, or return empty object if absent. */
-function readSourceIndex(cacheDir: string): Record<string, SourceIndexEntry[]> {
-  const ip = indexPath(cacheDir);
-  if (!fs.existsSync(ip)) return {};
+function withDatabase<T>(databasePath: string, fn: (db: BetterSqliteDatabase) => T): T | null {
+  if (!ensureDatabaseDir(databasePath)) return null;
+  let db: BetterSqliteDatabase | undefined;
   try {
-    const raw = fs.readFileSync(ip, 'utf-8');
-    return JSON.parse(raw) as Record<string, SourceIndexEntry[]>;
-  } catch {
-    return {};
-  }
-}
-
-/** Write the source index (entries sorted by createdAt descending). */
-function writeSourceIndex(cacheDir: string, index: Record<string, SourceIndexEntry[]>): void {
-  fs.writeFileSync(indexPath(cacheDir), JSON.stringify(index), 'utf-8');
-}
-
-/**
- * Add or update an entry in the source index for a given source key.
- * Entries are kept sorted by createdAt descending (most recent first).
- */
-function addToSourceIndex(cacheDir: string, sourceKey: string, entry: SourceIndexEntry): void {
-  const index = readSourceIndex(cacheDir);
-  const existing = index[sourceKey] ?? [];
-  // Remove any entry with the same corpusId (replace case)
-  const filtered = existing.filter((e) => e.corpusId !== entry.corpusId);
-  // Insert in descending createdAt order
-  const insertAt = filtered.findIndex((e) => e.createdAt < entry.createdAt);
-  if (insertAt === -1) {
-    filtered.push(entry);
-  } else {
-    filtered.splice(insertAt, 0, entry);
-  }
-  index[sourceKey] = filtered;
-  writeSourceIndex(cacheDir, index);
-}
-
-/**
- * Look up corpusIds for a source key from the source index.
- * Returns entries sorted by createdAt descending.
- */
-function findInSourceIndex(cacheDir: string, sourceKey: string): SourceIndexEntry[] {
-  return readSourceIndex(cacheDir)[sourceKey] ?? [];
-}
-
-// ────────────────────────────────────────────────────────────────────
-// Binary serialization
-// ────────────────────────────────────────────────────────────────────
-
-function serializeEmbeddings(embeddings: number[][]): Buffer {
-  const N = embeddings.length;
-  const D = N > 0 ? (embeddings[0]?.length ?? 0) : 0;
-  const header = 8; // 2 × uint32
-  const buf = Buffer.allocUnsafe(header + N * D * 4);
-  buf.writeUInt32LE(N, 0);
-  buf.writeUInt32LE(D, 4);
-  let offset = header;
-  for (const row of embeddings) {
-    for (const val of row) {
-      buf.writeFloatLE(val, offset);
-      offset += 4;
+    db = openDatabase(databasePath);
+    return fn(db);
+  } catch (err) {
+    logger.warn({ err, databasePath }, 'corpusCache: SQLite operation failed');
+    return null;
+  } finally {
+    try {
+      db?.close();
+    } catch {
+      // best effort
     }
+  }
+}
+
+// ────────────────────────────────────────────────────────────────────
+// Embedding serialization
+// ────────────────────────────────────────────────────────────────────
+
+function serializeEmbedding(row: number[]): Buffer {
+  const buf = Buffer.allocUnsafe(row.length * 4);
+  let offset = 0;
+  for (const val of row) {
+    buf.writeFloatLE(val, offset);
+    offset += 4;
   }
   return buf;
 }
 
-function deserializeEmbeddings(buf: Buffer): number[][] {
-  const N = buf.readUInt32LE(0);
-  const D = buf.readUInt32LE(4);
-  const result: number[][] = [];
-  let offset = 8;
-  for (let i = 0; i < N; i++) {
-    const row: number[] = [];
-    for (let d = 0; d < D; d++) {
-      row.push(buf.readFloatLE(offset));
-      offset += 4;
-    }
-    result.push(row);
+function deserializeEmbedding(buf: Buffer, dimensions: number): number[] | null {
+  if (buf.length !== dimensions * 4) return null;
+  const row: number[] = [];
+  for (let offset = 0; offset < buf.length; offset += 4) {
+    row.push(buf.readFloatLE(offset));
   }
-  return result;
+  return row;
+}
+
+function estimateCorpusBytes(args: {
+  sourceKey: string;
+  source: SemanticCrawlSource;
+  chunks: CorpusChunk[];
+  embeddings: number[][];
+  contentHash: string;
+  model: string;
+}): number {
+  const jsonBytes =
+    Buffer.byteLength(JSON.stringify(args.source), 'utf8') +
+    Buffer.byteLength(args.sourceKey, 'utf8') +
+    Buffer.byteLength(args.contentHash, 'utf8') +
+    Buffer.byteLength(args.model, 'utf8');
+  const chunkBytes = args.chunks.reduce(
+    (total, chunk) =>
+      total +
+      Buffer.byteLength(JSON.stringify(chunk), 'utf8') +
+      Buffer.byteLength(chunk.text, 'utf8'),
+    0,
+  );
+  const embeddingBytes = args.embeddings.reduce((total, row) => total + row.length * 4, 0);
+  return jsonBytes + chunkBytes + embeddingBytes;
 }
 
 // ────────────────────────────────────────────────────────────────────
-// Write / read corpus files
+// Read / write corpus rows
 // ────────────────────────────────────────────────────────────────────
 
-function writeCorpus(cacheDir: string, meta: CorpusMetadata, embeddings: number[][]): void {
-  const jsonTmp = metaPath(cacheDir, meta.corpusId) + '.tmp';
-  const binTmp = binPath(cacheDir, meta.corpusId) + '.tmp';
-  const jsonFinal = metaPath(cacheDir, meta.corpusId);
-  const binFinal = binPath(cacheDir, meta.corpusId);
+function writeCorpus(
+  db: BetterSqliteDatabase,
+  corpus: Omit<CachedCorpus, 'bm25Index'>,
+  sourceKey: string,
+  totalBytes: number,
+): void {
+  const insert = db.transaction(() => {
+    db.prepare('DELETE FROM corpora WHERE corpus_id = ?').run(corpus.corpusId);
+    db.prepare(
+      `
+      INSERT INTO corpora (
+        corpus_id, source_key, source_json, content_hash, model,
+        dimensions, created_at, last_accessed_at, total_bytes
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `,
+    ).run(
+      corpus.corpusId,
+      sourceKey,
+      JSON.stringify(corpus.source),
+      corpus.contentHash,
+      corpus.model,
+      corpus.dimensions,
+      corpus.createdAt,
+      corpus.lastAccessedAt,
+      totalBytes,
+    );
 
-  try {
-    fs.writeFileSync(jsonTmp, JSON.stringify(meta), 'utf-8');
-    fs.writeFileSync(binTmp, serializeEmbeddings(embeddings));
-    fs.renameSync(jsonTmp, jsonFinal);
-    fs.renameSync(binTmp, binFinal);
-  } catch (err) {
-    // Clean up temp files on any error
-    try {
-      fs.rmSync(jsonTmp, { force: true });
-    } catch {
-      // best effort
-    }
-    try {
-      fs.rmSync(binTmp, { force: true });
-    } catch {
-      // best effort
-    }
-    throw err;
-  }
+    const insertChunk = db.prepare(`
+      INSERT INTO chunks (corpus_id, position, chunk_json, bm25_id, bm25_text)
+      VALUES (?, ?, ?, ?, ?)
+    `);
+    const insertEmbedding = db.prepare(`
+      INSERT INTO embeddings (corpus_id, position, vector)
+      VALUES (?, ?, ?)
+    `);
+
+    corpus.chunks.forEach((chunk, position) => {
+      insertChunk.run(
+        corpus.corpusId,
+        position,
+        JSON.stringify(chunk),
+        chunkToBm25Id(chunk),
+        chunk.text,
+      );
+      insertEmbedding.run(
+        corpus.corpusId,
+        position,
+        serializeEmbedding(corpus.embeddings[position] ?? []),
+      );
+    });
+
+    db.prepare(
+      `
+      INSERT OR REPLACE INTO source_index (source_key, corpus_id, model, dimensions, created_at)
+      VALUES (?, ?, ?, ?, ?)
+    `,
+    ).run(sourceKey, corpus.corpusId, corpus.model, corpus.dimensions, corpus.createdAt);
+  });
+
+  insert();
 }
 
-function readCorpusFromDisk(
-  cacheDir: string,
+function readCorpusFromDatabase(
+  db: BetterSqliteDatabase,
   corpusId: string,
   ttlMs: number,
   updateAccess = true,
 ): CachedCorpus | null {
-  const mp = metaPath(cacheDir, corpusId);
-  const bp = binPath(cacheDir, corpusId);
+  const row = db.prepare('SELECT * FROM corpora WHERE corpus_id = ?').get(corpusId) as
+    | CorpusRow
+    | undefined;
+  if (row === undefined) return null;
 
-  if (!fs.existsSync(mp) || !fs.existsSync(bp)) {
+  if (Date.now() - row.created_at > ttlMs) {
     return null;
   }
 
-  let meta: CorpusMetadata;
+  const chunkRows = db
+    .prepare(
+      'SELECT position, chunk_json, bm25_id, bm25_text FROM chunks WHERE corpus_id = ? ORDER BY position ASC',
+    )
+    .all(corpusId) as ChunkRow[];
+  if (chunkRows.length === 0) {
+    logger.warn({ corpusId }, 'corpusCache: ignoring empty corpus');
+    return null;
+  }
+
+  let chunks: CorpusChunk[];
   try {
-    meta = JSON.parse(fs.readFileSync(mp, 'utf-8')) as CorpusMetadata;
+    chunks = chunkRows.map((chunkRow) => JSON.parse(chunkRow.chunk_json) as CorpusChunk);
   } catch (err) {
-    logger.error({ err, corpusId }, 'corpusCache: failed to parse metadata JSON');
+    logger.warn({ err, corpusId }, 'corpusCache: failed to parse chunk JSON');
     return null;
   }
 
-  // Schema version check
-  if (meta.schemaVersion !== SCHEMA_VERSION) {
+  const recomputedHash = contentHashForChunks(chunks);
+  if (recomputedHash !== row.content_hash) {
     logger.warn(
-      { corpusId, found: meta.schemaVersion, expected: SCHEMA_VERSION },
-      'corpusCache: schema version mismatch',
-    );
-    return null;
-  }
-
-  // Content hash validation
-  const recomputedHash = crypto
-    .createHash('sha256')
-    .update(meta.chunks.map((c) => c.text).join('\n'))
-    .digest('hex');
-  if (recomputedHash !== meta.contentHash) {
-    logger.warn(
-      { corpusId, expected: meta.contentHash, actual: recomputedHash },
+      { corpusId, expected: row.content_hash, actual: recomputedHash },
       'corpusCache: content hash mismatch',
     );
     return null;
   }
 
-  // TTL check
-  if (Date.now() - meta.createdAt > ttlMs) {
+  const embeddingRows = db
+    .prepare('SELECT position, vector FROM embeddings WHERE corpus_id = ? ORDER BY position ASC')
+    .all(corpusId) as EmbeddingRow[];
+  if (embeddingRows.length !== chunks.length) {
+    logger.warn(
+      { corpusId, chunks: chunks.length, embeddings: embeddingRows.length },
+      'corpusCache: embedding count mismatch',
+    );
     return null;
   }
 
-  if (meta.chunks.length === 0) {
-    logger.warn({ corpusId }, 'corpusCache: ignoring empty corpus');
-    return null;
+  const embeddings: number[][] = [];
+  for (const embeddingRow of embeddingRows) {
+    const embedding = deserializeEmbedding(embeddingRow.vector, row.dimensions);
+    if (embedding === null) {
+      logger.warn(
+        { corpusId, position: embeddingRow.position },
+        'corpusCache: invalid embedding blob',
+      );
+      return null;
+    }
+    embeddings.push(embedding);
   }
 
-  let embeddings: number[][];
+  let source: SemanticCrawlSource;
   try {
-    const buf = fs.readFileSync(bp);
-    embeddings = deserializeEmbeddings(buf);
+    source = JSON.parse(row.source_json) as SemanticCrawlSource;
   } catch (err) {
-    logger.error({ err, corpusId }, 'corpusCache: failed to read binary embeddings');
+    logger.warn({ err, corpusId }, 'corpusCache: failed to parse source JSON');
     return null;
   }
 
-  // Rebuild BM25 index
   let bm25Index: Bm25Index;
   try {
-    bm25Index = buildBm25Index(meta.bm25Docs);
+    bm25Index = buildBm25Index(
+      chunkRows.map((chunkRow) => ({ id: chunkRow.bm25_id, text: chunkRow.bm25_text })),
+    );
   } catch (err) {
     logger.warn({ err, corpusId }, 'corpusCache: failed to rebuild BM25 index; using no-op');
     bm25Index = { search: () => [] };
   }
 
-  // Update lastAccessedAt on disk only when this is an actual cache hit (not a scan)
+  const lastAccessedAt = updateAccess ? Date.now() : row.last_accessed_at;
   if (updateAccess) {
-    try {
-      meta.lastAccessedAt = Date.now();
-      fs.writeFileSync(mp, JSON.stringify(meta), 'utf-8');
-    } catch {
-      // non-fatal
-    }
+    db.prepare('UPDATE corpora SET last_accessed_at = ? WHERE corpus_id = ?').run(
+      lastAccessedAt,
+      corpusId,
+    );
   }
 
   return {
-    corpusId: meta.corpusId,
-    source: meta.source,
-    contentHash: meta.contentHash,
-    model: meta.model,
-    dimensions: meta.dimensions,
-    chunks: meta.chunks,
+    corpusId: row.corpus_id,
+    source,
+    contentHash: row.content_hash,
+    model: row.model,
+    dimensions: row.dimensions,
+    chunks,
     embeddings,
     bm25Index,
-    createdAt: meta.createdAt,
-    lastAccessedAt: meta.lastAccessedAt,
+    createdAt: row.created_at,
+    lastAccessedAt,
   };
+}
+
+function findInSourceIndex(db: BetterSqliteDatabase, sourceKey: string): SourceIndexEntry[] {
+  const rows = db
+    .prepare(
+      'SELECT corpus_id, model, dimensions, created_at FROM source_index WHERE source_key = ? ORDER BY created_at DESC',
+    )
+    .all(sourceKey) as SourceIndexRow[];
+  return rows.map((row) => ({
+    corpusId: row.corpus_id,
+    model: row.model,
+    dimensions: row.dimensions,
+    createdAt: row.created_at,
+  }));
 }
 
 // ────────────────────────────────────────────────────────────────────
 // Eviction
 // ────────────────────────────────────────────────────────────────────
 
-interface IndexEntry {
-  corpusId: string;
-  lastAccessedAt: number;
-  createdAt: number;
-}
-
-function listCachedCorpora(cacheDir: string): IndexEntry[] {
-  let files: string[];
-  try {
-    files = fs.readdirSync(cacheDir);
-  } catch {
-    return [];
-  }
-
-  const entries: IndexEntry[] = [];
-  for (const f of files) {
-    if (!f.endsWith('.json')) continue;
-    // Skip the source-index.json
-    if (f === 'source-index.json') continue;
-    const corpusId = f.slice(0, -5);
-    // Prune orphan .json entries where the corresponding .bin is missing
-    if (!fs.existsSync(binPath(cacheDir, corpusId))) {
-      try {
-        fs.rmSync(path.join(cacheDir, f), { force: true });
-      } catch {
-        // best effort
-      }
-      continue;
-    }
-    try {
-      const meta = JSON.parse(
-        fs.readFileSync(path.join(cacheDir, f), 'utf-8'),
-      ) as Partial<CorpusMetadata>;
-      entries.push({
-        corpusId,
-        lastAccessedAt: meta.lastAccessedAt ?? 0,
-        createdAt: meta.createdAt ?? 0,
-      });
-    } catch {
-      // skip corrupted file
-    }
-  }
-  return entries;
+function deleteCorpus(db: BetterSqliteDatabase, corpusId: string): void {
+  db.prepare('DELETE FROM corpora WHERE corpus_id = ?').run(corpusId);
 }
 
 function evictIfNeeded(
-  cacheDir: string,
+  db: BetterSqliteDatabase,
   ttlMs: number,
   maxCorpora: number,
+  maxTotalBytes: number,
   excludeId: string,
 ): void {
-  const entries = listCachedCorpora(cacheDir);
-
   const now = Date.now();
 
-  // Remove TTL-expired entries
-  for (const e of entries) {
-    if (e.corpusId !== excludeId && now - e.createdAt > ttlMs) {
-      deleteCorpusFiles(cacheDir, e.corpusId);
-    }
+  db.prepare('DELETE FROM corpora WHERE corpus_id <> ? AND ? - created_at > ?').run(
+    excludeId,
+    now,
+    ttlMs,
+  );
+
+  let rows = db
+    .prepare(
+      'SELECT corpus_id, last_accessed_at, created_at, total_bytes FROM corpora ORDER BY last_accessed_at ASC, created_at ASC',
+    )
+    .all() as EvictionRow[];
+
+  while (rows.length > maxCorpora) {
+    const victim = rows.find((row) => row.corpus_id !== excludeId);
+    if (victim === undefined) break;
+    deleteCorpus(db, victim.corpus_id);
+    rows = rows.filter((row) => row.corpus_id !== victim.corpus_id);
   }
 
-  // Re-read after TTL cleanup
-  const remaining = listCachedCorpora(cacheDir);
-
-  // If over cap (accounting for the one we are about to write), evict LRU
-  // The incoming corpusId is being written, so count would be remaining + 1
-  // We need to keep maxCorpora - 1 to make room
-  if (remaining.length >= maxCorpora) {
-    // Sort by lastAccessedAt ascending (oldest = LRU)
-    remaining.sort((a, b) => a.lastAccessedAt - b.lastAccessedAt);
-    const toEvict = remaining.length - maxCorpora + 1;
-    for (let i = 0; i < toEvict; i++) {
-      const e = remaining[i];
-      if (e && e.corpusId !== excludeId) {
-        deleteCorpusFiles(cacheDir, e.corpusId);
-      }
-    }
-  }
-}
-
-function deleteCorpusFiles(cacheDir: string, corpusId: string): void {
-  try {
-    fs.rmSync(metaPath(cacheDir, corpusId), { force: true });
-    fs.rmSync(binPath(cacheDir, corpusId), { force: true });
-  } catch (err) {
-    logger.warn({ err, corpusId }, 'corpusCache: failed to delete corpus files');
+  let totalBytes = rows.reduce((total, row) => total + row.total_bytes, 0);
+  while (totalBytes > maxTotalBytes && rows.length > 1) {
+    const victim = rows.find((row) => row.corpus_id !== excludeId);
+    if (victim === undefined) break;
+    deleteCorpus(db, victim.corpus_id);
+    rows = rows.filter((row) => row.corpus_id !== victim.corpus_id);
+    totalBytes -= victim.total_bytes;
   }
 }
 
@@ -528,9 +611,9 @@ function deleteCorpusFiles(cacheDir: string, corpusId: string): void {
  * Get a cached corpus or build it via `materializeFn`.
  *
  * - Deduplicates concurrent calls for the same source (thundering herd guard).
- * - Looks up source in source-index.json → reads from disk when available and within TTL.
- * - Writes to disk after materializing (updating source-index.json).
- * - Evicts LRU + TTL-expired entries before writing.
+ * - Looks up source in SQLite source_index → reads from SQLite when available and within TTL.
+ * - Writes to SQLite after materializing.
+ * - Evicts TTL-expired, count-over-cap, and byte-over-cap rows after writing.
  */
 export async function getOrBuildCorpus(
   source: SemanticCrawlSource,
@@ -544,7 +627,8 @@ export async function getOrBuildCorpus(
 ): Promise<CachedCorpus> {
   const ttlMs = opts?.ttlMs ?? DEFAULT_TTL_MS;
   const maxCorpora = opts?.maxCorpora ?? DEFAULT_MAX_CORPORA;
-  const cacheDir = opts?.cacheDir ?? DEFAULT_CACHE_DIR;
+  const maxTotalBytes = opts?.maxTotalBytes ?? DEFAULT_MAX_TOTAL_BYTES;
+  const databasePath = resolveDatabasePath(opts);
 
   // Stable key for pendingBuilds map — uses normalized source for consistency
   const sourceKey = stableStringify(normalizeSource(source));
@@ -555,22 +639,15 @@ export async function getOrBuildCorpus(
   }
 
   const promise = (async (): Promise<CachedCorpus> => {
-    // Ensure cache dir exists
-    const dirOk = ensureCacheDir(cacheDir);
-
-    // Look up corpusIds for this source via the source index
-    if (dirOk) {
-      const candidates = findInSourceIndex(cacheDir, sourceKey);
+    const cached = withDatabase(databasePath, (db) => {
+      const candidates = findInSourceIndex(db, sourceKey);
       for (const candidate of candidates) {
-        const loaded = readCorpusFromDisk(cacheDir, candidate.corpusId, ttlMs, true);
-        if (loaded !== null) {
-          // Return the disk-loaded corpus; update lastAccessedAt was done in readCorpusFromDisk
-          return loaded;
-        }
-        // If readCorpusFromDisk returned null (hash mismatch, schema mismatch, TTL expired),
-        // fall through to materialize
+        const loaded = readCorpusFromDatabase(db, candidate.corpusId, ttlMs, true);
+        if (loaded !== null) return loaded;
       }
-    }
+      return null;
+    });
+    if (cached !== null) return cached;
 
     // Not found — materialize
     const { chunks, embeddings, model, contentHash } = await materializeFn();
@@ -600,35 +677,24 @@ export async function getOrBuildCorpus(
       lastAccessedAt: now,
     };
 
-    if (dirOk && chunks.length > 0) {
-      try {
-        evictIfNeeded(cacheDir, ttlMs, maxCorpora, corpusId);
-
-        const meta: CorpusMetadata = {
-          schemaVersion: SCHEMA_VERSION,
-          corpusId,
-          source,
-          contentHash,
-          model,
-          dimensions,
-          createdAt: now,
-          lastAccessedAt: now,
-          chunks,
-          bm25Docs,
-        };
-        writeCorpus(cacheDir, meta, embeddings);
-
-        // Update the source index
-        addToSourceIndex(cacheDir, sourceKey, {
-          corpusId,
-          model,
-          dimensions,
-          createdAt: now,
-        });
-      } catch (err) {
-        logger.warn({ err, corpusId }, 'corpusCache: failed to write corpus to disk');
+    if (chunks.length > 0) {
+      const totalBytes = estimateCorpusBytes({
+        sourceKey,
+        source,
+        chunks,
+        embeddings,
+        contentHash,
+        model,
+      });
+      const writeResult = withDatabase(databasePath, (db) => {
+        writeCorpus(db, corpus, sourceKey, totalBytes);
+        evictIfNeeded(db, ttlMs, maxCorpora, maxTotalBytes, corpusId);
+        return true;
+      });
+      if (writeResult === null) {
+        logger.warn({ corpusId }, 'corpusCache: failed to write corpus to SQLite');
       }
-    } else if (chunks.length === 0) {
+    } else {
       logger.warn({ source }, 'corpusCache: not persisting empty corpus');
     }
 
@@ -647,12 +713,12 @@ export async function getOrBuildCorpus(
  */
 export function loadCorpusById(corpusId: string, opts?: CacheOpts): CachedCorpus | null {
   const ttlMs = opts?.ttlMs ?? DEFAULT_TTL_MS;
-  const cacheDir = opts?.cacheDir ?? DEFAULT_CACHE_DIR;
-  return readCorpusFromDisk(cacheDir, corpusId, ttlMs);
+  const databasePath = resolveDatabasePath(opts);
+  return withDatabase(databasePath, (db) => readCorpusFromDatabase(db, corpusId, ttlMs)) ?? null;
 }
 
 /**
- * Remove a corpus from disk and from the in-memory lock map.
+ * Remove a corpus from SQLite and from the in-memory lock map.
  * Subsequent calls to getOrBuildCorpus will re-materialize.
  *
  * Pass `source` to also cancel any in-flight build for that source
@@ -660,10 +726,13 @@ export function loadCorpusById(corpusId: string, opts?: CacheOpts): CachedCorpus
  */
 export function invalidateCorpus(
   corpusId: string,
-  opts?: { cacheDir?: string; source?: SemanticCrawlSource },
+  opts?: { cacheDir?: string; databasePath?: string; source?: SemanticCrawlSource },
 ): void {
-  const cacheDir = opts?.cacheDir ?? DEFAULT_CACHE_DIR;
-  deleteCorpusFiles(cacheDir, corpusId);
+  const databasePath = resolveDatabasePath(opts);
+  withDatabase(databasePath, (db) => {
+    deleteCorpus(db, corpusId);
+    return true;
+  });
   if (opts?.source !== undefined) {
     pendingBuilds.delete(stableStringify(normalizeSource(opts.source)));
   }

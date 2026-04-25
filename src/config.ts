@@ -3,8 +3,8 @@
  *
  * Resolution order:
  *   1. Encrypted config file (config.enc) decrypted via SEARCH_MCP_CONFIG_KEY env var
- *   2. Individual env vars (BRAVE_API_KEY, SEARXNG_BASE_URL, SEARCH_BACKEND)
- *   3. Defaults (Brave as default backend)
+ *   2. Individual env vars (BRAVE_API_KEY, SEARXNG_BASE_URL, EXA_API_KEY, SEARCH_BACKEND)
+ *   3. Defaults (SearXNG as default backend)
  */
 
 import { readFileSync, existsSync } from 'node:fs';
@@ -17,7 +17,7 @@ import { DEFAULT_SEMANTIC_MAX_BYTES } from './semanticLimits.js';
 /** Directory containing this file (dist/ or src/). Go up one level to reach project root. */
 const PKG_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 
-export type SearchBackend = 'brave' | 'searxng';
+export type SearchBackend = 'brave' | 'searxng' | 'exa';
 
 export interface RescoreWeights {
   rrfAnchor: number;
@@ -77,6 +77,10 @@ export interface RedditConfig {
   oauthConfigValid: boolean;
 }
 
+export interface ExaConfig {
+  apiKey: string;
+}
+
 export interface Crawl4aiConfig {
   baseUrl: string;
   apiToken: string;
@@ -103,6 +107,7 @@ export interface SearchConfig {
   searchBackend: SearchBackend;
   brave: { apiKey: string };
   searxng: { baseUrl: string };
+  exa: ExaConfig;
   nitter: { baseUrl: string };
   listennotes: { apiKey: string };
   producthunt: { apiToken: string };
@@ -122,6 +127,7 @@ const DEFAULTS: Omit<SearchConfig, 'rescoreWeights'> = {
   searchBackend: 'searxng',
   brave: { apiKey: '' },
   searxng: { baseUrl: '' },
+  exa: { apiKey: '' },
   nitter: { baseUrl: '' },
   listennotes: { apiKey: '' },
   producthunt: { apiToken: '' },
@@ -138,11 +144,14 @@ const DEFAULTS: Omit<SearchConfig, 'rescoreWeights'> = {
   },
   crawl4ai: { baseUrl: '', apiToken: '' },
   embeddingSidecar: { baseUrl: '', apiToken: '', dimensions: 768 },
-  semanticCrawl: { defaultMaxBytes: DEFAULT_SEMANTIC_MAX_BYTES, maxMaxBytes: DEFAULT_SEMANTIC_MAX_BYTES },
+  semanticCrawl: {
+    defaultMaxBytes: DEFAULT_SEMANTIC_MAX_BYTES,
+    maxMaxBytes: DEFAULT_SEMANTIC_MAX_BYTES,
+  },
   llm: { provider: '', apiToken: '', baseUrl: '' },
 };
 
-const VALID_BACKENDS = new Set<string>(['brave', 'searxng']);
+const VALID_BACKENDS = new Set<string>(['brave', 'searxng', 'exa']);
 
 /**
  * Decrypt config.enc using AES-256-GCM.
@@ -170,11 +179,12 @@ function decryptConfigFile(filePath: string, password: string): SearchConfig {
 
 type EnvConfig = Omit<
   Partial<SearchConfig>,
-  'reddit' | 'crawl4ai' | 'github' | 'embeddingSidecar' | 'semanticCrawl' | 'llm'
+  'reddit' | 'crawl4ai' | 'github' | 'embeddingSidecar' | 'semanticCrawl' | 'llm' | 'exa'
 > & {
   reddit?: Partial<RedditConfig>;
   crawl4ai?: Partial<Crawl4aiConfig>;
   github?: Partial<GitHubConfig>;
+  exa?: Partial<ExaConfig>;
   embeddingSidecar?: Partial<EmbeddingSidecarConfig>;
   semanticCrawl?: Partial<SemanticCrawlConfig>;
   llm?: Partial<LlmConfig>;
@@ -198,6 +208,12 @@ function loadFromEnv(): EnvConfig {
   if (searxngUrl) {
     cfg.searxng = { baseUrl: searxngUrl };
     if (!cfg.searchBackend && !braveKey) cfg.searchBackend = 'searxng';
+  }
+
+  const exaKey = process.env.EXA_API_KEY;
+  if (exaKey) {
+    cfg.exa = { apiKey: exaKey };
+    cfg.searchBackend ??= 'exa';
   }
 
   const nitterUrl = process.env.NITTER_BASE_URL;
@@ -349,6 +365,9 @@ export function loadConfig(): SearchConfig {
     searxng: {
       baseUrl:
         envConfig.searxng?.baseUrl ?? fileConfig.searxng?.baseUrl ?? DEFAULTS.searxng.baseUrl,
+    },
+    exa: {
+      apiKey: envConfig.exa?.apiKey ?? fileConfig.exa?.apiKey ?? DEFAULTS.exa.apiKey,
     },
     nitter: {
       baseUrl: envConfig.nitter?.baseUrl ?? fileConfig.nitter?.baseUrl ?? DEFAULTS.nitter.baseUrl,

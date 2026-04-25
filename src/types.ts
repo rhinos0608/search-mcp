@@ -22,7 +22,7 @@ export interface SearchResult {
   /** Domain extracted from the result URL (e.g. "example.com"). */
   domain: string;
   /** Which search backend produced this result. */
-  source: 'brave' | 'searxng';
+  source: 'brave' | 'searxng' | 'exa';
   /** Page age / publication date hint when available (e.g. "2 days ago", ISO date). */
   age: string | null;
   /** Additional snippet text beyond the primary description. */

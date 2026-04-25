@@ -75,9 +75,9 @@ const GATED_TOOLS: Record<string, GateRule> = {
   semantic_jobs: {
     check: (cfg) =>
       cfg.embeddingSidecar.baseUrl.length > 0 &&
-      (cfg.brave.apiKey.length > 0 || cfg.searxng.baseUrl.length > 0),
+      (cfg.exa.apiKey.length > 0 || cfg.brave.apiKey.length > 0 || cfg.searxng.baseUrl.length > 0),
     remediation:
-      'Set EMBEDDING_SIDECAR_BASE_URL and a search backend (BRAVE_API_KEY or SEARXNG_BASE_URL) to use semantic_jobs.',
+      'Set EMBEDDING_SIDECAR_BASE_URL and a search backend (EXA_API_KEY, BRAVE_API_KEY, or SEARXNG_BASE_URL) to use semantic_jobs.',
   },
 };
 
@@ -91,9 +91,10 @@ interface OptionalRule {
 
 const OPTIONAL_CONFIG: Record<string, OptionalRule> = {
   web_search: {
-    check: (cfg) => cfg.brave.apiKey.length > 0 || cfg.searxng.baseUrl.length > 0,
+    check: (cfg) =>
+      cfg.exa.apiKey.length > 0 || cfg.brave.apiKey.length > 0 || cfg.searxng.baseUrl.length > 0,
     degradedMessage: 'No search backend configured — web_search calls will fail.',
-    remediation: 'Set BRAVE_API_KEY or SEARXNG_BASE_URL environment variable.',
+    remediation: 'Set EXA_API_KEY, BRAVE_API_KEY, or SEARXNG_BASE_URL environment variable.',
   },
   stackoverflow_search: {
     check: (cfg) => cfg.stackexchange.apiKey.length > 0,

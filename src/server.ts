@@ -196,7 +196,7 @@ export function createServer(): McpServer {
     'web_search',
     {
       description:
-        'Search the web and return a ranked list of results with titles, URLs, descriptions, and citation metadata (position, domain, source backend, age). Uses the configured search backend (Brave or SearXNG) with automatic fallback.',
+        'Search the web and return a ranked list of results with titles, URLs, descriptions, and citation metadata (position, domain, source backend, age). Uses the configured search backend (Exa, Brave, or SearXNG) with automatic fallback.',
       inputSchema: {
         query: z.string().describe('The search query string'),
         limit: z

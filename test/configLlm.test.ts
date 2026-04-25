@@ -2,7 +2,14 @@ import test, { beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { loadConfig, resetConfig } from '../src/config.js';
 
-const LLM_ENV_KEYS = ['LLM_PROVIDER', 'LLM_API_TOKEN', 'LLM_BASE_URL', 'SEARCH_MCP_CONFIG_KEY'] as const;
+const LLM_ENV_KEYS = [
+  'LLM_PROVIDER',
+  'LLM_API_TOKEN',
+  'LLM_BASE_URL',
+  'SEARCH_MCP_CONFIG_KEY',
+  'SEARCH_BACKEND',
+  'EXA_API_KEY',
+] as const;
 const saved = new Map<string, string | undefined>();
 
 beforeEach(() => {
@@ -90,4 +97,14 @@ test('resetConfig clears cached config so env changes are picked up', () => {
   resetConfig();
   const cfg2 = loadConfig();
   assert.equal(cfg2.llm.provider, 'anthropic/claude-3');
+});
+
+test('loadConfig supports Exa search backend and API key from env', () => {
+  process.env.SEARCH_BACKEND = 'exa';
+  process.env.EXA_API_KEY = 'exa-test-key';
+  resetConfig();
+  const cfg = loadConfig();
+
+  assert.equal(cfg.searchBackend, 'exa');
+  assert.equal(cfg.exa.apiKey, 'exa-test-key');
 });

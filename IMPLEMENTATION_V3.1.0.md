@@ -4,22 +4,22 @@
 
 Transform the extraction, caching, and code-parsing layers to be robust enough for production agent workflows. This merges the original Code/AST goals with new research findings (Kill Chain extraction, Contextual Embeddings, Persistence, and Neural Search).
 
-## Phase 1: Robust Infrastructure
+## Phase 1: Robust Infrastructure [✅ COMPLETED]
 
 ### 1. Persistent Corpus Cache (SQLite)
 
-- **Objective**: Prevent corpus loss on server restart and support larger datasets.
-- **Action**:
-  - Install `better-sqlite3`.
-  - Replace `src/utils/corpusCache.ts` memory structures with SQLite tables (`corpora`, `chunks`, `embeddings`, `bm25_stats`).
-  - Implement a byte-weighted LRU eviction policy.
+- [x] **Objective**: Prevent corpus loss on server restart and support larger datasets.
+- [x] **Action**:
+  - [x] Install `better-sqlite3`.
+  - [x] Replace `src/utils/corpusCache.ts` memory structures with SQLite tables.
+  - [x] Implement a byte-weighted LRU eviction policy.
 
 ### 2. Neural Search Integration (Exa)
 
-- **Objective**: Provide a higher-quality semantic web search alternative.
-- **Action**:
-  - Add `EXA_API_KEY` to `src/config.ts`.
-  - Implement `src/tools/exaSearch.ts` and integrate it into the `web_search` tool fallback chain.
+- [x] **Objective**: Provide a higher-quality semantic web search alternative.
+- [x] **Action**:
+  - [x] Add `EXA_API_KEY` to `src/config.ts`.
+  - [x] Implement `src/tools/exaSearch.ts` and integrate it into the `web_search` tool fallback chain.
 
 ## Phase 2: Advanced Extraction
 

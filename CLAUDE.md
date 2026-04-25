@@ -37,7 +37,7 @@ Append `--json` (via `dev:json` / `start:json`) for structured JSON logging inst
 
 _Search & Read_
 
-- `web_search` — Multi-backend search with fallback chain: primary backend (configured) → remaining backend. Supports Brave and SearXNG.
+- `web_search` — Multi-backend search with fallback chain: primary backend (configured) → remaining backend. Supports Exa, Brave, and SearXNG.
 - `web_read` — Fetches a URL and extracts article content via Mozilla Readability + jsdom.
 - `web_crawl` — Deep multi-page crawl via Crawl4AI (JS rendering). Returns raw markdown per page. Requires `CRAWL4AI_BASE_URL`.
 - `semantic_crawl` — Full RAG pipeline over a crawled corpus. Source types: `url`, `sitemap`, `search` (search-then-crawl), `github` (code-aware), `cached` (re-use corpus by ID). Returns top-K semantically ranked chunks with bi-encoder, BM25, and RRF scores. Requires `CRAWL4AI_BASE_URL` + `EMBEDDING_SIDECAR_BASE_URL`.
@@ -84,11 +84,12 @@ _Specialist_
 
 Key env vars:
 
-- Search: `BRAVE_API_KEY`, `SEARXNG_BASE_URL`, `SEARCH_BACKEND`
+- Search: `EXA_API_KEY`, `BRAVE_API_KEY`, `SEARXNG_BASE_URL`, `SEARCH_BACKEND`
 - Social: `NITTER_BASE_URL`, `REDDIT_CLIENT_ID`, `REDDIT_CLIENT_SECRET`, `REDDIT_USER_AGENT`
 - Specialist: `LISTENNOTES_API_KEY`, `PRODUCTHUNT_API_TOKEN`, `PATENTSVIEW_API_KEY`, `YOUTUBE_API_KEY`, `STACKEXCHANGE_API_KEY`
 - Crawl: `CRAWL4AI_BASE_URL`, `CRAWL4AI_API_TOKEN`
 - Embedding: `EMBEDDING_SIDECAR_BASE_URL`, `EMBEDDING_SIDECAR_API_TOKEN`, `EMBEDDING_DIMENSIONS` (default 768)
+- Persistence: `DATABASE_PATH` (SQLite corpus cache path; defaults under `~/.cache/search-mcp/semantic-crawl/`)
 
 Reddit OAuth is optional: both `REDDIT_CLIENT_ID` and `REDDIT_CLIENT_SECRET` must be set together; setting exactly one is treated as invalid configuration (server starts, health reports degraded, Reddit tools throw `VALIDATION_ERROR` at first use).
 
@@ -114,7 +115,7 @@ Reddit OAuth is optional: both `REDDIT_CLIENT_ID` and `REDDIT_CLIENT_SECRET` mus
 3. Hybrid ranking: bi-encoder cosine → BM25+ (`src/utils/bm25.ts`) → RRF fusion via `src/rag/pipeline.ts` (internal `retrieveSemanticChunks()` wrapper)
 4. Post-filtering: semantic coherence filter (centroid similarity for borderline chunks) → soft IDF-weighted lexical constraint (`src/utils/lexicalConstraint.ts`)
 5. Optional cross-encoder reranking (`src/utils/rerank.ts`, ONNX-based, local, default off)
-6. Corpus cache (`src/utils/corpusCache.ts`): Persistent via SQLite (`better-sqlite3`), configurable TTL, byte-weighted LRU eviction. Re-query via `source: { type: 'cached', corpusId }`.
+6. Corpus cache (`src/utils/corpusCache.ts`): Persistent via SQLite (`better-sqlite3`), configurable TTL, byte-weighted LRU eviction, default database path from `DATABASE_PATH` or `~/.cache/search-mcp/semantic-crawl/corpus-cache.sqlite`. Re-query via `source: { type: 'cached', corpusId }`.
 
 GitHub corpus (`src/utils/githubCorpus.ts`): fetches repo files via GitHub API, uses `chunkMarkdown` with path-prefixed sections. Supports branch, file extension filter, and query pre-filter.
 
