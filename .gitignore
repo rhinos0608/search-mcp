@@ -10,4 +10,5 @@ stderr.log
 .worktrees/
 models/
 .pi/
+.pi-lens/
 .cache/semantic-crawl/
