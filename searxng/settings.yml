@@ -1,2 +1,68 @@
-# TODO: Phase 6 — Distribution (SearXNG settings)
-# Placeholder file created during Phase 0 Foundation
+# SearXNG configuration for search-mcp
+# Privacy-first settings with JSON output
+
+server:
+  secret_key: "replace-with-a-random-secret-key"
+  bind_address: "0.0.0.0"
+  port: 8080
+  limiter: false
+  image_proxy: false
+  # Enable JSON API for MCP server consumption
+  method: "GET"
+  default_http_headers:
+    X-Content-Type-Options: nosniff
+    X-Frame-Options: DENY
+    X-XSS-Protection: 1; mode=block
+
+search:
+  safe_search: 0
+  autocomplete: ""
+  language: "en-US"
+  formats:
+    - html
+    - json
+  # Disable cookies for privacy
+  cookie_max_age: 0
+
+ui:
+  static_use_hash: true
+  default_theme: simple
+  default_locale: ""
+  results_on_new_tab: false
+
+engines:
+  # Web search engines
+  - name: google
+    engine: google
+    shortcut: g
+    disabled: false
+
+  - name: duckduckgo
+    engine: duckduckgo
+    shortcut: ddg
+    disabled: false
+
+  - name: brave
+    engine: brave
+    shortcut: bv
+    disabled: false
+
+  - name: wikipedia
+    engine: wikipedia
+    shortcut: wp
+    disabled: false
+
+  # Disabled: engines that require API keys or are unreliable in Docker
+  - name: bing
+    engine: bing
+    shortcut: bi
+    disabled: true
+
+outgoing:
+  request_timeout: 10.0
+  max_request_timeout: 15.0
+  useragent_suffix: ""
+  # Use Tor if available (set SOCKS_HOST/TOR_PORT env vars)
+  # proxies:
+  #   http:  socks5h://tor:9050
+  #   https: socks5h://tor:9050
