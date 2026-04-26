@@ -23,7 +23,7 @@ import type {
   CorpusChunk,
   SemanticCrawlSource,
   CrawlPageResult,
-  SemanticCrawlSizeWarning,
+  SemanticCrawlWarning,
 } from '../types.js';
 import type { Crawl4aiConfig } from '../config.js';
 import type { ExtractionConfig } from '../utils/extractionConfig.js';
@@ -111,7 +111,7 @@ export async function embedTexts(
 
     raw = await safeResponseJson(response, endpoint);
   } catch (err) {
-    if (err instanceof Error && err.name === 'AbortError') {
+    if (err instanceof Error && (err.name === 'AbortError' || err.name === 'TimeoutError')) {
       throw networkError('Embedding sidecar request timed out after 60 seconds');
     }
     throw err;
@@ -835,7 +835,7 @@ export async function crawlSeeds(
   totalPages: number;
   successfulPages: number;
   warnings: string[];
-  structuredWarnings: SemanticCrawlSizeWarning[];
+  structuredWarnings: SemanticCrawlWarning[];
   omittedPages: { url: string; reason: string; estimatedBytes?: number }[];
 }> {
   if (seedUrls.length === 0) {
@@ -851,14 +851,13 @@ export async function crawlSeeds(
 
   const allPages: CrawlPageResult[] = [];
   const warnings: string[] = [];
-  const structuredWarnings: SemanticCrawlSizeWarning[] = [];
+  const structuredWarnings: SemanticCrawlWarning[] = [];
   const omittedPages: {
     url: string;
     reason: string;
     estimatedBytes?: number;
   }[] = [];
-  let totalPagesAttempted = 0;
-  let totalSuccessfulPages = 0;
+  let totalPagesFromCrawler = 0;
 
   // ── Preflight size guard ──────────────────────────────────────────────────
   const firstSeedUrl = seedUrls[0];
@@ -877,19 +876,19 @@ export async function crawlSeeds(
     const safeCap = Math.max(1, Math.floor(SAFE_BYTES / avgPageBytes));
     const requestedMaxPages = opts.maxPages;
     resolvedMaxPages = safeCap;
-    const w: SemanticCrawlSizeWarning = {
+    const msg: string =
+      `semantic_crawl: maxPages ${String(requestedMaxPages)} may exceed the response size limit; ` +
+      `capped to ${String(safeCap)} pages to avoid truncation.`;
+    structuredWarnings.push({
       code: 'SEMANTIC_CRAWL_RESPONSE_SIZE_GUARD',
-      message:
-        `semantic_crawl: maxPages ${String(requestedMaxPages)} may exceed the response size limit; ` +
-        `capped to ${String(safeCap)} pages to avoid truncation.`,
+      message: msg,
       requestedMaxPages,
       cappedMaxPages: safeCap,
       estimatedBytes: estimatedTotalBytes,
       safeBytes: SAFE_BYTES,
       avgPageBytes,
-    };
-    structuredWarnings.push(w);
-    warnings.push(w.message);
+    });
+    warnings.push(msg);
     logger.warn(
       { requestedMaxPages, safeCap, estimatedTotalBytes, heavy },
       'semantic_crawl: preflight size guard capped maxPages',
@@ -949,7 +948,6 @@ export async function crawlSeeds(
     }
 
     let keptPages = 0;
-    let keptSuccessfulPages = 0;
 
     // In-flight byte accumulator
     for (const page of pages) {
@@ -970,18 +968,18 @@ export async function crawlSeeds(
           estimatedBytes: pageBytes,
         });
         sizeLimitReached = true;
-        const w: SemanticCrawlSizeWarning = {
+        const limitMsg: string =
+          `semantic_crawl stopped after ${String(allPages.length)} pages because ` +
+          `the response was approaching the size limit.`;
+        structuredWarnings.push({
           code: 'SEMANTIC_CRAWL_RESPONSE_SIZE_LIMIT_APPROACHED',
-          message:
-            `semantic_crawl stopped after ${String(allPages.length)} pages because ` +
-            `the response was approaching the size limit.`,
+          message: limitMsg,
           requestedMaxPages: opts.maxPages,
           pagesReturned: allPages.length,
           safeBytes: SAFE_BYTES,
           accumulatedBytes,
-        };
-        structuredWarnings.push(w);
-        warnings.push(w.message);
+        });
+        warnings.push(limitMsg);
         logger.warn(
           {
             pagesReturned: allPages.length,
@@ -1158,7 +1156,7 @@ export async function semanticCrawl(
   let extractedData: Record<string, Record<string, unknown>[]> | undefined;
   // Recovery and crawl warnings collected across seed URLs.
   const crawlWarnings: string[] = [];
-  const crawlStructuredWarnings: SemanticCrawlSizeWarning[] = [];
+  const crawlStructuredWarnings: SemanticCrawlWarning[] = [];
   const crawlOmittedPages: {
     url: string;
     reason: string;
@@ -1180,7 +1178,9 @@ export async function semanticCrawl(
         sourceType: opts.source.type,
       });
       crawlWarnings.push(...result.warnings);
-      crawlStructuredWarnings.push(...result.structuredWarnings);
+      for (const sw of result.structuredWarnings) {
+        crawlStructuredWarnings.push(sw);
+      }
       crawlOmittedPages.push(...result.omittedPages);
       corpusChunks = pagesToCorpus(result.pages);
       lastPages = result.pages;
@@ -1257,7 +1257,9 @@ export async function semanticCrawl(
       };
       const result = await crawlSeeds(safeUrls, crawl4aiCfg, sitemapOpts);
       crawlWarnings.push(...result.warnings);
-      crawlStructuredWarnings.push(...result.structuredWarnings);
+      for (const sw of result.structuredWarnings) {
+        crawlStructuredWarnings.push(sw);
+      }
       crawlOmittedPages.push(...result.omittedPages);
       corpusChunks = pagesToCorpus(result.pages);
       lastPages = result.pages;
@@ -1295,7 +1297,9 @@ export async function semanticCrawl(
       const searchOpts = { ...opts, maxDepth: 0, sourceType: opts.source.type };
       const result = await crawlSeeds(safeUrls, crawl4aiCfg, searchOpts);
       crawlWarnings.push(...result.warnings);
-      crawlStructuredWarnings.push(...result.structuredWarnings);
+      for (const sw of result.structuredWarnings) {
+        crawlStructuredWarnings.push(sw);
+      }
       crawlOmittedPages.push(...result.omittedPages);
       corpusChunks = pagesToCorpus(result.pages);
       lastPages = result.pages;
@@ -1373,6 +1377,13 @@ export async function semanticCrawl(
     // Already loaded from cache — just use the pre-computed data directly.
     resolvedCorpusId = cachedCorpusId ?? opts.source.corpusId;
     // Cached sources have no page-level elements (not persisted in corpus cache)
+    const cachedMsg =
+      'Cached corpus: page-level structured elements and extracted data are not available from cache. Re-crawl with the original source type if these are needed.';
+    crawlStructuredWarnings.push({
+      code: 'SEMANTIC_CRAWL_CACHED_SOURCE_LIMITATION',
+      message: cachedMsg,
+    });
+    crawlWarnings.push(cachedMsg);
 
     const topChunks = await retrieveSemanticChunks(corpusChunks, {
       query: opts.query,

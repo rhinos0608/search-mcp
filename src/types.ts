@@ -466,7 +466,7 @@ export interface SemanticCrawlChunk {
   };
 }
 
-export type SemanticCrawlSizeWarning =
+export type SemanticCrawlWarning =
   | {
       code: 'SEMANTIC_CRAWL_RESPONSE_SIZE_GUARD';
       message: string;
@@ -483,6 +483,10 @@ export type SemanticCrawlSizeWarning =
       pagesReturned: number;
       safeBytes: number;
       accumulatedBytes: number;
+    }
+  | {
+      code: 'SEMANTIC_CRAWL_CACHED_SOURCE_LIMITATION';
+      message: string;
     };
 
 export interface SemanticCrawlResult extends StructuredContent {
@@ -497,7 +501,7 @@ export interface SemanticCrawlResult extends StructuredContent {
   chunks: SemanticCrawlChunk[];
   extractedData?: Record<string, Record<string, unknown>[]>;
   warnings?: string[];
-  structuredWarnings?: SemanticCrawlSizeWarning[];
+  structuredWarnings?: SemanticCrawlWarning[];
   omittedPages?: { url: string; reason: string; estimatedBytes?: number }[];
 }
 
