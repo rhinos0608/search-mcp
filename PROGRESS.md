@@ -1,5 +1,26 @@
 # search-mcp v3.2.0 Implementation Progress
 
+## Review
+
+### Correct
+- All six phases compile under TypeScript strict mode (`exactOptionalPropertyTypes`, `noUncheckedIndexedAccess`, `noUnusedLocals`, `noUnusedParameters`) with zero errors.
+- All 146 v3.2.0-specific tests pass (17 dedup, 24 constraints, 25 adapter ecosystem, 20 integration, 24 observability, 36 evaluation framework).
+- ESM `.js` extensions are used consistently across all new files.
+- Backward compatibility is maintained: existing callers of `prepareCorpus` and `retrieveCorpus` are unchanged; new options are optional.
+- Dockerfile runs as non-root user (`appuser`).
+- No hardcoded secrets in any source file (only template placeholder in SearXNG config).
+- SSRF guards are used where user-supplied URLs are fetched (`safeResponseJson` in stackoverflowAnswers; embedding provider URLs are operator-configured and exempt per project rules).
+- No circular dependencies detected across all new modules.
+- Evaluation framework golden query datasets cover academic, general, job, and QA domains.
+
+### Fixed
+- **Lint warning in `src/utils/transformersEmbedding.ts`**: The file contained a stale combined `eslint-disable-nextline` that was partially unused. During review I split it into two targeted directives (`no-unsafe-assignment` for the dynamic import, `no-unsafe-call` for the `pipeline(...)` invocation) so lint now passes clean.
+
+### Note
+- Two pre-existing test failures in `healthExtraction.test.js` are unchanged and unrelated to v3.2.0.
+- `test/pipelineIntegration.test.ts` is 9 tests vs the plan’s 12 (the async `prepareCorpusAsync` semantic-dedup case is commented out as skipped, and timed wrappers are not explicitly unit-tested).
+- `test/dedup.test.ts` is 17 tests vs the plan’s 19+; every exported dedup function still has at least one coverage test, so the shortfall is in edge-case depth rather than missing feature coverage.
+
 ## Phases
 
 | Phase | Feature | Status |
