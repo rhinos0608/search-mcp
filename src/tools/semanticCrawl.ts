@@ -94,7 +94,9 @@ export async function embedTexts(
           signal: AbortSignal.timeout(60_000),
         });
         if (res.status === 503) {
-          throw networkError('Embedding sidecar returned HTTP 503', { statusCode: 503 });
+          throw networkError('Embedding sidecar returned HTTP 503', {
+            statusCode: 503,
+          });
         }
         return res;
       },
@@ -469,8 +471,20 @@ export async function embedAndRank(
         chunkIndex: chunk.chunkIndex,
         totalChunks: chunk.totalChunks,
         scores: {
-          biEncoder: { raw: 0, normalized: 0, corpusMin: 0, corpusMax: 0, median: 0 },
-          bm25: { raw: 0, normalized: 0, corpusMin: 0, corpusMax: 0, median: 0 },
+          biEncoder: {
+            raw: 0,
+            normalized: 0,
+            corpusMin: 0,
+            corpusMax: 0,
+            median: 0,
+          },
+          bm25: {
+            raw: 0,
+            normalized: 0,
+            corpusMin: 0,
+            corpusMax: 0,
+            median: 0,
+          },
           rrf: { raw: 0, normalized: 0, corpusMin: 0, corpusMax: 0, median: 0 },
         },
       },
@@ -492,7 +506,12 @@ export async function embedAndRank(
   // 5. BM25+ ranking
   const bm25 =
     opts.bm25Index ??
-    buildBm25Index(chunks.map((c) => ({ id: c.url + ':' + String(c.chunkIndex), text: c.text })));
+    buildBm25Index(
+      chunks.map((c) => ({
+        id: c.url + ':' + String(c.chunkIndex),
+        text: c.text,
+      })),
+    );
 
   const idToChunk = new Map<string, SemanticCrawlChunk>();
   for (const p of paired) {
@@ -623,7 +642,9 @@ export async function embedAndRank(
 
     try {
       const { rerank } = await import('../utils/rerank.js');
-      const reranked = await rerank(opts.query, candidateTexts, { topK: opts.topK });
+      const reranked = await rerank(opts.query, candidateTexts, {
+        topK: opts.topK,
+      });
 
       const rerankScores = reranked.map((r) => r.score);
       const rerankMin = Math.min(...rerankScores);
@@ -818,18 +839,32 @@ export async function crawlSeeds(
   omittedPages: { url: string; reason: string; estimatedBytes?: number }[];
 }> {
   if (seedUrls.length === 0) {
-    return { pages: [], totalPages: 0, successfulPages: 0, warnings: [], structuredWarnings: [], omittedPages: [] };
+    return {
+      pages: [],
+      totalPages: 0,
+      successfulPages: 0,
+      warnings: [],
+      structuredWarnings: [],
+      omittedPages: [],
+    };
   }
 
   const allPages: CrawlPageResult[] = [];
   const warnings: string[] = [];
   const structuredWarnings: SemanticCrawlSizeWarning[] = [];
-  const omittedPages: { url: string; reason: string; estimatedBytes?: number }[] = [];
+  const omittedPages: {
+    url: string;
+    reason: string;
+    estimatedBytes?: number;
+  }[] = [];
   let totalPagesAttempted = 0;
   let totalSuccessfulPages = 0;
 
   // ── Preflight size guard ──────────────────────────────────────────────────
   const firstSeedUrl = seedUrls[0];
+  if (firstSeedUrl === undefined) {
+    throw new Error('No seed URLs provided for preflight size guard');
+  }
   const heavy = isLikelyJsHeavySite({
     sourceType: opts.sourceType ?? 'url',
     url: firstSeedUrl,
@@ -948,7 +983,11 @@ export async function crawlSeeds(
         structuredWarnings.push(w);
         warnings.push(w.message);
         logger.warn(
-          { pagesReturned: allPages.length, accumulatedBytes, safeBytes: SAFE_BYTES },
+          {
+            pagesReturned: allPages.length,
+            accumulatedBytes,
+            safeBytes: SAFE_BYTES,
+          },
           'semantic_crawl: in-flight size limit reached; stopping accumulation',
         );
         remainingPages = 0;
@@ -1120,7 +1159,11 @@ export async function semanticCrawl(
   // Recovery and crawl warnings collected across seed URLs.
   const crawlWarnings: string[] = [];
   const crawlStructuredWarnings: SemanticCrawlSizeWarning[] = [];
-  const crawlOmittedPages: { url: string; reason: string; estimatedBytes?: number }[] = [];
+  const crawlOmittedPages: {
+    url: string;
+    reason: string;
+    estimatedBytes?: number;
+  }[] = [];
   // Track latest pages for structured elements
   let lastPages: CrawlPageResult[] = [];
 
@@ -1132,7 +1175,10 @@ export async function semanticCrawl(
           ? [opts.source.url, ...opts.source.urls]
           : [opts.source.url];
       const safeUrls = filterSafeUrls(seedUrls);
-      const result = await crawlSeeds(safeUrls, crawl4aiCfg, { ...opts, sourceType: opts.source.type });
+      const result = await crawlSeeds(safeUrls, crawl4aiCfg, {
+        ...opts,
+        sourceType: opts.source.type,
+      });
       crawlWarnings.push(...result.warnings);
       crawlStructuredWarnings.push(...result.structuredWarnings);
       crawlOmittedPages.push(...result.omittedPages);
@@ -1189,7 +1235,11 @@ export async function semanticCrawl(
 
       const safeUrls = filterSafeUrls(sitemapUrls).slice(0, opts.maxPages);
       logger.info(
-        { sitemapUrl: seedUrl, urlsFound: sitemapUrls.length, urlsUsed: safeUrls.length },
+        {
+          sitemapUrl: seedUrl,
+          urlsFound: sitemapUrls.length,
+          urlsUsed: safeUrls.length,
+        },
         'Parsed sitemap',
       );
 
@@ -1200,7 +1250,11 @@ export async function semanticCrawl(
           'semantic_crawl: sitemap mode ignores maxDepth > 0, forcing depth 0',
         );
       }
-      const sitemapOpts = { ...opts, maxDepth: 0, sourceType: opts.source.type };
+      const sitemapOpts = {
+        ...opts,
+        maxDepth: 0,
+        sourceType: opts.source.type,
+      };
       const result = await crawlSeeds(safeUrls, crawl4aiCfg, sitemapOpts);
       crawlWarnings.push(...result.warnings);
       crawlStructuredWarnings.push(...result.structuredWarnings);
@@ -1223,7 +1277,11 @@ export async function semanticCrawl(
       const searchUrls = searchResults.map((r) => r.url).filter((url) => url.length > 0);
       const safeUrls = filterSafeUrls(searchUrls).slice(0, opts.maxPages);
       logger.info(
-        { searchQuery: opts.source.query, urlsFound: searchUrls.length, urlsUsed: safeUrls.length },
+        {
+          searchQuery: opts.source.query,
+          urlsFound: searchUrls.length,
+          urlsUsed: safeUrls.length,
+        },
         'Search-then-crawl: discovered URLs',
       );
 
@@ -1335,7 +1393,9 @@ export async function semanticCrawl(
       corpusId: resolvedCorpusId,
       chunks: topChunks,
       ...(crawlWarnings.length > 0 ? { warnings: crawlWarnings } : {}),
-      ...(crawlStructuredWarnings.length > 0 ? { structuredWarnings: crawlStructuredWarnings } : {}),
+      ...(crawlStructuredWarnings.length > 0
+        ? { structuredWarnings: crawlStructuredWarnings }
+        : {}),
       ...(crawlOmittedPages.length > 0 ? { omittedPages: crawlOmittedPages } : {}),
     };
   }

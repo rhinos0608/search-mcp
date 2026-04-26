@@ -12,24 +12,19 @@
  * in src/server.ts once quality issues are resolved.
  */
 
-import { logger } from "../logger.js";
+import { logger } from '../logger.js';
+import { unavailableError } from '../errors.js';
 
 /**
  * Stub for the deprecated news_search tool.
- * Always throws — never returns data.
+ * Always rejects — never returns data.
  */
-export function newsSearch(): never {
-	logger.warn(
-		{ tool: "news_search" },
-		"Deprecated news_search invoked — returning error",
-	);
-	throw Object.assign(
-		new Error(
-			"news_search is deprecated and no longer available. Use web_search for general news queries, or reddit_search / hackernews_search for topic-specific results.",
-		),
-		{
-			code: "TOOL_UNAVAILABLE",
-			retryable: false,
-		},
-	);
+export function newsSearch(): Promise<never> {
+  logger.warn({ tool: 'news_search' }, 'Deprecated news_search invoked — returning error');
+  return Promise.reject(
+    unavailableError(
+      'news_search is deprecated and no longer available. Use web_search for general news queries, or reddit_search / hackernews_search for topic-specific results.',
+      { retryable: false },
+    ),
+  );
 }
