@@ -503,6 +503,8 @@ export interface SemanticCrawlResult extends StructuredContent {
 
 // ── Semantic Crawl Sources ────────────────────────────────────────────────
 
+export type SemanticCrawlSourceType = SemanticCrawlSource['type'];
+
 export interface UrlSource {
   type: 'url';
   url: string;

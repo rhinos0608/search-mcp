@@ -49,14 +49,23 @@ interface FactoryOpts {
   statusCode?: number;
   backend?: string;
   cause?: unknown;
+  retryable?: boolean;
 }
 
 export function rateLimitError(message: string, opts?: FactoryOpts): ToolError {
-  return new ToolError(message, { code: 'RATE_LIMIT', retryable: true, ...opts });
+  return new ToolError(message, {
+    code: 'RATE_LIMIT',
+    retryable: true,
+    ...opts,
+  });
 }
 
 export function notFoundError(message: string, opts?: FactoryOpts): ToolError {
-  return new ToolError(message, { code: 'NOT_FOUND', retryable: false, ...opts });
+  return new ToolError(message, {
+    code: 'NOT_FOUND',
+    retryable: false,
+    ...opts,
+  });
 }
 
 export function timeoutError(message: string, opts?: FactoryOpts): ToolError {
@@ -64,17 +73,33 @@ export function timeoutError(message: string, opts?: FactoryOpts): ToolError {
 }
 
 export function networkError(message: string, opts?: FactoryOpts): ToolError {
-  return new ToolError(message, { code: 'NETWORK_ERROR', retryable: true, ...opts });
+  return new ToolError(message, {
+    code: 'NETWORK_ERROR',
+    retryable: true,
+    ...opts,
+  });
 }
 
 export function parseError(message: string, opts?: FactoryOpts): ToolError {
-  return new ToolError(message, { code: 'PARSE_ERROR', retryable: false, ...opts });
+  return new ToolError(message, {
+    code: 'PARSE_ERROR',
+    retryable: false,
+    ...opts,
+  });
 }
 
 export function unavailableError(message: string, opts?: FactoryOpts): ToolError {
-  return new ToolError(message, { code: 'UNAVAILABLE', retryable: true, ...opts });
+  return new ToolError(message, {
+    code: 'UNAVAILABLE',
+    retryable: true,
+    ...opts,
+  });
 }
 
 export function validationError(message: string, opts?: FactoryOpts): ToolError {
-  return new ToolError(message, { code: 'VALIDATION_ERROR', retryable: false, ...opts });
+  return new ToolError(message, {
+    code: 'VALIDATION_ERROR',
+    retryable: false,
+    ...opts,
+  });
 }
