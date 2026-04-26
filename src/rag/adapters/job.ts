@@ -31,8 +31,8 @@ const CAVEAT_PATTERNS: { caveat: string; pattern: RegExp }[] = [
 const SALARY_PATTERNS: RegExp[] = [
   /\$\d+(?:,\d{3})*(?:\.\d+)?\s*[–-]\s*\$?\d+(?:,\d{3})*(?:\.\d+)?\s*\/\s*hr/i,
   /\$\d+(?:,\d{3})*(?:\.\d+)?\s*[–-]\s*\$?\d+(?:,\d{3})*(?:\.\d+)?\s*a\s*year/i,
-  /\$\d+(?:\.\d+)?k\s*[–-]\s*\$?\d+(?:\.\d+)?k/i,
-  /\$\d+(?:\.\d+)?k\s*\+\s*super/i,
+  /\$\d{1,3}(?:\.\d+)?k\s*[–-]\s*\$?\d{1,3}(?:\.\d+)?k/i,
+  /\$\d{1,3}(?:\.\d+)?k\s*\+\s*super/i,
 ];
 
 export function extractJobListingsFromHtml(html: string, url: string): JobListingMvp[] {
