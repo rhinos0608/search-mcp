@@ -1,0 +1,80 @@
+# search-mcp full-stack deployment
+#
+# One-command setup:
+#   docker compose up -d
+#
+# Services:
+#   - search-mcp: the MCP server over stdio/SSE
+#   - embedding-sidecar: text embedding inference
+#   - crawl4ai: headless browser for web crawling
+#   - searxng: privacy-first metasearch engine
+#
+# The MCP server connects via stdio transport by default.
+# For SSE mode, expose port 8050 and configure clients accordingly.
+
+services:
+  search-mcp:
+    build: .
+    ports:
+      - '8050:8050'
+    environment:
+      # Embedding provider (sidecar | ollama | transformers)
+      - EMBEDDING_PROVIDER=sidecar
+      - EMBEDDING_SIDECAR_BASE_URL=http://embedding-sidecar:8000
+      - CRAWL4AI_BASE_URL=http://crawl4ai:8050
+      - SEARXNG_BASE_URL=http://searxng:8080
+      - SEARCH_BACKEND=searxng
+      # Optional API keys (uncomment to enable premium backends)
+      # - BRAVE_API_KEY=your_brave_key
+      # - EXA_API_KEY=your_exa_key
+      # - YOUTUBE_API_KEY=your_youtube_key
+    depends_on:
+      embedding-sidecar:
+        condition: service_healthy
+      crawl4ai:
+        condition: service_started
+      searxng:
+        condition: service_started
+    restart: unless-stopped
+    # For stdio-transport MCP clients, use stdin/stdout instead of port mapping:
+    # stdin_open: true
+    # tty: true
+
+  embedding-sidecar:
+    build: ./sidecar/embedding/
+    ports:
+      - '8001:8000'
+    healthcheck:
+      test: ['CMD', 'curl', '-f', 'http://localhost:8000/health']
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    restart: unless-stopped
+    # For CPU-only inference (adjust for GPU):
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: 1
+    #           capabilities: [gpu]
+
+  crawl4ai:
+    image: unclebrian/crawl4ai:latest
+    ports:
+      - '8051:8050'
+    restart: unless-stopped
+
+  searxng:
+    image: searxng/searxng:latest
+    ports:
+      - '8081:8080'
+    volumes:
+      - ./searxng/settings.yml:/etc/searxng/settings.yml:ro
+      - searxng-data:/etc/searxng/data
+    environment:
+      - SEARXNG_BASE_URL=http://localhost:8081/
+    restart: unless-stopped
+
+volumes:
+  searxng-data:

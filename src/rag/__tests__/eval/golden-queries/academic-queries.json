@@ -1,0 +1,38 @@
+[
+  {
+    "id": "acad-001",
+    "domain": "academic",
+    "query": "limitations of transformer architecture in natural language processing",
+    "expectedSection": "discussion",
+    "expectedTerms": ["transformer", "attention", "limitation", "nlp"],
+    "minRelevant": 2,
+    "difficulty": "medium"
+  },
+  {
+    "id": "acad-002",
+    "domain": "academic",
+    "query": "comparison of BERT and GPT models for text classification",
+    "expectedSection": "results",
+    "expectedTerms": ["bert", "gpt", "classification", "comparison"],
+    "minRelevant": 2,
+    "difficulty": "medium"
+  },
+  {
+    "id": "acad-003",
+    "domain": "academic",
+    "query": "methodology for training large language models efficiently",
+    "expectedSection": "method",
+    "expectedTerms": ["training", "large language model", "efficient", "optimization"],
+    "minRelevant": 2,
+    "difficulty": "hard"
+  },
+  {
+    "id": "acad-004",
+    "domain": "academic",
+    "query": "related work in multimodal learning across vision and language",
+    "expectedSection": "related",
+    "expectedTerms": ["multimodal", "vision", "language", "related"],
+    "minRelevant": 1,
+    "difficulty": "medium"
+  }
+]

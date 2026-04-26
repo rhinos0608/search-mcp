@@ -7,7 +7,11 @@ import {
 } from '../semanticLimits.js';
 import { webSearch } from './webSearch.js';
 import { webCrawl } from './webCrawl.js';
-import { extractJobListingsFromHtml, documentsFromJobListings } from '../rag/adapters/job.js';
+import {
+  extractJobListingsFromHtml,
+  documentsFromJobListings,
+  extractJobLinksFromHtml,
+} from '../rag/adapters/job.js';
 import { dedupJobListings } from '../rag/jobDedup.js';
 import { applyHardFilters, rankJobListings, type JobScore } from '../rag/jobRanking.js';
 import { embedTexts, embedTextsBatched } from '../rag/embedding.js';
@@ -312,48 +316,55 @@ async function defaultSearch(query: string, limit: number): Promise<SearchResult
 
 async function defaultCrawl(urls: string[]): Promise<SemanticJobsCrawledPage[]> {
   const cfg = loadConfig();
-  const settled = await Promise.allSettled(
-    urls.map(async (url) => {
-      const result = await webCrawl(url, cfg.crawl4ai.baseUrl, cfg.crawl4ai.apiToken, {
-        strategy: 'bfs',
-        maxDepth: 1,
-        maxPages: 1,
-        includeExternalLinks: false,
-      });
-      const page = result.pages[0];
-      return {
+
+  const crawlOne = async (
+    url: string,
+  ): Promise<{ url: string; page: import('../types.js').CrawlPageResult | undefined }> => {
+    const result = await webCrawl(url, cfg.crawl4ai.baseUrl, cfg.crawl4ai.apiToken, {
+      strategy: 'bfs',
+      maxDepth: 1,
+      maxPages: 1,
+      includeExternalLinks: false,
+    });
+    return { url, page: result.pages[0] };
+  };
+
+  // Phase 1: crawl collection pages to extract individual job links
+  const phase1 = await Promise.allSettled(urls.map(crawlOne));
+  const jobLinks: string[] = [];
+  for (const outcome of phase1) {
+    if (outcome.status !== 'fulfilled') continue;
+    const { url, page } = outcome.value;
+    if (page?.html) {
+      jobLinks.push(...extractJobLinksFromHtml(page.html, url));
+    }
+  }
+
+  // If no individual job links found, fall back to treating collection pages as listings
+  const targets = jobLinks.length > 0 ? dedupUrls(jobLinks) : urls;
+
+  // Phase 2: crawl individual job pages (or fall back to collection pages)
+  const phase2 = await Promise.allSettled(targets.map(crawlOne));
+  const pages: SemanticJobsCrawledPage[] = [];
+  for (let i = 0; i < phase2.length; i += 1) {
+    const outcome = phase2[i];
+    const url = targets[i] ?? 'unknown';
+    if (outcome === undefined) continue;
+    if (outcome.status === 'fulfilled') {
+      const { page } = outcome.value;
+      pages.push({
         url,
         html: page?.html ?? page?.markdown ?? '',
         success: page?.success ?? false,
         ...(page?.errorMessage !== null && page?.errorMessage !== undefined
           ? { error: page.errorMessage }
           : {}),
-      } satisfies SemanticJobsCrawledPage;
-    }),
-  );
-
-  const pages: SemanticJobsCrawledPage[] = [];
-  for (let index = 0; index < settled.length; index += 1) {
-    const outcome = settled[index];
-    const url = urls[index] ?? 'unknown';
-    if (outcome === undefined) {
-      continue;
+      } satisfies SemanticJobsCrawledPage);
+    } else {
+      const reason =
+        outcome.reason instanceof Error ? outcome.reason.message : String(outcome.reason);
+      pages.push({ url, html: '', success: false, error: reason });
     }
-
-    if (outcome.status === 'fulfilled') {
-      pages.push(outcome.value);
-      continue;
-    }
-
-    const reason =
-      outcome.reason instanceof Error ? outcome.reason.message : String(outcome.reason);
-    pages.push({
-      url,
-      html: '',
-      success: false,
-      error: reason,
-    });
   }
-
   return pages;
 }

@@ -1,0 +1,38 @@
+[
+  {
+    "id": "qa-001",
+    "domain": "qa",
+    "query": "how to handle asynchronous errors in JavaScript promises",
+    "expectedTags": ["javascript", "promise", "async-await"],
+    "minAcceptedScore": 10,
+    "minRelevant": 2,
+    "difficulty": "easy"
+  },
+  {
+    "id": "qa-002",
+    "domain": "qa",
+    "query": "difference between useEffect and useLayoutEffect in React",
+    "expectedTags": ["react", "react-hooks", "useEffect"],
+    "minAcceptedScore": 5,
+    "minRelevant": 1,
+    "difficulty": "easy"
+  },
+  {
+    "id": "qa-003",
+    "domain": "qa",
+    "query": "Python type hints best practices for large codebases",
+    "expectedTags": ["python", "typing", "type-hints"],
+    "minAcceptedScore": 15,
+    "minRelevant": 1,
+    "difficulty": "medium"
+  },
+  {
+    "id": "qa-004",
+    "domain": "qa",
+    "query": "SQL query optimization techniques for million-row tables",
+    "expectedTags": ["sql", "performance", "query-optimization"],
+    "minAcceptedScore": 20,
+    "minRelevant": 2,
+    "difficulty": "hard"
+  }
+]

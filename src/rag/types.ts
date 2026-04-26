@@ -1,5 +1,70 @@
 import type { CorpusChunk, ScoreDetail, RerankScoreDetail, SemanticCrawlChunk } from '../types.js';
 
+// ── Coverage tracking for retrieval operations ───────────────────────────────
+
+export interface Coverage {
+  sourcesAttempted: string[];
+  sourcesSucceeded: string[];
+  sourcesPartial: string[];
+  sourcesFailed: string[];
+  documentsFound: number;
+  documentsAfterDedup: number;
+  chunksGenerated: number;
+  embeddingsGenerated: number;
+  retrievalTimeMs: number;
+}
+
+// ── Query constraints for structured retrieval ─────────────────────────────
+
+export interface QueryConstraints {
+  hard: {
+    location?: string[];
+    salary?: { min?: number; max?: number; currency?: string };
+    experience?: { min?: number; max?: number };
+    workMode?: ('remote' | 'hybrid' | 'onsite')[];
+    language?: string[];
+    availability?: ('now' | 'week' | 'month')[];
+    dateRange?: { from?: Date; to?: Date };
+  };
+  soft: {
+    companySize?: { preferred: string[]; weight: number };
+    techStack?: { keywords: string[]; weight: number };
+    remoteFirst?: { weight: number };
+    sourceReliability?: { weight: number };
+    recency?: { weight: number; decay: 'linear' | 'exponential' };
+  };
+}
+
+// ── Deduplication configuration ────────────────────────────────────────────
+
+export interface DedupeConfig {
+  layers: {
+    url: boolean;
+    fingerprint: boolean;
+    semantic: boolean;
+  };
+  fingerprintThreshold: number; // default 0.95
+  semanticThreshold: number; // default 0.90
+  preferKeep: 'newest' | 'mostComplete' | 'highestScore';
+}
+
+// ── Constraint evaluation result ───────────────────────────────────────────
+
+export interface ConstraintEvaluation {
+  passedHard: boolean;
+  softScore: number; // 0-1
+  matchedConstraints: string[];
+  failedConstraints: string[];
+  explanations: {
+    constraint: string;
+    expected: unknown;
+    actual: unknown;
+    matched: boolean;
+  }[];
+}
+
+// ── Adapter types ──────────────────────────────────────────────────────────
+
 export type AdapterType =
   | 'text'
   | 'code'
@@ -10,7 +75,9 @@ export type AdapterType =
   | 'url'
   | 'sitemap'
   | 'search'
-  | 'cached';
+  | 'cached'
+  | 'academic'
+  | 'qa';
 
 export type RetrievalProfileName =
   | 'balanced'
@@ -80,12 +147,22 @@ export interface RetrievalResult<T = RagChunk> {
   item: T;
   score: RetrievalScore;
   rank: number;
+  // New fields for V3.2.0
+  constraintScore?: number; // 0-1 from constraint evaluation
+  qualityScore?: number; // 0-1 from quality heuristics
+  duplicateScore?: number; // 0-1 (higher = more likely duplicate)
+  overallScore?: number; // Combined score after all factors
+  explanation?: {
+    matched: string[]; // What constraints/features matched
+    caveats: string[]; // Warnings or limitations
+  };
 }
 
 export interface RetrievalResponse<T = RagChunk> {
   corpus: PreparedCorpus;
   results: RetrievalResult<T>[];
   trace: RetrievalTrace;
+  coverage?: Coverage; // New for V3.2.0
   warnings?: string[] | undefined;
 }
 

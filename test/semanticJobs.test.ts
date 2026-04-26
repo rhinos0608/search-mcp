@@ -148,7 +148,14 @@ test('semanticJobs returns empty results when search finds no URLs', async () =>
   );
 
   assert.equal(result.results.length, 0);
-  assert.deepEqual(result.corpusStatus, { requested: 0, fetched: 0, failed: 0, deduplicated: 0 });
+  assert.deepEqual(result.corpusStatus, {
+    requested: 0,
+    fetched: 0,
+    failed: 0,
+    extracted: 0,
+    deduplicated: 0,
+    filtered: 0,
+  });
 });
 
 test('semanticJobs records crawl failures in warnings', async () => {
@@ -294,8 +301,6 @@ test('processJobSearchResults warns when page html has no angle brackets (markdo
     4,
   );
 
-  const hasMarkdownWarning = result.warnings.some((w) =>
-    w.includes('markdown only'),
-  );
+  const hasMarkdownWarning = result.warnings.some((w) => w.includes('markdown only'));
   assert.ok(hasMarkdownWarning, 'expected a markdown-only warning');
 });

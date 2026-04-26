@@ -167,7 +167,7 @@ test('documentsFromJobListings builds embedding-friendly documents', () => {
   const documents = documentsFromJobListings(listings);
 
   assert.equal(documents.length, 1);
-  assert.equal(documents[0]?.adapter, 'search');
+  assert.equal(documents[0]?.adapter, 'job');
   assert.equal(documents[0]?.id, '12345');
   assert.equal(documents[0]?.url, 'https://www.seek.com.au/job/12345');
   assert.equal(documents[0]?.title, 'Frontend Developer');
