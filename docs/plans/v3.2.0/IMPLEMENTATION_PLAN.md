@@ -1346,6 +1346,198 @@ export async function retrieveCorpus<T = RagChunk>(
   let finalResults = results;
 ```
 
+#### 3.2 Two-Phase Job Discovery Crawl (`src/tools/semanticJobs.ts` + `src/rag/adapters/job.ts`)
+
+**Problem:** `semantic_jobs` currently treats job board search-result pages as individual job listings. `webSearch` returns collection URLs (e.g. `seek.com.au/data-entry-jobs/in-Bankstown-NSW-2200`), which are crawled and fed to `extractJobListingsFromHtml`. Since those pages have no `JobPosting` JSON-LD, the extractor falls back to `<h1>` — yielding "2,564 data entry jobs in Bankstown NSW 2200" as a job title. All extracted fields (location, salary, company) are either absent or wrong.
+
+**Fix:** Add an intermediate step that extracts individual job card links from collection pages before crawling the real listing pages.
+
+**New function: `extractJobLinksFromHtml`**
+
+Add to `src/rag/adapters/job.ts`:
+
+```typescript
+// Per-host canonical job URL patterns
+const JOB_URL_PATTERNS: { hostname: RegExp; path: RegExp }[] = [
+  { hostname: /seek\.com\.au$/, path: /^\/job\/\d+/ },
+  { hostname: /indeed\.com$/, path: /\bjk=[a-f0-9]+/ },     // query param
+  { hostname: /linkedin\.com$/, path: /\/jobs\/view\// },
+  { hostname: /jora\.com$/, path: /\/job\// },
+];
+
+export function extractJobLinksFromHtml(html: string, baseUrl: string): string[] {
+  const $ = cheerio.load(html);
+  let base: URL;
+  try {
+    base = new URL(baseUrl);
+  } catch {
+    return [];
+  }
+
+  const links = new Set<string>();
+
+  $('a[href]').each((_, el) => {
+    const href = $(el).attr('href');
+    if (!href) return;
+    let resolved: URL;
+    try {
+      resolved = new URL(href, base);
+    } catch {
+      return;
+    }
+    // Only same-host links
+    if (resolved.hostname !== base.hostname) return;
+
+    for (const { hostname, path } of JOB_URL_PATTERNS) {
+      if (hostname.test(resolved.hostname) && path.test(resolved.pathname + resolved.search)) {
+        links.add(resolved.href);
+        break;
+      }
+    }
+  });
+
+  return [...links];
+}
+```
+
+**Updated `defaultCrawl` in `src/tools/semanticJobs.ts`:**
+
+```typescript
+async function defaultCrawl(urls: string[]): Promise<SemanticJobsCrawledPage[]> {
+  const cfg = loadConfig();
+  const crawlOne = async (url: string) => {
+    const result = await webCrawl(url, cfg.crawl4ai.baseUrl, cfg.crawl4ai.apiToken, {
+      strategy: 'bfs', maxDepth: 1, maxPages: 1, includeExternalLinks: false,
+    });
+    return { url, page: result.pages[0] };
+  };
+
+  // Phase 1: crawl collection pages to extract individual job links
+  const phase1 = await Promise.allSettled(urls.map(crawlOne));
+  const jobLinks: string[] = [];
+  for (const outcome of phase1) {
+    if (outcome.status !== 'fulfilled') continue;
+    const { page } = outcome.value;
+    if (page?.html) {
+      jobLinks.push(...extractJobLinksFromHtml(page.html, outcome.value.url));
+    }
+  }
+
+  // If no individual job links found, fall back to treating collection pages as listings
+  const targets = jobLinks.length > 0 ? dedupUrls(jobLinks) : urls;
+
+  // Phase 2: crawl individual job pages (or fall back to collection pages)
+  const phase2 = await Promise.allSettled(targets.map(crawlOne));
+  const pages: SemanticJobsCrawledPage[] = [];
+  for (let i = 0; i < phase2.length; i++) {
+    const outcome = phase2[i];
+    const url = targets[i] ?? 'unknown';
+    if (outcome === undefined) continue;
+    if (outcome.status === 'fulfilled') {
+      const { page } = outcome.value;
+      pages.push({
+        url,
+        html: page?.html ?? page?.markdown ?? '',
+        success: page?.success ?? false,
+        ...(page?.errorMessage ? { error: page.errorMessage } : {}),
+      });
+    } else {
+      const reason = outcome.reason instanceof Error ? outcome.reason.message : String(outcome.reason);
+      pages.push({ url, html: '', success: false, error: reason });
+    }
+  }
+  return pages;
+}
+```
+
+**Integration with full `JobListing` type (from Phase 0.2):**
+
+The new `JobListing` type has structured `salary: SalaryRange`, `experience: ExperienceRange`, and `requirements: JobRequirement[]`. Individual job pages (not collection pages) reliably carry JSON-LD `JobPosting` schema and proper `<h1>` + structured fields. The two-phase crawl is what makes the Phase 0.2 type upgrade worthwhile — without it, the richer type is populated with garbage from collection pages.
+
+Update `buildListing` in `adapters/job.ts` to populate `JobListing` (not just `JobListingMvp`) using the structured extraction paths from Phase 0.2.
+
+**Tests:**
+
+```typescript
+// src/rag/__tests__/adapters/job-two-phase.test.ts
+
+describe('extractJobLinksFromHtml', () => {
+  it('extracts SEEK job links from a search result page', () => {
+    const html = `
+      <a href="/job/91431086">Software Engineer</a>
+      <a href="/job/91431087">Data Entry Clerk</a>
+      <a href="/company/acme">ACME Corp</a>
+    `;
+    const links = extractJobLinksFromHtml(html, 'https://www.seek.com.au/data-entry-jobs');
+    expect(links).toHaveLength(2);
+    expect(links[0]).toContain('/job/91431086');
+    expect(links[1]).toContain('/job/91431087');
+  });
+
+  it('extracts Indeed job links via jk param', () => {
+    const html = `<a href="/viewjob?jk=abc123def456">Data Entry</a>`;
+    const links = extractJobLinksFromHtml(html, 'https://au.indeed.com/jobs?q=data+entry');
+    expect(links).toHaveLength(1);
+    expect(links[0]).toContain('jk=abc123def456');
+  });
+
+  it('ignores cross-domain links', () => {
+    const html = `<a href="https://other.com/job/123">Cross-domain</a>`;
+    const links = extractJobLinksFromHtml(html, 'https://www.seek.com.au/jobs');
+    expect(links).toHaveLength(0);
+  });
+
+  it('deduplicates identical links', () => {
+    const html = `
+      <a href="/job/12345">Job A</a>
+      <a href="/job/12345">Job A again</a>
+    `;
+    const links = extractJobLinksFromHtml(html, 'https://www.seek.com.au/jobs');
+    expect(links).toHaveLength(1);
+  });
+});
+
+describe('defaultCrawl two-phase', () => {
+  it('falls back to collection pages when no job links found', async () => {
+    // Mock that returns pages with no job card links
+    // Expect the collection page URLs themselves to be crawled for extraction
+  });
+
+  it('discovers and crawls individual job links when present', async () => {
+    // Mock phase 1 returns a collection page with job links
+    // Mock phase 2 returns individual job pages with JSON-LD JobPosting
+    // Expect extracted listings to have proper title/company/location
+  });
+});
+```
+
+### Exit Criteria
+
+- [ ] Pipeline dedup integration (`src/rag/dedup.ts`) wired into `prepareCorpus`
+- [ ] Pipeline constraint integration (`src/rag/constraints.ts`) wired into `retrieveCorpus`
+- [ ] `JobListingMvp` upgraded to full `JobListing` with structured salary/experience/requirements
+- [ ] `extractJobLinksFromHtml` implemented with tests covering SEEK, Indeed, LinkedIn, Jora patterns
+- [ ] `defaultCrawl` in `semanticJobs.ts` uses two-phase discovery
+- [ ] Two-phase crawl falls back gracefully when no individual links are found
+- [ ] All new tests pass (`npm test`)
+- [ ] `npm run typecheck` passes
+
+### Review Gate 3: Integration Review (45 minutes)
+
+**Checklist:**
+
+- [ ] Pipeline dedup and constraints don't break existing tests
+- [ ] `JobListing` replaces `JobListingMvp` without breaking `semantic_jobs` results contract
+- [ ] Two-phase crawl delivers real individual job listings, not collection page artifacts
+- [ ] Fallback to collection pages works when job links are not found
+- [ ] Job link patterns cover SEEK, Indeed, LinkedIn, Jora correctly
+- [ ] Score formula (`semantic * 0.45 + location * 0.2 + ...`) differentiates results meaningfully with real listing data
+
+**Go/No-Go Criteria:**
+
+- GO: Individual job pages extracted cleanly, scores differentiate across listings
+- NO-GO: Regression in existing tools, type errors, or fallback path missing
+
 ---
 
 ## Phase 6: Distribution — Docker Compose + Ollama + Registry
