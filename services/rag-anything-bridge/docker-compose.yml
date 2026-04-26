@@ -1,0 +1,115 @@
+# Docker Compose for RAG-Anything Bridge Development
+
+version: '3.8'
+
+services:
+  rag-anything-bridge:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: runtime
+    ports:
+      - "8000:8000"
+    environment:
+      # Core configuration
+      - RAGA_CACHE_DIR=/cache/rag-anything
+      - RAGA_MAX_SYNC_PAGES=30
+      - RAGA_MAX_SYNC_SIZE_MB=20
+      - RAGA_DEFAULT_PARSER=auto
+      - RAGA_REQUEST_TIMEOUT=30
+      - RAGA_ASYNC_TIMEOUT=300
+      # Debug mode
+      - RAGA_DEBUG=false
+      # Parser configuration
+      - RAGA_DOCLING_ENABLED=true
+      - RAGA_PADDLEOCR_ENABLED=true
+      - RAGA_MINERU_ENABLED=false
+      # Limits
+      - RAGA_SYNC_MAX_PAGES=30
+      - RAGA_SYNC_MAX_SIZE_MB=20
+      - RAGA_SYNC_TIMEOUT_SEC=30
+      - RAGA_ASYNC_MAX_PAGES=200
+      - RAGA_ASYNC_MAX_SIZE_MB=100
+      - RAGA_ASYNC_TIMEOUT_MIN=5
+      # Quality thresholds
+      - RAGA_QUALITY_MIN_TEXT=500
+      - RAGA_QUALITY_MIN_RATIO=0.1
+      - RAGA_QUALITY_MAX_BOILERPLATE=0.7
+    volumes:
+      # Cache directory
+      - ./cache:/cache
+      # Temporary processing directory
+      - ./tmp:/tmp/rag-anything
+      # Logs
+      - ./logs:/app/logs
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '4'
+          memory: 8G
+        reservations:
+          cpus: '1'
+          memory: 2G
+    networks:
+      - rag-anything-network
+
+  # Optional: Redis for distributed caching
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    command: redis-server --appendonly yes
+    networks:
+      - rag-anything-network
+    profiles:
+      - with-redis
+
+  # Optional: Prometheus for metrics
+  prometheus:
+    image: prom/prometheus:latest
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus-data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+    networks:
+      - rag-anything-network
+    profiles:
+      - with-monitoring
+
+  # Optional: Grafana for dashboards
+  grafana:
+    image: grafana/grafana:latest
+    ports:
+      - "3000:3000"
+    volumes:
+      - grafana-data:/var/lib/grafana
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+    depends_on:
+      - prometheus
+    networks:
+      - rag-anything-network
+    profiles:
+      - with-monitoring
+
+volumes:
+  redis-data:
+  prometheus-data:
+  grafana-data:
+
+networks:
+  rag-anything-network:
+    driver: bridge
