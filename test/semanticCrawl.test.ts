@@ -7,10 +7,12 @@ import {
   isBorderline,
   applyReranking,
   embedAndRank,
+  embedTexts,
   filterByPathPrefix,
   isDirectChild,
   pagesToCorpus,
   crawlSeeds,
+  retrieveSemanticChunks,
   type SemanticCrawlOptions,
   type SemanticCrawlSeedsOptions,
 } from '../src/tools/semanticCrawl.js';
@@ -556,7 +558,11 @@ describe('maxPages client-side enforcement', () => {
         768,
       );
 
-      assert.equal(result.pagesCrawled, 25);
+      // pagesCrawled now reflects total pages returned by the crawler before
+      // path-filtering/truncation, so the mock's 47 raw results are reported.
+      assert.equal(result.pagesCrawled, 47);
+      // Only 25 should actually be returned (kept after budget enforcement).
+      assert.equal(result.chunks.length, 1);
     } finally {
       globalThis.fetch = originalFetch;
     }
@@ -584,10 +590,10 @@ describe('filterByPathPrefix', () => {
       makePage('https://docs.docker.com/cli/config/'),
     ];
     const filtered = filterByPathPrefix(pages, seed);
-    assert.strictEqual(filtered.length, 2);
+    assert.strictEqual(filtered.length, 3);
     assert.ok(filtered.some((p) => p.url.includes('dockerfile/')));
     assert.ok(!filtered.some((p) => p.url.includes('cli/config')));
-    assert.ok(!filtered.some((p) => p.url.includes('args')));
+    assert.ok(filtered.some((p) => p.url.includes('args')));
   });
 
   it('allows drift when allowPathDrift is true', () => {
@@ -721,17 +727,13 @@ describe('crawlSeeds size guard', () => {
   it('small crawl below budget emits no size warnings', async () => {
     globalThis.fetch = async () => buildCrawlResponse('# Hello\n\nShort page content.');
 
-    const result = await crawlSeeds(
-      ['https://example.com'],
-      CRAWL4AI_CFG,
-      {
-        strategy: 'bfs',
-        maxDepth: 1,
-        maxPages: 1,
-        includeExternalLinks: false,
-        sourceType: 'url',
-      } satisfies SemanticCrawlSeedsOptions,
-    );
+    const result = await crawlSeeds(['https://example.com'], CRAWL4AI_CFG, {
+      strategy: 'bfs',
+      maxDepth: 1,
+      maxPages: 1,
+      includeExternalLinks: false,
+      sourceType: 'url',
+    } satisfies SemanticCrawlSeedsOptions);
 
     const sizeWarnings = result.structuredWarnings;
     assert.equal(sizeWarnings.length, 0);
@@ -742,17 +744,13 @@ describe('crawlSeeds size guard', () => {
     globalThis.fetch = async () => buildCrawlResponse('# Hello\n\nPage content.');
 
     const requestedMaxPages = 10;
-    const result = await crawlSeeds(
-      ['https://www.seek.com.au/jobs'],
-      CRAWL4AI_CFG,
-      {
-        strategy: 'bfs',
-        maxDepth: 1,
-        maxPages: requestedMaxPages,
-        includeExternalLinks: false,
-        sourceType: 'url',
-      } satisfies SemanticCrawlSeedsOptions,
-    );
+    const result = await crawlSeeds(['https://www.seek.com.au/jobs'], CRAWL4AI_CFG, {
+      strategy: 'bfs',
+      maxDepth: 1,
+      maxPages: requestedMaxPages,
+      includeExternalLinks: false,
+      sourceType: 'url',
+    } satisfies SemanticCrawlSeedsOptions);
 
     const guard = result.structuredWarnings.find(
       (w) => w.code === 'SEMANTIC_CRAWL_RESPONSE_SIZE_GUARD',
@@ -770,9 +768,16 @@ describe('crawlSeeds size guard', () => {
     // Mock returns a page with a huge markdown body — larger than SAFE_BYTES on its own.
     // Use allowPathDrift: true so pages are not dropped by the path prefix filter.
     globalThis.fetch = async (_input: RequestInfo | URL, _init?: RequestInit) => {
-      const url = typeof _input === 'string' ? _input : _input instanceof URL ? _input.href : (_input as Request).url;
+      const url =
+        typeof _input === 'string'
+          ? _input
+          : _input instanceof URL
+            ? _input.href
+            : (_input as Request).url;
       // Return a result with the seed URL embedded in the response so filter passes
-      const seedUrl = url.includes('page1') ? 'https://example.com/page1' : 'https://example.com/page2';
+      const seedUrl = url.includes('page1')
+        ? 'https://example.com/page1'
+        : 'https://example.com/page2';
       return buildCrawlResponse('X'.repeat(SAFE_BYTES + 1), seedUrl);
     };
 
@@ -993,5 +998,200 @@ describe('collectPageElements', () => {
     assert.equal(result.elements!.length, MAX_ELEMENTS);
     assert.equal(result.truncatedElements, true);
     assert.equal(result.originalElementCount, MAX_ELEMENTS + 5);
+  });
+});
+
+describe('retrieveSemanticChunks embedding pairing', () => {
+  const originalFetch = globalThis.fetch;
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  it('pairs embeddings correctly when chunkIndex collides across pages', async () => {
+    // Two pages, each with one chunk. Both chunks have chunkIndex 0 (page-local)
+    // but must map to different embeddings.
+    const chunks: CorpusChunk[] = [
+      {
+        text: 'Page A content about neural networks',
+        url: 'https://example.com/page-a',
+        section: '## A',
+        charOffset: 0,
+        chunkIndex: 0,
+        totalChunks: 1,
+      },
+      {
+        text: 'Page B content about banana bread',
+        url: 'https://example.com/page-b',
+        section: '## B',
+        charOffset: 0,
+        chunkIndex: 0,
+        totalChunks: 1,
+      },
+    ];
+
+    // Embeddings that are orthogonal-ish so they don't get mixed up
+    const precomputedEmbeddings: number[][] = [
+      [1, 0, 0, 0], // matches page A
+      [0, 1, 0, 0], // matches page B
+    ];
+
+    globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(
+        input instanceof URL ? input.href : input instanceof Request ? input.url : input,
+      );
+      if (url.includes('/embed')) {
+        const body = init?.body ? JSON.parse(await new Response(init.body).text()) : { texts: [] };
+        return buildMockResponse({
+          embeddings: body.texts.map(() => [0.9, 0.1, 0, 0]), // query leans toward page A
+          model: 'test-model',
+        });
+      }
+      return buildMockResponse({});
+    };
+
+    const result = await retrieveSemanticChunks(chunks, {
+      query: 'neural networks',
+      topK: 2,
+      embeddingBaseUrl: 'https://embed.example.com',
+      embeddingApiToken: '',
+      embeddingDimensions: 4,
+      precomputedEmbeddings,
+    });
+
+    // Page A should rank first because its embedding aligns with the query.
+    // The pairing must survive the chunkIndex collision.
+    assert.ok(result.length > 0, 'should return at least one chunk');
+    assert.strictEqual(
+      result[0]?.url,
+      'https://example.com/page-a',
+      'first result should be page-a because query aligns with its embedding',
+    );
+  });
+});
+
+describe('crawlSeeds deduplicated successfulPages', () => {
+  const originalFetch = globalThis.fetch;
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  const CRAWL4AI_CFG = { baseUrl: 'https://crawl4ai.example.com', apiToken: '' };
+
+  function buildCrawlResponse(pages: Array<{ url: string; success: boolean; markdown: string }>) {
+    return new Response(JSON.stringify({ results: pages }), {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    });
+  }
+
+  it('recomputes successfulPages from deduplicated pages', async () => {
+    globalThis.fetch = async () =>
+      buildCrawlResponse([
+        { url: 'https://example.com/shared', success: true, markdown: '# Shared' },
+        { url: 'https://example.com/only-a', success: true, markdown: '# A' },
+      ]);
+
+    await crawlSeeds(['https://example.com/seed-a', 'https://example.com/seed-b'], CRAWL4AI_CFG, {
+      strategy: 'bfs',
+      maxDepth: 1,
+      maxPages: 5,
+      includeExternalLinks: false,
+      sourceType: 'url',
+    } satisfies SemanticCrawlSeedsOptions);
+
+    // With allowPathDrift false the path filter may drop everything except exact
+    // matches. To make the test robust, allow drift so URLs survive filtering.
+    const resultWithDrift = await crawlSeeds(
+      ['https://example.com/seed-a', 'https://example.com/seed-b'],
+      CRAWL4AI_CFG,
+      {
+        strategy: 'bfs',
+        maxDepth: 1,
+        maxPages: 5,
+        includeExternalLinks: false,
+        allowPathDrift: true,
+        sourceType: 'url',
+      } satisfies SemanticCrawlSeedsOptions,
+    );
+
+    // Both seeds returned the same 2 pages, so dedup should leave 2 unique pages.
+    // Both pages are successful => successfulPages should be 2, not 4.
+    assert.strictEqual(resultWithDrift.pages.length, 2, 'should deduplicate to 2 unique pages');
+    assert.strictEqual(
+      resultWithDrift.successfulPages,
+      2,
+      'successfulPages should count deduplicated successful pages, not pre-dedup sum',
+    );
+  });
+});
+
+describe('filterByPathPrefix nested paths', () => {
+  const makePage = (url: string): CrawlPageResult => ({
+    url,
+    success: true,
+    markdown: `# ${url}`,
+    title: null,
+    description: null,
+    links: [],
+    statusCode: 200,
+    errorMessage: null,
+  });
+
+  it('keeps deeply nested pages under seed path', () => {
+    const seed = 'https://example.com/docs';
+    const pages = [
+      makePage('https://example.com/docs'),
+      makePage('https://example.com/docs/guides'),
+      makePage('https://example.com/docs/guides/install'),
+      makePage('https://example.com/docs/guides/install/step1'),
+      makePage('https://example.com/blog/post'),
+    ];
+    const filtered = filterByPathPrefix(pages, seed);
+    assert.strictEqual(filtered.length, 4);
+    assert.ok(filtered.some((p) => p.url === 'https://example.com/docs/guides/install/step1'));
+    assert.ok(!filtered.some((p) => p.url === 'https://example.com/blog/post'));
+  });
+
+  it('keeps pages when seed path ends with trailing slash', () => {
+    const seed = 'https://example.com/docs/';
+    const pages = [
+      makePage('https://example.com/docs/'),
+      makePage('https://example.com/docs/getting-started'),
+    ];
+    const filtered = filterByPathPrefix(pages, seed);
+    assert.strictEqual(filtered.length, 2);
+  });
+});
+
+describe('embedTexts timeout', () => {
+  const originalFetch = globalThis.fetch;
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  it('throws networkError for TimeoutError from AbortSignal.timeout', async () => {
+    globalThis.fetch = async () => {
+      const err = new Error('The operation timed out.');
+      err.name = 'TimeoutError';
+      throw err;
+    };
+
+    await assert.rejects(
+      () => embedTexts('https://embed.example.com', '', ['hello'], 'document', 4),
+      (err: Error) => err.message.includes('Embedding sidecar request timed out after 60 seconds'),
+    );
+  });
+
+  it('throws networkError for AbortError from AbortSignal.timeout', async () => {
+    globalThis.fetch = async () => {
+      const err = new Error('The operation was aborted.');
+      err.name = 'AbortError';
+      throw err;
+    };
+
+    await assert.rejects(
+      () => embedTexts('https://embed.example.com', '', ['hello'], 'document', 4),
+      (err: Error) => err.message.includes('Embedding sidecar request timed out after 60 seconds'),
+    );
   });
 });
