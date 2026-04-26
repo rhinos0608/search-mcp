@@ -2,14 +2,29 @@
 
 ## Current State (2026-04-26)
 
-| Release          | Status     | Notes                                                          |
-| ---------------- | ---------- | -------------------------------------------------------------- |
-| **V3.1 Phase 1** | ✅ Done    | SQLite corpus cache, Exa neural search                         |
-| **V3.0.5**       | ✅ Done    | Job adapter MVP, `semantic_jobs` tool                          |
-| **V3.0.0**       | ✅ Done    | RAG pipeline extraction, YouTube/Reddit adapters               |
-| **V3.1.0 Code**  | ✅ Done    | Tree-sitter adapter, GitHub guardrails, `semantic_github_code` |
-| **V3.2.0**       | 🔲 Pending | Job adapter in src/rag/, no eval/Stack Overflow/HN             |
-| **V3.3.0**       | 🔲 Pending | Kill chain extraction, contextual embeddings                   |
+| Release          | Status     | Notes                                                                                                     |
+| ---------------- | ---------- | --------------------------------------------------------------------------------------------------------- |
+| **V3.1 Phase 1** | ✅ Done    | SQLite corpus cache, Exa neural search                                                                    |
+| **V3.0.5**       | ✅ Done    | Job adapter MVP, `semantic_jobs` tool                                                                     |
+| **V3.0.0**       | ✅ Done    | RAG pipeline extraction, YouTube/Reddit adapters                                                          |
+| **V3.1.0 Code**  | ✅ Done    | Tree-sitter adapter, GitHub guardrails, `semantic_github_code`                                            |
+| **V3.1.1**       | ✅ Done    | Crawl reliability patch: HTML threading for `semantic_jobs`, timeout scaling for `web_crawl`, `semantic_crawl` size guard |
+| **V3.2.0**       | 🔲 Pending | Job adapter in src/rag/, no eval/Stack Overflow/HN                                                        |
+| **V3.3.0**       | 🔲 Pending | Kill chain extraction, contextual embeddings                                                              |
+
+---
+
+## V3.1.1 — Crawl Reliability Patch (2026-04-26)
+
+Three production bugs identified from real usage and fixed:
+
+**Bug 1: `semantic_jobs` returned 0 results.** The `defaultCrawl` path in `src/tools/semanticJobs.ts` passed `page.markdown` to `extractJobListingsFromHtml()`, which uses Cheerio to parse `<script type="application/ld+json">` and CSS selectors — neither present in markdown. Fixed by threading `html` (with markdown fallback) from Crawl4AI's response. Requires Crawl4AI v0.8.x, which returns `fit_html`, `cleaned_html`, and `html` fields alongside markdown.
+
+**Bug 2: `web_crawl` timed out on JS-heavy sites.** Hardcoded 120s `AbortSignal.timeout` was insufficient for multi-page crawls with JS rendering. Fixed with `computeCrawlTimeout(maxPages)` = `min(30,000 + maxPages × 15,000, 300,000)` ms. A 10-page crawl now gets 180s; 25+ pages get the 5-minute cap.
+
+**Bug 3: `semantic_crawl` crashed with 314MB response.** Large crawls (`maxPages: 40`) could produce responses exceeding the 52MB MCP cap, crashing with a `safeResponseJson` size error. Fixed with a two-layer guard in `src/utils/crawlBudget.ts`:
+- *Preflight:* before crawling, estimates `maxPages × avgPageBytes` (8MB/page for JS-heavy sites, 1.5MB/page otherwise) and caps `maxPages` if estimated total exceeds the ~41MB safe budget. Emits a `SEMANTIC_CRAWL_RESPONSE_SIZE_GUARD` structured warning.
+- *In-flight:* per-page `Buffer.byteLength(JSON.stringify(page))` accumulator stops adding pages when the budget is approached. Omitted pages recorded in `omittedPages[]`. Emits a `SEMANTIC_CRAWL_RESPONSE_SIZE_LIMIT_APPROACHED` structured warning.
 
 ---
 

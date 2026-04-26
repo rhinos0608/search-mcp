@@ -34,7 +34,10 @@ const LISTING_PATTERN =
  *
  * False negatives are acceptable — the in-flight byte accumulator is the authoritative guard.
  */
-export function isLikelyJsHeavySite(opts: { sourceType: SourceType; url?: string }): boolean {
+export function isLikelyJsHeavySite(opts: {
+  sourceType: SourceType;
+  url?: string | undefined;
+}): boolean {
   if (opts.sourceType === 'search') return true;
 
   if (opts.url === undefined) return false;

@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-> **Version: 3.1.0** — Intelligence, Extraction, and Code: Persistent SQLite corpus cache, Kill Chain extraction, Neural Search (Exa), and Tree-sitter AST code chunking.
+> **Version: 3.1.1** — Crawl reliability patch: HTML threading for `semantic_jobs`, dynamic timeout scaling for `web_crawl`, and two-layer response-size guard for `semantic_crawl`.
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
@@ -8,7 +8,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 An MCP (Model Context Protocol) server that exposes web search, web reading, deep crawling, **semantic RAG search**, GitHub (repo, file, tree, search, corpus), YouTube, Reddit, Twitter/X, Product Hunt, patent, podcast, academic research, Hacker News, Stack Overflow, npm, PyPI, and news tools over stdio JSON-RPC. Clients like Claude Desktop or the Claude CLI connect via stdin/stdout; all logging goes to stderr.
 
-V3.0.0 extracts the retrieval pipeline into reusable `src/rag/` modules and adds two new semantic tools: `semantic_youtube` (search + transcripts + RAG) and `semantic_reddit` (search + comments + RAG). V3.0.5 adds the `semantic_jobs` tool with structured job listing extraction (SEEK, Indeed, Jora), three-layer dedup, and constraint-aware weighted ranking. V3.1.0 adds `semantic_github_code` (AST-aware code search via lazy-loaded tree-sitter WASM grammars, lexical-heavy profile). The `semantic_crawl` tool remains the primary crawl entry point. The shared RAG core: bi-encoder embeddings → BM25+ → RRF fusion → top-K.
+V3.0.0 extracts the retrieval pipeline into reusable `src/rag/` modules and adds two new semantic tools: `semantic_youtube` (search + transcripts + RAG) and `semantic_reddit` (search + comments + RAG). V3.0.5 adds the `semantic_jobs` tool with structured job listing extraction (SEEK, Indeed, Jora), three-layer dedup, and constraint-aware weighted ranking. V3.1.0 adds `semantic_github_code` (AST-aware code search via lazy-loaded tree-sitter WASM grammars, lexical-heavy profile). V3.1.1 fixes three reliability bugs: `semantic_jobs` now receives full HTML from Crawl4AI for structured extraction; `web_crawl` timeout scales with `maxPages` (30s + 15s × pages, capped at 5 min); `semantic_crawl` has a two-layer response-size guard (preflight `maxPages` cap + in-flight byte accumulator) to prevent MCP 52MB response limit crashes. The `semantic_crawl` tool remains the primary crawl entry point. The shared RAG core: bi-encoder embeddings → BM25+ → RRF fusion → top-K.
 
 ## Commands
 
@@ -39,11 +39,11 @@ _Search & Read_
 
 - `web_search` — Multi-backend search with fallback chain: primary backend (configured) → remaining backend. Supports Exa, Brave, and SearXNG.
 - `web_read` — Fetches a URL and extracts article content via Mozilla Readability + jsdom.
-- `web_crawl` — Deep multi-page crawl via Crawl4AI (JS rendering). Returns raw markdown per page. Requires `CRAWL4AI_BASE_URL`.
+- `web_crawl` — Deep multi-page crawl via Crawl4AI (JS rendering). Returns markdown + HTML per page. Timeout scales with `maxPages` (30s + 15s × pages, cap 5 min). Requires `CRAWL4AI_BASE_URL`.
 - `semantic_crawl` — Full RAG pipeline over a crawled corpus. Source types: `url`, `sitemap`, `search` (search-then-crawl), `github` (code-aware), `cached` (re-use corpus by ID). Returns top-K semantically ranked chunks with bi-encoder, BM25, and RRF scores. Requires `CRAWL4AI_BASE_URL` + `EMBEDDING_SIDECAR_BASE_URL`.
 - `semantic_youtube` — YouTube video search + transcript fetch + RAG pipeline. Returns top-K semantically ranked transcript passages. Requires `YOUTUBE_API_KEY` + `EMBEDDING_SIDECAR_BASE_URL`.
 - `semantic_reddit` — Reddit post search + comment thread fetch + RAG pipeline. Deleted/removed comments auto-filtered. Returns top-K semantically ranked comment passages. Requires `EMBEDDING_SIDECAR_BASE_URL`.
-- `semantic_jobs` — Job listing search across job boards (SEEK, Indeed, Jora) via web search + crawl. Extracts structured fields (title, company, location, salary, work mode), deduplicates across sources, applies constraint filters, and ranks with weighted composite scoring (semantic 0.45, location 0.20, workMode 0.15, recency 0.10, completeness 0.10). Returns structured `JobListingMvp` objects with confidence scores and verification status. Requires `EMBEDDING_SIDECAR_BASE_URL` + a search backend (`BRAVE_API_KEY` or `SEARXNG_BASE_URL`).
+- `semantic_jobs` — Job listing search across job boards (SEEK, Indeed, Jora) via web search + crawl. Extracts structured fields from HTML (title, company, location, salary, work mode) using Cheerio and JSON-LD; requires Crawl4AI v0.8.x for HTML delivery. Deduplicates across sources, applies constraint filters, and ranks with weighted composite scoring (semantic 0.45, location 0.20, workMode 0.15, recency 0.10, completeness 0.10). Returns structured `JobListingMvp` objects with confidence scores and verification status. Requires `EMBEDDING_SIDECAR_BASE_URL` + a search backend (`BRAVE_API_KEY` or `SEARXNG_BASE_URL`).
 
 _GitHub_
 
@@ -116,11 +116,12 @@ Reddit OAuth is optional: both `REDDIT_CLIENT_ID` and `REDDIT_CLIENT_SECRET` mus
 **Semantic pipeline** (`src/tools/semanticCrawl.ts` + `src/chunking.ts` + `src/utils/`):
 
 1. Corpus ingestion: crawl pages via Crawl4AI → strip cookie banners → `chunkMarkdown()` (400-token max, 20% overlap, atomic units for code blocks/tables, boilerplate heuristics)
-2. Embedding: batched document embeddings via sidecar (max 512/batch, document/query asymmetric, title-aware). Query embedded in parallel.
-3. Hybrid ranking: bi-encoder cosine → BM25+ (`src/utils/bm25.ts`) → RRF fusion via `src/rag/pipeline.ts` (internal `retrieveSemanticChunks()` wrapper)
-4. Post-filtering: semantic coherence filter (centroid similarity for borderline chunks) → soft IDF-weighted lexical constraint (`src/utils/lexicalConstraint.ts`)
-5. Optional cross-encoder reranking (`src/utils/rerank.ts`, ONNX-based, local, default off)
-6. Corpus cache (`src/utils/corpusCache.ts`): Persistent via SQLite (`better-sqlite3`), configurable TTL, byte-weighted LRU eviction, default database path from `DATABASE_PATH` or `~/.cache/search-mcp/semantic-crawl/corpus-cache.sqlite`. Re-query via `source: { type: 'cached', corpusId }`.
+2. **Response-size guard** (`src/utils/crawlBudget.ts`): preflight heuristic cap on `maxPages` (site-aware: 8MB/page JS-heavy, 1.5MB/page default; safe budget ~41MB) + in-flight per-page byte accumulator that stops collection and records `omittedPages` when budget is approached. Emits typed `SemanticCrawlSizeWarning` objects in `structuredWarnings`.
+3. Embedding: batched document embeddings via sidecar (max 512/batch, document/query asymmetric, title-aware). Query embedded in parallel.
+4. Hybrid ranking: bi-encoder cosine → BM25+ (`src/utils/bm25.ts`) → RRF fusion via `src/rag/pipeline.ts` (internal `retrieveSemanticChunks()` wrapper)
+5. Post-filtering: semantic coherence filter (centroid similarity for borderline chunks) → soft IDF-weighted lexical constraint (`src/utils/lexicalConstraint.ts`)
+6. Optional cross-encoder reranking (`src/utils/rerank.ts`, ONNX-based, local, default off)
+7. Corpus cache (`src/utils/corpusCache.ts`): Persistent via SQLite (`better-sqlite3`), configurable TTL, byte-weighted LRU eviction, default database path from `DATABASE_PATH` or `~/.cache/search-mcp/semantic-crawl/corpus-cache.sqlite`. Re-query via `source: { type: 'cached', corpusId }`.
 
 GitHub corpus (`src/utils/githubCorpus.ts`): fetches repo files via GitHub API, uses `chunkMarkdown` with path-prefixed sections. Supports branch, file extension filter, and query pre-filter.
 
@@ -141,6 +142,7 @@ GitHub corpus (`src/utils/githubCorpus.ts`): fetches repo files via GitHub API, 
 - `corpusCache.ts` — In-process corpus store (chunks + embeddings + BM25 index)
 - `lexicalConstraint.ts` — IDF-weighted soft token coverage constraint
 - `githubCorpus.ts` — GitHub API → document corpus converter
+- `crawlBudget.ts` — Response-size budget utilities: `SAFE_BYTES`, `DEFAULT_AVG_PAGE_BYTES`, `JS_HEAVY_AVG_PAGE_BYTES`, `isLikelyJsHeavySite()`, `estimateSerializedBytes()`
 - `extractionConfig.ts` — Structured data extraction config schema for Crawl4AI
 - `elementHelpers.ts`, `elementTruncation.ts`, `htmlElements.ts`, `markdownElements.ts` — Structured content element types and truncation logic
 - `sitemap.ts` — XML sitemap parser + sitemap-index detection

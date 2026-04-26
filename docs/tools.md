@@ -713,13 +713,109 @@ Crawl a URL or corpus source and return the most semantically relevant passages 
 
 Crawls pages, chunks them, embeds them through the shared sidecar, and ranks passages with dense + lexical retrieval. Optional cross-encoder re-ranking can be enabled with `useReranker`.
 
+**Response-size protection:** To prevent MCP response limit errors, `semantic_crawl` implements a two-layer size guard:
+
+1. **Preflight guard:** Before crawling, estimates the total response size using site-aware heuristics (JS-heavy sites like job boards produce larger payloads). If the estimated size would exceed the safe budget (~41MB), `maxPages` is automatically capped to a safe level and a `SEMANTIC_CRAWL_RESPONSE_SIZE_GUARD` warning is emitted.
+
+2. **In-flight accumulator:** During crawling, accumulates the actual serialized byte count of each page. If adding another page would exceed the safe budget, the accumulator stops and returns the pages collected so far, plus `SEMANTIC_CRAWL_RESPONSE_SIZE_LIMIT_APPROACHED` warning and an `omittedPages` list detailing which URLs were skipped.
+
+### Output fields
+
+In addition to the ranked `chunks`, the response may include:
+
+- `omittedPages?: Array<{ url: string; reason: string; estimatedBytes?: number }>` — Pages that were skipped due to response-size limits.
+- `structuredWarnings?: Array<{ code: string; message: string; ... }>` — Machine-readable warnings including size-guard events.
+
 ### Rate limits / caveats
 
 - Requires `CRAWL4AI_BASE_URL` and `EMBEDDING_SIDECAR_BASE_URL`.
 - The corpus budget is capped at 250MB by default.
+- **Response-size guard:** Large crawls may return fewer pages than requested if the response would exceed MCP size limits (~52MB). Check `omittedPages` and `structuredWarnings` in the response.
 - Cached corpus IDs are retained for at least 24 hours and are refreshed on access; re-run the original crawl if a corpus has been evicted.
 - Broad GitHub crawls are de-prioritized toward core source directories, but the best results still come from providing a query pre-filter.
 - SSRF protection still applies to fetched seed URLs and discovered pages.
 - If crawl4ai returns shell/placeholder content (for example `Loading...`), the crawler automatically retries once with a more aggressive render profile before indexing; successful recoveries may be reported in `meta.warnings`.
+
+---
+
+## `web_crawl`
+
+Crawl a URL using a headless Playwright browser via the Crawl4AI sidecar. Handles JavaScript-rendered SPAs, React/Vue apps, consent popups, and shadow DOM. Returns clean LLM-ready Markdown plus raw HTML for each crawled page.
+
+### Inputs
+
+| Parameter               | Type               | Required | Default  | Description                                                                                   |
+| ----------------------- | ------------------ | -------- | -------- | --------------------------------------------------------------------------------------------- |
+| `url`                   | string (URL)       | yes      | —        | Seed URL to start crawling from.                                                              |
+| `strategy`              | `"bfs"` \| `"dfs"` | no       | `"bfs"`  | Crawl strategy: `bfs` (breadth-first, wide coverage) or `dfs` (depth-first, deep nesting).   |
+| `maxDepth`              | number (1–5)       | no       | `1`      | Maximum link depth to follow from seed URL (1 = single page only).                           |
+| `maxPages`              | number (1–100)     | no       | `1`      | Maximum number of pages to crawl.                                                             |
+| `includeExternalLinks`  | boolean            | no       | `false`  | Follow links to external domains.                                                             |
+| `extractionConfig`      | object             | no       | —        | Structured extraction config (css_schema, xpath_schema, regex, or llm strategy). Requires Crawl4AI sidecar v0.8.x. |
+| `waitFor`               | string             | no       | —        | CSS selector or JS predicate to wait for before extracting.                                   |
+| `delayBeforeReturnHtml` | number (0–30)      | no       | `0.1`    | Extra seconds to wait after page load for dynamic content to settle.                          |
+| `pageTimeout`           | number (ms)        | no       | `60000`  | Per-page operation timeout in milliseconds.                                                   |
+| `jsCode`                | string             | no       | —        | Custom JavaScript to execute on the page (e.g. scroll to bottom, click "Load More").         |
+
+### Underlying approach
+
+Each page is fetched via Playwright through the Crawl4AI sidecar. The sidecar returns three HTML variants: `fit_html` (content-focused), `cleaned_html` (sanitized), and `html` (full DOM). The tool uses the first non-empty variant in that order and populates the `html` field on each result page. Markdown is always returned as the primary content field.
+
+**Timeout scaling:** The outer HTTP timeout scales with `maxPages` to prevent premature cancellation of large crawls: `min(30,000 + maxPages × 15,000, 300,000)` ms. A single-page crawl times out at 45s; a 10-page crawl at 180s; 25+ pages cap at 300s (5 minutes).
+
+### Output
+
+Returns a `WebCrawlResult` with:
+- `pages` — array of `CrawlPageResult` objects, each with `url`, `success`, `markdown`, `html?`, `title`, `description`, `links`, `statusCode`, `errorMessage`
+- `totalPages` — pages attempted
+- `successfulPages` — pages successfully fetched
+- `warnings?` — any non-fatal issues
+
+### Rate limits / caveats
+
+- Requires `CRAWL4AI_BASE_URL` (self-hosted Docker sidecar).
+- JS-heavy sites (job boards, SPAs) produce larger HTML payloads — the `html` field can be several MB per page.
+- SSRF protection applies to all fetched URLs.
+
+---
+
+## `semantic_jobs`
+
+Search for job listings across job boards (SEEK, Indeed, Jora), extract structured fields from HTML, apply constraint filters, rank with weighted composite scoring, and return structured job results.
+
+### Inputs
+
+| Parameter       | Type                               | Required | Default | Description                                                                          |
+| --------------- | ---------------------------------- | -------- | ------- | ------------------------------------------------------------------------------------ |
+| `query`         | string                             | yes      | —       | Job search query (e.g. `"frontend developer"`, `"data entry admin"`).                |
+| `location`      | string[]                           | no       | —       | Preferred locations (e.g. `["Sydney", "Melbourne"]`). Ranking boost, not hard filter. |
+| `workMode`      | `("remote"\|"hybrid"\|"onsite")`[] | no       | —       | Preferred work modes. Ranking boost, not hard filter.                                |
+| `maxSalary`     | number                             | no       | —       | Maximum annual salary. Listings with a parseable salary above this are excluded.     |
+| `excludeTitles` | string[]                           | no       | —       | Title keywords to exclude (e.g. `["senior", "manager"]`).                            |
+| `maxPages`      | number (1–50)                      | no       | `20`    | Maximum job listing pages to crawl.                                                  |
+| `topK`          | number (1–50)                      | no       | `10`    | Number of top-ranked job listings to return.                                         |
+| `maxBytes`      | number                             | no       | `250MB` | Maximum total bytes of listing text to embed.                                        |
+
+### Underlying approach
+
+1. **Discovery:** Issues web searches against SEEK, Indeed, and Jora using the query. Returns result URLs.
+2. **Crawl:** Fetches each listing page via the Crawl4AI sidecar. Uses the HTML field (not markdown) for structured extraction.
+3. **Extraction:** Parses HTML with Cheerio. Extracts `<script type="application/ld+json">` structured data first, then falls back to CSS selectors for title, company, location, salary, and work mode. Requires Crawl4AI v0.8.x for HTML delivery; older versions produce a `"markdown only"` warning.
+4. **Deduplication:** Three-layer dedup — exact URL → source+jobId → company+title normalization.
+5. **Constraint filtering:** Hard filters (`maxSalary`, `excludeTitles`) applied before ranking.
+6. **Ranking:** Weighted composite score: semantic 0.45, location 0.20, workMode 0.15, recency 0.10, completeness 0.10.
+7. **Return:** Top-K `JobListingMvp` objects with confidence scores, verification status, and caveats.
+
+### Output fields
+
+Each result is a `JobListingMvp` with: `title`, `company?`, `location?`, `workMode`, `salaryRaw?`, `source`, `sourceUrl?`, `jobId?`, `postedRaw?`, `caveats[]`, `confidence` (per-field 0–1 scores), `verificationStatus` (`listing_page_fetched` | `search_result_only` | `aggregator_result` | `needs_manual_check`).
+
+### Rate limits / caveats
+
+- Requires `EMBEDDING_SIDECAR_BASE_URL` for semantic ranking; falls back to constraint-only ranking without it.
+- Requires a search backend (`BRAVE_API_KEY` or `SEARXNG_BASE_URL`).
+- HTML extraction requires Crawl4AI sidecar v0.8.x or later. Older versions deliver markdown only — structured field extraction will be degraded and a warning is emitted.
+- Indeed returns heavily JS-rendered pages; extraction reliability is lower than SEEK or Jora.
+- LinkedIn is not included (auth-wall risk is too high for reliable crawl).
 
 ---
