@@ -3,6 +3,7 @@ import { buildBm25Index } from './bm25.js';
 import { rrfMerge } from './fusion.js';
 import { getProfileSettings } from './profiles.js';
 import { validationError } from '../errors.js';
+import { MAX_TOKENS, MIN_TOKENS, TOKEN_RATIO, OVERLAP_RATIO } from '../chunking.js';
 import type {
   PreparedCorpus,
   PrepareCorpusOptions,
@@ -24,6 +25,12 @@ function corpusIdFor(options: PrepareCorpusOptions, chunks: RagChunk[]): string 
     adapter: options.adapter,
     model: options.model,
     dimensions: options.dimensions,
+    chunking: {
+      maxTokens: MAX_TOKENS,
+      minTokens: MIN_TOKENS,
+      overlapRatio: OVERLAP_RATIO,
+      tokenRatio: TOKEN_RATIO,
+    },
     chunks: chunks.map((chunk) => ({
       text: chunk.text,
       url: chunk.url,

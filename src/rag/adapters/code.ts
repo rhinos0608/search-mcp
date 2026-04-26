@@ -78,45 +78,53 @@ function chunkSymbolsFromFile(
   const language = detectCodeLanguage(file.path, file.content);
   const chunks: RagChunk[] = [];
 
-  // First pass: count total chunks to set correct totalChunks
-  let totalChunkCount = 0;
-  for (const symbol of symbols) {
-    const windows = symbolLineWindows(symbol, maxLinesPerChunk);
-    totalChunkCount += windows.length;
-  }
-
-  // Second pass: create chunks with correct indices
-  let chunkIndexCounter = startingChunkIndex;
+  // Build window list, filtering empty slices upfront
+  const validWindows: {
+    symbol: CodeSymbol;
+    window: {
+      startLine: number;
+      endLine: number;
+      splitIndex?: number | undefined;
+      splitTotal?: number | undefined;
+    };
+    text: string;
+  }[] = [];
   for (const symbol of symbols) {
     const windows = symbolLineWindows(symbol, maxLinesPerChunk);
     for (const window of windows) {
-      chunks.push({
-        text: sliceLines(file.content, window.startLine, window.endLine),
-        url: file.url,
-        section:
-          window.splitIndex === undefined
-            ? `${file.path} > ${symbol.name}`
-            : `${file.path} > ${symbol.name} (${String(window.splitIndex + 1)}/${String(window.splitTotal)})`,
-        charOffset: 0,
-        chunkIndex: chunkIndexCounter++,
-        totalChunks: totalChunkCount,
-        metadata: {
-          path: file.path,
-          language,
-          startLine: window.startLine,
-          endLine: window.endLine,
-          symbolStartLine: symbol.startLine,
-          symbolEndLine: symbol.endLine,
-          symbolName: symbol.name,
-          symbolKind: symbol.kind,
-          signature: symbol.signature,
-          imports: symbol.imports,
-          docstring: symbol.docstring,
-          splitIndex: window.splitIndex,
-          splitTotal: window.splitTotal,
-        },
-      });
+      const text = sliceLines(file.content, window.startLine, window.endLine);
+      if (text.length > 0) validWindows.push({ symbol, window, text });
     }
+  }
+
+  let chunkIndexCounter = startingChunkIndex;
+  for (const { symbol, window, text } of validWindows) {
+    chunks.push({
+      text,
+      url: file.url,
+      section:
+        window.splitIndex === undefined
+          ? `${file.path} > ${symbol.name}`
+          : `${file.path} > ${symbol.name} (${String(window.splitIndex + 1)}/${String(window.splitTotal)})`,
+      charOffset: 0,
+      chunkIndex: chunkIndexCounter++,
+      totalChunks: -1, // patched after all files are processed
+      metadata: {
+        path: file.path,
+        language,
+        startLine: window.startLine,
+        endLine: window.endLine,
+        symbolStartLine: symbol.startLine,
+        symbolEndLine: symbol.endLine,
+        symbolName: symbol.name,
+        symbolKind: symbol.kind,
+        signature: symbol.signature,
+        imports: symbol.imports,
+        docstring: symbol.docstring,
+        splitIndex: window.splitIndex,
+        splitTotal: window.splitTotal,
+      },
+    });
   }
 
   return chunks;
@@ -129,27 +137,29 @@ function fallbackChunksFromFile(
 ): RagChunk[] {
   const language = detectCodeLanguage(file.path, file.content);
   const fallback = chunkMarkdown(file.content, file.url);
-  return fallback.map((chunk, index) => ({
-    text: chunk.content,
-    url: chunk.url,
-    section: `${file.path} > ${chunk.section}`,
-    charOffset: chunk.charOffset,
-    chunkIndex: startingChunkIndex + index,
-    totalChunks: fallback.length,
-    metadata: {
-      path: file.path,
-      language,
-      imports: imports.length > 0 ? imports : undefined,
-      fallback: true,
-      ...chunk.metadata,
-    },
-  }));
+  return fallback
+    .filter((chunk) => chunk.content.length > 0)
+    .map((chunk, index) => ({
+      text: chunk.content,
+      url: chunk.url,
+      section: `${file.path} > ${chunk.section}`,
+      charOffset: chunk.charOffset,
+      chunkIndex: startingChunkIndex + index,
+      totalChunks: -1, // patched after all files are processed
+      metadata: {
+        path: file.path,
+        language,
+        imports: imports.length > 0 ? imports : undefined,
+        fallback: true,
+        ...chunk.metadata,
+      },
+    }));
 }
 
 export function documentsFromCodeFiles(files: CodeFileInput[]): RawDocument[] {
   return files.map((file, index) => ({
     id: file.path || `code:${String(index)}`,
-    adapter: 'text',
+    adapter: 'code',
     text: file.content,
     url: file.url,
     title: file.path,
@@ -178,6 +188,12 @@ export function chunksFromCodeFiles(
     }
 
     chunks.push(...chunkSymbolsFromFile(file, symbols, maxLinesPerChunk, chunks.length));
+  }
+
+  // Patch totalChunks to reflect the final corpus size
+  const total = chunks.length;
+  for (const chunk of chunks) {
+    chunk.totalChunks = total;
   }
 
   return chunks;
@@ -209,6 +225,12 @@ export async function chunksFromCodeFilesAsync(
     }
 
     chunks.push(...chunkSymbolsFromFile(file, symbols, maxLinesPerChunk, chunks.length));
+  }
+
+  // Patch totalChunks to reflect the final corpus size
+  const total = chunks.length;
+  for (const chunk of chunks) {
+    chunk.totalChunks = total;
   }
 
   return chunks;

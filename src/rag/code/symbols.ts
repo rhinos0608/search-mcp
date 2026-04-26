@@ -97,7 +97,7 @@ function extractLeadingDocstring(lines: string[], startLine: number): string | u
 function extractPythonBodyDocstring(node: Parser.SyntaxNode): string | undefined {
   const body = node.childForFieldName('body');
   const first = body?.namedChild(0);
-  const text = first?.text?.trim();
+  const text = first?.text.trim();
   if (text === undefined) return undefined;
   return text.startsWith('"""') || text.startsWith("'''") ? normalizeLine(text) : undefined;
 }
@@ -116,14 +116,22 @@ function matchSymbolHeader(
     case 'javascript': {
       const classMatch = /^\s*(?:export\s+)?(?:default\s+)?class\s+([A-Za-z_$][\w$]*)/u.exec(line);
       if (classMatch?.[1] !== undefined) {
-        return { name: classMatch[1], kind: 'class', signature: normalizeLine(line) };
+        return {
+          name: classMatch[1],
+          kind: 'class',
+          signature: normalizeLine(line),
+        };
       }
 
       const functionMatch = /^\s*(?:export\s+)?(?:async\s+)?function\s+([A-Za-z_$][\w$]*)/u.exec(
         line,
       );
       if (functionMatch?.[1] !== undefined) {
-        return { name: functionMatch[1], kind: 'function', signature: normalizeLine(line) };
+        return {
+          name: functionMatch[1],
+          kind: 'function',
+          signature: normalizeLine(line),
+        };
       }
 
       const constMatch =
@@ -131,13 +139,21 @@ function matchSymbolHeader(
           line,
         );
       if (constMatch?.[1] !== undefined) {
-        return { name: constMatch[1], kind: 'constant', signature: normalizeLine(line) };
+        return {
+          name: constMatch[1],
+          kind: 'constant',
+          signature: normalizeLine(line),
+        };
       }
 
       const methodMatch =
         /^\s{2,}(?:async\s+)?([A-Za-z_$][\w$]*)\s*\([^)]*\)\s*(?::\s*[^{}]+)?\s*\{/u.exec(line);
       if (methodMatch?.[1] !== undefined) {
-        return { name: methodMatch[1], kind: 'method', signature: normalizeLine(line) };
+        return {
+          name: methodMatch[1],
+          kind: 'method',
+          signature: normalizeLine(line),
+        };
       }
 
       return null;
@@ -146,12 +162,20 @@ function matchSymbolHeader(
     case 'python': {
       const classMatch = /^\s*class\s+([A-Za-z_][\w]*)/u.exec(line);
       if (classMatch?.[1] !== undefined) {
-        return { name: classMatch[1], kind: 'class', signature: normalizeLine(line) };
+        return {
+          name: classMatch[1],
+          kind: 'class',
+          signature: normalizeLine(line),
+        };
       }
 
       const functionMatch = /^\s*(?:async\s+)?def\s+([A-Za-z_][\w]*)/u.exec(line);
       if (functionMatch?.[1] !== undefined) {
-        return { name: functionMatch[1], kind: 'function', signature: normalizeLine(line) };
+        return {
+          name: functionMatch[1],
+          kind: 'function',
+          signature: normalizeLine(line),
+        };
       }
 
       return null;
@@ -160,12 +184,20 @@ function matchSymbolHeader(
     case 'go': {
       const typeMatch = /^\s*type\s+([A-Za-z_][\w]*)\s+struct\b/u.exec(line);
       if (typeMatch?.[1] !== undefined) {
-        return { name: typeMatch[1], kind: 'struct', signature: normalizeLine(line) };
+        return {
+          name: typeMatch[1],
+          kind: 'struct',
+          signature: normalizeLine(line),
+        };
       }
 
       const funcMatch = /^\s*func\s+(?:\([^)]*\)\s*)?([A-Za-z_][\w]*)\s*\(/u.exec(line);
       if (funcMatch?.[1] !== undefined) {
-        return { name: funcMatch[1], kind: 'function', signature: normalizeLine(line) };
+        return {
+          name: funcMatch[1],
+          kind: 'function',
+          signature: normalizeLine(line),
+        };
       }
 
       return null;
@@ -174,17 +206,29 @@ function matchSymbolHeader(
     case 'rust': {
       const structMatch = /^\s*(?:pub\s+)?struct\s+([A-Za-z_][\w]*)/u.exec(line);
       if (structMatch?.[1] !== undefined) {
-        return { name: structMatch[1], kind: 'struct', signature: normalizeLine(line) };
+        return {
+          name: structMatch[1],
+          kind: 'struct',
+          signature: normalizeLine(line),
+        };
       }
 
       const implMatch = /^\s*impl\s+([A-Za-z_][\w:]*)/u.exec(line);
       if (implMatch?.[1] !== undefined) {
-        return { name: implMatch[1], kind: 'impl', signature: normalizeLine(line) };
+        return {
+          name: implMatch[1],
+          kind: 'impl',
+          signature: normalizeLine(line),
+        };
       }
 
       const fnMatch = /^\s*(?:pub\s+)?(?:async\s+)?fn\s+([A-Za-z_][\w]*)\s*\(/u.exec(line);
       if (fnMatch?.[1] !== undefined) {
-        return { name: fnMatch[1], kind: 'function', signature: normalizeLine(line) };
+        return {
+          name: fnMatch[1],
+          kind: 'function',
+          signature: normalizeLine(line),
+        };
       }
 
       return null;
