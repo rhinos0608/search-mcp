@@ -8,6 +8,7 @@
 
 import type { SearchConfig } from './config.js';
 import { getTracker, type RateLimitedBackend } from './rateLimit.js';
+import { assertSafeUrl, safeResponseText, safeResponseJson } from './httpGuards.js';
 import { logger } from './logger.js';
 
 // ── Types ────────────────────────────────────────────────────────────────────
@@ -146,12 +147,19 @@ export function configHealth(cfg: SearchConfig): Record<string, ToolHealth> {
   for (const [tool, rule] of Object.entries(OPTIONAL_CONFIG)) {
     report[tool] = rule.check(cfg)
       ? { status: 'healthy', message: 'Configured.' }
-      : { status: 'degraded', message: rule.degradedMessage, remediation: rule.remediation };
+      : {
+          status: 'degraded',
+          message: rule.degradedMessage,
+          remediation: rule.remediation,
+        };
   }
 
   // Free tools: always healthy at config level
   for (const tool of FREE_TOOLS) {
-    report[tool] = { status: 'healthy', message: 'Free API, no configuration required.' };
+    report[tool] = {
+      status: 'healthy',
+      message: 'Free API, no configuration required.',
+    };
   }
 
   // Synthesized Reddit OAuth config-layer indicator.
@@ -271,6 +279,7 @@ async function probeExtractionSupport(
   if (apiToken) headers.Authorization = `Bearer ${apiToken}`;
 
   try {
+    assertSafeUrl(crawl4aiBaseUrl);
     const res = await fetch(endpoint, {
       method: 'POST',
       headers,
@@ -286,7 +295,7 @@ async function probeExtractionSupport(
       };
     }
 
-    const raw = (await res.json()) as {
+    const raw = (await safeResponseJson(res, endpoint)) as {
       result?: { extracted_content?: unknown };
       results?: { extracted_content?: unknown }[];
     };
@@ -321,13 +330,14 @@ async function probeUrl(url: string): Promise<number> {
   }, PROBE_TIMEOUT_MS);
 
   try {
+    assertSafeUrl(url);
     const res = await fetch(url, {
       headers: { 'User-Agent': 'search-mcp/1.0 health-check' },
       signal: controller.signal,
     });
     if (!res.ok) throw new Error(`HTTP ${String(res.status)}`);
     // Consume a small amount to confirm the body is valid
-    await res.text();
+    await safeResponseText(res, url);
     return Date.now() - start;
   } finally {
     clearTimeout(timeout);
