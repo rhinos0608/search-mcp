@@ -23,10 +23,18 @@ import type {
   CorpusChunk,
   SemanticCrawlSource,
   CrawlPageResult,
+  SemanticCrawlSizeWarning,
 } from '../types.js';
 import type { Crawl4aiConfig } from '../config.js';
 import type { ExtractionConfig } from '../utils/extractionConfig.js';
 import { createHash } from 'node:crypto';
+import {
+  SAFE_BYTES,
+  DEFAULT_AVG_PAGE_BYTES,
+  JS_HEAVY_AVG_PAGE_BYTES,
+  isLikelyJsHeavySite,
+  estimateSerializedBytes,
+} from '../utils/crawlBudget.js';
 
 interface EmbedRequest {
   texts: string[];
@@ -780,43 +788,84 @@ export function filterByPathPrefix(
   return kept;
 }
 
+export type SemanticCrawlSeedsOptions = Pick<
+  SemanticCrawlOptions,
+  | 'strategy'
+  | 'maxDepth'
+  | 'maxPages'
+  | 'includeExternalLinks'
+  | 'maxBytes'
+  | 'allowPathDrift'
+  | 'waitFor'
+  | 'delayBeforeReturnHtml'
+  | 'pageTimeout'
+  | 'jsCode'
+  | 'extractionConfig'
+  | 'llmFallback'
+> & { sourceType?: 'url' | 'sitemap' | 'search' | 'github' | 'cached' };
+
 /** Crawl a list of seed URLs with per-seed budget division and sequential budget tracking. */
-async function crawlSeeds(
+export async function crawlSeeds(
   seedUrls: string[],
   crawl4aiCfg: Crawl4aiConfig,
-  opts: Pick<
-    SemanticCrawlOptions,
-    | 'strategy'
-    | 'maxDepth'
-    | 'maxPages'
-    | 'includeExternalLinks'
-    | 'maxBytes'
-    | 'allowPathDrift'
-    | 'waitFor'
-    | 'delayBeforeReturnHtml'
-    | 'pageTimeout'
-    | 'jsCode'
-    | 'extractionConfig'
-    | 'llmFallback'
-  >,
+  opts: SemanticCrawlSeedsOptions,
 ): Promise<{
   pages: CrawlPageResult[];
   totalPages: number;
   successfulPages: number;
   warnings: string[];
+  structuredWarnings: SemanticCrawlSizeWarning[];
+  omittedPages: { url: string; reason: string; estimatedBytes?: number }[];
 }> {
   if (seedUrls.length === 0) {
-    return { pages: [], totalPages: 0, successfulPages: 0, warnings: [] };
+    return { pages: [], totalPages: 0, successfulPages: 0, warnings: [], structuredWarnings: [], omittedPages: [] };
   }
 
   const allPages: CrawlPageResult[] = [];
   const warnings: string[] = [];
+  const structuredWarnings: SemanticCrawlSizeWarning[] = [];
+  const omittedPages: { url: string; reason: string; estimatedBytes?: number }[] = [];
   let totalPagesAttempted = 0;
   let totalSuccessfulPages = 0;
 
-  // Sequential crawl with global budget tracking
-  let remainingPages = opts.maxPages;
+  // ── Preflight size guard ──────────────────────────────────────────────────
+  const firstSeedUrl = seedUrls[0];
+  const heavy = isLikelyJsHeavySite({
+    sourceType: opts.sourceType ?? 'url',
+    url: firstSeedUrl,
+  });
+  const avgPageBytes = heavy ? JS_HEAVY_AVG_PAGE_BYTES : DEFAULT_AVG_PAGE_BYTES;
+  const estimatedTotalBytes = opts.maxPages * avgPageBytes;
+
+  let resolvedMaxPages = opts.maxPages;
+  if (estimatedTotalBytes > SAFE_BYTES) {
+    const safeCap = Math.max(1, Math.floor(SAFE_BYTES / avgPageBytes));
+    const requestedMaxPages = opts.maxPages;
+    resolvedMaxPages = safeCap;
+    const w: SemanticCrawlSizeWarning = {
+      code: 'SEMANTIC_CRAWL_RESPONSE_SIZE_GUARD',
+      message:
+        `semantic_crawl: maxPages ${String(requestedMaxPages)} may exceed the response size limit; ` +
+        `capped to ${String(safeCap)} pages to avoid truncation.`,
+      requestedMaxPages,
+      cappedMaxPages: safeCap,
+      estimatedBytes: estimatedTotalBytes,
+      safeBytes: SAFE_BYTES,
+      avgPageBytes,
+    };
+    structuredWarnings.push(w);
+    warnings.push(w.message);
+    logger.warn(
+      { requestedMaxPages, safeCap, estimatedTotalBytes, heavy },
+      'semantic_crawl: preflight size guard capped maxPages',
+    );
+  }
+
+  // ── Sequential crawl with global budget tracking ─────────────────────────
+  let remainingPages = resolvedMaxPages;
   let remainingBytes = opts.maxBytes ?? Infinity;
+  let accumulatedBytes = 0;
+  let sizeLimitReached = false;
 
   for (let i = 0; i < seedUrls.length; i++) {
     const seedUrl = seedUrls[i];
@@ -864,11 +913,56 @@ async function crawlSeeds(
       pages = pages.slice(0, perSeedPages);
     }
 
-    const keptPages = pages.length;
-    const keptSuccessfulPages = pages.filter((p) => p.success).length;
-    totalPagesAttempted += keptPages;
+    let keptPages = 0;
+    let keptSuccessfulPages = 0;
+
+    // In-flight byte accumulator
+    for (const page of pages) {
+      if (sizeLimitReached) {
+        omittedPages.push({
+          url: page.url,
+          reason: 'response_size_budget_exceeded',
+          estimatedBytes: estimateSerializedBytes(page),
+        });
+        continue;
+      }
+
+      const pageBytes = estimateSerializedBytes(page);
+      if (accumulatedBytes + pageBytes > SAFE_BYTES) {
+        omittedPages.push({
+          url: page.url,
+          reason: 'response_size_budget_exceeded',
+          estimatedBytes: pageBytes,
+        });
+        sizeLimitReached = true;
+        const w: SemanticCrawlSizeWarning = {
+          code: 'SEMANTIC_CRAWL_RESPONSE_SIZE_LIMIT_APPROACHED',
+          message:
+            `semantic_crawl stopped after ${String(allPages.length)} pages because ` +
+            `the response was approaching the size limit.`,
+          requestedMaxPages: opts.maxPages,
+          pagesReturned: allPages.length,
+          safeBytes: SAFE_BYTES,
+          accumulatedBytes,
+        };
+        structuredWarnings.push(w);
+        warnings.push(w.message);
+        logger.warn(
+          { pagesReturned: allPages.length, accumulatedBytes, safeBytes: SAFE_BYTES },
+          'semantic_crawl: in-flight size limit reached; stopping accumulation',
+        );
+        remainingPages = 0;
+        continue;
+      }
+
+      allPages.push(page);
+      accumulatedBytes += pageBytes;
+      keptPages++;
+      if (page.success) keptSuccessfulPages++;
+    }
+
+    totalPagesAttempted += pages.length;
     totalSuccessfulPages += keptSuccessfulPages;
-    allPages.push(...pages);
 
     remainingPages -= keptPages;
     if (perSeedBytes !== undefined) {
@@ -892,6 +986,8 @@ async function crawlSeeds(
     totalPages: totalPagesAttempted,
     successfulPages: totalSuccessfulPages,
     warnings,
+    structuredWarnings,
+    omittedPages,
   };
 }
 
@@ -1023,6 +1119,8 @@ export async function semanticCrawl(
   let extractedData: Record<string, Record<string, unknown>[]> | undefined;
   // Recovery and crawl warnings collected across seed URLs.
   const crawlWarnings: string[] = [];
+  const crawlStructuredWarnings: SemanticCrawlSizeWarning[] = [];
+  const crawlOmittedPages: { url: string; reason: string; estimatedBytes?: number }[] = [];
   // Track latest pages for structured elements
   let lastPages: CrawlPageResult[] = [];
 
@@ -1034,8 +1132,10 @@ export async function semanticCrawl(
           ? [opts.source.url, ...opts.source.urls]
           : [opts.source.url];
       const safeUrls = filterSafeUrls(seedUrls);
-      const result = await crawlSeeds(safeUrls, crawl4aiCfg, opts);
+      const result = await crawlSeeds(safeUrls, crawl4aiCfg, { ...opts, sourceType: opts.source.type });
       crawlWarnings.push(...result.warnings);
+      crawlStructuredWarnings.push(...result.structuredWarnings);
+      crawlOmittedPages.push(...result.omittedPages);
       corpusChunks = pagesToCorpus(result.pages);
       lastPages = result.pages;
       pagesCrawled = result.totalPages;
@@ -1100,9 +1200,11 @@ export async function semanticCrawl(
           'semantic_crawl: sitemap mode ignores maxDepth > 0, forcing depth 0',
         );
       }
-      const sitemapOpts = { ...opts, maxDepth: 0 };
+      const sitemapOpts = { ...opts, maxDepth: 0, sourceType: opts.source.type };
       const result = await crawlSeeds(safeUrls, crawl4aiCfg, sitemapOpts);
       crawlWarnings.push(...result.warnings);
+      crawlStructuredWarnings.push(...result.structuredWarnings);
+      crawlOmittedPages.push(...result.omittedPages);
       corpusChunks = pagesToCorpus(result.pages);
       lastPages = result.pages;
       pagesCrawled = result.totalPages;
@@ -1132,9 +1234,11 @@ export async function semanticCrawl(
           'semantic_crawl: search mode ignores maxDepth > 0, forcing depth 0',
         );
       }
-      const searchOpts = { ...opts, maxDepth: 0 };
+      const searchOpts = { ...opts, maxDepth: 0, sourceType: opts.source.type };
       const result = await crawlSeeds(safeUrls, crawl4aiCfg, searchOpts);
       crawlWarnings.push(...result.warnings);
+      crawlStructuredWarnings.push(...result.structuredWarnings);
+      crawlOmittedPages.push(...result.omittedPages);
       corpusChunks = pagesToCorpus(result.pages);
       lastPages = result.pages;
       pagesCrawled = result.totalPages;
@@ -1231,6 +1335,8 @@ export async function semanticCrawl(
       corpusId: resolvedCorpusId,
       chunks: topChunks,
       ...(crawlWarnings.length > 0 ? { warnings: crawlWarnings } : {}),
+      ...(crawlStructuredWarnings.length > 0 ? { structuredWarnings: crawlStructuredWarnings } : {}),
+      ...(crawlOmittedPages.length > 0 ? { omittedPages: crawlOmittedPages } : {}),
     };
   }
 
@@ -1284,6 +1390,8 @@ export async function semanticCrawl(
     corpusId: resolvedCorpusId,
     chunks: topChunks,
     ...(crawlWarnings.length > 0 ? { warnings: crawlWarnings } : {}),
+    ...(crawlStructuredWarnings.length > 0 ? { structuredWarnings: crawlStructuredWarnings } : {}),
+    ...(crawlOmittedPages.length > 0 ? { omittedPages: crawlOmittedPages } : {}),
     ...(extractedData ? { extractedData } : {}),
     ...collectPageElements(lastPages),
   };

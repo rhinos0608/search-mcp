@@ -1,4 +1,4 @@
-import { describe, it } from 'node:test';
+import { describe, it, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
 import {
@@ -10,8 +10,11 @@ import {
   filterByPathPrefix,
   isDirectChild,
   pagesToCorpus,
+  crawlSeeds,
   type SemanticCrawlOptions,
+  type SemanticCrawlSeedsOptions,
 } from '../src/tools/semanticCrawl.js';
+import { SAFE_BYTES, JS_HEAVY_AVG_PAGE_BYTES } from '../src/utils/crawlBudget.js';
 import type {
   SemanticCrawlChunk,
   SemanticCrawlResult,
@@ -697,6 +700,100 @@ describe('cache persistence', () => {
     // Note: buildCount may be 1 or 2 depending on whether the thundering-herd
     // guard is active. The key validation is that loadCorpusById works (disk
     // persistence) and computeCorpusId is deterministic.
+  });
+});
+
+describe('crawlSeeds size guard', () => {
+  const originalFetch = globalThis.fetch;
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  const CRAWL4AI_CFG = { baseUrl: 'https://crawl4ai.example.com', apiToken: '' };
+
+  function buildCrawlResponse(markdown: string, url = 'https://example.com') {
+    return new Response(JSON.stringify({ result: { url, success: true, markdown } }), {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    });
+  }
+
+  it('small crawl below budget emits no size warnings', async () => {
+    globalThis.fetch = async () => buildCrawlResponse('# Hello\n\nShort page content.');
+
+    const result = await crawlSeeds(
+      ['https://example.com'],
+      CRAWL4AI_CFG,
+      {
+        strategy: 'bfs',
+        maxDepth: 1,
+        maxPages: 1,
+        includeExternalLinks: false,
+        sourceType: 'url',
+      } satisfies SemanticCrawlSeedsOptions,
+    );
+
+    const sizeWarnings = result.structuredWarnings;
+    assert.equal(sizeWarnings.length, 0);
+    assert.equal(result.omittedPages.length, 0);
+  });
+
+  it('preflight guard emits SEMANTIC_CRAWL_RESPONSE_SIZE_GUARD for JS-heavy site exceeding budget', async () => {
+    globalThis.fetch = async () => buildCrawlResponse('# Hello\n\nPage content.');
+
+    const requestedMaxPages = 10;
+    const result = await crawlSeeds(
+      ['https://www.seek.com.au/jobs'],
+      CRAWL4AI_CFG,
+      {
+        strategy: 'bfs',
+        maxDepth: 1,
+        maxPages: requestedMaxPages,
+        includeExternalLinks: false,
+        sourceType: 'url',
+      } satisfies SemanticCrawlSeedsOptions,
+    );
+
+    const guard = result.structuredWarnings.find(
+      (w) => w.code === 'SEMANTIC_CRAWL_RESPONSE_SIZE_GUARD',
+    );
+    assert.ok(guard, 'expected SEMANTIC_CRAWL_RESPONSE_SIZE_GUARD warning');
+    assert.equal(guard.code, 'SEMANTIC_CRAWL_RESPONSE_SIZE_GUARD');
+    assert.equal(guard.requestedMaxPages, requestedMaxPages);
+    assert.ok(guard.cappedMaxPages < requestedMaxPages);
+    assert.ok(guard.estimatedBytes > SAFE_BYTES);
+    // Verify the avgPageBytes used matches the JS-heavy constant
+    assert.equal(guard.avgPageBytes, JS_HEAVY_AVG_PAGE_BYTES);
+  });
+
+  it('in-flight accumulator stops collection and emits SEMANTIC_CRAWL_RESPONSE_SIZE_LIMIT_APPROACHED', async () => {
+    // Mock returns a page with a huge markdown body — larger than SAFE_BYTES on its own.
+    // Use allowPathDrift: true so pages are not dropped by the path prefix filter.
+    globalThis.fetch = async (_input: RequestInfo | URL, _init?: RequestInit) => {
+      const url = typeof _input === 'string' ? _input : _input instanceof URL ? _input.href : (_input as Request).url;
+      // Return a result with the seed URL embedded in the response so filter passes
+      const seedUrl = url.includes('page1') ? 'https://example.com/page1' : 'https://example.com/page2';
+      return buildCrawlResponse('X'.repeat(SAFE_BYTES + 1), seedUrl);
+    };
+
+    const result = await crawlSeeds(
+      ['https://example.com/page1', 'https://example.com/page2'],
+      CRAWL4AI_CFG,
+      {
+        strategy: 'bfs',
+        maxDepth: 1,
+        maxPages: 5,
+        includeExternalLinks: false,
+        allowPathDrift: true,
+        sourceType: 'url',
+      } satisfies SemanticCrawlSeedsOptions,
+    );
+
+    const limitWarning = result.structuredWarnings.find(
+      (w) => w.code === 'SEMANTIC_CRAWL_RESPONSE_SIZE_LIMIT_APPROACHED',
+    );
+    assert.ok(limitWarning, 'expected SEMANTIC_CRAWL_RESPONSE_SIZE_LIMIT_APPROACHED warning');
+    assert.ok(result.omittedPages.length > 0, 'expected omittedPages to be populated');
   });
 });
 
