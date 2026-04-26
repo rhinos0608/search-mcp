@@ -24,13 +24,9 @@ services:
       - RAGA_DOCLING_ENABLED=true
       - RAGA_PADDLEOCR_ENABLED=true
       - RAGA_MINERU_ENABLED=false
-      # Limits
-      - RAGA_SYNC_MAX_PAGES=30
-      - RAGA_SYNC_MAX_SIZE_MB=20
-      - RAGA_SYNC_TIMEOUT_SEC=30
+      # Async limits
       - RAGA_ASYNC_MAX_PAGES=200
       - RAGA_ASYNC_MAX_SIZE_MB=100
-      - RAGA_ASYNC_TIMEOUT_MIN=5
       # Quality thresholds
       - RAGA_QUALITY_MIN_TEXT=500
       - RAGA_QUALITY_MIN_RATIO=0.1
@@ -75,10 +71,11 @@ services:
 
   # Optional: Prometheus for metrics
   prometheus:
-    image: prom/prometheus:latest
+    image: prom/prometheus:v2.45.0
     ports:
       - '9090:9090'
     volumes:
+      # NOTE: create a prometheus.yml alongside this file, or see prometheus.yml.example
       - ./prometheus.yml:/etc/prometheus/prometheus.yml
       - prometheus-data:/prometheus
     command:
@@ -91,13 +88,15 @@ services:
 
   # Optional: Grafana for dashboards
   grafana:
-    image: grafana/grafana:latest
+    # Pinned to a stable v10.x release for reproducible builds
+    image: grafana/grafana:10.4.0
     ports:
       - '3000:3000'
     volumes:
       - grafana-data:/var/lib/grafana
     environment:
-      - GF_SECURITY_ADMIN_PASSWORD=admin
+      # No default password — you MUST export GRAFANA_ADMIN_PASSWORD before starting
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD}
     depends_on:
       - prometheus
     networks:

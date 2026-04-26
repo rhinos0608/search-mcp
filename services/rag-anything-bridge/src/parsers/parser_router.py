@@ -8,12 +8,43 @@ Routes extraction requests to appropriate parser backends:
 """
 
 from pathlib import Path
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 from dataclasses import dataclass
 from enum import Enum
 import asyncio
 
+import hashlib
+import tempfile
+from urllib.parse import urlparse
+
+import aiohttp
 import structlog
+
+
+def _is_safe_url(url: str) -> bool:
+    """Basic SSRF guard: block private IPs and localhost."""
+    parsed = urlparse(url)
+    hostname = parsed.hostname or ""
+    if not hostname:
+        return False
+    blocked = {"localhost", "127.0.0.1", "::1", "0.0.0.0"}
+    if hostname.lower() in blocked:
+        return False
+    if hostname.lower().endswith(".local"):
+        return False
+    parts = hostname.split(".")
+    if len(parts) == 4 and all(p.isdigit() for p in parts):
+        first, second = int(parts[0]), int(parts[1])
+        if first == 10:
+            return False
+        if first == 172 and 16 <= second <= 31:
+            return False
+        if first == 192 and second == 168:
+            return False
+        if first == 169 and second == 254:
+            return False
+    return True
+
 
 logger = structlog.get_logger()
 
@@ -64,7 +95,7 @@ class DoclingParser(BaseParser):
 
     def __init__(self):
         super().__init__()
-        self._docling = None
+        self._docling: Any = None
 
     async def initialize(self):
         """Lazy initialization of Docling."""
@@ -86,8 +117,8 @@ class DoclingParser(BaseParser):
 
         try:
             # Run Docling in thread pool to not block
-            loop = asyncio.get_event_loop()
-            docling_result = await loop.run_in_executor(
+            loop = asyncio.get_running_loop()
+            docling_result = await loop.run_in_executor(  # type: ignore[call-overload]
                 None,  # Default executor
                 lambda: self._docling.convert(str(file_path)),
             )
@@ -150,7 +181,7 @@ class PaddleOCRParser(BaseParser):
 
     def __init__(self):
         super().__init__()
-        self._ocr = None
+        self._ocr: Any = None
 
     async def initialize(self):
         """Lazy initialization of PaddleOCR."""
@@ -183,33 +214,57 @@ class PaddleOCRParser(BaseParser):
             elements = []
 
             for i, image_path in enumerate(images):
-                result = self._ocr.ocr(str(image_path), cls=True)
+                loop = asyncio.get_running_loop()
+                result = await loop.run_in_executor(  # type: ignore[call-overload]
+                    None, self._ocr.ocr, str(image_path), True
+                )
 
                 page_text = []
-                for line in result[0]:
-                    if line:
-                        bbox = line[0]
-                        text = line[1][0]
-                        conf = line[1][1]
+                if not result or not result[0]:
+                    continue
 
-                        page_text.append(text)
-                        elements.append(
-                            {
-                                "type": "text",
-                                "text": text,
-                                "page_number": i + 1,
-                                "confidence": conf,
-                                "bbox": bbox,
-                            }
-                        )
+                for line in result[0]:
+                    if not line or len(line) < 2:
+                        continue
+                    if not isinstance(line[1], (list, tuple)) or len(line[1]) < 2:
+                        continue
+
+                    bbox = line[0]
+                    text = line[1][0]
+                    conf = line[1][1]
+
+                    page_text.append(text)
+                    elements.append(
+                        {
+                            "type": "text",
+                            "text": text,
+                            "page_number": i + 1,
+                            "confidence": conf,
+                            "bbox": bbox,
+                        }
+                    )
 
                 all_text.append("\n".join(page_text))
 
             # Build markdown
             markdown = "\n\n".join(all_text)
 
+            # Detect content type from file extension
+            suffix = file_path.suffix.lower()
+            detected_type = {
+                ".pdf": "application/pdf",
+                ".png": "image/png",
+                ".jpg": "image/jpeg",
+                ".jpeg": "image/jpeg",
+                ".tiff": "image/tiff",
+                ".tif": "image/tiff",
+                ".bmp": "image/bmp",
+                ".gif": "image/gif",
+                ".webp": "image/webp",
+            }.get(suffix, "application/octet-stream")
+
             return ParseResult(
-                content_type="image/pdf",  # TODO: detect actual type
+                content_type=detected_type,
                 parser_type=ParserType.PADDLEOCR,
                 parser_version="2.7.0",  # TODO: get actual version
                 markdown=markdown,
@@ -217,7 +272,7 @@ class PaddleOCRParser(BaseParser):
                 description=None,
                 page_count=len(images),
                 word_count=len(markdown.split()),
-                language=options.get("ocr_language", "eng"),
+                language=options.get("ocr_language", "en"),
                 elements=elements,
                 assets=[],  # Could extract images
                 citations=[],
@@ -231,9 +286,98 @@ class PaddleOCRParser(BaseParser):
 
     async def _convert_to_images(self, file_path: Path) -> List[Path]:
         """Convert PDF to images for OCR."""
-        # TODO: implement PDF to image conversion
-        # For now, assume single image
-        return [file_path]
+        from pdf2image import convert_from_path
+
+        loop = asyncio.get_running_loop()
+
+        try:
+            images = await loop.run_in_executor(
+                None, convert_from_path, str(file_path), 200
+            )
+        except Exception as exc:
+            self.logger.error("PDF to image conversion failed", error=str(exc))
+            raise RuntimeError(
+                f"PDF-to-image conversion failed for {file_path}; "
+                "ensure pdf2image and poppler are installed"
+            ) from exc
+
+        temp_dir = file_path.parent
+        image_paths: List[Path] = []
+
+        def _save():
+            paths = []
+            for i, image in enumerate(images):
+                image_path = temp_dir / f"{file_path.stem}_page_{i + 1}.png"
+                image.save(str(image_path), "PNG")
+                paths.append(image_path)
+            return paths
+
+        image_paths = await loop.run_in_executor(None, _save)
+        return image_paths
+
+
+class MinerUParser(BaseParser):
+    """MinerU parser for complex PDFs with equations, tables, and academic layouts."""
+
+    def __init__(self):
+        super().__init__()
+        self._mineru: Any = None
+
+    async def initialize(self):
+        """Lazy initialization of MinerU."""
+        if self._mineru is None:
+            try:
+                from raganything import MinerU as MinerUClass
+
+                self._mineru = MinerUClass()
+                self.logger.info("MinerU parser initialized")
+            except ImportError:
+                self.logger.error("MinerU not installed, MinerU parser unavailable")
+                raise
+
+    async def parse(self, file_path: Path, options: Dict[str, Any]) -> ParseResult:
+        """Parse document using MinerU."""
+        await self.initialize()
+
+        self.logger.info("Parsing with MinerU", file=file_path)
+
+        try:
+            loop = asyncio.get_running_loop()
+            mineru_result = await loop.run_in_executor(  # type: ignore[call-overload]
+                None,
+                lambda: self._mineru.parse(str(file_path)),
+            )
+
+            elements = []
+            for element in mineru_result.elements:
+                elements.append(
+                    {
+                        "type": element.type,
+                        "text": element.text,
+                        "level": getattr(element, "level", None),
+                        "bbox": element.bbox if hasattr(element, "bbox") else None,
+                    }
+                )
+
+            return ParseResult(
+                content_type="application/pdf",
+                parser_type=ParserType.MINERU,
+                parser_version="1.0.0",
+                markdown=mineru_result.markdown,
+                title=mineru_result.title,
+                description=None,
+                page_count=getattr(mineru_result, "page_count", None),
+                word_count=len(mineru_result.markdown.split()),
+                language=getattr(mineru_result, "language", None),
+                elements=elements,
+                assets=getattr(mineru_result, "assets", []),
+                citations=getattr(mineru_result, "citations", []),
+                warnings=[],
+                errors=[],
+            )
+        except Exception as e:
+            self.logger.error("MinerU parsing failed", error=str(e))
+            raise
 
 
 class ParserRouter:
@@ -248,25 +392,18 @@ class ParserRouter:
         """Initialize all parsers."""
         if self._initialized:
             return
-
-        # Initialize Docling
-        try:
-            docling = DoclingParser()
-            await docling.initialize()
-            self.parsers[ParserType.DOCLING] = docling
-            logger.info("Docling parser ready")
-        except Exception as e:
-            logger.warning("Docling parser not available", error=str(e))
-
-        # Initialize PaddleOCR
-        try:
-            paddle = PaddleOCRParser()
-            await paddle.initialize()
-            self.parsers[ParserType.PADDLEOCR] = paddle
-            logger.info("PaddleOCR parser ready")
-        except Exception as e:
-            logger.warning("PaddleOCR parser not available", error=str(e))
-
+        # Initialize all available parsers with deduplication
+        for parser_cls in [DoclingParser, PaddleOCRParser, MinerUParser]:
+            pt = ParserType(parser_cls.__name__.lower().replace("parser", ""))
+            if pt in self.parsers:
+                continue
+            try:
+                instance = parser_cls()
+                await instance.initialize()
+                self.parsers[pt] = instance
+                logger.info(f"{parser_cls.__name__} parser ready")
+            except Exception as e:
+                logger.warning(f"{parser_cls.__name__} not available", error=str(e))
         self._initialized = True
 
     async def cleanup(self):
@@ -277,48 +414,66 @@ class ParserRouter:
     def select_parser(self, content_type: Optional[str]) -> ParserType:
         """Select optimal parser based on content type."""
         if not content_type:
-            return ParserType.DOCLING  # Default
-
+            if ParserType.DOCLING in self.parsers:
+                return ParserType.DOCLING
+            if ParserType.PADDLEOCR in self.parsers:
+                return ParserType.PADDLEOCR
+            if ParserType.MINERU in self.parsers:
+                return ParserType.MINERU
+            raise RuntimeError("No parsers available")
         content_type = content_type.lower()
-
-        # Images need OCR
         if any(t in content_type for t in ["image", "png", "jpeg", "jpg"]):
             if ParserType.PADDLEOCR in self.parsers:
                 return ParserType.PADDLEOCR
-
-        # Scanned PDFs need OCR
-        if "pdf" in content_type:
-            # TODO: detect if scanned vs born-digital
-            # For now, default to Docling for PDFs
+        if any(t in content_type for t in ["pdf"]):
+            if ParserType.MINERU in self.parsers:
+                return ParserType.MINERU
             if ParserType.DOCLING in self.parsers:
                 return ParserType.DOCLING
-
-        # Office documents
         if any(
             t in content_type
             for t in ["word", "doc", "excel", "xls", "powerpoint", "ppt"]
         ):
             if ParserType.DOCLING in self.parsers:
                 return ParserType.DOCLING
-
-        # Default fallback
-        return (
-            ParserType.DOCLING
-            if ParserType.DOCLING in self.parsers
-            else ParserType.PADDLEOCR
-        )
+        if ParserType.DOCLING in self.parsers:
+            return ParserType.DOCLING
+        if ParserType.PADDLEOCR in self.parsers:
+            return ParserType.PADDLEOCR
+        raise RuntimeError("No parsers available")
 
     async def parse(
         self, url: str, parser_type: ParserType, options: Dict[str, Any]
     ) -> Any:
         """Route parse request to appropriate parser."""
+        if parser_type == ParserType.AUTO:
+            parser_type = self.select_parser(options.get("content_type"))
         if parser_type not in self.parsers:
             raise ValueError(f"Parser {parser_type} not available")
-
         parser = self.parsers[parser_type]
-
-        # Download file if URL provided
-        # TODO: implement file download/caching
-        temp_path = Path(url)  # Placeholder
-
-        return await parser.parse(temp_path, options)
+        downloaded = False
+        if url.startswith("http://") or url.startswith("https://"):
+            if not _is_safe_url(url):
+                raise ValueError(f"URL not allowed: {url}")
+            async with aiohttp.ClientSession() as session:
+                async with session.get(
+                    url, timeout=aiohttp.ClientTimeout(total=60)
+                ) as resp:
+                    resp.raise_for_status()
+                    content = await resp.read()
+            max_size = options.get("max_size_bytes", 100 * 1024 * 1024)
+            if len(content) > max_size:
+                raise ValueError(f"Download exceeds maximum size of {max_size} bytes")
+            content_hash = hashlib.sha256(content).hexdigest()
+            cache_dir = Path(tempfile.gettempdir()) / "raga-downloads"
+            cache_dir.mkdir(parents=True, exist_ok=True)
+            temp_path = cache_dir / content_hash
+            temp_path.write_bytes(content)
+            downloaded = True
+        else:
+            temp_path = Path(url)
+        try:
+            return await parser.parse(temp_path, options)
+        finally:
+            if downloaded and temp_path.exists():
+                temp_path.unlink(missing_ok=True)

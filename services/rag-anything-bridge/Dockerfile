@@ -1,10 +1,33 @@
 # RAG-Anything Bridge Service
 # Multi-stage build for optimized production image
 
-# Stage 1: Base with system dependencies
-FROM python:3.11-slim as base
+# Stage 1: Builder with build dependencies
+FROM python:3.11-slim as builder
 
-# Install system dependencies
+# Install build dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    gcc \
+    g++ \
+    make \
+    git \
+    wget \
+    && rm -rf /var/lib/apt/lists/*
+
+# Set environment variables
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1
+
+WORKDIR /build
+
+COPY requirements.txt .
+RUN pip install --user --no-cache-dir -r requirements.txt
+
+# Stage 2: Runtime — minimal image without build tools
+FROM python:3.11-slim as runtime
+
+# Install runtime system dependencies only
 RUN apt-get update && apt-get install -y --no-install-recommends \
     # Document processing
     libreoffice \
@@ -25,14 +48,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libxext6 \
     libxrender-dev \
     libgomp1 \
-    # Build dependencies (for pip packages)
-    gcc \
-    g++ \
-    make \
-    # Utilities
+    # Utilities (curl for health check)
     curl \
-    wget \
-    git \
+    && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
 # Set environment variables
@@ -41,34 +59,29 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PIP_NO_CACHE_DIR=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1
 
-# Stage 2: Build dependencies
-FROM base as builder
-
-WORKDIR /build
-
-# Install build dependencies
-COPY requirements.txt .
-RUN pip install --user --no-cache-dir -r requirements.txt
-
-# Stage 3: Runtime
-FROM base as runtime
-
 WORKDIR /app
 
-# Copy Python packages from builder
-COPY --from=builder /root/.local /root/.local
+# Create non-root user
+RUN groupadd -r appuser && useradd -r -g appuser -d /app -s /sbin/nologin appuser
 
-# Ensure local bin is in PATH
-ENV PATH=/root/.local/bin:$PATH
+# Copy Python packages from builder
+COPY --from=builder /root/.local /home/appuser/.local
+
+# Ensure local bin is in PATH for the non-root user
+ENV PATH=/home/appuser/.local/bin:$PATH
 
 # Copy application code
 COPY src/ ./src/
 
-# Create necessary directories
-RUN mkdir -p /cache/rag-anything /tmp/rag-anything
+# Create necessary directories and set ownership
+RUN mkdir -p /cache/rag-anything /tmp/rag-anything && \
+    chown -R appuser:appuser /app /cache/rag-anything /tmp/rag-anything /home/appuser/.local
 
 # Expose port
 EXPOSE 8000
+
+# Run as non-root user
+USER appuser
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \

@@ -7,10 +7,11 @@ for indexing and retrieval in search-mcp.
 
 from typing import List, Dict, Any, Optional
 from dataclasses import dataclass
+import uuid
 
 # Handle structlog import
 try:
-    import structlog
+    import structlog  # type: ignore[import-untyped]
 
     logger = structlog.get_logger()
 except ImportError:
@@ -39,12 +40,10 @@ class ContentProcessor:
 
     def __init__(self):
         self.logger = logger
-        self._item_counter = 0
 
     def _generate_item_id(self) -> str:
         """Generate unique item ID."""
-        self._item_counter += 1
-        return f"item-{self._item_counter:06d}"
+        return f"item-{uuid.uuid4().hex}"
 
     async def process(self, parse_result: Any) -> List[ContentItem]:
         """
@@ -71,22 +70,12 @@ class ContentProcessor:
                 items = await self._process_generic(parse_result)
 
             self.logger.info(
-                "Content processing complete",
-                item_count=len(items),
-                types=self._count_types(items),
+                f"Content processing complete item_count={len(items)} types={self._count_types(items)}"
             )
 
-        except Exception as e:
-            self.logger.error("Content processing failed", error=str(e))
-            # Return minimal text item on failure
-            items = [
-                ContentItem(
-                    item_id=self._generate_item_id(),
-                    type="text",
-                    text="Content processing failed",
-                    markdown="Error processing document content",
-                )
-            ]
+        except Exception:
+            self.logger.exception("Content processing failed")
+            raise
 
         return items
 
@@ -107,9 +96,7 @@ class ContentProcessor:
 
             except Exception as e:
                 self.logger.warning(
-                    "Failed to process element",
-                    element_type=getattr(element, "type", "unknown"),
-                    error=str(e),
+                    f"Failed to process element element_type={getattr(element, 'type', 'unknown')} error={e}"
                 )
 
         return items

@@ -1,37 +1,37 @@
 # FastAPI and server
-fastapi==0.109.0
-uvicorn[standard]==0.27.0
-pydantic==2.5.3
-python-multipart==0.0.6
+fastapi>=0.136.0
+uvicorn[standard]>=0.32.0
+pydantic>=2.10.0
+python-multipart>=0.0.18
 
 # RAG-Anything and dependencies
-raganything[all]==0.1.0
+raganything[all]>=0.1.0
 
 # Parser backends
-docling==1.0.0
-paddleocr==2.7.0
-paddlepaddle==2.5.2
+docling>=1.0.0
+paddleocr>=2.7.0
+paddlepaddle>=2.6.0
 
 # Document processing
-pymupdf==1.23.8
-pdf2image==1.16.3
-pillow==10.2.0
+pymupdf>=1.25.3
+pdf2image>=1.16.3
+pillow>=10.4.0
 
 # OCR and vision
-pytesseract==0.3.10
-easyocr==1.7.0
+pytesseract>=0.3.13
+easyocr>=1.7.0
 
 # Utilities
-aiofiles==23.2.1
-httpx==0.26.0
-python-dotenv==1.0.0
-tenacity==8.2.3
+aiofiles>=24.1.0
+httpx>=0.28.1
+python-dotenv>=1.0.1
+tenacity>=9.0.0
 
 # Monitoring and logging
-prometheus-client==0.19.0
-structlog==24.1.0
+prometheus-client>=0.21.0
+structlog>=24.4.0
 
 # Testing
-pytest==7.4.4
-pytest-asyncio==0.23.3
-pytest-cov==4.1.0
+pytest>=8.0.0
+pytest-asyncio>=0.24.0
+pytest-cov>=6.0.0

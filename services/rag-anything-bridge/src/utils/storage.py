@@ -29,6 +29,7 @@ class StorageConfig:
 
     backend: str = "local"  # "local" or "s3"
     local_path: Path = Path("/tmp/rag-anything-assets")
+    ttl_seconds: int = 86400  # Default TTL: 24 hours
     # S3 configuration (future)
     s3_bucket: Optional[str] = None
     s3_prefix: str = "rag-anything/"
@@ -46,12 +47,11 @@ class StorageManager:
         if self.config.backend == "local":
             self.config.local_path.mkdir(parents=True, exist_ok=True)
 
+        path_str = (
+            str(self.config.local_path) if self.config.backend == "local" else None
+        )
         logger.info(
-            "Storage manager initialized",
-            backend=self.config.backend,
-            path=str(self.config.local_path)
-            if self.config.backend == "local"
-            else None,
+            f"Storage manager initialized backend={self.config.backend} path={path_str}"
         )
 
     def _generate_key(self, content: bytes, extension: str = "") -> str:
@@ -63,9 +63,14 @@ class StorageManager:
 
     def _get_local_path(self, key: str) -> Path:
         """Get local filesystem path for key."""
+        if any(c in key for c in ("/", "\\", "..")):
+            raise ValueError(f"Invalid storage key: {key}")
         # Use first 2 chars as subdirectory for distribution
         subdir = key[:2] if len(key) >= 2 else "xx"
-        return self.config.local_path / subdir / key
+        resolved = (self.config.local_path / subdir / key).resolve()
+        if not str(resolved).startswith(str(self.config.local_path.resolve())):
+            raise ValueError(f"Storage key escapes storage directory: {key}")
+        return resolved
 
     async def store(
         self,
@@ -99,7 +104,7 @@ class StorageManager:
 
                 # Write metadata alongside
                 if metadata:
-                    meta_path = file_path.with_suffix(".json")
+                    meta_path = file_path.with_name(file_path.name + ".json")
                     meta_content = {
                         "key": key,
                         "mime_type": mime_type,
@@ -109,7 +114,7 @@ class StorageManager:
                     async with aiofiles.open(meta_path, "w") as f:
                         await f.write(json.dumps(meta_content, indent=2))
 
-                logger.debug("Asset stored locally", key=key, path=str(file_path))
+                logger.debug(f"Asset stored locally key={key} path={file_path}")
 
             elif self.config.backend == "s3":
                 # Future: S3 storage
@@ -158,22 +163,27 @@ class StorageManager:
         Returns:
             Metadata dictionary or None
         """
-        if self.config.backend == "local":
-            file_path = self._get_local_path(key)
-            meta_path = file_path.with_suffix(".json")
+        async with self._lock:
+            if self.config.backend == "local":
+                file_path = self._get_local_path(key)
+                meta_path = file_path.with_name(file_path.name + ".json")
 
-            if not meta_path.exists():
-                return None
+                if not meta_path.exists():
+                    return None
 
-            try:
-                async with aiofiles.open(meta_path, "r") as f:
-                    content = await f.read()
-                    return json.loads(content)
-            except Exception as e:
-                logger.error("Failed to read metadata", key=key, error=str(e))
-                return None
+                try:
+                    async with aiofiles.open(meta_path, "r") as f:
+                        content = await f.read()
+                        return json.loads(content)
+                except Exception as e:
+                    logger.error(f"Failed to read metadata key={key} error={e}")
+                    return None
 
-        return None
+            elif self.config.backend == "s3":
+                raise NotImplementedError("S3 storage not yet implemented")
+
+            else:
+                raise ValueError(f"Unknown backend: {self.config.backend}")
 
     async def delete(self, key: str) -> bool:
         """
@@ -188,7 +198,7 @@ class StorageManager:
         async with self._lock:
             if self.config.backend == "local":
                 file_path = self._get_local_path(key)
-                meta_path = file_path.with_suffix(".json")
+                meta_path = file_path.with_name(file_path.name + ".json")
 
                 deleted = False
 
@@ -210,27 +220,38 @@ class StorageManager:
     async def list_keys(self, prefix: str = "") -> list:
         """List all keys with optional prefix filter."""
         if self.config.backend == "local":
-            keys = []
-            search_path = self.config.local_path
 
-            if prefix:
-                # Use first 2 chars as subdir
-                subdir = prefix[:2] if len(prefix) >= 2 else prefix
-                search_path = search_path / subdir
+            def _scan():
+                keys = []
+                search_path = self.config.local_path
 
-            if search_path.exists():
-                for file_path in search_path.rglob("*.json"):
-                    # Skip metadata files
-                    if file_path.suffix == ".json" and file_path.stem.endswith("_meta"):
-                        continue
+                if prefix:
+                    if any(c in prefix for c in ("/", "\\", "..")):
+                        raise ValueError(f"Invalid prefix: {prefix}")
+                    subdir = prefix[:2] if len(prefix) >= 2 else prefix
+                    search_path = search_path / subdir
 
-                    key = file_path.stem
-                    if key.startswith(prefix):
-                        keys.append(key)
+                if search_path.exists():
+                    for file_path in search_path.rglob("*"):
+                        if not file_path.is_file():
+                            continue
+                        # Skip metadata files (appended .json)
+                        if file_path.name.endswith(".json"):
+                            continue
 
-            return keys
+                        key = file_path.name
+                        if key.startswith(prefix):
+                            keys.append(key)
 
-        return []
+                return keys
+
+            return await asyncio.to_thread(_scan)
+
+        elif self.config.backend == "s3":
+            raise NotImplementedError("S3 storage not yet implemented")
+
+        else:
+            raise ValueError(f"Unknown backend: {self.config.backend}")
 
     def get_stats(self) -> Dict[str, Any]:
         """Get storage statistics."""

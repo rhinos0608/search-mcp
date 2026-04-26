@@ -4,7 +4,7 @@ Parsers package for RAG-Anything Bridge.
 Provides document parsing backends:
 - Docling: Born-digital PDFs and Office documents
 - PaddleOCR: Image-heavy and scanned documents
-- MinerU: Complex PDFs with equations and tables
+- MinerU: Complex PDFs with equations, tables, academic layouts
 """
 
 from .parser_router import (
@@ -14,6 +14,7 @@ from .parser_router import (
     ParseResult,
     DoclingParser,
     PaddleOCRParser,
+    MinerUParser,
 )
 
 __all__ = [
@@ -23,4 +24,5 @@ __all__ = [
     "ParseResult",
     "DoclingParser",
     "PaddleOCRParser",
+    "MinerUParser",
 ]

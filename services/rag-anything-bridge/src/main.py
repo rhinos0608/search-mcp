@@ -9,15 +9,16 @@ Supports multiple parser backends: Docling, PaddleOCR, MinerU.
 import os
 import sys
 import hashlib
+import uuid
 from pathlib import Path
 from datetime import datetime, timedelta
-from typing import Optional, List, Dict, Any, Literal
+from typing import Optional, List, Dict, Any, Literal, cast
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException, BackgroundTasks, File, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
-import structlog
+import structlog  # type: ignore[import-untyped]
 from prometheus_client import Counter, Histogram, generate_latest
 
 # Add src to path
@@ -151,7 +152,9 @@ class ExtractionResult(BaseModel):
 
 class JobStatus(BaseModel):
     document_id: str
-    status: Literal["pending", "processing", "completed", "failed"]
+    status: Literal[
+        "pending", "processing", "completed", "failed", "not_found", "expired"
+    ]
     progress: Optional[float] = None  # 0-100
     message: Optional[str] = None
     created_at: str
@@ -161,10 +164,10 @@ class JobStatus(BaseModel):
 
 
 # Global state
-parser_router: Optional[ParserRouter] = None
-content_processor: Optional[ContentProcessor] = None
-cache_manager: Optional[CacheManager] = None
-storage_manager: Optional[StorageManager] = None
+parser_router: ParserRouter = None  # type: ignore[assignment]
+content_processor: ContentProcessor = None  # type: ignore[assignment]
+cache_manager: CacheManager = None  # type: ignore[assignment]
+storage_manager: StorageManager = None  # type: ignore[assignment]
 
 
 @asynccontextmanager
@@ -288,9 +291,10 @@ async def extract(request: ExtractionRequest, background_tasks: BackgroundTasks)
         # Perform extraction
         with EXTRACTION_DURATION.labels(parser=parser_type).time():
             # Route to appropriate parser
+            assert parser_router is not None
             parse_result = await parser_router.parse(
                 url=request.url,
-                parser_type=parser_type,
+                parser_type=cast(ParserType, parser_type),
                 options={
                     "extract_tables": request.extract_tables,
                     "extract_images": request.extract_images,
@@ -301,12 +305,13 @@ async def extract(request: ExtractionRequest, background_tasks: BackgroundTasks)
             )
 
         # Process and structure content
+        assert content_processor is not None
         content_items = await content_processor.process(parse_result)
 
         # Build result
         processing_time = (datetime.utcnow() - start_time).total_seconds() * 1000
 
-        result = ExtractionResult(
+        result = ExtractionResult(  # type: ignore[arg-type]
             document_id=doc_id,
             source_url=request.url,
             source_type=request.content_type or parse_result.content_type,
@@ -320,7 +325,7 @@ async def extract(request: ExtractionRequest, background_tasks: BackgroundTasks)
             markdown=parse_result.markdown,
             title=parse_result.title,
             description=parse_result.description,
-            content_items=content_items,
+            content_items=content_items,  # type: ignore[arg-type]
             assets=parse_result.assets,
             page_count=parse_result.page_count,
             word_count=parse_result.word_count,
@@ -335,18 +340,21 @@ async def extract(request: ExtractionRequest, background_tasks: BackgroundTasks)
         )
 
         # Cache result
+        assert cache_manager is not None
         await cache_manager.set(doc_id, result.dict(), ttl=86400 * 7)  # 7 days
 
         EXTRACTION_COUNTER.labels(parser=parser_type, status="success").inc()
 
         return result
 
-    except Exception as e:
-        logger.error("Extraction failed", error=str(e), url=request.url)
+    except Exception:
+        logger.exception("Extraction failed", url=request.url)
         EXTRACTION_COUNTER.labels(
             parser=request.parser or "unknown", status="error"
         ).inc()
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(
+            status_code=500, detail="Internal server error during extraction"
+        )
 
 
 @app.get("/extract/{document_id}/status", response_model=JobStatus)
@@ -354,9 +362,10 @@ async def extraction_status(document_id: str):
     """Check status of async extraction job."""
     # For v1, most extractions are synchronous
     # This endpoint is for future async support
-    cache_path = CONFIG["cache_dir"] / f"{document_id}.json"
+    assert cache_manager is not None
+    cached = await cache_manager.get(document_id)
 
-    if cache_path.exists():
+    if cached:
         return JobStatus(
             document_id=document_id,
             status="completed",
@@ -369,9 +378,9 @@ async def extraction_status(document_id: str):
 
     return JobStatus(
         document_id=document_id,
-        status="pending",
-        progress=0,
-        message="Extraction not started or expired",
+        status="not_found",
+        progress=None,
+        message="Document not found or extraction not started",
         created_at=datetime.utcnow().isoformat(),
         updated_at=datetime.utcnow().isoformat(),
     )
@@ -380,6 +389,7 @@ async def extraction_status(document_id: str):
 @app.get("/extract/{document_id}/result")
 async def extraction_result(document_id: str):
     """Get extraction result by document ID."""
+    assert cache_manager is not None
     cached = await cache_manager.get(document_id)
     if not cached:
         raise HTTPException(status_code=404, detail="Document not found or expired")
@@ -400,15 +410,17 @@ async def parse_file(
     temp_dir = CONFIG["cache_dir"] / "uploads"
     temp_dir.mkdir(parents=True, exist_ok=True)
 
-    file_path = temp_dir / file.filename
+    file_path = temp_dir / f"{uuid.uuid4().hex}_{file.filename}"
     with open(file_path, "wb") as f:
         content = await file.read()
         f.write(content)
 
+    assert parser_router is not None
+    assert content_processor is not None
     try:
         # Parse file
-        result = await parser_router.parse_file(
-            file_path=file_path,
+        result = await parser_router.parse(
+            url=str(file_path),
             parser_type=parser,
             options={
                 "extract_tables": extract_tables,

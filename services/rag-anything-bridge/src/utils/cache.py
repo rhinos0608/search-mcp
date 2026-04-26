@@ -7,7 +7,7 @@ Future: Can be extended to use Redis or other distributed cache.
 
 import json
 from pathlib import Path
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional, Dict, Any
 import asyncio
 import aiofiles
@@ -29,108 +29,125 @@ class CacheManager:
 
     def _get_cache_path(self, key: str) -> Path:
         """Get filesystem path for cache key."""
-        # Use first 2 chars as subdirectory for distribution
+        import re
+
+        if not re.fullmatch(r"[0-9a-fA-F]+", key):
+            raise ValueError(f"Invalid cache key: {key}")
+        if len(key) > 128:
+            raise ValueError(f"Cache key too long: {key}")
         subdir = key[:2] if len(key) >= 2 else "xx"
-        return self.cache_dir / subdir / f"{key}.json"
+        resolved = (self.cache_dir / subdir / f"{key}.json").resolve()
+        if not str(resolved).startswith(str(self.cache_dir.resolve())):
+            raise ValueError(f"Cache key escapes cache directory: {key}")
+        return resolved
+
+    async def _delete_unlocked(self, key: str) -> bool:
+        cache_path = self._get_cache_path(key)
+        if not cache_path.exists():
+            return False
+        try:
+            cache_path.unlink()
+            return True
+        except Exception as e:
+            logger.error("Cache delete error", key=key, error=str(e))
+            return False
 
     async def get(self, key: str) -> Optional[Dict[str, Any]]:
         """Get cached result by key."""
-        cache_path = self._get_cache_path(key)
+        async with self._lock:
+            cache_path = self._get_cache_path(key)
 
-        if not cache_path.exists():
-            return None
+            if not cache_path.exists():
+                return None
 
-        try:
-            async with aiofiles.open(cache_path, "r") as f:
-                content = await f.read()
-                data = json.loads(content)
+            try:
+                async with aiofiles.open(cache_path, "r") as f:
+                    content = await f.read()
+                    data = json.loads(content)
 
-            # Check expiration
-            expires_at = data.get("expires_at")
-            if expires_at:
-                expires = datetime.fromisoformat(expires_at)
-                if datetime.utcnow() > expires:
-                    # Expired, delete
-                    await self.delete(key)
-                    return None
+                expires_at = data.get("expires_at")
+                if expires_at:
+                    expires = datetime.fromisoformat(expires_at)
+                    if expires.tzinfo is None:
+                        expires = expires.replace(tzinfo=timezone.utc)
+                    if datetime.now(timezone.utc) > expires:
+                        await self._delete_unlocked(key)
+                        return None
 
-            logger.debug("Cache hit", key=key)
-            return data.get("result")
+                logger.debug("Cache hit", key=key)
+                return data.get("result")
 
-        except Exception as e:
-            logger.error("Cache read error", key=key, error=str(e))
-            return None
+            except Exception as e:
+                logger.error("Cache read error", key=key, error=str(e))
+                return None
 
     async def set(
         self,
         key: str,
         result: Dict[str, Any],
-        ttl: int = 604800,  # 7 days in seconds
+        ttl: int = 604800,
     ) -> None:
         """Cache result with TTL."""
-        cache_path = self._get_cache_path(key)
+        async with self._lock:
+            cache_path = self._get_cache_path(key)
+            cache_path.parent.mkdir(parents=True, exist_ok=True)
 
-        # Ensure subdirectory exists
-        cache_path.parent.mkdir(parents=True, exist_ok=True)
+            expires_at = (
+                datetime.now(timezone.utc) + timedelta(seconds=ttl)
+            ).isoformat()
 
-        expires_at = (datetime.utcnow() + timedelta(seconds=ttl)).isoformat()
+            data = {
+                "key": key,
+                "result": result,
+                "created_at": datetime.now(timezone.utc).isoformat(),
+                "expires_at": expires_at,
+                "ttl": ttl,
+            }
 
-        data = {
-            "key": key,
-            "result": result,
-            "created_at": datetime.utcnow().isoformat(),
-            "expires_at": expires_at,
-            "ttl": ttl,
-        }
-
-        try:
-            async with aiofiles.open(cache_path, "w") as f:
-                await f.write(json.dumps(data, indent=2, default=str))
-
-            logger.debug("Cache set", key=key, ttl=ttl)
-
-        except Exception as e:
-            logger.error("Cache write error", key=key, error=str(e))
+            try:
+                async with aiofiles.open(cache_path, "w") as f:
+                    await f.write(json.dumps(data, indent=2, default=str))
+                logger.debug("Cache set", key=key, ttl=ttl)
+            except Exception as e:
+                logger.error("Cache write error", key=key, error=str(e))
 
     async def delete(self, key: str) -> bool:
         """Delete cached result."""
-        cache_path = self._get_cache_path(key)
-
-        if not cache_path.exists():
-            return False
-
-        try:
-            cache_path.unlink()
-            logger.debug("Cache deleted", key=key)
-            return True
-
-        except Exception as e:
-            logger.error("Cache delete error", key=key, error=str(e))
-            return False
+        async with self._lock:
+            return await self._delete_unlocked(key)
 
     async def clear(self, older_than: Optional[int] = None) -> int:
         """Clear all cached results, optionally only those older than specified seconds."""
-        cleared = 0
-        cutoff = (
-            datetime.utcnow() - timedelta(seconds=older_than) if older_than else None
-        )
+        async with self._lock:
+            cleared = 0
+            cutoff = (
+                datetime.now(timezone.utc) - timedelta(seconds=older_than)
+                if older_than
+                else None
+            )
 
-        for cache_file in self.cache_dir.rglob("*.json"):
-            try:
-                if cutoff:
-                    stat = cache_file.stat()
-                    mtime = datetime.fromtimestamp(stat.st_mtime)
-                    if mtime > cutoff:
-                        continue
+            cache_files = await asyncio.to_thread(
+                lambda: list(self.cache_dir.rglob("*.json"))
+            )
 
-                cache_file.unlink()
-                cleared += 1
+            for cache_file in cache_files:
+                try:
+                    if cutoff:
+                        stat = await asyncio.to_thread(cache_file.stat)
+                        mtime = datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc)
+                        if mtime > cutoff:
+                            continue
 
-            except Exception as e:
-                logger.error("Cache clear error", file=str(cache_file), error=str(e))
+                    await asyncio.to_thread(cache_file.unlink)
+                    cleared += 1
 
-        logger.info("Cache cleared", cleared=cleared, older_than=older_than)
-        return cleared
+                except Exception as e:
+                    logger.error(
+                        "Cache clear error", file=str(cache_file), error=str(e)
+                    )
+
+            logger.info("Cache cleared", cleared=cleared, older_than=older_than)
+            return cleared
 
     def get_stats(self) -> Dict[str, Any]:
         """Get cache statistics."""
@@ -142,7 +159,7 @@ class CacheManager:
             try:
                 stat = cache_file.stat()
                 total_size += stat.st_size
-            except:
+            except Exception:
                 pass
 
         return {
