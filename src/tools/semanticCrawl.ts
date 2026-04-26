@@ -259,7 +259,7 @@ interface RetrieveSemanticChunksOptions {
   precomputedEmbeddings: number[][];
 }
 
-async function retrieveSemanticChunks(
+export async function retrieveSemanticChunks(
   chunks: CorpusChunk[],
   opts: RetrieveSemanticChunksOptions,
 ): Promise<SemanticCrawlChunk[]> {
@@ -995,13 +995,14 @@ export async function crawlSeeds(
       allPages.push(page);
       accumulatedBytes += pageBytes;
       keptPages++;
-      if (page.success) keptSuccessfulPages++;
     }
 
-    totalPagesAttempted += pages.length;
-    totalSuccessfulPages += keptSuccessfulPages;
+    totalPagesFromCrawler += result.totalPages;
 
     remainingPages -= keptPages;
+    // maxBytes here is a global response-accumulation budget. perSeedBytes is
+    // a hint given to each crawler invocation; remainingBytes is decremented
+    // by the actual bytes of pages we kept across seeds.
     if (perSeedBytes !== undefined) {
       const bytesUsed = pages.reduce((sum, p) => sum + p.markdown.length, 0);
       remainingBytes -= bytesUsed;
