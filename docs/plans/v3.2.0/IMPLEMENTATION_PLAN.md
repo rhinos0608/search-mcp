@@ -1,8 +1,8 @@
 # V3.2.0 Implementation Plan - Phased Development with Hard Review Gates
 
 **Status**: Planning Complete  
-**Target**: Complete V3.2.0 Domain Adapters + Structured Retrieval  
-**Estimated LOC**: ~2,500 new + ~500 modified
+**Target**: Complete V3.2.0 Domain Adapters + Structured Retrieval + Distribution  
+**Estimated LOC**: ~2,840 new + ~660 modified (includes ~340 new + ~160 modified for Phase 6 distribution packaging)
 
 ---
 
@@ -83,6 +83,12 @@ This plan breaks V3.2.0 into **6 phases** with **hard review gates** between eac
 │  ├─ Entry: Review Gate 4 passed                                                │
 │  ├─ Exit: Eval harness with offline tests passing                              │
 │  └─ Review Gate 5: Final QA review (60 min)                                    │
+│                                                                              │
+│  PHASE 6: Distribution - Docker Compose + Ollama + Registry                    │
+│  ├─ Entry: Review Gate 5 passed                                                │
+│  ├─ Exit: Docker Compose bundle working, Ollama provider tested,               │
+│  │         listings submitted to 3 registries                                  │
+│  └─ Review Gate 6: Distribution review (30 min)                                │
 │                                                                              │
 │  RELEASE: V3.2.0                                                              │
 │  ├─ Entry: All review gates passed                                             │
@@ -293,6 +299,15 @@ touch src/rag/metrics.ts
 mkdir -p src/rag/__tests__/eval/golden-queries
 touch src/rag/__tests__/eval/runEval.ts
 touch src/rag/__tests__/eval/metrics.ts
+
+# Phase 6 files
+touch Dockerfile
+touch docker-compose.yml
+mkdir -p searxng
+touch searxng/settings.yml
+touch src/utils/ollamaEmbedding.ts
+touch src/utils/transformersEmbedding.ts
+touch docs/comparison.md
 ```
 
 ### Exit Criteria
@@ -1330,3 +1345,185 @@ export async function retrieveCorpus<T = RagChunk>(
   let constrainedResults: ConstraintRankedResult<T>[] | undefined;
   let finalResults = results;
 ```
+
+---
+
+## Phase 6: Distribution — Docker Compose + Ollama + Registry
+
+### Goal
+
+Ship a one-command deploy experience and fully local embedding option. These are the highest-leverage adoption fixes from the competitive analysis. Packaging problems block adoption faster than missing features.
+
+### Entry Criteria
+
+- Review Gate 5 passed
+- All domain adapter phases complete and tested
+- Eval harness passing in CI
+
+### Why This Phase Exists
+
+The competitive analysis (2026-04-26) identified three critical gaps:
+
+1. **Docker Compose bundles win adoption** — ToKiDoO's fork got 38 stars mostly because of `docker compose up -d`. Users don't want to configure 5 services.
+2. **MCP registries drive discoverability** — mcp.so lists 20,414 servers. search-mcp is technically superior but invisible in the discovery layer.
+3. **Ollama/Transformers.js closes the privacy gap** — mcp-local-rag runs fully local with no API keys. This is a blocker for privacy-first users.
+
+### Tasks
+
+#### 6.1 Docker Compose Bundle
+
+**What**: Add `Dockerfile` for the search-mcp server + `docker-compose.yml` that bundles SearXNG, Crawl4AI sidecar, and embedding sidecar.
+
+```yaml
+# docker-compose.yml (conceptual)
+services:
+  search-mcp:
+    build: .
+    ports:
+      - '8050:8050'
+    environment:
+      - EMBEDDING_SIDECAR_BASE_URL=http://embedding-sidecar:8000
+      - CRAWL4AI_BASE_URL=http://crawl4ai:8050
+      - SEARXNG_BASE_URL=http://searxng:8080
+      - SEARCH_BACKEND=searxng
+
+  embedding-sidecar:
+    build: ./sidecar/embedding/
+
+  crawl4ai:
+    image: unclebrian/crawl4ai:latest
+
+  searxng:
+    image: searxng/searxng:latest
+    volumes:
+      - ./searxng/settings.yml:/etc/searxng/settings.yml
+```
+
+**Files to create/modify**:
+- `Dockerfile` — multi-stage Node.js build (dev + production)
+- `docker-compose.yml` — full stack
+- `searxng/settings.yml` — pre-configured SearXNG (engines, privacy defaults)
+- `docs/quickstart.md` — update with Docker instructions
+
+**Acceptance criteria**:
+- [ ] `docker compose up -d` launches all 4 services
+- [ ] MCP clients connect via `http://host.docker.internal:8050`
+- [ ] SearXNG fallback works when no Exa/Brave API keys configured
+- [ ] Server starts without any API keys (fully local mode)
+
+#### 6.2 Ollama / Transformers.js Embedding Provider
+
+**What**: Add `EMBEDDING_PROVIDER=ollama` and `EMBEDDING_PROVIDER=transformers` modes alongside existing sidecar option.
+
+**Ollama path**:
+
+```typescript
+// src/utils/embedding.ts — provider abstraction
+type EmbeddingProvider = 'sidecar' | 'openai' | 'ollama' | 'transformers';
+
+interface OllamaEmbedder {
+  baseUrl: string; // e.g., http://localhost:11434
+  model: string;   // e.g., 'nomic-embed-text'
+  dimensions?: number;
+}
+
+async function embedWithOllama(texts: string[], opts: OllamaEmbedder): Promise<number[][]> {
+  const response = await fetch(`${opts.baseUrl}/api/embed`, {
+    method: 'POST',
+    body: JSON.stringify({ model: opts.model, input: texts }),
+  });
+  // ...
+}
+```
+
+**Transformers.js path** (fully in-process, no external service):
+
+```typescript
+// src/utils/transformersEmbedding.ts
+import { pipeline } from '@xenova/transformers';
+let embedder: Pipeline | null = null;
+async function getEmbedder(modelName: string) {
+  if (!embedder) {
+    embedder = await pipeline('feature-extraction', modelName);
+  }
+  return embedder;
+}
+```
+
+**Files to create/modify**:
+- `src/utils/embedding.ts` — provider dispatch (embedTexts routes to correct backend)
+- `src/utils/ollamaEmbedding.ts` — new Ollama client
+- `src/utils/transformersEmbedding.ts` — new Transformers.js client
+- `src/config.ts` — add `EMBEDDING_PROVIDER`, `EMBEDDING_OLLAMA_BASE_URL`, etc.
+- `package.json` — optional dependency on `@xenova/transformers`
+- `docs/quickstart.md` — document fully-local paths
+
+**Acceptance criteria**:
+- [ ] Ollama embeddings work with `EMBEDDING_PROVIDER=ollama` + `ollama pull nomic-embed-text`
+- [ ] Transformers.js embeddings work with `EMBEDDING_PROVIDER=transformers` (no external deps)
+- [ ] Existing sidecar path unchanged when `EMBEDDING_PROVIDER` is unset (backward compat)
+- [ ] Graceful error if Ollama not running or model not pulled
+- [ ] Graceful error if transformers package not installed
+
+#### 6.3 MCP Registry Publishing
+
+**What**: List search-mcp on the three major MCP directories.
+
+**Where**:
+- [ ] **mcp.so** — https://mcp.so/submit (largest directory, 20,414 servers)
+- [ ] **FastMCP.market** — https://fastmcp.market/submit
+- [ ] **MCP Registry** — Package as npm with MCP manifest
+
+**What to include in listings**:
+- Feature matrix comparison (36 tools vs competitors' 3-9)
+- Docker Compose one-command setup
+- Privacy-first positioning (no data leaves user machine with SearXNG)
+- Use cases: research, competitive analysis, job search, code search
+- Links to docs: tools.md, architecture.md, quickstart.md
+
+**Files to create/modify**:
+- `README.md` — add badges, feature comparison table, Docker setup
+- `docs/comparison.md` — detailed feature matrix vs Kindly, Vera, mcp-local-rag, mcp-crawl4ai-rag
+
+**Acceptance criteria**:
+- [ ] Listed on mcp.so with feature matrix
+- [ ] Listed on FastMCP.market
+- [ ] npm package has MCP manifest for registry discovery
+
+### Phase 6 Files
+
+| File | Action | Purpose |
+|------|--------|---------|
+| `Dockerfile` | Create | Multi-stage Node.js build |
+| `docker-compose.yml` | Create | Full stack (SearXNG + Crawl4AI + sidecar) |
+| `searxng/settings.yml` | Create | Pre-configured SearXNG |
+| `src/utils/ollamaEmbedding.ts` | Create | Ollama embedding client |
+| `src/utils/transformersEmbedding.ts` | Create | Transformers.js embedding client |
+| `src/utils/embedding.ts` | Modify | Provider dispatch |
+| `src/config.ts` | Modify | New env vars |
+| `package.json` | Modify | Optional transformers dependency |
+| `README.md` | Modify | Badges, comparison, Docker setup |
+| `docs/quickstart.md` | Modify | Docker + fully-local paths |
+| `docs/comparison.md` | Create | Feature matrix vs competitors |
+
+### Estimated Scope
+
+| Component | New LOC | Modified LOC |
+|-----------|---------|--------------|
+| Dockerfile + compose + SearXNG config | ~50 | 0 |
+| Ollama embedding client | ~60 | 0 |
+| Transformers.js embedding client | ~80 | 0 |
+| Provider dispatch refactor | ~30 | ~50 |
+| Config additions | ~20 | ~30 |
+| Docs + README + registry | ~100 | ~80 |
+| **Total** | **~340** | **~160** |
+
+### Review Gate 6: Distribution Review
+
+**Focus**:
+1. Docker Compose: does `docker compose up -d` work on a clean machine?
+2. Ollama: correct error handling when server not running
+3. Transformers.js: in-process embeddings without segfaults
+4. Registry listings: accurate, professional, differentiate
+
+**Duration**: 30 minutes

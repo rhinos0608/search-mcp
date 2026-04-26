@@ -1,6 +1,6 @@
 # Search MCP Roadmap — Implementation Plans Index
 
-**Version**: V3.1.5 (2026-04-26) → V3.2.0 → V3.3.0 → V3.4.0 → V3.5.0
+**Version**: V3.1.5 (2026-04-26) → V3.2.0 (includes distribution packaging) → V3.3.0 → V3.4.0
 
 This document indexes all implementation plans for the Search MCP roadmap.
 
@@ -113,20 +113,21 @@ This document indexes all implementation plans for the Search MCP roadmap.
 
 ---
 
-## V3.2.0 — Domain Adapters + Structured Retrieval
+## V3.2.0 — Domain Adapters + Structured Retrieval + Distribution
 
-**Status**: Not Started  
-**Priority**: Medium  
+**Status**: Planning in progress (`v3.2.0-planning` worktree)  
+**Priority**: High  
 **Depends On**: V3.0.0, V3.0.5, V3.1.0
 
-**Summary**: Complete the domain adapter ecosystem (Stack Overflow, HN, academic, news), upgrade the job adapter to full pipeline, add three-layer deduplication, constraint-aware ranking, source profiles, coverage reporting, and `semantic_search` unified tool prototype.
+**Summary**: Complete the domain adapter ecosystem (Stack Overflow, HN, academic, news), upgrade the job adapter to full pipeline, add three-layer deduplication, constraint-aware ranking, source profiles, coverage reporting, and `semantic_search` unified tool prototype. **Includes distribution packaging** (Docker Compose, Ollama/Transformers.js, MCP registry — originally V3.4.0) as Phase 6 intermediate milestone.
 
 | Document            | Path                                  |
 | ------------------- | ------------------------------------- |
 | Full Spec           | `docs/plans/v3.2.0/SPEC.md`           |
 | Implementation Plan | `docs/plans/v3.2.0/IMPLEMENTATION.md` |
+| Full Implementation | `docs/plans/v3.2.0/IMPLEMENTATION_PLAN.md` |
 
-### Key Deliverables
+### Key Deliverables — Domain & Pipeline
 
 1. **New Domain Adapters**
    - `qa.ts` — Stack Overflow Q&A pair preservation (`semantic_stackoverflow`)
@@ -162,7 +163,21 @@ This document indexes all implementation plans for the Search MCP roadmap.
    - Metrics: recall@1, recall@3, recall@10, mrr, latency distribution
    - CI integration: fail if recall@3 < 0.7 or p95Latency > 10s
 
-**Estimated Scope**: ~2,500 LOC new code
+### Key Deliverables — Distribution (Phase 6 Milestone)
+
+9. **Docker Compose Bundle**
+   - `Dockerfile` + `docker-compose.yml` with SearXNG + Crawl4AI + embedding sidecar
+   - One-command deploy, zero API-keys mode
+
+10. **Ollama / Transformers.js Embeddings**
+    - `EMBEDDING_PROVIDER=ollama` and `EMBEDDING_PROVIDER=transformers` modes
+    - Fully local embedding without external API dependencies
+
+11. **MCP Registry Publishing**
+    - Listed on mcp.so, FastMCP.market, MCP Registry
+    - Feature matrix comparison vs Kindly, Vera, mcp-local-rag, mcp-crawl4ai-rag
+
+**Estimated Scope**: ~2,840 new + ~660 modified LOC (Phase 6 = ~340 new + ~160 modified)
 
 ---
 
@@ -205,12 +220,11 @@ This document indexes all implementation plans for the Search MCP roadmap.
 | V3.1.0  | Code/GitHub   | Code adapter, semantic GitHub search, SQLite cache, Exa           | ~800 LOC   |
 | V3.1.1  | Reliability   | HTML threading, timeout scaling, size guard                       | ~300 LOC   |
 | V3.1.5  | RAG-Anything  | PDF/Office extraction bridge, code review fixes                   | ~1,200 LOC |
-| V3.2.0  | Domains       | SO, HN, academic, news adapters, full jobs, dedup, constraints    | ~2,500 LOC |
-| V3.3.0  | Resilience    | Contextual embeddings, domain trust, kill chain, query expansion  | ~2,500 LOC |
-| V3.4.0  | Distribution  | Docker Compose bundle, Ollama/local embedding, MCP registry       | ~500 LOC   |
-| V3.5.0  | Integration   | Resolver pattern, output budget, structured errors, diagnostics   | ~800 LOC   |
+| V3.2.0  | Domains + Dist | SO, HN, academic, news adapters, full jobs, dedup, constraints, **Docker Compose, Ollama, registry** | ~2,840 LOC |
+| V3.3.0  | Resilience     | Contextual embeddings, domain trust, kill chain, query expansion  | ~2,500 LOC |
+| V3.4.0  | Integration    | Resolver pattern, output budget, structured errors, diagnostics   | ~800 LOC   |
 
-**Total V3 Series**: ~11,000 LOC new code
+**Total V3 Series**: ~10,840 LOC new code
 
 ---
 
@@ -225,4 +239,4 @@ This document indexes all implementation plans for the Search MCP roadmap.
 
 ---
 
-_Generated: 2026-04-24 · Last updated: 2026-04-26 (V3.1.5 complete, roadmap realigned for V3.2.0–V3.5.0)_
+_Generated: 2026-04-24 · Last updated: 2026-04-26 (V3.1.5 complete, V3.4.0 folded into V3.2.0, planning in `v3.2.0-planning` worktree)_
