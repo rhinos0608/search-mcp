@@ -1,9 +1,9 @@
+import type { SemanticCrawlSourceType } from '../types.js';
+
 export const RESPONSE_CAP_BYTES = 52 * 1024 * 1024;
 export const SAFE_BYTES = Math.floor(RESPONSE_CAP_BYTES * 0.8);
 export const DEFAULT_AVG_PAGE_BYTES = 1.5 * 1024 * 1024;
 export const JS_HEAVY_AVG_PAGE_BYTES = 8 * 1024 * 1024;
-
-type SourceType = 'url' | 'sitemap' | 'search' | 'github' | 'cached';
 
 const KNOWN_HEAVY_HOSTNAMES = new Set([
   'seek.com.au',
@@ -34,7 +34,10 @@ const LISTING_PATTERN =
  *
  * False negatives are acceptable — the in-flight byte accumulator is the authoritative guard.
  */
-export function isLikelyJsHeavySite(opts: { sourceType: SourceType; url?: string }): boolean {
+export function isLikelyJsHeavySite(opts: {
+  sourceType: SemanticCrawlSourceType;
+  url?: string;
+}): boolean {
   if (opts.sourceType === 'search') return true;
 
   if (opts.url === undefined) return false;
