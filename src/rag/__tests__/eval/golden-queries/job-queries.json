@@ -1,0 +1,37 @@
+[
+  {
+    "id": "job-001",
+    "domain": "job",
+    "query": "senior software engineer position requiring Python and React in Sydney",
+    "expectedTerms": ["software engineer", "python", "react", "sydney", "senior"],
+    "expectedLocation": "Sydney",
+    "expectedWorkMode": "remote",
+    "minRelevant": 2,
+    "difficulty": "medium"
+  },
+  {
+    "id": "job-002",
+    "domain": "job",
+    "query": "entry level data entry clerk jobs no experience needed",
+    "expectedTerms": ["data entry", "entry level", "clerk"],
+    "minRelevant": 2,
+    "difficulty": "easy"
+  },
+  {
+    "id": "job-003",
+    "domain": "job",
+    "query": "remote devops engineer with Kubernetes and AWS experience",
+    "expectedTerms": ["devops", "kubernetes", "aws", "remote"],
+    "expectedWorkMode": "remote",
+    "minRelevant": 2,
+    "difficulty": "medium"
+  },
+  {
+    "id": "job-004",
+    "domain": "job",
+    "query": "machine learning engineer salary above 150k in Melbourne",
+    "expectedTerms": ["machine learning", "engineer", "melbourne"],
+    "minRelevant": 1,
+    "difficulty": "hard"
+  }
+]

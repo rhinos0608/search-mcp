@@ -1,0 +1,34 @@
+[
+  {
+    "id": "gen-001",
+    "domain": "general",
+    "query": "best practices for securing REST API endpoints",
+    "expectedTerms": ["authentication", "authorization", "api", "security"],
+    "minRelevant": 2,
+    "difficulty": "easy"
+  },
+  {
+    "id": "gen-002",
+    "domain": "general",
+    "query": "how to implement caching in distributed microservices",
+    "expectedTerms": ["cache", "redis", "microservice", "distributed"],
+    "minRelevant": 2,
+    "difficulty": "medium"
+  },
+  {
+    "id": "gen-003",
+    "domain": "general",
+    "query": "comparison of NoSQL databases for real-time analytics",
+    "expectedTerms": ["nosql", "analytics", "real-time", "database"],
+    "minRelevant": 1,
+    "difficulty": "medium"
+  },
+  {
+    "id": "gen-004",
+    "domain": "general",
+    "query": "zero-downtime deployment strategies for web applications",
+    "expectedTerms": ["deployment", "zero-downtime", "ci/cd", "rolling"],
+    "minRelevant": 1,
+    "difficulty": "hard"
+  }
+]
