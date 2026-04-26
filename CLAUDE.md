@@ -190,6 +190,27 @@ GitHub corpus (`src/utils/githubCorpus.ts`): fetches repo files via GitHub API, 
 - All other tools: string-only warnings in `ToolResult.meta.warnings`
 - V4 should introduce a `WarningCode` type union and `StructuredWarning { code, severity, message, source? }` across all tools
 
+## Commit Style
+
+```
+feat(rag): add persistent corpus cache
+fix(crawl): enforce page budget before extraction
+fix(security): block SSRF targets in smart extraction
+docs(roadmap): align v3.1 plan
+test(jobs): cover source normalization
+refactor(server): split tool registration
+chore(release): tag v3.1.5
+```
+
+- Use [Conventional Commits](https://www.conventionalcommits.org/).
+- Scopes name the subsystem (`rag`, `crawl`, `github`, `server`, etc.), not the release version.
+- Keep subjects imperative and under ~72 characters.
+- Mention user-visible behavior in the body when relevant.
+- Use `fix(security)` for security-sensitive hardening.
+- Tag releases separately with `chore(release): tag vX.Y.Z`.
+- Squash noisy fixups (typo, lint-only, "oops missed file", broken intermediates) before merge.
+- Keep meaningful fixes visible — especially correctness, security, and regression fixes.
+
 ## V4 Roadmap — Persistent Corpus Indexes
 
 V4 turns semantic results from ephemeral per-session cache into durable, named, queryable indexes: "from semantic search tool to persistent research memory for coding agents."

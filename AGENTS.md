@@ -148,6 +148,27 @@ Reddit OAuth is optional, but `REDDIT_CLIENT_ID` and `REDDIT_CLIENT_SECRET` must
 - Embedding sidecar URLs bypass SSRF guards because they come from operator config, not user input.
 - Never commit `config.json`, `config.enc`, or API keys.
 
+## Commit Style
+
+```
+feat(rag): add persistent corpus cache
+fix(crawl): enforce page budget before extraction
+fix(security): block SSRF targets in smart extraction
+docs(roadmap): align v3.1 plan
+test(jobs): cover source normalization
+refactor(server): split tool registration
+chore(release): tag v3.1.5
+```
+
+- Use [Conventional Commits](https://www.conventionalcommits.org/).
+- Scopes name the subsystem, not the release version.
+- Keep subjects imperative and under ~72 characters.
+- Mention user-visible behavior in the body when relevant.
+- Use `fix(security)` for security-sensitive hardening.
+- Tag releases with `chore(release): tag vX.Y.Z`.
+- Squash noisy fixups (typo, lint-only, "oops missed file", broken intermediates).
+- Keep meaningful fixes visible — correctness, security, and regression fixes.
+
 ## Key Constraints
 
 - TypeScript strict mode with `exactOptionalPropertyTypes`, `noUncheckedIndexedAccess`, `noUnusedLocals`, and `noUnusedParameters`.
