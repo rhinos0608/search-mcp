@@ -359,10 +359,9 @@ diagnostics.emit("resolver.route", "Matched StackOverflow", {"handler": "stackex
    - "I want the GitHub Issue with all the comments"
    - Action: Your semantic_github_code already does this — lean into it
 
-4. **Yagami has Pi integration** (interesting):
+4. **Yagami has Pi integration**:
    - `@ahkohd/pi-yagami-search` npm package
    - "replaces Exa in my Pi coding sessions"
-   - This is the project namesake!
 
 ---
 

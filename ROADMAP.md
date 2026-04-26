@@ -586,6 +586,155 @@ A thorough review of `pipeline.ts`, `types.ts`, `code.ts`, `corpusCache.ts`, `cr
 
 ---
 
+## V3.4.0 — Distribution & Local-First Deployment
+
+> **Priority**: High — identified from competitive analysis (2026-04-26)
+
+Three gaps between your technical leadership and adoption reality. These are **packaging problems, not technology problems** — the architecture already supports all of this.
+
+### Competitive Context
+
+After analyzing the local-first MCP server landscape, three patterns emerge:
+
+1. **Docker Compose bundles win adoption**: ToKiDoO's `crawl4ai-rag-mcp` (38 stars, forked from coleam00) shows that bundling SearXNG + Crawl4AI + MCP in one `docker compose up -d` dramatically reduces friction. Users don't want to configure 5 services — they want one command.
+
+2. **MCP registries drive discoverability**: mcp.so lists 20,414 servers. mcp-local-rag (237 stars, 187 commits) attributes part of its traction to registry presence. You're technically superior but invisible in the discovery layer.
+
+3. **Ollama/Transformers.js closes the privacy gap**: mcp-local-rag and doITmagic/rag-code-mcp run fully local with no API keys. Your roadmap has no fully-local embedding path — this is a gap for privacy-first users who don't want to route data through OpenAI.
+
+### 1. Docker Compose Bundle (Priority: Critical)
+
+**What**: Add `docker-compose.yml` that bundles search-mcp + SearXNG + Crawl4AI sidecar in one deploy.
+
+```yaml
+# docker-compose.yml (conceptual)
+services:
+  search-mcp:
+    build: .
+    ports:
+      - '8050:8050'
+    environment:
+      - EMBEDDING_SIDECAR_BASE_URL=http://embedding-sidecar:8000
+      - CRAWL4AI_BASE_URL=http://crawl4ai:8050
+      - SEARXNG_BASE_URL=http://searxng:8080
+      # Fallback: if no API keys, use SearXNG
+      - SEARCH_BACKEND=searxng
+
+  embedding-sidecar:
+    image: search-mcp/embedding-sidecar:latest
+    # or build from ./sidecar/embedding/
+
+  crawl4ai:
+    image: unclebrian/crawl4ai:latest
+
+  searxng:
+    image: searxng/searxng:latest
+    volumes:
+      - ./searxng/settings.yml:/etc/searxng/settings.yml
+```
+
+**Implementation path**:
+
+1. Add `Dockerfile` for search-mcp server
+2. Add `docker-compose.yml` with embedded SearXNG + Crawl4AI
+3. Pre-configure SearXNG settings (engines, privacy defaults)
+4. Document: `docker compose up -d` → full stack running
+5. For MCP clients: use `http://host.docker.internal:8050` for Docker networking
+
+**Outcome**: One-command deploy for users who don't have API keys or want fully local operation.
+
+### 2. MCP Registry Publishing (Priority: Critical)
+
+**Where to list**:
+
+- [ ] **mcp.so** — largest MCP server directory (20,414 servers)
+  - Submit at: https://mcp.so/submit
+  - Requires: GitHub repo, README with MCP config example, feature description
+- [ ] **FastMCP.market** — MCP marketplace with categories and search
+  - Submit at: https://fastmcp.market/submit
+- [ ] **MCP Registry** (registry.modelcontextprotocol.io)
+  - Package your server as npm package with MCP manifest
+
+**What to include in listings**:
+
+- Feature matrix comparison (your 36 tools vs competitors' 3-9)
+- Docker Compose one-command setup
+- Privacy-first positioning (no data leaves user machine when using SearXNG)
+- Use cases: research, competitive analysis, job search, code search
+
+**Outcome**: Discoverability converts technical superiority into user growth.
+
+### 3. Ollama/Local Embedding Option (Priority: High)
+
+**What**: Add `EMBEDDING_PROVIDER=ollama` mode alongside existing sidecar + OpenAI options.
+
+```ts
+// src/utils/embedding.ts - provider abstraction
+type EmbeddingProvider = 'sidecar' | 'openai' | 'ollama';
+
+interface OllamaEmbedder {
+  baseUrl: string; // e.g., http://localhost:11434
+  model: string; // e.g., 'nomic-embed-text'
+  dimensions?: number;
+}
+
+async function embedTexts(texts: string[], opts: OllamaEmbedder): Promise<number[][]> {
+  const response = await fetch(`${opts.baseUrl}/api/embeddings`, {
+    method: 'POST',
+    body: JSON.stringify({
+      model: opts.model,
+      prompt: texts, // Ollama batch endpoint
+    }),
+  });
+  // ...
+}
+```
+
+**User experience**:
+
+```bash
+# Start Ollama
+ollama serve
+ollama pull nomic-embed-text
+
+# Configure search-mcp
+EMBEDDING_PROVIDER=ollama
+EMBEDDING_OLLAMA_BASE_URL=http://localhost:11434
+EMBEDDING_OLLAMA_MODEL=nomic-embed-text
+```
+
+**Also support Transformers.js** (like mcp-local-rag) for Node.js environments without Ollama:
+
+```bash
+# No Ollama needed — runs entirely in-process
+EMBEDDING_PROVIDER=transformers
+MODEL_NAME=Xenova/all-MiniLM-L6-v2
+```
+
+**Outcome**: Privacy-first users get fully local operation without external API calls.
+
+### Quality Gates
+
+- [ ] `docker compose up -d` launches full stack (search-mcp + SearXNG + Crawl4AI)
+- [ ] MCP clients can connect via `http://host.docker.internal:8050`
+- [ ] SearXNG fallback works when no Exa/Brave API keys configured
+- [ ] Listed on mcp.so with feature matrix
+- [ ] Ollama embeddings work with `EMBEDDING_PROVIDER=ollama`
+- [ ] Transformers.js embeddings work with `EMBEDDING_PROVIDER=transformers`
+
+### V4.3.0 Update: Telemetry Flag
+
+> ⚠️ **Important**: V4.3.0 mentions "opt-in telemetry." Given heightened privacy sensitivity in the MCP/dev community, the default must be **off** — not opt-out. Implementation must be:
+
+- **Default**: telemetry disabled, no data sent
+- **Opt-in only**: user must explicitly enable (`ENABLE_TELEMETRY=true`)
+- **Transparent**: what's sent is logged to stderr (not hidden)
+- **Content-free**: only operational metadata (tool invoked, latency bucket, success/failure) — never queries, file paths, or code content
+
+See: community sensitivity around Claude Code telemetry debates. Privacy-first positioning is a market differentiator, not just a compliance checkbox.
+
+---
+
 ## V4.0.0 — Persistent Corpus Indexes
 
 **Goal**: Turn semantic results from ephemeral per-session cache into durable, named, queryable indexes — "from semantic search tool to persistent research memory for coding agents."
@@ -1090,6 +1239,278 @@ No version ships unless its gates pass. These are checked in CI, not vibes.
 - [ ] Constraint-aware ranking can explain inclusions and exclusions (matched + caveats)
 - [ ] Static source profiles consulted by every multi-source tool
 - [ ] `semantic_search` prototype dispatches to same pipeline as per-tool names
+
+---
+
+## V3.5.0 — Competitive Integration (Competitive Analysis 2026-04-26)
+
+> **Source**: Competitive analysis research comparing search-mcp against Kindly Web Search, Vera, Yagami, mcp-local-rag, and 12+ other MCP servers.
+
+After analyzing the competitive landscape, eight patterns were identified that would improve search-mcp's feature set and market positioning. Each finding maps to a specific competitor and source file.
+
+### Research Sources
+
+| Competitor                                                                                            | Stars | Key Pattern                                      | File Reference                                         |
+| ----------------------------------------------------------------------------------------------------- | ----- | ------------------------------------------------ | ------------------------------------------------------ |
+| [Kindly Web Search](https://github.com/Shelpuk-AI-Technology-Consulting/kindly-web-search-mcp-server) | 294   | Resolver pattern, diagnostics, structured errors | `src/kindly_web_search_mcp_server/content/resolver.py` |
+| [Vera](https://github.com/lemon07r/Vera)                                                              | 66    | Eval harness, agent skills, BM25+vector+rerank   | `skills/vera/SKILL.md`, `eval/`                        |
+| [mcp-local-rag](https://github.com/shinpr/mcp-local-rag)                                              | 237   | Pure local, Transformers.js                      | —                                                      |
+
+Full research document: `docs/competitive-analysis-2026-04-26.md`
+
+---
+
+### Finding 1: Multi-Source URL Resolver Pattern
+
+**Source**: Kindly Web Search
+**File**: `src/kindly_web_search_mcp_server/content/resolver.py`
+**Priority**: **High**
+**Effort**: Medium
+
+**Pattern**: Dispatch URL resolution to specialized API handlers instead of universal scraping:
+
+```python
+# Stage 1: StackExchange API (returns full Q&A with answers)
+# Stage 2: GitHub Issue GraphQL API (returns full discussion)
+# Stage 3: Wikipedia MediaWiki API (clean article content)
+# Stage 4: arXiv Atom API (abstract extraction)
+# Stage 5: Universal HTML fallback (headless browser)
+```
+
+**Why it matters**: API-based fetching returns structured, complete content vs scraping HTML fragments. StackOverflow via API returns all answers + comments, not just snippets.
+
+**Implementation**: Create `src/utils/urlResolver.ts` with handlers for:
+
+- StackOverflow/StackExchange → StackExchange API
+- GitHub Issues → GitHub GraphQL API
+- GitHub Discussions → GitHub GraphQL API
+- Wikipedia → MediaWiki Action API
+- arXiv → Atom API + PDF extraction
+- Fallback → Crawl4AI
+
+**This directly improves** `semantic_github_code` — fetching GitHub Issues via GraphQL would return full discussions + comments, not markdown rendering.
+
+---
+
+### Finding 2: Output Budget Management
+
+**Source**: Kindly + Vera
+**Files**: Kindly `KINDLY_TOOL_TOTAL_TIMEOUT_SECONDS`, Vera `MCP_OUTPUT_BUDGET`
+**Priority**: **High**
+**Effort**: Low
+
+**Pattern**: Explicit budgets prevent MCP response size crashes:
+
+```typescript
+// Kindly-style timeout budgets
+const KINDLY_TOOL_TOTAL_TIMEOUT_SECONDS = 120; // default
+const KINDLY_TOOL_TOTAL_TIMEOUT_MAX_SECONDS = 600; // cap
+
+// Vera-style output truncation
+const MCP_OUTPUT_BUDGET: usize = 20_000; // chars
+```
+
+**Why it matters**: search-mcp already hit the 314MB crash scenario. Budget enforcement prevents this.
+
+**Implementation**: Enhance `src/utils/crawlBudget.ts`:
+
+- Add per-result budget limits (not just total)
+- Truncate at line boundaries (not arbitrary chars)
+- Report omitted count in `corpusStatus`
+
+---
+
+### Finding 3: Structured Error Notes
+
+**Source**: Kindly Web Search
+**File**: `src/kindly_web_search_mcp_server/content/resolver.py`
+**Priority**: Medium
+**Effort**: Low
+
+**Pattern**: Return deterministic Markdown error notes instead of throwing:
+
+```python
+# Instead of throwing, return structured error note
+f"_Failed to retrieve StackExchange content: {error}_\n\nSource: {url}\n"
+```
+
+**Why it matters**: AI tools see "I tried but failed" with URL and can retry/skip. Throwing breaks tool call.
+
+**Implementation**: Add to `src/utils/urlResolver.ts`:
+
+```typescript
+export function createErrorNote(error: string, url: string, source?: string): string {
+  const sourcePart = source ? `: ${source}` : '';
+  return `_Failed to retrieve content${sourcePart}: ${error}_\n\nSource: ${url}\n`;
+}
+```
+
+---
+
+### Finding 4: Agent Skills System
+
+**Source**: Vera
+**Files**: `skills/vera/SKILL.md`, `AGENT-USAGE.md`
+**Priority**: Medium
+**Effort**: Medium
+
+**Pattern**: Precise "when to use / when not to use" guidance + query strategy tips:
+
+```markdown
+## When to Use
+
+- Conceptual queries: "how does auth work"
+- NOT: exact strings, regex (use `vera grep`)
+
+## Query Strategy
+
+- Be specific: "OAuth token refresh" not "auth"
+- Use multiple queries: ["OAuth", "JWT", "auth middleware"]
+```
+
+**Why it matters**: Better AI assistant usage guidance improves tool effectiveness.
+
+**Implementation**: Create `skills/search-mcp/SKILL.md`:
+
+- Per-tool "when to use / not to use"
+- Query strategy tips
+- Failure recovery steps
+- Output format explanation
+
+---
+
+### Finding 5: Eval Harness + Benchmarks
+
+**Source**: Vera
+**Files**: `eval/corpus.toml`, `docs/benchmarks.md`
+**Priority**: **High**
+**Effort**: High
+
+**Pattern**: Full eval suite with 21-task benchmark across 4 codebases:
+
+```markdown
+| Metric   | ripgrep | cocoindex | ColGREP | Vera     |
+| -------- | ------- | --------- | ------- | -------- |
+| Recall@5 | 0.28    | 0.37      | 0.67    | **0.78** |
+| MRR@10   | 0.26    | 0.35      | 0.62    | **0.91** |
+```
+
+**Why it matters**: Vera's benchmark showing MRR@10 = 0.91 vs competitors is a powerful differentiator. Publishing eval results for search-mcp would demonstrate technical superiority.
+
+**Implementation**: Create `eval/` directory:
+
+- `eval/golden-queries/` (web-search, github-code, youtube, jobs)
+- `eval/harness.ts` (runner)
+- `eval/thresholds.json` (pass/fail criteria)
+
+---
+
+### Finding 6: Diagnostic Emitters
+
+**Source**: Kindly Web Search
+**File**: `src/kindly_web_search_mcp_server/utils/diagnostics.py`
+**Priority**: Medium
+**Effort**: Medium
+
+**Pattern**: Per-event JSON logging to stderr:
+
+```python
+diagnostics.emit("web_search.start", "Starting web search", {
+  "query": query, "num_results": num_results
+})
+diagnostics.emit("resolver.route", "Matched StackExchange", {
+  "handler": "stackexchange"
+})
+```
+
+**Why it matters**: Helps users debug why results are poor without reading source code.
+
+**Implementation**: Create `src/utils/diagnostics.ts`:
+
+```typescript
+export function emitDiagnostic(event: string, message: string, data: Record<string, unknown>) {
+  if (!process.env.ENABLE_DIAGNOSTICS) return;
+  console.error(
+    JSON.stringify({
+      timestamp: new Date().toISOString(),
+      event,
+      message,
+      data,
+    }),
+  );
+}
+```
+
+---
+
+### Finding 7: Multi-Query Search with Intent
+
+**Source**: Vera
+**File**: `crates/vera-mcp/src/tools.rs`
+**Priority**: Medium
+**Effort**: Medium
+
+**Pattern**: Accept `queries: string[]` and `intent: string` for better precision:
+
+```typescript
+// Vera's tool schema
+{
+  "queries": ["OAuth token refresh", "JWT expiry handling", "auth middleware"],
+  "intent": "find where auth tokens are validated and refreshed"
+}
+```
+
+**Why it matters**: Running multiple varied queries and merging results + using intent for reranking improves precision for ambiguous queries.
+
+**Implementation**: Add to semantic tools:
+
+```typescript
+interface SemanticSearchOptions {
+  queries?: string[]; // Run multiple queries, merge results
+  intent?: string; // Higher-level goal for reranking
+}
+```
+
+---
+
+### Finding 8: TTY Detection Guard
+
+**Source**: Kindly Web Search
+**File**: `src/kindly_web_search_mcp_server/server.py`
+**Priority**: Low
+**Effort**: Low
+
+**Pattern**: Refuse stdio when stdin is a TTY (human running directly):
+
+```python
+if sys.stdin.isatty() and os.environ.get("MCP_ALLOW_TTY_STDIO") != "1":
+    print("Error: `--stdio` is for MCP clients, not manual use.")
+    raise SystemExit(2)
+```
+
+**Why it matters**: Prevents confusing "server starts but hangs" when users run it directly.
+
+**Implementation**: Add to `src/server.ts` startup:
+
+```typescript
+if (process.stdin.isatty() && process.env.MCP_ALLOW_TTY !== '1') {
+  console.error('stdio transport is for MCP clients. Use SSE or HTTP for manual testing.');
+  process.exit(1);
+}
+```
+
+---
+
+### Competitive Integration Quality Gates
+
+- [ ] URL Resolver handles StackOverflow, GitHub Issues, Wikipedia, arXiv
+- [ ] Output budgets prevent MCP response size crashes
+- [ ] Error notes return structured markdown (not thrown exceptions)
+- [ ] Agent Skills file created at `skills/search-mcp/SKILL.md`
+- [ ] Eval harness with golden queries for web, github, youtube, jobs
+- [ ] Diagnostic emitters log to stderr when `ENABLE_DIAGNOSTICS=1`
+- [ ] Multi-query search accepts `queries[]` and `intent`
+- [ ] TTY guard prevents direct stdio execution
 
 ---
 
