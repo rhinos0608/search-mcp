@@ -9,7 +9,7 @@ providing multimodal document extraction for complex documents.
 
 **Version:** 3.1.5  
 **Branch:** `feature/v3.1.5-rag-anything`  
-**Commits:** 2 commits with ~3,500 lines of production code
+**Commits:** 2 commits with ~4,087 lines of code
 
 ## Implemented Components
 
@@ -143,7 +143,7 @@ cd services/rag-anything-bridge
 docker-compose exec rag-anything-bridge pytest -v
 
 # Run TypeScript tests
-cd ../../../
+cd ../../
 npm test -- --testPathPattern="ragAnything|extractionQuality"
 
 # Integration test
