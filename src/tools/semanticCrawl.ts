@@ -792,19 +792,37 @@ export function filterByPathPrefix(
   allowPathDrift = false,
 ): CrawlPageResult[] {
   if (allowPathDrift) return pages;
-  const seedPath = new URL(seedUrl).pathname;
+  let seedPath: string;
+  try {
+    seedPath = new URL(seedUrl).pathname;
+  } catch {
+    logger.warn({ url: seedUrl }, 'semantic_crawl: invalid seed URL; skipping path filter');
+    return pages;
+  }
+  const prefix = seedPath.endsWith('/') ? seedPath : `${seedPath}/`;
   const kept: CrawlPageResult[] = [];
   let dropped = 0;
+  let malformed = 0;
   for (const page of pages) {
-    const pagePath = new URL(page.url).pathname;
-    if (pagePath === seedPath || isDirectChild(pagePath, seedPath)) {
+    let pagePath: string;
+    try {
+      pagePath = new URL(page.url).pathname;
+    } catch {
+      logger.warn({ url: page.url }, 'semantic_crawl: dropping page with malformed URL');
+      malformed++;
+      continue;
+    }
+    if (pagePath === seedPath || pagePath.startsWith(prefix)) {
       kept.push(page);
     } else {
       dropped++;
     }
   }
-  if (dropped > 0) {
-    logger.info({ dropped, seedPath }, 'semantic_crawl: dropped pages outside seed path');
+  if (dropped > 0 || malformed > 0) {
+    logger.info(
+      { dropped, malformed, seedPath },
+      'semantic_crawl: dropped pages outside seed path or with malformed URLs',
+    );
   }
   return kept;
 }
@@ -1021,8 +1039,8 @@ export async function crawlSeeds(
 
   return {
     pages: deduped,
-    totalPages: totalPagesAttempted,
-    successfulPages: totalSuccessfulPages,
+    totalPages: totalPagesFromCrawler,
+    successfulPages: deduped.filter((p) => p.success).length,
     warnings,
     structuredWarnings,
     omittedPages,
