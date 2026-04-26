@@ -12,3 +12,9 @@ models/
 .pi/
 .pi-lens/
 .cache/semantic-crawl/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+

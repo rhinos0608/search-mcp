@@ -48,7 +48,9 @@ export interface SemanticJobsResult {
     requested: number;
     fetched: number;
     failed: number;
+    extracted: number;
     deduplicated: number;
+    filtered: number;
   };
   warnings: string[];
 }
@@ -78,7 +80,14 @@ export async function semanticJobs(
   if (seedUrls.length === 0) {
     return {
       results: [],
-      corpusStatus: { requested: 0, fetched: 0, failed: 0, deduplicated: 0 },
+      corpusStatus: {
+        requested: 0,
+        fetched: 0,
+        failed: 0,
+        extracted: 0,
+        deduplicated: 0,
+        filtered: 0,
+      },
       warnings: [],
     };
   }
@@ -137,12 +146,15 @@ export async function processJobSearchResults(
   const dedupedListings = dedupJobListings(extractedListings);
   const deduplicatedCount = extractedListings.length - dedupedListings.length;
   const filteredListings = applyHardFilters(dedupedListings, constraints);
+  const filteredCount = dedupedListings.length - filteredListings.length;
 
   const corpusStatus = {
     requested: crawledPages.length,
     fetched: successfulPages.length,
     failed: failedPages,
+    extracted: extractedListings.length,
     deduplicated: deduplicatedCount,
+    filtered: filteredCount,
   };
 
   if (filteredListings.length === 0) {
@@ -195,12 +207,7 @@ async function buildSemanticScores(
   }
 
   if (budgeted.items.length === 0) {
-    const corpus = prepareCorpus({ adapter: 'search', documents: [] });
-    const response = retrieveCorpus(corpus, {
-      query,
-      topK,
-    });
-    return mapSemanticScores(response.results);
+    return new Map();
   }
 
   const docTexts = budgeted.items.map((document) => document.text);
@@ -230,7 +237,7 @@ async function buildSemanticScores(
   }
 
   const corpus = prepareCorpus({
-    adapter: 'search',
+    adapter: 'job',
     documents: budgeted.items,
     embeddings: docEmbed.embeddings,
     model: docEmbed.model,
@@ -247,11 +254,16 @@ async function buildSemanticScores(
 }
 
 function mapSemanticScores(
-  results: { item: { url: string }; score: { fused: number } }[],
+  results: {
+    item: { url: string; metadata?: Record<string, unknown> | undefined };
+    score: { fused: number };
+  }[],
 ): Map<string, number> {
   const scores = new Map<string, number>();
   for (const result of results) {
-    scores.set(result.item.url, result.score.fused);
+    const raw = result.item.metadata?.documentId;
+    const docId = typeof raw === 'string' ? raw : undefined;
+    scores.set(docId ?? result.item.url, result.score.fused);
   }
   return scores;
 }

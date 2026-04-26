@@ -2,15 +2,20 @@
 
 ## Current State (2026-04-26)
 
-| Release          | Status     | Notes                                                                                                     |
-| ---------------- | ---------- | --------------------------------------------------------------------------------------------------------- |
-| **V3.1 Phase 1** | ✅ Done    | SQLite corpus cache, Exa neural search                                                                    |
-| **V3.0.5**       | ✅ Done    | Job adapter MVP, `semantic_jobs` tool                                                                     |
-| **V3.0.0**       | ✅ Done    | RAG pipeline extraction, YouTube/Reddit adapters                                                          |
-| **V3.1.0 Code**  | ✅ Done    | Tree-sitter adapter, GitHub guardrails, `semantic_github_code`                                            |
+| Release          | Status     | Notes                                                                                                                     |
+| ---------------- | ---------- | ------------------------------------------------------------------------------------------------------------------------- |
+| **V3.1.5**       | ✅ Done    | RAG-Anything integration, code review fixes across RAG pipeline                                                           |
 | **V3.1.1**       | ✅ Done    | Crawl reliability patch: HTML threading for `semantic_jobs`, timeout scaling for `web_crawl`, `semantic_crawl` size guard |
-| **V3.2.0**       | 🔲 Pending | Job adapter in src/rag/, no eval/Stack Overflow/HN                                                        |
-| **V3.3.0**       | 🔲 Pending | Kill chain extraction, contextual embeddings                                                              |
+| **V3.1 Phase 1** | ✅ Done    | SQLite corpus cache, Exa neural search                                                                                    |
+| **V3.0.5**       | ✅ Done    | Job adapter MVP, `semantic_jobs` tool                                                                                     |
+| **V3.1.0 Code**  | ✅ Done    | Tree-sitter adapter, GitHub guardrails, `semantic_github_code`                                                            |
+| **V3.0.0**       | ✅ Done    | RAG pipeline extraction, YouTube/Reddit adapters                                                                          |
+| **V3.2.0**       | 🔲 Pending | Job adapter in src/rag/, no eval/Stack Overflow/HN                                                                        |
+| **V3.3.0**       | 🔲 Pending | Kill chain extraction, contextual embeddings                                                                              |
+| **V4.0.0**       | 🔲 Planned | Persistent corpus indexes — from ephemeral cache to durable research memory                                               |
+| **V4.1.0**       | 🔲 Planned | Index refresh, incremental updates, maintenance                                                                           |
+| **V4.2.0**       | 🔲 Planned | Cloud storage backends, team-ready deployments                                                                            |
+| **V4.3.0**       | 🔲 Planned | Packaging, opt-in telemetry, monetisation readiness                                                                       |
 
 ---
 
@@ -23,8 +28,9 @@ Three production bugs identified from real usage and fixed:
 **Bug 2: `web_crawl` timed out on JS-heavy sites.** Hardcoded 120s `AbortSignal.timeout` was insufficient for multi-page crawls with JS rendering. Fixed with `computeCrawlTimeout(maxPages)` = `min(30,000 + maxPages × 15,000, 300,000)` ms. A 10-page crawl now gets 180s; 25+ pages get the 5-minute cap.
 
 **Bug 3: `semantic_crawl` crashed with 314MB response.** Large crawls (`maxPages: 40`) could produce responses exceeding the 52MB MCP cap, crashing with a `safeResponseJson` size error. Fixed with a two-layer guard in `src/utils/crawlBudget.ts`:
-- *Preflight:* before crawling, estimates `maxPages × avgPageBytes` (8MB/page for JS-heavy sites, 1.5MB/page otherwise) and caps `maxPages` if estimated total exceeds the ~41MB safe budget. Emits a `SEMANTIC_CRAWL_RESPONSE_SIZE_GUARD` structured warning.
-- *In-flight:* per-page `Buffer.byteLength(JSON.stringify(page))` accumulator stops adding pages when the budget is approached. Omitted pages recorded in `omittedPages[]`. Emits a `SEMANTIC_CRAWL_RESPONSE_SIZE_LIMIT_APPROACHED` structured warning.
+
+- _Preflight:_ before crawling, estimates `maxPages × avgPageBytes` (8MB/page for JS-heavy sites, 1.5MB/page otherwise) and caps `maxPages` if estimated total exceeds the ~41MB safe budget. Emits a `SEMANTIC_CRAWL_RESPONSE_SIZE_GUARD` structured warning.
+- _In-flight:_ per-page `Buffer.byteLength(JSON.stringify(page))` accumulator stops adding pages when the budget is approached. Omitted pages recorded in `omittedPages[]`. Emits a `SEMANTIC_CRAWL_RESPONSE_SIZE_LIMIT_APPROACHED` structured warning.
 
 ---
 
@@ -265,15 +271,29 @@ Eviction policy: when `maxTotalCacheBytes` is exceeded, evict the corpus with th
 ### Adapter Registry
 
 ```ts
-type AdapterType = 'text' | 'code' | 'transcript' | 'conversation' | 'academic' | 'qa' | 'job';
+// Actual AdapterType (as of V3.1.5):
+type AdapterType =
+  | 'text'
+  | 'code'
+  | 'job'
+  | 'transcript'
+  | 'conversation'
+  | 'github'
+  | 'url'
+  | 'sitemap'
+  | 'search'
+  | 'cached';
+// Planned additions for V3.2+: 'academic', 'qa'
+```
 
 interface Adapter {
-  type: AdapterType;
-  chunk(docs: RawDocument[], opts: ChunkOpts): Chunk[];
-  section(chunk: Chunk): string; // section metadata builder
-  preferredProfile: RetrievalProfile; // default profile for this adapter
-  profileOverrides: Record<RetrievalProfile, ProfileSettings>; // internal tuning
+type: AdapterType;
+chunk(docs: RawDocument[], opts: ChunkOpts): Chunk[];
+section(chunk: Chunk): string; // section metadata builder
+preferredProfile: RetrievalProfile; // default profile for this adapter
+profileOverrides: Record<RetrievalProfile, ProfileSettings>; // internal tuning
 }
+
 ```
 
 Each adapter declares its chunking strategy, section format, preferred default profile, and per-profile tuning overrides. The pipeline calls `adapter.chunk()` during `prepareCorpus` and uses the adapter's profile config during `retrieveCorpus`.
@@ -341,13 +361,15 @@ New tool input: query + optional subreddit/sort/timeframe. Output: top-K comment
 Before shipping V3.0, define a minimal eval framework. Not academic ceremony — just enough to stop regressions and validate that the pipeline actually works across adapters.
 
 ```
-src/rag/__tests__/eval/
+
+src/rag/**tests**/eval/
 ├── golden-queries/
-│   ├── youtube.json     # { query, expectedTopK: [{ videoId, timestamp }] }
-│   ├── reddit.json      # { query, expectedTopK: [{ postId, commentId }] }
-│   └── ...
-├── eval.ts              # runner: load golden queries, assert top-K hits
-└── thresholds.json      # { maxLatencyMs, minRecallTop3, maxChunkCount, ... }
+│ ├── youtube.json # { query, expectedTopK: [{ videoId, timestamp }] }
+│ ├── reddit.json # { query, expectedTopK: [{ postId, commentId }] }
+│ └── ...
+├── eval.ts # runner: load golden queries, assert top-K hits
+└── thresholds.json # { maxLatencyMs, minRecallTop3, maxChunkCount, ... }
+
 ```
 
 Eval checks per adapter:
@@ -362,18 +384,20 @@ Eval checks per adapter:
 **Per-adapter profile calibration**: profile names like `balanced` are stable and public, but a `balanced` profile for code, Reddit, and job listings should not imply identical weights. Each adapter gets calibration tests proving that profile names mean something:
 
 ```
-src/rag/__tests__/eval/
+
+src/rag/**tests**/eval/
 ├── golden-queries/
-│   ├── youtube.json
-│   ├── reddit.json
-│   └── ...
+│ ├── youtube.json
+│ ├── reddit.json
+│ └── ...
 ├── profile-calibration/
-│   ├── conversation-balanced.json   # balanced weights for Reddit
-│   ├── transcript-balanced.json     # balanced weights for YouTube
-│   ├── code-lexical-heavy.json      # lexical-heavy beats balanced on identifier queries
-│   └── text-balanced.json           # baseline: web content balanced
+│ ├── conversation-balanced.json # balanced weights for Reddit
+│ ├── transcript-balanced.json # balanced weights for YouTube
+│ ├── code-lexical-heavy.json # lexical-heavy beats balanced on identifier queries
+│ └── text-balanced.json # baseline: web content balanced
 ├── eval.ts
 └── thresholds.json
+
 ```
 
 Each calibration file defines queries where `lexical-heavy` should beat `balanced` (identifier searches on code) or where `semantic-heavy` should win (vague conceptual queries on transcripts). If `balanced` and `semantic-heavy` return identical rankings for every adapter, the profile system is decorative, not functional.
@@ -393,11 +417,13 @@ Every `RetrievalResult` includes `corpusStatus` and, when `opts.debug` is true, 
 ### V3 Config Additions
 
 ```
-EMBEDDING_CODE_MODEL=nomic-embed-code     # V3.1: code-tuned embedding model endpoint
-YOUTUBE_PARALLEL_TRANSCRIPT_LIMIT=20     # max concurrency (adaptive fetcher target ceiling)
-CORPUS_CACHE_MAX=100                      # up from 50
-CORPUS_CACHE_TTL_MS=86400000             # 24h default
-```
+
+EMBEDDING_CODE_MODEL=nomic-embed-code # V3.1: code-tuned embedding model endpoint
+YOUTUBE_PARALLEL_TRANSCRIPT_LIMIT=20 # max concurrency (adaptive fetcher target ceiling)
+CORPUS_CACHE_MAX=100 # up from 50
+CORPUS_CACHE_TTL_MS=86400000 # 24h default
+
+````
 
 **Code embedding degradation path** (V3.1 concern, documented now): users who skip `EMBEDDING_CODE_MODEL` will get prose embeddings on code. This handles identifier-level search ("find `handleSubmit`") okay but falls apart on semantic queries like "where does error handling happen for network timeouts." This limitation must be surfaced prominently in the README — not buried in config docs — as a known gap when the code embedding model is not configured.
 
@@ -450,7 +476,7 @@ interface JobListingMVP {
   // Caveats extracted from the listing
   caveats: string[]; // ["temp contract", "via agency", "closing soon"]
 }
-```
+````
 
 Key addition: `verificationStatus`. A Jora result copied from SEEK is not as strong as a directly fetched SEEK listing. A LinkedIn snippet behind an auth wall is weaker still. This field lets rankers and downstream agents weight provenance without guessing.
 
@@ -516,6 +542,162 @@ The new semantic tools are working but need guardrails:
 - DFS crawl overruns `maxPages` — needs hard stop
 
 **Roadmap impact**: V3.1 implementation plans updated with mandatory pre-filter tests and under-constraint warnings.
+
+---
+
+## V3.1.5 — RAG-Anything Integration & Quality Fixes
+
+**Goal**: Add multimodal document extraction capability via a Python bridge service, and fix correctness issues identified in a comprehensive RAG pipeline code review.
+
+### 1. RAG-Anything Bridge [COMPLETED 2026-04-26]
+
+- **Python Bridge Service** (`services/rag-anything-bridge/`): FastAPI-based HTTP service with multi-parser architecture (Docling for born-digital docs, PaddleOCR for image-heavy/scanned docs, MinerU for complex academic PDFs)
+- **Content Processing**: Structured content extraction and normalization (heading, text, table, image, equation types), markdown generation, asset reference tracking
+- **Caching & Storage**: Content-addressable caching with TTL, filesystem-based storage with hash distribution, storage backend abstraction (local now, S3-ready)
+- **TypeScript Client** (`src/utils/ragAnythingClient.ts`): HTTP client with retry, in-memory caching, health checks
+- **Quality Detection** (`src/utils/extractionQuality.ts`): Configurable quality thresholds and escalation trigger identification
+- **Smart Extraction** (`src/utils/smartExtraction.ts`): Orchestration with quality-based escalation to RAG-Anything
+
+### 2. Code Review-Driven Fixes [COMPLETED 2026-04-26]
+
+A thorough review of `pipeline.ts`, `types.ts`, `code.ts`, `corpusCache.ts`, `crawlBudget.ts`, and `semanticJobs.ts` identified and fixed these issues:
+
+| Fix                     | File                                                 | Change                                                                                                          |
+| ----------------------- | ---------------------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
+| Adapter type mismatch   | `adapters/code.ts`                                   | `documentsFromCodeFiles()` used `adapter: 'text'` — changed to `'code'`                                         |
+| Phantom type field      | `corpusCache.ts`                                     | `extractedData` in `CachedCorpus` was typed but never persisted — removed from type                             |
+| Score mapping collapse  | `semanticJobs.ts`                                    | `mapSemanticScores()` keyed by URL — now keys by `documentId` (jobId), preventing multi-listing page collisions |
+| Empty budget branch     | `semanticJobs.ts`                                    | Created empty corpus + retrieved just to return empty map — simplified to `new Map()`                           |
+| Incomplete funnel       | `semanticJobs.ts`                                    | Added `extracted` and `filtered` counts to `corpusStatus`                                                       |
+| Job adapter identity    | `rag/types.ts`, `adapters/job.ts`, `semanticJobs.ts` | Added `'job'` as first-class `AdapterType`; all job documents now use it                                        |
+| Corpus ID versioning    | `pipeline.ts`                                        | `corpusIdFor()` now includes chunking parameters (`maxTokens`, `minTokens`, `overlapRatio`, `tokenRatio`)       |
+| GitHub source stability | `corpusCache.ts`                                     | `normalizeSource()` for GitHub now sorts extensions array for stable identity                                   |
+| Type drift prevention   | `crawlBudget.ts`, `types.ts`                         | Replaced local `SourceType` union with canonical `SemanticCrawlSourceType`; exported from types.ts              |
+| Empty chunk pollution   | `adapters/code.ts`                                   | Filter empty chunks from both symbol extraction and fallback paths                                              |
+
+### Quality Gates
+
+- [x] Typecheck passes (no new errors introduced)
+- [x] Lint passes on all modified files
+- [x] All adapter types correctly assigned (code uses `'code'`, jobs use `'job'`)
+- [x] Corpus cache type contract matches storage implementation
+- [x] Semantic score mapping preserves multi-listing-per-page scenarios
+- [x] Source normalization produces stable identities across runs
+
+---
+
+## V4.0.0 — Persistent Corpus Indexes
+
+**Goal**: Turn semantic results from ephemeral per-session cache into durable, named, queryable indexes — "from semantic search tool to persistent research memory for coding agents."
+
+V3 proves the retrieval architecture source by source. V4 should not be "add ten more sources." V4 changes the product category from a powerful session tool into a durable personal/team research index.
+
+### Design Principles
+
+- **Any source can become a persistent, queryable corpus.** A coding agent can index repos, docs sites, issue threads, job boards, and query that corpus across sessions.
+- **Persistence saves the prepared corpus**, not just the final answer. `retrieveCorpus()` must run repeatedly with different queries against the same saved corpus.
+- **Separation of concerns**: semantic tools remain acquisition/query tools. V4 adds a persistent corpus management layer alongside them.
+
+### Key Deliverables
+
+1. **Persistent Corpus Store**
+   - Named indexes surviving server restarts
+   - Source documents, normalized chunks, embeddings, BM25 index data or rebuild metadata
+   - Adapter metadata, versioned pipeline config, provenance, coverage, extraction warnings
+   - Index version metadata: schema version, adapter version, chunker version, embedding model/dimensions/mode, retrieval profile defaults, created/refreshed timestamps, content hashes, compatibility status
+
+2. **Index Management Tools**
+   - `index_create` — build a persistent index from one or more sources
+   - `index_query` — query an existing persistent index
+   - `index_list` — list saved indexes with size, source types, created/updated time, chunk count, health
+   - `index_describe` — show coverage, source breakdown, pipeline versions, warnings, metadata
+   - `index_refresh` — recrawl/re-embed changed sources
+   - `index_delete` — remove an index
+   - `index_compact` — dedup, prune stale chunks, rebuild indexes
+   - `index_export` / `index_import` — portability (V4.1+)
+
+3. **Storage Backend Abstraction**
+   - `StorageProvider` / `IndexStore` interface
+   - Local-first: SQLite for metadata + chunks + embeddings + BM25 data; filesystem for larger artifacts
+   - Optional S3-compatible asset storage (V4.2+)
+   - Optional Postgres/pgvector (V4.2+)
+
+4. **Migration & Invalidation**
+   - Every persistent corpus carries version metadata
+   - `index_query` can report: queryable, needs re-embedding, incompatible pipeline version
+   - Source change detection: stale documents, deleted content, different content at same URL
+
+### Lifecycle Semantics (vs Current Cache)
+
+| Aspect     | Current Cache (V3)             | Persistent Index (V4)                                 |
+| ---------- | ------------------------------ | ----------------------------------------------------- |
+| Purpose    | Avoid re-crawl within session  | Durable knowledge base across sessions                |
+| TTL        | Hard expiry (default 24 hours) | No forced expiry; explicit lifecycle states           |
+| Identity   | Source-derived corpus ID       | User-facing index name + deterministic corpus ID      |
+| Eviction   | Byte-weighted LRU              | Manual delete or compact; no auto-eviction            |
+| Versioning | Chunking params in corpus ID   | Full pipeline version metadata + compatibility status |
+
+### Quality Gates
+
+- [ ] Named index survives server restart
+- [ ] Different queries against same index return correct results
+- [ ] Index creation with version metadata persists correctly
+- [ ] Compatibility status detects pipeline version changes
+- [ ] StorageProvider interface allows local-to-cloud swap without code changes
+- [ ] Index management tools work over MCP (list, describe, delete, refresh)
+
+---
+
+## V4.1.0 — Index Refresh and Maintenance
+
+**Depends On**: V4.0.0
+
+### Key Deliverables
+
+1. **Incremental Refresh** — recrawl only changed sources, re-embed only new/changed chunks
+2. **Source Freshness Checks** — detect stale documents without full re-fetch
+3. **Dedup Compaction** — prune duplicate chunks accumulated over refresh cycles
+4. **Stale Document Detection** — identify documents whose source content has changed or disappeared
+5. **Index Health Reports** — coverage, chunk count drift, embedding staleness
+6. **Storage Quota Controls** — configurable per-index and global storage limits
+7. **Export/Import** — corpus portability for teams and migration
+
+---
+
+## V4.2.0 — Cloud Storage and Team-Ready Backends
+
+**Depends On**: V4.1.0
+
+### Key Deliverables
+
+1. **S3-Compatible Asset Storage** — raw docs, extraction artifacts, serialized vector blobs
+2. **Optional Postgres/pgvector** — for team/shared/server deployments
+3. **Configurable Storage Providers** — local filesystem, S3, Postgres selectable via config
+4. **Cloud Sync Primitives** — push/pull indexes between local and remote storage
+5. **Auth Boundary Preparation** — per-index access control scaffolding
+
+---
+
+## V4.3.0 — Packaging, Telemetry, and Monetisation Readiness
+
+**Depends On**: V4.0.0 (telemetry can start independently)
+
+### Key Deliverables
+
+1. **Packaged Install** — Docker images, `npm install -g`, config profiles (local, power-user, server, cloud-backed)
+2. **Opt-In Privacy-Preserving Telemetry**
+   - Operational only: tool invoked, source type, success/failure, latency buckets, chunk counts, cache hit/miss
+   - No content, queries, file paths, or code snippets unless user explicitly enables diagnostic mode
+   - Genuinely opt-in, not opt-out
+3. **Feature-Flag Framework** — enable/disable capabilities per deployment
+4. **Monetisable Layers** (open-source core remains powerful)
+   - Managed cloud indexes
+   - Team/shared indexes
+   - Hosted crawling and enrichment workers
+   - Scheduled refresh and cloud sync
+   - Cross-device index access
+   - RAG-Anything/document-intelligence workers
+   - Observability dashboard
 
 ---
 

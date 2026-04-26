@@ -328,7 +328,9 @@ async function crawlOnce(
   } catch (err) {
     if (err instanceof Error && (err.name === 'AbortError' || err.name === 'TimeoutError')) {
       const timeoutSecs = Math.ceil(computeCrawlTimeout(opts.maxPages) / 1000);
-      throw networkError(`crawl4ai request timed out after ${timeoutSecs} seconds for "${url}"`);
+      throw networkError(
+        `crawl4ai request timed out after ${String(timeoutSecs)} seconds for "${url}"`,
+      );
     }
     throw err;
   }

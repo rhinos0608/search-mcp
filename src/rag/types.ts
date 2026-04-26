@@ -3,6 +3,7 @@ import type { CorpusChunk, ScoreDetail, RerankScoreDetail, SemanticCrawlChunk } 
 export type AdapterType =
   | 'text'
   | 'code'
+  | 'job'
   | 'transcript'
   | 'conversation'
   | 'github'

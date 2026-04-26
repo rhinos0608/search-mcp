@@ -41,8 +41,6 @@ export interface CachedCorpus {
   bm25Index: Bm25Index;
   createdAt: number; // Unix ms
   lastAccessedAt: number; // Unix ms
-  /** Aggregated extractedData from the original crawl, keyed by URL. */
-  extractedData?: Record<string, Record<string, unknown>[]>;
 }
 
 // ────────────────────────────────────────────────────────────────────
@@ -164,7 +162,7 @@ function normalizeSource(source: SemanticCrawlSource): SemanticCrawlSource {
       owner: source.owner,
       repo: source.repo,
       branch: source.branch,
-      extensions: source.extensions,
+      extensions: source.extensions !== undefined ? [...source.extensions].sort() : undefined,
       query: source.query,
     };
   }

@@ -305,7 +305,9 @@ export function createServer(): McpServer {
           data = readabilityFallbackResult(url, article, strategy, maxDepth, maxPages);
         }
 
-        const result = makeResult('web_read', data, Date.now() - start, { warnings });
+        const result = makeResult('web_read', data, Date.now() - start, {
+          warnings,
+        });
         return successResponse(result);
       } catch (err: unknown) {
         logger.error({ err, tool: 'web_read' }, 'Tool failed');
@@ -488,7 +490,16 @@ export function createServer(): McpServer {
     },
     async ({ owner, repo, path, branch, raw, offset, limit, byteOffset, byteLimit }) => {
       logger.info(
-        { tool: 'github_repo_file', owner, repo, path, offset, limit, byteOffset, byteLimit },
+        {
+          tool: 'github_repo_file',
+          owner,
+          repo,
+          path,
+          offset,
+          limit,
+          byteOffset,
+          byteLimit,
+        },
         'Tool invoked',
       );
       const start = Date.now();
@@ -1683,11 +1694,10 @@ export function createServer(): McpServer {
           .describe('Maximum number of articles to return (1–250, default 20)'),
       },
     },
-    async ({ query, dateFrom, dateTo, language, limit }) => {
-      logger.info({ tool: 'news_search', dateFrom, dateTo, language, limit }, 'Tool invoked');
+    async () => {
       const start = Date.now();
       try {
-        const data = await newsSearch(query, dateFrom ?? null, dateTo ?? null, language, limit);
+        const data = await newsSearch();
         const result = makeResult('news_search', data, Date.now() - start);
         return successResponse(result);
       } catch (err: unknown) {
@@ -1812,7 +1822,9 @@ export function createServer(): McpServer {
           });
 
           const warnings = [...extractionWarnings(data), ...(data.warnings ?? [])];
-          const result = makeResult('web_crawl', data, Date.now() - start, { warnings });
+          const result = makeResult('web_crawl', data, Date.now() - start, {
+            warnings,
+          });
           return successResponse(result);
         } catch (err: unknown) {
           logger.error({ err, tool: 'web_crawl' }, 'Tool failed');

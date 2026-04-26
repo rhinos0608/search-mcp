@@ -172,6 +172,13 @@ function resolveSemanticScore(
     return 0;
   }
 
+  if (listing.jobId !== undefined) {
+    const jobScore = semanticScores.get(listing.jobId);
+    if (jobScore !== undefined) {
+      return jobScore;
+    }
+  }
+
   if (listing.sourceUrl !== undefined) {
     const sourceScore = semanticScores.get(listing.sourceUrl);
     if (sourceScore !== undefined) {

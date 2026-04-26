@@ -58,9 +58,24 @@ function validateRescoreWeights(weights: RescoreWeights, toolName: string): void
 
 const DEFAULT_RESCORE_WEIGHTS: RescoreConfig = {
   webSearch: { rrfAnchor: 0.5, recency: 0.2, hasDeepLinks: 0.05 },
-  academicSearch: { rrfAnchor: 0.5, recency: 0.05, citations: 0.3, venue: 0.15 },
-  hackernewsSearch: { rrfAnchor: 0.5, recency: 0.15, engagement: 0.2, commentEngagement: 0.15 },
-  redditSearch: { rrfAnchor: 0.5, recency: 0.1, engagement: 0.25, commentEngagement: 0.15 },
+  academicSearch: {
+    rrfAnchor: 0.5,
+    recency: 0.05,
+    citations: 0.3,
+    venue: 0.15,
+  },
+  hackernewsSearch: {
+    rrfAnchor: 0.5,
+    recency: 0.15,
+    engagement: 0.2,
+    commentEngagement: 0.15,
+  },
+  redditSearch: {
+    rrfAnchor: 0.5,
+    recency: 0.1,
+    engagement: 0.25,
+    commentEngagement: 0.15,
+  },
 };
 
 export interface GitHubConfig {
@@ -104,6 +119,15 @@ export interface LlmConfig {
   baseUrl: string;
 }
 
+export interface RAGAConfig {
+  enabled: boolean;
+  baseUrl: string;
+  timeoutMs: number;
+  maxRetries: number;
+  cacheEnabled: boolean;
+  defaultParser: 'auto' | 'docling' | 'paddleocr' | 'mineru';
+}
+
 export interface SearchConfig {
   searchBackend: SearchBackend;
   brave: { apiKey: string };
@@ -144,7 +168,12 @@ const DEFAULTS: Omit<SearchConfig, 'rescoreWeights'> = {
     oauthConfigValid: true,
   },
   crawl4ai: { baseUrl: '', apiToken: '' },
-  embeddingSidecar: { baseUrl: '', apiToken: '', dimensions: 768, codeModel: '' },
+  embeddingSidecar: {
+    baseUrl: '',
+    apiToken: '',
+    dimensions: 768,
+    codeModel: '',
+  },
   semanticCrawl: {
     defaultMaxBytes: DEFAULT_SEMANTIC_MAX_BYTES,
     maxMaxBytes: DEFAULT_SEMANTIC_MAX_BYTES,
@@ -362,89 +391,89 @@ export function loadConfig(): SearchConfig {
   const envConfig = loadFromEnv();
 
   cached = {
-    searchBackend: envConfig.searchBackend ?? fileConfig.searchBackend ?? DEFAULTS.searchBackend,
+    searchBackend: fileConfig.searchBackend ?? envConfig.searchBackend ?? DEFAULTS.searchBackend,
     brave: {
-      apiKey: envConfig.brave?.apiKey ?? fileConfig.brave?.apiKey ?? DEFAULTS.brave.apiKey,
+      apiKey: fileConfig.brave?.apiKey ?? envConfig.brave?.apiKey ?? DEFAULTS.brave.apiKey,
     },
     searxng: {
       baseUrl:
-        envConfig.searxng?.baseUrl ?? fileConfig.searxng?.baseUrl ?? DEFAULTS.searxng.baseUrl,
+        fileConfig.searxng?.baseUrl ?? envConfig.searxng?.baseUrl ?? DEFAULTS.searxng.baseUrl,
     },
     exa: {
-      apiKey: envConfig.exa?.apiKey ?? fileConfig.exa?.apiKey ?? DEFAULTS.exa.apiKey,
+      apiKey: fileConfig.exa?.apiKey ?? envConfig.exa?.apiKey ?? DEFAULTS.exa.apiKey,
     },
     nitter: {
-      baseUrl: envConfig.nitter?.baseUrl ?? fileConfig.nitter?.baseUrl ?? DEFAULTS.nitter.baseUrl,
+      baseUrl: fileConfig.nitter?.baseUrl ?? envConfig.nitter?.baseUrl ?? DEFAULTS.nitter.baseUrl,
     },
     listennotes: {
       apiKey:
-        envConfig.listennotes?.apiKey ??
         fileConfig.listennotes?.apiKey ??
+        envConfig.listennotes?.apiKey ??
         DEFAULTS.listennotes.apiKey,
     },
     producthunt: {
       apiToken:
-        envConfig.producthunt?.apiToken ??
         fileConfig.producthunt?.apiToken ??
+        envConfig.producthunt?.apiToken ??
         DEFAULTS.producthunt.apiToken,
     },
     patentsview: {
       apiKey:
-        envConfig.patentsview?.apiKey ??
         fileConfig.patentsview?.apiKey ??
+        envConfig.patentsview?.apiKey ??
         DEFAULTS.patentsview.apiKey,
     },
     youtube: {
-      apiKey: envConfig.youtube?.apiKey ?? fileConfig.youtube?.apiKey ?? DEFAULTS.youtube.apiKey,
+      apiKey: fileConfig.youtube?.apiKey ?? envConfig.youtube?.apiKey ?? DEFAULTS.youtube.apiKey,
     },
     stackexchange: {
       apiKey:
-        envConfig.stackexchange?.apiKey ??
         fileConfig.stackexchange?.apiKey ??
+        envConfig.stackexchange?.apiKey ??
         DEFAULTS.stackexchange.apiKey,
     },
     github: {
-      token: envConfig.github?.token ?? fileConfig.github?.token ?? DEFAULTS.github.token,
+      token: fileConfig.github?.token ?? envConfig.github?.token ?? DEFAULTS.github.token,
     },
-    reddit: resolveRedditConfig(envConfig.reddit, fileConfig.reddit),
+    reddit: resolveRedditConfig(fileConfig.reddit, envConfig.reddit),
     crawl4ai: {
       baseUrl:
-        envConfig.crawl4ai?.baseUrl ?? fileConfig.crawl4ai?.baseUrl ?? DEFAULTS.crawl4ai.baseUrl,
+        fileConfig.crawl4ai?.baseUrl ?? envConfig.crawl4ai?.baseUrl ?? DEFAULTS.crawl4ai.baseUrl,
       apiToken:
-        envConfig.crawl4ai?.apiToken ?? fileConfig.crawl4ai?.apiToken ?? DEFAULTS.crawl4ai.apiToken,
+        fileConfig.crawl4ai?.apiToken ?? envConfig.crawl4ai?.apiToken ?? DEFAULTS.crawl4ai.apiToken,
     },
     embeddingSidecar: {
       baseUrl:
-        envConfig.embeddingSidecar?.baseUrl ??
         fileConfig.embeddingSidecar?.baseUrl ??
+        envConfig.embeddingSidecar?.baseUrl ??
         DEFAULTS.embeddingSidecar.baseUrl,
       apiToken:
-        envConfig.embeddingSidecar?.apiToken ??
         fileConfig.embeddingSidecar?.apiToken ??
+        envConfig.embeddingSidecar?.apiToken ??
         DEFAULTS.embeddingSidecar.apiToken,
       dimensions:
-        envConfig.embeddingSidecar?.dimensions ??
         fileConfig.embeddingSidecar?.dimensions ??
+        envConfig.embeddingSidecar?.dimensions ??
         DEFAULTS.embeddingSidecar.dimensions,
       codeModel:
-        envConfig.embeddingSidecar?.codeModel ??
         fileConfig.embeddingSidecar?.codeModel ??
+        envConfig.embeddingSidecar?.codeModel ??
         DEFAULTS.embeddingSidecar.codeModel,
     },
     semanticCrawl: {
       defaultMaxBytes:
-        envConfig.semanticCrawl?.defaultMaxBytes ??
         fileConfig.semanticCrawl?.defaultMaxBytes ??
+        envConfig.semanticCrawl?.defaultMaxBytes ??
         DEFAULTS.semanticCrawl.defaultMaxBytes,
       maxMaxBytes:
-        envConfig.semanticCrawl?.maxMaxBytes ??
         fileConfig.semanticCrawl?.maxMaxBytes ??
+        envConfig.semanticCrawl?.maxMaxBytes ??
         DEFAULTS.semanticCrawl.maxMaxBytes,
     },
     llm: {
-      provider: envConfig.llm?.provider ?? fileConfig.llm?.provider ?? DEFAULTS.llm.provider,
-      apiToken: envConfig.llm?.apiToken ?? fileConfig.llm?.apiToken ?? DEFAULTS.llm.apiToken,
-      baseUrl: envConfig.llm?.baseUrl ?? fileConfig.llm?.baseUrl ?? DEFAULTS.llm.baseUrl,
+      provider: fileConfig.llm?.provider ?? envConfig.llm?.provider ?? DEFAULTS.llm.provider,
+      apiToken: fileConfig.llm?.apiToken ?? envConfig.llm?.apiToken ?? DEFAULTS.llm.apiToken,
+      baseUrl: fileConfig.llm?.baseUrl ?? envConfig.llm?.baseUrl ?? DEFAULTS.llm.baseUrl,
     },
     rescoreWeights: DEFAULT_RESCORE_WEIGHTS,
   };
@@ -480,20 +509,20 @@ export function getCodeEmbeddingFallbackWarning(config: SearchConfig): string | 
 }
 
 function resolveRedditConfig(
-  envReddit: Partial<RedditConfig> | undefined,
   fileReddit: Partial<RedditConfig> | undefined,
+  envReddit: Partial<RedditConfig> | undefined,
 ): RedditConfig {
   // Trim whitespace so values like `REDDIT_CLIENT_ID=' '` (common with
   // misquoted .env lines) are treated as unset rather than partial config.
-  const clientId = (envReddit?.clientId ?? fileReddit?.clientId ?? DEFAULTS.reddit.clientId).trim();
+  const clientId = (fileReddit?.clientId ?? envReddit?.clientId ?? DEFAULTS.reddit.clientId).trim();
   const clientSecret = (
-    envReddit?.clientSecret ??
     fileReddit?.clientSecret ??
+    envReddit?.clientSecret ??
     DEFAULTS.reddit.clientSecret
   ).trim();
   const userAgent = (
-    envReddit?.userAgent ??
     fileReddit?.userAgent ??
+    envReddit?.userAgent ??
     DEFAULTS.reddit.userAgent
   ).trim();
 

@@ -260,7 +260,7 @@ export function documentsFromJobListings(listings: JobListingMvp[]): RawDocument
     const documentId = listing.jobId ?? listing.sourceUrl ?? `job-${String(index)}`;
     return {
       id: documentId,
-      adapter: 'search',
+      adapter: 'job',
       text,
       url: listing.sourceUrl ?? `job:${listing.source}:${documentId}`,
       title: listing.title,
