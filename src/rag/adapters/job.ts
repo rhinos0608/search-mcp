@@ -528,6 +528,54 @@ function stripSiteSuffix(value: string | undefined): string | undefined {
   return normalized;
 }
 
+// ── Two-phase job discovery ────────────────────────────────────────────────
+
+// Per-host canonical job URL patterns
+const JOB_URL_PATTERNS: { hostname: RegExp; path: RegExp }[] = [
+  { hostname: /seek\.com\.au$/, path: /^\/job\/\d+/ },
+  { hostname: /seek\.co\.nz$/, path: /^\/job\/\d+/ },
+  { hostname: /indeed\.com$/, path: /\bjk=[a-f0-9]+/ },
+  { hostname: /indeed\.\w+$/, path: /\bjk=[a-f0-9]+/ }, // au.indeed.com, uk.indeed.com
+  { hostname: /linkedin\.com$/, path: /\/jobs\/view\// },
+  { hostname: /jora\.com$/, path: /\/job\// },
+  { hostname: /jora\.\w+$/, path: /\/job\// },
+];
+
+export function extractJobLinksFromHtml(html: string, baseUrl: string): string[] {
+  const links = new Set<string>();
+  let base: URL;
+  try {
+    base = new URL(baseUrl);
+  } catch {
+    return [];
+  }
+
+  const $ = cheerio.load(html);
+
+  $('a[href]').each((_, el) => {
+    const href = $(el).attr('href');
+    if (!href) return;
+    let resolved: URL;
+    try {
+      resolved = new URL(href, base);
+    } catch {
+      return;
+    }
+    // Only same-host links
+    if (resolved.hostname !== base.hostname) return;
+
+    // Match against known job URL patterns
+    for (const { hostname, path } of JOB_URL_PATTERNS) {
+      if (hostname.test(resolved.hostname) && path.test(resolved.pathname + resolved.search)) {
+        links.add(resolved.href);
+        break;
+      }
+    }
+  });
+
+  return [...links];
+}
+
 function normalizeText(value: string | null | undefined): string | undefined {
   if (value === null || value === undefined) {
     return undefined;

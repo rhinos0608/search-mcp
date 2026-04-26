@@ -4,6 +4,10 @@ import { rrfMerge } from './fusion.js';
 import { getProfileSettings } from './profiles.js';
 import { validationError } from '../errors.js';
 import { MAX_TOKENS, MIN_TOKENS, TOKEN_RATIO, OVERLAP_RATIO } from '../chunking.js';
+import { dedupeByUrl, dedupeByFingerprint, deduplicateCorpus } from './dedup.js';
+import { applyConstraints } from './constraints.js';
+import type { ConstraintConfig, ConstraintExtractors } from './constraints.js';
+import type { DedupeConfig, Coverage } from './types.js';
 import type {
   PreparedCorpus,
   PrepareCorpusOptions,
@@ -15,6 +19,15 @@ import type {
   RetrieveCorpusOptions,
   RawDocument,
 } from './types.js';
+
+interface PrepareCorpusOptionsV3 extends PrepareCorpusOptions {
+  dedupeConfig?: DedupeConfig;
+}
+
+interface RetrieveCorpusOptionsV3 extends RetrieveCorpusOptions {
+  constraintConfig?: ConstraintConfig;
+  constraintExtractors?: ConstraintExtractors<unknown>;
+}
 
 interface Candidate {
   index: number;
@@ -96,8 +109,56 @@ function validateEmbeddingsForChunks(embeddings: number[][], chunkCount: number)
   }
 }
 
-export function prepareCorpus(options: PrepareCorpusOptions): PreparedCorpus {
-  const documents = options.documents ?? [];
+function applySyncDedup(documents: RawDocument[], config: DedupeConfig): RawDocument[] {
+  // Apply only URL + fingerprint layers synchronously.
+  // Semantic dedup needs embeddings and must be done async via prepareCorpusAsync.
+  let current = [...documents];
+  if (config.layers.url) {
+    const urlResult = dedupeByUrl(current, { normalize: true, removeTracking: true });
+    current = urlResult.items;
+  }
+  if (config.layers.fingerprint) {
+    const fpResult = dedupeByFingerprint(current, config.fingerprintThreshold);
+    current = fpResult.items;
+  }
+  return current;
+}
+
+export function prepareCorpus(options: PrepareCorpusOptionsV3): PreparedCorpus {
+  let documents = options.documents ?? [];
+
+  // Step 1: Sync dedup (URL + fingerprint only)
+  if (options.dedupeConfig && documents.length > 0) {
+    documents = applySyncDedup(documents, options.dedupeConfig);
+  }
+
+  const chunks = options.chunks ?? chunksFromDocuments(documents);
+  return {
+    id: corpusIdFor(options, chunks),
+    status: chunks.length === 0 ? 'empty' : 'ready',
+    adapter: options.adapter,
+    documents,
+    chunks,
+    embeddings: options.embeddings,
+    model: options.model,
+    modelRevision: options.modelRevision,
+    dimensions: options.dimensions,
+    metadata: options.metadata,
+  };
+}
+
+export async function prepareCorpusAsync(
+  options: PrepareCorpusOptionsV3,
+  embedFn?: (texts: string[]) => Promise<number[][]>,
+): Promise<PreparedCorpus> {
+  let documents = options.documents ?? [];
+
+  // Full async dedup including semantic layer
+  if (options.dedupeConfig && documents.length > 0) {
+    const dedupeResult = await deduplicateCorpus(documents, options.dedupeConfig, embedFn);
+    documents = dedupeResult.items;
+  }
+
   const chunks = options.chunks ?? chunksFromDocuments(documents);
   return {
     id: corpusIdFor(options, chunks),
@@ -115,7 +176,7 @@ export function prepareCorpus(options: PrepareCorpusOptions): PreparedCorpus {
 
 export function retrieveCorpus(
   corpus: PreparedCorpus,
-  options: RetrieveCorpusOptions,
+  options: RetrieveCorpusOptionsV3,
 ): RetrievalResponse {
   const overrides: Partial<Omit<ProfileSettings, 'profile'>> = {};
   if (options.topK !== undefined) overrides.topK = options.topK;
@@ -175,7 +236,7 @@ export function retrieveCorpus(
     getId: candidateId,
   });
 
-  const results: RetrievalResult[] = fused.slice(0, topK).map((candidate, index) => {
+  let results: RetrievalResult[] = fused.slice(0, topK).map((candidate, index) => {
     const chunkIndex = candidate.item.index;
     const item = corpus.chunks[chunkIndex];
     if (item === undefined) {
@@ -195,6 +256,52 @@ export function retrieveCorpus(
     };
   });
 
+  // Apply constraints if configured
+  const constraintWarnings: string[] = [];
+  if (options.constraintConfig && options.constraintExtractors && results.length > 0) {
+    const constrained = applyConstraints(
+      results,
+      options.constraintConfig,
+      options.constraintExtractors,
+    );
+    if (constrained.length < results.length) {
+      constraintWarnings.push(
+        `Constraints filtered ${String(results.length - constrained.length)} result(s)`,
+      );
+    }
+    // Remap constrained results back to RetrievalResult[] with updated scores
+    results = constrained.map((c, index) => {
+      const original = results[c.originalRank - 1];
+      const baseScore = original?.score ?? { fused: 0 };
+      return {
+        item: c.item,
+        score: {
+          ...baseScore,
+          fused: c.finalScore,
+        },
+        rank: index + 1,
+        constraintScore: c.constraintEvaluation.softScore,
+        overallScore: c.finalScore,
+        explanation: {
+          matched: c.constraintEvaluation.matchedConstraints,
+          caveats: c.constraintEvaluation.failedConstraints,
+        },
+      };
+    });
+  }
+
+  const coverage: Coverage = {
+    sourcesAttempted: [corpus.adapter],
+    sourcesSucceeded: corpus.status === 'ready' ? [corpus.adapter] : [],
+    sourcesPartial: corpus.status === 'partial' ? [corpus.adapter] : [],
+    sourcesFailed: corpus.status === 'error' ? [corpus.adapter] : [],
+    documentsFound: corpus.documents.length,
+    documentsAfterDedup: corpus.documents.length,
+    chunksGenerated: corpus.chunks.length,
+    embeddingsGenerated: corpus.embeddings?.length ?? 0,
+    retrievalTimeMs: 0,
+  };
+
   return {
     corpus,
     results,
@@ -207,7 +314,8 @@ export function retrieveCorpus(
       fusedCandidates: fused.length,
       returnedResults: results.length,
     },
-    warnings: [],
+    coverage,
+    warnings: [...constraintWarnings],
   };
 }
 
