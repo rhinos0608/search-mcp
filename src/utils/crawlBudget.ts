@@ -2,8 +2,8 @@ import type { SemanticCrawlSourceType } from '../types.js';
 
 export const RESPONSE_CAP_BYTES = 52 * 1024 * 1024;
 export const SAFE_BYTES = Math.floor(RESPONSE_CAP_BYTES * 0.8);
-export const DEFAULT_AVG_PAGE_BYTES = 1.5 * 1024 * 1024;
-export const JS_HEAVY_AVG_PAGE_BYTES = 8 * 1024 * 1024;
+export const DEFAULT_AVG_PAGE_BYTES = 150 * 1024;
+export const JS_HEAVY_AVG_PAGE_BYTES = 1 * 1024 * 1024;
 
 const KNOWN_HEAVY_HOSTNAMES = new Set([
   'seek.com.au',

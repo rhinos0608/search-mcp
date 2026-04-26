@@ -743,7 +743,7 @@ describe('crawlSeeds size guard', () => {
   it('preflight guard emits SEMANTIC_CRAWL_RESPONSE_SIZE_GUARD for JS-heavy site exceeding budget', async () => {
     globalThis.fetch = async () => buildCrawlResponse('# Hello\n\nPage content.');
 
-    const requestedMaxPages = 10;
+    const requestedMaxPages = 50;
     const result = await crawlSeeds(['https://www.seek.com.au/jobs'], CRAWL4AI_CFG, {
       strategy: 'bfs',
       maxDepth: 1,
