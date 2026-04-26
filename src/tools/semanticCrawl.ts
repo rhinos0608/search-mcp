@@ -33,7 +33,6 @@ import {
   DEFAULT_AVG_PAGE_BYTES,
   JS_HEAVY_AVG_PAGE_BYTES,
   isLikelyJsHeavySite,
-  estimateSerializedBytes,
 } from '../utils/crawlBudget.js';
 
 interface EmbedRequest {
@@ -973,12 +972,12 @@ export async function crawlSeeds(
         omittedPages.push({
           url: page.url,
           reason: 'response_size_budget_exceeded',
-          estimatedBytes: estimateSerializedBytes(page),
+          estimatedBytes: Buffer.byteLength(page.markdown ?? '', 'utf8'),
         });
         continue;
       }
 
-      const pageBytes = estimateSerializedBytes(page);
+      const pageBytes = Buffer.byteLength(page.markdown ?? '', 'utf8');
       if (accumulatedBytes + pageBytes > SAFE_BYTES) {
         omittedPages.push({
           url: page.url,
@@ -1313,7 +1312,7 @@ export async function semanticCrawl(
           'semantic_crawl: search mode ignores maxDepth > 0, forcing depth 0',
         );
       }
-      const searchOpts = { ...opts, maxDepth: 0, sourceType: opts.source.type };
+      const searchOpts = { ...opts, maxDepth: 0, sourceType: opts.source.type, allowPathDrift: true };
       const result = await crawlSeeds(safeUrls, crawl4aiCfg, searchOpts);
       crawlWarnings.push(...result.warnings);
       for (const sw of result.structuredWarnings) {
