@@ -10,8 +10,10 @@
 | **V3.0.5**       | ✅ Done    | Job adapter MVP, `semantic_jobs` tool                                                                                     |
 | **V3.1.0 Code**  | ✅ Done    | Tree-sitter adapter, GitHub guardrails, `semantic_github_code`                                                            |
 | **V3.0.0**       | ✅ Done    | RAG pipeline extraction, YouTube/Reddit adapters                                                                          |
-| **V3.2.0**       | 🔲 Pending | Job adapter in src/rag/, no eval/Stack Overflow/HN                                                                        |
-| **V3.3.0**       | 🔲 Pending | Kill chain extraction, contextual embeddings                                                                              |
+| **V3.2.0**       | 🔲 Pending | Domain adapters (Stack Overflow, HN, academic, news), full job pipeline, `semantic_search`, constraint ranking, dedup     |
+| **V3.3.0**       | 🔲 Pending | Kill chain extraction, contextual embeddings, render recovery                                                              |
+| **V3.4.0**       | 🔲 Pending | Docker Compose bundle, Ollama/local embedding, MCP registry publishing — packaging for adoption                            |
+| **V3.5.0**       | 🔲 Pending | Competitive integration: resolver pattern, output budget, structured errors, diagnostics                                  |
 | **V4.0.0**       | 🔲 Planned | Persistent corpus indexes — from ephemeral cache to durable research memory                                               |
 | **V4.1.0**       | 🔲 Planned | Index refresh, incremental updates, maintenance                                                                           |
 | **V4.2.0**       | 🔲 Planned | Cloud storage backends, team-ready deployments                                                                            |
@@ -850,9 +852,9 @@ V3 proves the retrieval architecture source by source. V4 should not be "add ten
 
 ---
 
-## V3.2.0 — Domain Adapters + Structured Retrieval [IN PROGRESS]
+## V3.2.0 — Domain Adapters + Structured Retrieval
 
-> ⚠️ **In Progress**: Job adapter exists in `src/rag/adapters/job.ts`. Still pending: coverage, eval harness, Stack Overflow, HN, academic.
+> **Note**: Job adapter MVP shipped in V3.0.5 (`src/rag/adapters/job.ts`). V3.2.0 upgrades it to full pipeline and adds Stack Overflow, HN, academic, and news adapters.
 
 The adapter contract has been hardened by real use across YouTube, Reddit, and GitHub. V3.2 introduces the biggest unlock: **domain adapters that extract structured objects**, not just markdown chunks.
 

@@ -1,15 +1,18 @@
 # Search MCP Roadmap — Implementation Plans Index
 
-**Version**: 3.0.5 (implemented 2026-04-25) → V3.1.0 → V3.2.0 → V3.3.0
+**Version**: V3.1.5 (2026-04-26) → V3.2.0 → V3.3.0 → V3.4.0 → V3.5.0
 
 This document indexes all implementation plans for the Search MCP roadmap.
 
-## Current State: V3.1.0 Phase 1 Complete ✅ (2026-04-25)
+## Current State: V3.1.5 Complete ✅ (2026-04-26)
 
-- **V3.0.5** — COMPLETE: job adapter MVP with structured extraction, dedup, constraint-aware ranking, `semantic_jobs` tool
-- **V3.1 Phase 1** — COMPLETE (2026-04-25): persistent corpus cache (SQLite), Exa neural search integration
-- **semantic tools** (2026-04-25): YouTube/Reddit crawlers live but recent — week-one stress testing exposed guardrail gaps
-- 605+ tests pass; typecheck ✅ · lint ✅ · format ✅
+- **V3.0.0** — COMPLETE: RAG pipeline extraction, YouTube/Reddit adapters
+- **V3.0.5** — COMPLETE: job adapter MVP with structured extraction, SEEK/Indeed/Jora
+- **V3.1.0 (Phase 1)** — COMPLETE: SQLite corpus cache, Exa neural search
+- **V3.1.0 (Code)** — COMPLETE: tree-sitter code adapter, `semantic_github_code`
+- **V3.1.1** — COMPLETE: crawl reliability (HTML threading, timeout scaling, size guard)
+- **V3.1.5** — COMPLETE: RAG-Anything integration, code review quality fixes
+- 700+ tests pass; typecheck ✅ · lint ✅ · format ✅
 
 ---
 
@@ -84,7 +87,7 @@ This document indexes all implementation plans for the Search MCP roadmap.
 
 ## V3.1.0 — Code / GitHub
 
-**Status**: Not Started · **Phase 1**: Done ✅ (persistence + Exa)  
+**Status**: Complete ✅ (V3.1.0 Code shipped 2026-04-26; Phase 1 shipped 2026-04-25)  
 **Priority**: High  
 **Depends On**: V3.0.0
 
@@ -110,13 +113,13 @@ This document indexes all implementation plans for the Search MCP roadmap.
 
 ---
 
-## V3.2.0 — Full Domain Adapters + Eval
+## V3.2.0 — Domain Adapters + Structured Retrieval
 
 **Status**: Not Started  
 **Priority**: Medium  
 **Depends On**: V3.0.0, V3.0.5, V3.1.0
 
-**Summary**: Complete the domain adapter ecosystem (academic, QA, job full), add three-layer deduplication, constraint-aware ranking, and comprehensive eval harness with metrics.
+**Summary**: Complete the domain adapter ecosystem (Stack Overflow, HN, academic, news), upgrade the job adapter to full pipeline, add three-layer deduplication, constraint-aware ranking, source profiles, coverage reporting, and `semantic_search` unified tool prototype.
 
 | Document            | Path                                  |
 | ------------------- | ------------------------------------- |
@@ -125,30 +128,41 @@ This document indexes all implementation plans for the Search MCP roadmap.
 
 ### Key Deliverables
 
-1. **Remaining Domain Adapters**
-   - `academic.ts` — Paper structure (abstract, intro, method, results, equations, citations)
-   - `qa.ts` — Stack Overflow Q&A pair preservation
-   - `jobFull.ts` — Upgraded Job adapter (LinkedIn, Glassdoor, full source profiles)
+1. **New Domain Adapters**
+   - `qa.ts` — Stack Overflow Q&A pair preservation (`semantic_stackoverflow`)
+   - Conversation adapter for HN (`semantic_hackernews`)
+   - `academic.ts` — Paper structure (abstract, intro, method, results, equations, citations; `semantic_academic`)
+   - Text adapter for news with news-specific dedup (`semantic_news`)
 
-2. **Three-Layer Deduplication**
-   - URL dedup (exact match)
-   - Fingerprint dedup (95% content similarity)
-   - Semantic dedup (same entity + role)
+2. **Full Job Pipeline (upgrade from V3.0.5 MVP)**
+   - Structured salary parsing, seniority classification, requirements extraction
+   - LinkedIn best-effort via source profiles
+   - Three-layer dedup, hard/soft constraint ranking, coverage reporting, explanation generation
 
-3. **Constraint-Aware Ranking**
-   - Hard constraints: filter (location, salary, experience, workMode, language)
-   - Soft constraints: score boost (companySize, techStack, remoteFirst)
+3. **Three-Layer Deduplication** (`src/rag/dedup.ts`)
+   - URL canonicalization, structured fingerprint, semantic near-dupe
+   - Cross-source merge tracking
 
-4. **Observability**
-   - `instrumentation.ts` — Span hierarchy with timing
-   - `metrics.ts` — p50/p95/p99 latency, recall, dedup rate
+4. **Constraint-Aware Ranking**
+   - Hard constraints: filter (location, salary, experience, workMode)
+   - Soft constraints: score boost (proximity, recency, source trust)
+   - Explanation generation per result
 
-5. **Full Eval Harness**
+5. **Source Capability Profiles** (`src/rag/sources.ts`)
+   - Per-source dynamic risk, duplicate risk, structured data likelihood, crawl reliability
+   - Orchestrator uses profiles to choose strategies
+
+6. **Coverage Reporting** (first-class in every multi-source response)
+
+7. **`semantic_search` Unified Tool Prototype**
+   - Single dispatch tool alongside per-tool names (no deprecation)
+
+8. **Full Eval Harness**
    - Golden queries for all adapters
    - Metrics: recall@1, recall@3, recall@10, mrr, latency distribution
    - CI integration: fail if recall@3 < 0.7 or p95Latency > 10s
 
-**Estimated Scope**: ~2,000 LOC new code
+**Estimated Scope**: ~2,500 LOC new code
 
 ---
 
@@ -188,11 +202,15 @@ This document indexes all implementation plans for the Search MCP roadmap.
 | ------- | ------------- | ----------------------------------------------------------------- | ---------- |
 | V3.0.0  | Core Pipeline | RAG module extraction, adapter system, YouTube/Reddit tools, eval | ~1,700 LOC |
 | V3.0.5  | Jobs MVP      | Job adapter (SEEK, Indeed, Jora), structured extraction           | ~750 LOC   |
-| V3.1.0  | Code/GitHub   | Code adapter, semantic GitHub search                              | ~800 LOC   |
-| V3.2.0  | Completion    | Academic, QA, job full, dedup, constraints, metrics, full eval    | ~2,000 LOC |
-| V3.3.0  | Resilience    | Contextual embeddings, domain trust, query expansion, scrubbing   | ~2,500 LOC |
+| V3.1.0  | Code/GitHub   | Code adapter, semantic GitHub search, SQLite cache, Exa           | ~800 LOC   |
+| V3.1.1  | Reliability   | HTML threading, timeout scaling, size guard                       | ~300 LOC   |
+| V3.1.5  | RAG-Anything  | PDF/Office extraction bridge, code review fixes                   | ~1,200 LOC |
+| V3.2.0  | Domains       | SO, HN, academic, news adapters, full jobs, dedup, constraints    | ~2,500 LOC |
+| V3.3.0  | Resilience    | Contextual embeddings, domain trust, kill chain, query expansion  | ~2,500 LOC |
+| V3.4.0  | Distribution  | Docker Compose bundle, Ollama/local embedding, MCP registry       | ~500 LOC   |
+| V3.5.0  | Integration   | Resolver pattern, output budget, structured errors, diagnostics   | ~800 LOC   |
 
-**Total V3 Series**: ~7,750 LOC new code
+**Total V3 Series**: ~11,000 LOC new code
 
 ---
 
@@ -207,6 +225,4 @@ This document indexes all implementation plans for the Search MCP roadmap.
 
 ---
 
-_Generated: 2026-04-24 · Last updated: 2026-04-25 (V3.0.5 complete)_
-
-_Last revision per git log f0a3020: Added stress-test findings to guardrails (V3_REVIEW.md, IMPLEMENTATION.md, ROADMAP.md)._
+_Generated: 2026-04-24 · Last updated: 2026-04-26 (V3.1.5 complete, roadmap realigned for V3.2.0–V3.5.0)_
