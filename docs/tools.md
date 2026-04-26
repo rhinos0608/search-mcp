@@ -744,18 +744,18 @@ Crawl a URL using a headless Playwright browser via the Crawl4AI sidecar. Handle
 
 ### Inputs
 
-| Parameter               | Type               | Required | Default  | Description                                                                                   |
-| ----------------------- | ------------------ | -------- | -------- | --------------------------------------------------------------------------------------------- |
-| `url`                   | string (URL)       | yes      | —        | Seed URL to start crawling from.                                                              |
-| `strategy`              | `"bfs"` \| `"dfs"` | no       | `"bfs"`  | Crawl strategy: `bfs` (breadth-first, wide coverage) or `dfs` (depth-first, deep nesting).   |
-| `maxDepth`              | number (1–5)       | no       | `1`      | Maximum link depth to follow from seed URL (1 = single page only).                           |
-| `maxPages`              | number (1–100)     | no       | `1`      | Maximum number of pages to crawl.                                                             |
-| `includeExternalLinks`  | boolean            | no       | `false`  | Follow links to external domains.                                                             |
-| `extractionConfig`      | object             | no       | —        | Structured extraction config (css_schema, xpath_schema, regex, or llm strategy). Requires Crawl4AI sidecar v0.8.x. |
-| `waitFor`               | string             | no       | —        | CSS selector or JS predicate to wait for before extracting.                                   |
-| `delayBeforeReturnHtml` | number (0–30)      | no       | `0.1`    | Extra seconds to wait after page load for dynamic content to settle.                          |
-| `pageTimeout`           | number (ms)        | no       | `60000`  | Per-page operation timeout in milliseconds.                                                   |
-| `jsCode`                | string             | no       | —        | Custom JavaScript to execute on the page (e.g. scroll to bottom, click "Load More").         |
+| Parameter               | Type               | Required | Default | Description                                                                                                        |
+| ----------------------- | ------------------ | -------- | ------- | ------------------------------------------------------------------------------------------------------------------ |
+| `url`                   | string (URL)       | yes      | —       | Seed URL to start crawling from.                                                                                   |
+| `strategy`              | `"bfs"` \| `"dfs"` | no       | `"bfs"` | Crawl strategy: `bfs` (breadth-first, wide coverage) or `dfs` (depth-first, deep nesting).                         |
+| `maxDepth`              | number (1–5)       | no       | `1`     | Maximum link depth to follow from seed URL (1 = single page only).                                                 |
+| `maxPages`              | number (1–100)     | no       | `1`     | Maximum number of pages to crawl.                                                                                  |
+| `includeExternalLinks`  | boolean            | no       | `false` | Follow links to external domains.                                                                                  |
+| `extractionConfig`      | object             | no       | —       | Structured extraction config (css_schema, xpath_schema, regex, or llm strategy). Requires Crawl4AI sidecar v0.8.x. |
+| `waitFor`               | string             | no       | —       | CSS selector or JS predicate to wait for before extracting.                                                        |
+| `delayBeforeReturnHtml` | number (0–30)      | no       | `0.1`   | Extra seconds to wait after page load for dynamic content to settle.                                               |
+| `pageTimeout`           | number (ms)        | no       | `60000` | Per-page operation timeout in milliseconds.                                                                        |
+| `jsCode`                | string             | no       | —       | Custom JavaScript to execute on the page (e.g. scroll to bottom, click "Load More").                               |
 
 ### Underlying approach
 
@@ -766,6 +766,7 @@ Each page is fetched via Playwright through the Crawl4AI sidecar. The sidecar re
 ### Output
 
 Returns a `WebCrawlResult` with:
+
 - `pages` — array of `CrawlPageResult` objects, each with `url`, `success`, `markdown`, `html?`, `title`, `description`, `links`, `statusCode`, `errorMessage`
 - `totalPages` — pages attempted
 - `successfulPages` — pages successfully fetched
@@ -785,16 +786,16 @@ Search for job listings across job boards (SEEK, Indeed, Jora), extract structur
 
 ### Inputs
 
-| Parameter       | Type                               | Required | Default | Description                                                                          |
-| --------------- | ---------------------------------- | -------- | ------- | ------------------------------------------------------------------------------------ |
-| `query`         | string                             | yes      | —       | Job search query (e.g. `"frontend developer"`, `"data entry admin"`).                |
+| Parameter       | Type                               | Required | Default | Description                                                                           |
+| --------------- | ---------------------------------- | -------- | ------- | ------------------------------------------------------------------------------------- |
+| `query`         | string                             | yes      | —       | Job search query (e.g. `"frontend developer"`, `"data entry admin"`).                 |
 | `location`      | string[]                           | no       | —       | Preferred locations (e.g. `["Sydney", "Melbourne"]`). Ranking boost, not hard filter. |
-| `workMode`      | `("remote"\|"hybrid"\|"onsite")`[] | no       | —       | Preferred work modes. Ranking boost, not hard filter.                                |
-| `maxSalary`     | number                             | no       | —       | Maximum annual salary. Listings with a parseable salary above this are excluded.     |
-| `excludeTitles` | string[]                           | no       | —       | Title keywords to exclude (e.g. `["senior", "manager"]`).                            |
-| `maxPages`      | number (1–50)                      | no       | `20`    | Maximum job listing pages to crawl.                                                  |
-| `topK`          | number (1–50)                      | no       | `10`    | Number of top-ranked job listings to return.                                         |
-| `maxBytes`      | number                             | no       | `250MB` | Maximum total bytes of listing text to embed.                                        |
+| `workMode`      | `("remote"\|"hybrid"\|"onsite")`[] | no       | —       | Preferred work modes. Ranking boost, not hard filter.                                 |
+| `maxSalary`     | number                             | no       | —       | Maximum annual salary. Listings with a parseable salary above this are excluded.      |
+| `excludeTitles` | string[]                           | no       | —       | Title keywords to exclude (e.g. `["senior", "manager"]`).                             |
+| `maxPages`      | number (1–50)                      | no       | `20`    | Maximum job listing pages to crawl.                                                   |
+| `topK`          | number (1–50)                      | no       | `10`    | Number of top-ranked job listings to return.                                          |
+| `maxBytes`      | number                             | no       | `250MB` | Maximum total bytes of listing text to embed.                                         |
 
 ### Underlying approach
 
