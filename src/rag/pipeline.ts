@@ -6,6 +6,11 @@ import { validationError } from '../errors.js';
 import { MAX_TOKENS, MIN_TOKENS, TOKEN_RATIO, OVERLAP_RATIO } from '../chunking.js';
 import { dedupeByUrl, dedupeByFingerprint, deduplicateCorpus } from './dedup.js';
 import { applyConstraints } from './constraints.js';
+import {
+  recordRetrievalMetrics,
+  recordDedupMetrics,
+  recordConstraintMetrics,
+} from './metrics.js';
 import type { ConstraintConfig, ConstraintExtractors } from './constraints.js';
 import type { DedupeConfig, Coverage } from './types.js';
 import type {
@@ -109,19 +114,27 @@ function validateEmbeddingsForChunks(embeddings: number[][], chunkCount: number)
   }
 }
 
-function applySyncDedup(documents: RawDocument[], config: DedupeConfig): RawDocument[] {
+function applySyncDedup(documents: RawDocument[], config: DedupeConfig): {
+  items: RawDocument[];
+  urlRemoved: number;
+  fpRemoved: number;
+} {
   // Apply only URL + fingerprint layers synchronously.
   // Semantic dedup needs embeddings and must be done async via prepareCorpusAsync.
   let current = [...documents];
+  let urlRemoved = 0;
+  let fpRemoved = 0;
   if (config.layers.url) {
     const urlResult = dedupeByUrl(current, { normalize: true, removeTracking: true });
+    urlRemoved = urlResult.decisions.filter((d) => !d.kept).length;
     current = urlResult.items;
   }
   if (config.layers.fingerprint) {
     const fpResult = dedupeByFingerprint(current, config.fingerprintThreshold);
+    fpRemoved = fpResult.decisions.filter((d) => !d.kept).length;
     current = fpResult.items;
   }
-  return current;
+  return { items: current, urlRemoved, fpRemoved };
 }
 
 export function prepareCorpus(options: PrepareCorpusOptionsV3): PreparedCorpus {
@@ -129,7 +142,18 @@ export function prepareCorpus(options: PrepareCorpusOptionsV3): PreparedCorpus {
 
   // Step 1: Sync dedup (URL + fingerprint only)
   if (options.dedupeConfig && documents.length > 0) {
-    documents = applySyncDedup(documents, options.dedupeConfig);
+    const docsBefore = documents.length;
+    const dedupResult = applySyncDedup(documents, options.dedupeConfig);
+    documents = dedupResult.items;
+    const docsAfter = documents.length;
+    recordDedupMetrics({
+      adapter: options.adapter,
+      documentsBefore: docsBefore,
+      documentsAfter: docsAfter,
+      urlRemoved: dedupResult.urlRemoved,
+      fingerprintRemoved: dedupResult.fpRemoved,
+      semanticRemoved: 0,
+    });
   }
 
   const chunks = options.chunks ?? chunksFromDocuments(documents);
@@ -155,8 +179,26 @@ export async function prepareCorpusAsync(
 
   // Full async dedup including semantic layer
   if (options.dedupeConfig && documents.length > 0) {
+    const docsBefore = documents.length;
     const dedupeResult = await deduplicateCorpus(documents, options.dedupeConfig, embedFn);
     documents = dedupeResult.items;
+    const docsAfter = documents.length;
+    let urlRemoved = 0;
+    let fpRemoved = 0;
+    let semanticRemoved = 0;
+    for (const layer of dedupeResult.layers) {
+      if (layer.name === 'url') urlRemoved = layer.removed;
+      else if (layer.name === 'fingerprint') fpRemoved = layer.removed;
+      else semanticRemoved = layer.removed;
+    }
+    recordDedupMetrics({
+      adapter: options.adapter,
+      documentsBefore: docsBefore,
+      documentsAfter: docsAfter,
+      urlRemoved,
+      fingerprintRemoved: fpRemoved,
+      semanticRemoved,
+    });
   }
 
   const chunks = options.chunks ?? chunksFromDocuments(documents);
@@ -174,7 +216,7 @@ export async function prepareCorpusAsync(
   };
 }
 
-export function retrieveCorpus(
+function retrieveCorpusImpl(
   corpus: PreparedCorpus,
   options: RetrieveCorpusOptionsV3,
 ): RetrievalResponse {
@@ -317,6 +359,54 @@ export function retrieveCorpus(
     coverage,
     warnings: [...constraintWarnings],
   };
+}
+
+export function retrieveCorpus(
+  corpus: PreparedCorpus,
+  options: RetrieveCorpusOptionsV3,
+): RetrievalResponse {
+  const startMs = performance.now();
+  const result = retrieveCorpusImpl(corpus, options);
+  const durationMs = performance.now() - startMs;
+
+  let hardConstraints = 0;
+  let softConstraints = 0;
+  let passed = 0;
+  let filtered = 0;
+  if (options.constraintConfig) {
+    hardConstraints = options.constraintConfig.hardConstraints.length;
+    softConstraints = options.constraintConfig.softConstraints.length;
+    // We can't easily know passed/filtered from the result without re-running constraints,
+    // but we can infer from warnings
+    const constraintWarning = result.warnings?.find((w) => w.startsWith('Constraints filtered'));
+    if (constraintWarning) {
+      const match = /Constraints filtered (\d+)/.exec(constraintWarning);
+      if (match) {
+        filtered = Number.parseInt(match[1] ?? '0', 10);
+      }
+    }
+    passed = result.results.length;
+  }
+  if (options.constraintConfig) {
+    recordConstraintMetrics({
+      adapter: corpus.adapter,
+      hardConstraints,
+      softConstraints,
+      passed,
+      filtered,
+    });
+  }
+
+  recordRetrievalMetrics({
+    adapter: corpus.adapter,
+    totalChunks: corpus.chunks.length,
+    returnedResults: result.results.length,
+    durationMs,
+    vectorCandidates: result.trace.vectorCandidates,
+    lexicalCandidates: result.trace.lexicalCandidates,
+  });
+
+  return result;
 }
 
 export function prepareAndRetrieve(
