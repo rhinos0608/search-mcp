@@ -148,12 +148,16 @@ export async function semanticGitHubCode(
   const warnings = [...corpusWarnings, ...(configWarning !== undefined ? [configWarning] : [])];
 
   if (scopedDocs.length === 0) {
+    const noFilesMsg =
+      docs.length === 0
+        ? `No files found in ${input.repo}. The repo may not be accessible via the GitHub API, or no files match the requested language/extensions.`
+        : 'No GitHub files matched the requested scope.';
     return {
       query: input.query,
       repo: input.repo,
       profile: input.profile ?? 'lexical-heavy',
       results: [],
-      warnings: ['No GitHub files matched the requested scope.', ...warnings],
+      warnings: [noFilesMsg, ...warnings],
       ...(input.debug === true ? { debug: { collectedFiles: docs.length, chunkCount: 0 } } : {}),
     };
   }

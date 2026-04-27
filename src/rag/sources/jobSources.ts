@@ -44,17 +44,44 @@ export const SOURCE_PROFILES: Record<JobSource, JobSourceProfile> = {
   },
 };
 
+/** Extended source profiles for job search — covers additional job boards globally. */
+export const EXTENDED_SOURCE_PATTERNS: { source: JobSource; patterns: RegExp[] }[] = [
+  {
+    source: 'seek',
+    patterns: [
+      /^(?:[^.]+\.)*seek\.(?:com\.au|co\.nz|com)$/i,
+    ],
+  },
+  {
+    source: 'indeed',
+    patterns: [
+      /^(?:[^.]+\.)*indeed\.com$/i,
+    ],
+  },
+  {
+    source: 'jora',
+    patterns: [
+      /^(?:[^.]+\.)*jora\.com$/i,
+    ],
+  },
+];
+
+/** Detect the job source from a URL. Falls back to 'other' for unrecognized domains. */
 export function detectJobSource(url: string): JobSource {
   try {
     const hostname = new URL(url).hostname.toLowerCase();
-    for (const profile of Object.values(SOURCE_PROFILES)) {
-      if (profile.source === 'other') {
-        continue;
-      }
 
+    // Check known sources first
+    for (const profile of Object.values(SOURCE_PROFILES)) {
+      if (profile.source === 'other') continue;
       if (profile.hostPatterns.some((pattern) => pattern.test(hostname))) {
         return profile.source;
       }
+    }
+
+    // Heuristic: common job board keywords in hostname
+    if (/\b(jobs?|careers?|hire|recruit|work|apply|linkedin)\b/i.test(hostname)) {
+      return 'other';
     }
   } catch {
     return 'other';
@@ -64,5 +91,5 @@ export function detectJobSource(url: string): JobSource {
 }
 
 export function getSourceProfile(source: JobSource): JobSourceProfile {
-  return SOURCE_PROFILES[source];
+  return SOURCE_PROFILES[source] ?? SOURCE_PROFILES.other;
 }

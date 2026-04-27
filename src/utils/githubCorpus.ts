@@ -148,12 +148,17 @@ function isIgnoredByRules(path: string, rules: GitIgnoreRule[]): boolean {
 
 function scoreBroadCorpusFile(entry: GitHubTreeEntry): number {
   const pathParts = entry.path.toLowerCase().split('/');
+  const name = pathParts[pathParts.length - 1] ?? '';
   let score = 0;
   for (const [index, part] of pathParts.entries()) {
     if (part === 'src') score += index === 0 ? 55 : 35;
     else if (CORE_DIR_HINTS.has(part)) score += 25;
     if (SURFACE_DIR_HINTS.has(part)) score -= 25;
   }
+  // Penalize changelogs, history files, readme — they dominate results but aren't useful for code search
+  if (/^(changelog|history|readme|contributing|license)/i.test(name)) score -= 50;
+  // Penalize .md/.txt docs vs source code
+  if (/\.(md|mdx|txt|rst)$/i.test(name)) score -= 20;
   score -= pathParts.length * 2;
   score -= entry.path.length / 1000;
   return score;
@@ -177,6 +182,14 @@ export interface GitHubCorpusWarningInput {
 
 export function getGitHubCorpusWarnings(input: GitHubCorpusWarningInput): string[] {
   const warnings: string[] = [];
+
+  if (input.candidateCount === 0) {
+    warnings.push(
+      `GitHub search for "${String(input.query ?? '')}" in ${input.repo} returned 0 results. The repo may be private, the query may not match, or GitHub code search limits may apply.`,
+    );
+    return warnings;
+  }
+
   const underConstrained = input.query === undefined || input.query.trim().length === 0;
   if (underConstrained) {
     warnings.push(`GitHub crawl for ${input.repo} is broad; add query, language, or file filters.`);
@@ -242,35 +255,62 @@ export async function fetchGitHubCorpus(
   const getFile = deps.getGitHubRepoFile ?? getGitHubRepoFile;
   const getSearch = deps.getGitHubRepoSearch ?? getGitHubRepoSearch;
 
-  let candidateFiles: GitHubTreeEntry[];
-
-  if (opts.query) {
-    const searchResult = await getSearch(
-      opts.query,
-      opts.owner,
-      opts.repo,
-      undefined,
-      undefined,
-      Math.min(maxFiles * 2, 100),
-    );
-    candidateFiles = prioritizeBroadGitHubCorpus(
-      searchResult.results
-        .map((r) => ({
-          name: r.name,
-          path: r.path,
-          type: 'file' as const,
-          htmlUrl: r.htmlUrl,
-          apiUrl: r.url,
-        }))
-        .filter((e) => shouldIncludeFile(e, extensions)),
-    );
-  } else {
+  // Phase 1: Always fetch the full repo tree first — exhaustive file listing.
+  let treeFiles: GitHubTreeEntry[] = [];
+  try {
     const treeResult = await getTree(opts.owner, opts.repo, '', opts.branch, true, 500);
-    candidateFiles = prioritizeBroadGitHubCorpus(
-      treeResult.entries.filter((e) => shouldIncludeFile(e, extensions)),
-    );
+    if (treeResult?.entries) {
+      treeFiles = treeResult.entries.filter((e) => shouldIncludeFile(e, extensions));
+    }
+    logger.info({ repo: opts.repo, treeFiles: treeFiles.length }, 'fetchGitHubCorpus: repo tree fetched');
+  } catch (err) {
+    logger.warn({ err, repo: opts.repo }, 'fetchGitHubCorpus: repo tree fetch failed, trying search-only fallback');
   }
 
+  // Phase 2: If a query is provided, also search to find relevant files.
+  const searchFiles: GitHubTreeEntry[] = [];
+  if (opts.query && opts.query.trim().length > 0) {
+    try {
+      const searchResult = await getSearch(
+        opts.query,
+        opts.owner,
+        opts.repo,
+        undefined,
+        undefined,
+        Math.min(maxFiles, 100),
+      );
+      if (searchResult?.results) {
+        for (const r of searchResult.results) {
+          const entry: GitHubTreeEntry = {
+            name: r.name,
+            path: r.path,
+            type: 'file' as const,
+            htmlUrl: r.htmlUrl,
+            apiUrl: r.url,
+          };
+          if (shouldIncludeFile(entry, extensions)) {
+            searchFiles.push(entry);
+          }
+        }
+      }
+      logger.info({ repo: opts.repo, searchFiles: searchFiles.length }, 'fetchGitHubCorpus: search results merged');
+    } catch (err) {
+      logger.warn({ err, repo: opts.repo }, 'fetchGitHubCorpus: search failed');
+    }
+  }
+
+  // Phase 3: Merge tree + search results, dedup by path. Search results come first so they get
+  // priority in dedup (search hits are more relevant than tree listings).
+  const seenPaths = new Set<string>();
+  const merged: GitHubTreeEntry[] = [];
+  for (const entry of [...searchFiles, ...treeFiles]) {
+    if (!seenPaths.has(entry.path)) {
+      seenPaths.add(entry.path);
+      merged.push(entry);
+    }
+  }
+
+  const candidateFiles = prioritizeBroadGitHubCorpus(merged);
   const selectedFiles = candidateFiles.slice(0, maxFiles);
   const docs: GitHubCorpusDocument[] = [];
 
