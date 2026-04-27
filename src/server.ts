@@ -174,6 +174,39 @@ function readabilityFallbackResult(
   };
 }
 
+/** Document file extensions that should use RAG-Anything extraction. */
+const DOCUMENT_EXTENSIONS = new Set([
+  '.pdf', '.doc', '.docx', '.ppt', '.pptx', '.xls', '.xlsx',
+  '.odt', '.ods', '.odp',
+  '.rtf', '.tex',
+  '.png', '.jpg', '.jpeg', '.gif', '.bmp', '.tiff', '.tif', '.webp',
+  '.djvu',
+]);
+
+/** Check if a URL likely points to a document file. */
+function isDocumentUrl(url: string): boolean {
+  try {
+    const pathname = new URL(url).pathname.toLowerCase();
+    return DOCUMENT_EXTENSIONS.has(pathname.slice(pathname.lastIndexOf('.')));
+  } catch {
+    return false;
+  }
+}
+
+/** Use RAG-Anything bridge to extract content from a document URL. */
+async function extractWithRAGA(url: string, ragaBaseUrl: string): Promise<string> {
+  const { RAGAnythingClient } = await import('./utils/ragAnythingClient.js');
+  const client = new RAGAnythingClient({ baseUrl: ragaBaseUrl });
+  const result = await client.extract({
+    url,
+    parser: 'auto',
+    extractTables: true,
+    extractImages: false,
+    extractEquations: true,
+  });
+  return result.markdown;
+}
+
 export function createServer(): McpServer {
   const cfg = loadConfig();
   logger.info({ backend: cfg.searchBackend }, 'Primary search backend');
@@ -283,7 +316,30 @@ export function createServer(): McpServer {
         let data: import('./types.js').WebCrawlResult;
         const warnings: string[] = [];
 
-        if (cfg.crawl4ai.baseUrl) {
+        // RAG-Anything escalation for document URLs (PDF, Office, images, etc.)
+        if (isDocumentUrl(url) && cfg.raga.enabled && cfg.raga.baseUrl) {
+          logger.info({ tool: 'web_read', url }, 'Document URL detected — using RAG-Anything extraction');
+          const markdown = await extractWithRAGA(url, cfg.raga.baseUrl);
+          data = readabilityFallbackResult(
+            url,
+            {
+              url,
+              title: null,
+              textContent: markdown,
+              content: markdown,
+              extractionMethod: 'raga',
+              elements: [],
+              byline: null,
+              siteName: null,
+              description: null,
+              publishedDate: null,
+              image: null,
+            },
+            strategy,
+            maxDepth,
+            maxPages,
+          );
+        } else if (cfg.crawl4ai.baseUrl) {
           const llmFallback = buildLlmFallback(extractionConfig, cfg.llm);
           data = await webCrawl(url, cfg.crawl4ai.baseUrl, cfg.crawl4ai.apiToken, {
             strategy,
