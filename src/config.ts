@@ -145,6 +145,7 @@ export interface SearchConfig {
   embeddingSidecar: EmbeddingSidecarConfig;
   semanticCrawl: SemanticCrawlConfig;
   llm: LlmConfig;
+  raga: RAGAConfig;
   rescoreWeights: RescoreConfig;
 }
 
@@ -179,6 +180,14 @@ const DEFAULTS: Omit<SearchConfig, 'rescoreWeights'> = {
     maxMaxBytes: DEFAULT_SEMANTIC_MAX_BYTES,
   },
   llm: { provider: '', apiToken: '', baseUrl: '' },
+  raga: {
+    enabled: false,
+    baseUrl: '',
+    timeoutMs: 30000,
+    maxRetries: 2,
+    cacheEnabled: true,
+    defaultParser: 'auto',
+  },
 };
 
 const VALID_BACKENDS = new Set<string>(['brave', 'searxng', 'exa']);
@@ -209,7 +218,7 @@ function decryptConfigFile(filePath: string, password: string): SearchConfig {
 
 type EnvConfig = Omit<
   Partial<SearchConfig>,
-  'reddit' | 'crawl4ai' | 'github' | 'embeddingSidecar' | 'semanticCrawl' | 'llm' | 'exa'
+  'reddit' | 'crawl4ai' | 'github' | 'embeddingSidecar' | 'semanticCrawl' | 'llm' | 'raga' | 'exa'
 > & {
   reddit?: Partial<RedditConfig>;
   crawl4ai?: Partial<Crawl4aiConfig>;
@@ -218,6 +227,7 @@ type EnvConfig = Omit<
   embeddingSidecar?: Partial<EmbeddingSidecarConfig>;
   semanticCrawl?: Partial<SemanticCrawlConfig>;
   llm?: Partial<LlmConfig>;
+  raga?: Partial<RAGAConfig>;
 };
 
 function loadFromEnv(): EnvConfig {
@@ -356,6 +366,23 @@ function loadFromEnv(): EnvConfig {
     cfg.llm = llmCfg;
   }
 
+  // RAG-Anything Bridge configuration
+  const ragaBridgeUrl = process.env.RAGA_BRIDGE_URL;
+  const ragaEnabled = process.env.RAGA_ENABLED;
+  const ragaParser = process.env.RAGA_DEFAULT_PARSER;
+  if (ragaBridgeUrl !== undefined || ragaEnabled !== undefined || ragaParser !== undefined) {
+    const ragaCfg: Partial<RAGAConfig> = {};
+    if (ragaBridgeUrl !== undefined) ragaCfg.baseUrl = ragaBridgeUrl;
+    if (ragaEnabled !== undefined) ragaCfg.enabled = ragaEnabled === 'true';
+    if (ragaParser !== undefined) {
+      const validParsers = ['auto', 'docling', 'paddleocr', 'mineru'] as const;
+      if (validParsers.includes(ragaParser as (typeof validParsers)[number])) {
+        ragaCfg.defaultParser = ragaParser as RAGAConfig['defaultParser'];
+      }
+    }
+    cfg.raga = ragaCfg;
+  }
+
   return cfg;
 }
 
@@ -474,6 +501,20 @@ export function loadConfig(): SearchConfig {
       provider: fileConfig.llm?.provider ?? envConfig.llm?.provider ?? DEFAULTS.llm.provider,
       apiToken: fileConfig.llm?.apiToken ?? envConfig.llm?.apiToken ?? DEFAULTS.llm.apiToken,
       baseUrl: fileConfig.llm?.baseUrl ?? envConfig.llm?.baseUrl ?? DEFAULTS.llm.baseUrl,
+    },
+    raga: {
+      enabled:
+        fileConfig.raga?.enabled ?? envConfig.raga?.enabled ?? DEFAULTS.raga.enabled,
+      baseUrl:
+        fileConfig.raga?.baseUrl ?? envConfig.raga?.baseUrl ?? DEFAULTS.raga.baseUrl,
+      timeoutMs:
+        fileConfig.raga?.timeoutMs ?? envConfig.raga?.timeoutMs ?? DEFAULTS.raga.timeoutMs,
+      maxRetries:
+        fileConfig.raga?.maxRetries ?? envConfig.raga?.maxRetries ?? DEFAULTS.raga.maxRetries,
+      cacheEnabled:
+        fileConfig.raga?.cacheEnabled ?? envConfig.raga?.cacheEnabled ?? DEFAULTS.raga.cacheEnabled,
+      defaultParser:
+        fileConfig.raga?.defaultParser ?? envConfig.raga?.defaultParser ?? DEFAULTS.raga.defaultParser,
     },
     rescoreWeights: DEFAULT_RESCORE_WEIGHTS,
   };
