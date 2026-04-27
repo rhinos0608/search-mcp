@@ -8,7 +8,7 @@
 
 import type { SearchConfig } from './config.js';
 import { getTracker, type RateLimitedBackend } from './rateLimit.js';
-import { assertSafeUrl, safeResponseText, safeResponseJson } from './httpGuards.js';
+import { safeResponseText, safeResponseJson } from './httpGuards.js';
 import { logger } from './logger.js';
 
 // ── Types ────────────────────────────────────────────────────────────────────
@@ -279,7 +279,7 @@ async function probeExtractionSupport(
   if (apiToken) headers.Authorization = `Bearer ${apiToken}`;
 
   try {
-    assertSafeUrl(crawl4aiBaseUrl);
+    // crawl4ai URL is operator-configured, not user input — skip SSRF guard.
     const res = await fetch(endpoint, {
       method: 'POST',
       headers,
@@ -330,7 +330,8 @@ async function probeUrl(url: string): Promise<number> {
   }, PROBE_TIMEOUT_MS);
 
   try {
-    assertSafeUrl(url);
+    // Sidecar URLs (crawl4ai, embedding, searxng) are operator-configured,
+    // not user input — skip SSRF guard for health probes.
     const res = await fetch(url, {
       headers: { 'User-Agent': 'search-mcp/1.0 health-check' },
       signal: controller.signal,

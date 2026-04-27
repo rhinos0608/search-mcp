@@ -2,11 +2,18 @@
  * Shared HTTP safety guards: SSRF protection and response size limiting.
  */
 
+/** Default set of hostnames always blocked. */
 const BLOCKED_HOSTNAMES = new Set([
   'localhost',
   '127.0.0.1',
   '[::1]',
   '0.0.0.0',
+  'metadata.google.internal',
+]);
+
+/** Additional hostnames blocked when strict mode is enforced. */
+const STRICT_BLOCKED = new Set([
+  '169.254.169.254', // AWS metadata
   'metadata.google.internal',
 ]);
 
@@ -36,8 +43,11 @@ function isPrivateIPv4(hostname: string): boolean {
 /**
  * Validate a URL is safe to fetch (not targeting internal networks).
  * Throws if the URL is blocked.
+ *
+ * @param url - The URL to validate
+ * @param allowInternal - If true, allows localhost/private IPs (for operator-configured sidecars).
  */
-export function assertSafeUrl(url: string): void {
+export function assertSafeUrl(url: string, allowInternal = false): void {
   let parsed: URL;
   try {
     parsed = new URL(url);
@@ -51,6 +61,14 @@ export function assertSafeUrl(url: string): void {
   }
 
   const hostname = parsed.hostname.toLowerCase();
+
+  // When allowInternal is true, only block cloud metadata endpoints
+  if (allowInternal) {
+    if (STRICT_BLOCKED.has(hostname)) {
+      throw new Error(`Blocked request to cloud metadata host "${hostname}"`);
+    }
+    return;
+  }
 
   if (BLOCKED_HOSTNAMES.has(hostname)) {
     throw new Error(`Blocked request to internal host "${hostname}"`);
