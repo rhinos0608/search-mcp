@@ -820,3 +820,183 @@ Each result is a `JobListingMvp` with: `title`, `company?`, `location?`, `workMo
 - LinkedIn is not included (auth-wall risk is too high for reliable crawl).
 
 ---
+
+## `github_repo_file`
+
+Fetch a single file from a GitHub repository.
+
+**Inputs:** `owner` (string), `repo` (string), `path` (string), `ref?` (string, default branch), `lineOffset?` (number), `lineLimit?` (number), `byteOffset?` (number), `byteLimit?` (number)
+
+**Output:** `GitHubFileResult` with decoded content, encoding, truncation info, line range, and structured content `elements`.
+
+**Caveats:** Public repos only without `GITHUB_TOKEN`. Large files truncated per `lineLimit`/`byteLimit`.
+
+---
+
+## `github_repo_tree`
+
+Browse the directory tree of a GitHub repository.
+
+**Inputs:** `owner` (string), `repo` (string), `ref?` (string, default branch)
+
+**Output:** `GitHubTreeResult` with `entries` (name, path, type, size, sha, htmlUrl) and `truncated` flag.
+
+**Caveats:** Public repos only without `GITHUB_TOKEN`. Very large repos may return truncated results.
+
+---
+
+## `github_repo_search`
+
+Search GitHub repositories by query string.
+
+**Inputs:** `query` (string), `limit?` (number, default 10, max 25)
+
+**Output:** Array of repo results with full name, description, stars, forks, language, topics.
+
+**Caveats:** Unauthenticated rate limit is 60/hr. Set `GITHUB_TOKEN` for higher quota.
+
+---
+
+## `youtube_search`
+
+Search YouTube videos via the YouTube Data API v3.
+
+**Inputs:** `query` (string), `maxResults?` (number, default 10, max 50), `channel?` (string), `sort?` (`relevance`|`date`|`viewCount`)
+
+**Output:** Array of `YouTubeVideo` with videoId, title, description, channelTitle, publishedAt, thumbnailUrl.
+
+**Caveats:** Requires `YOUTUBE_API_KEY`. Pairs with `youtube_transcript`.
+
+---
+
+## `twitter_search`
+
+Search Twitter/X via a Nitter instance (cheerio scraping).
+
+**Inputs:** `query` (string), `limit?` (number, default 20, max 50)
+
+**Output:** Array of `TwitterPost` with author, handle, content, url, timestamp, likes, retweets, replies.
+
+**Caveats:** Requires `NITTER_BASE_URL`. Nitter reliability depends on the instance.
+
+---
+
+## `academic_search`
+
+Search academic papers across ArXiv + Semantic Scholar.
+
+**Inputs:** `query` (string), `sources?` (`arxiv`|`semantic_scholar`|`both`), `limit?` (number, default 10), `yearFrom?` (number)
+
+**Output:** Array of `AcademicPaper` with title, authors, abstract, url, year, venue, citationCount, doi, pdfUrl.
+
+**Caveats:** Free, no auth required. Results merged and deduplicated across sources.
+
+---
+
+## `arxiv_search`
+
+Fast direct ArXiv-only search with date range filtering.
+
+**Inputs:** `query` (string), `maxResults?` (number, default 10, max 50), `categories?` (string[]), `dateFrom?`/`dateTo?` (ISO dates)
+
+**Output:** Array of `ArXivPaper` with title, authors, abstract, url, publishedDate, categories, pdfUrl.
+
+**Caveats:** Faster than `academic_search` for ArXiv-only queries. Full `submittedDate` range filtering.
+
+---
+
+## `hackernews_search`
+
+Search Hacker News via Algolia API.
+
+**Inputs:** `query` (string), `type?` (`story`|`comment`|`all`), `sort?` (`relevance`|`date`), `limit?` (number, default 20), `dateFrom?`/`dateTo?` (ISO dates)
+
+**Output:** Array of `HackerNewsItem` with title, url, author, points, numComments, createdAt.
+
+**Caveats:** Free, no auth required.
+
+---
+
+## `stackoverflow_search`
+
+Search Stack Exchange questions.
+
+**Inputs:** `query` (string), `tags?` (string[]), `acceptedOnly?` (boolean), `limit?` (number, default 10, max 25)
+
+**Output:** Array of `StackOverflowQuestion` with title, body, link, score, answerCount, tags, acceptedAnswerId.
+
+**Caveats:** Optional `STACKEXCHANGE_API_KEY` for higher rate limits.
+
+---
+
+## `npm_search`
+
+Search npm packages via registry API.
+
+**Inputs:** `query` (string), `limit?` (number, default 10, max 50)
+
+**Output:** Array of `NpmPackage` with name, version, description, keywords, author, repository, score.
+
+**Caveats:** Free, no auth required.
+
+---
+
+## `pypi_search`
+
+Search PyPI packages via HTML scraping + JSON API enrichment.
+
+**Inputs:** `query` (string), `limit?` (number, default 10, max 50)
+
+**Output:** Array of `PypiPackage` with name, version, description, url, author, releaseDate.
+
+**Caveats:** Free, no auth required.
+
+---
+
+## `producthunt_search`
+
+Search Product Hunt posts via GraphQL API or public leaderboard fallback.
+
+**Inputs:** `query` (string), `limit?` (number, default 10, max 25)
+
+**Output:** Array of `ProductHuntProduct` with name, tagline, description, votesCount, commentsCount, topics, thumbnail.
+
+**Caveats:** `PRODUCTHUNT_API_TOKEN` required for GraphQL; falls back to public scraping.
+
+---
+
+## `patent_search`
+
+Search US patents via USPTO PatentsView API.
+
+**Inputs:** `query` (string), `limit?` (number, default 10, max 50)
+
+**Output:** Array of `PatentResult` with patentNumber, title, abstract, inventors, assignees, filingDate, grantDate.
+
+**Caveats:** Requires `PATENTSVIEW_API_KEY` (free registration).
+
+---
+
+## `podcast_search`
+
+Search podcast episodes via ListenNotes API.
+
+**Inputs:** `query` (string), `limit?` (number, default 10, max 50)
+
+**Output:** Array of `PodcastResult` with title, description, podcast name, publisher, audioUrl, duration, publishedDate.
+
+**Caveats:** Requires `LISTENNOTES_API_KEY`.
+
+---
+
+## `health_check`
+
+Verify server status and configuration health.
+
+**Inputs:** None.
+
+**Output:** `{ status: string; version: string; uptime: number; config: { ... }; backends: { ... } }`
+
+Reports backend connectivity (search, embedding, social) and config degradation states.
+
+**Caveats:** No auth required.

@@ -34,8 +34,18 @@ search-mcp/
 │   ├── rag/                 # shared retrieval pipeline
 │   │   ├── types.ts         # RagChunk, PreparedCorpus, RetrievalResponse, etc.
 │   │   ├── pipeline.ts      # prepareCorpus() + retrieveCorpus()
-│   │   ├── embedding.ts     # sidecar client, batched embeddings
+│   │   ├── embedding.ts     # multi-provider dispatch (sidecar, ollama, transformers, openai)
 │   │   ├── profiles.ts      # named retrieval profiles (balanced, lexical-heavy, etc.)
+│   │   ├── metrics.ts       # counters, histograms, gauges
+│   │   ├── instrumentation.ts # tracing spans, pipeline wrappers
+│   │   ├── dedup.ts         # three-layer dedup
+│   │   ├── constraints.ts   # hard + soft constraint filtering
+│   │   ├── fusion.ts        # RRF + weighted linear fusion
+│   │   ├── rerank.ts        # cross-encoder reranking (ONNX)
+│   │   ├── corpusCache.ts   # SQLite-backed corpus cache
+│   │   ├── jobRanking.ts    # weighted composite job scoring
+│   │   ├── jobDedup.ts      # three-layer job dedup
+│   │   ├── lexicalConstraint.ts # IDF-weighted soft token coverage
 │   │   ├── adapters/        # source-specific chunk converters
 │   │   │   ├── text.ts      # web pages → RagChunk[]
 │   │   │   ├── transcript.ts# YouTube segments → RagChunk[]
@@ -50,24 +60,73 @@ search-mcp/
 │   │   ├── bm25.ts          # BM25+ full-text index
 │   │   ├── fusion.ts        # RRF merge across ranked lists
 │   │   ├── rerank.ts        # cross-encoder reranking (ONNX, dynamically imported)
-│   │   ├── corpusCache.ts   # SQLite-backed corpus cache with byte-weighted LRU eviction
+│   │   ├── corpusCache.ts   # SQLite-backed corpus cache
 │   │   ├── githubCorpus.ts  # GitHub API file collector (dynamically imported)
 │   │   ├── lexicalConstraint.ts # IDF-weighted soft token coverage
-│   │   └── sitemap.ts       # XML sitemap parser
-│   └── tools/               # one file per tool
+│   │   ├── cookieBanner.ts    # cookie-banner page detection
+│   │   ├── crawlBudget.ts     # response-size budget (preflight + in-flight)
+│   │   ├── sitemap.ts       # XML sitemap parser
+│   │   ├── url.ts           # URL dedup
+│   │   ├── rescore.ts       # score normalization
+│   │   ├── embedding.ts     # provider dispatch
+│   │   ├── ollamaEmbedding.ts # Ollama local embedding
+│   │   ├── transformersEmbedding.ts # Transformers.js in-process
+│   │   ├── ragAnythingClient.ts # RAG-Anything bridge client
+│   │   ├── extractionQuality.ts  # quality thresholds
+│   │   ├── extractionConfig.ts   # extraction config schema
+│   │   ├── smartExtraction.ts    # quality-based escalation
+│   │   ├── llmSummarizer.ts      # LLM summarization
+│   │   ├── semanticResponse.ts   # response compaction
+│   │   ├── renderRecovery.ts     # placeholder content recovery
+│   │   ├── elementHelpers.ts     # element utilities
+│   │   ├── elementTruncation.ts  # truncation logic
+│   │   ├── htmlElements.ts       # HTML element types
+│   │   └── markdownElements.ts   # markdown element types
+│   └── tools/               # one file per tool (29 tools)
 │       ├── webSearch.ts
 │       ├── webRead.ts
+│       ├── webCrawl.ts
 │       ├── githubRepo.ts
+│       ├── githubRepoFile.ts
+│       ├── githubRepoSearch.ts
+│       ├── githubRepoTree.ts
 │       ├── githubTrending.ts
+│       ├── semanticGitHubCode.ts
+│       ├── semanticCrawl.ts
+│       ├── semanticJobs.ts
+│       ├── semanticReddit.ts
+│       ├── semanticYoutube.ts
+│       ├── youtubeSearch.ts
 │       ├── youtubeTranscript.ts
-│       ├── semanticGitHubCode.ts  # semantic_github_code tool
 │       ├── redditSearch.ts
 │       ├── redditComments.ts
-│       ├── redditClient.ts        # shared Reddit transport (public + OAuth paths)
-│       ├── redditAuth.ts          # client_credentials token cache
+│       ├── redditClient.ts
+│       ├── redditAuth.ts
 │       ├── redditSearchParser.ts
 │       ├── redditThreadParser.ts
-│       └── redditPermalink.ts
+│       ├── redditPermalink.ts
+│       ├── twitterSearch.ts
+│       ├── producthuntSearch.ts
+│       ├── patentSearch.ts
+│       ├── podcastSearch.ts
+│       ├── academicSearch.ts
+│       ├── arxivSearch.ts
+│       ├── hackernewsSearch.ts
+│       ├── stackoverflowSearch.ts
+│       ├── npmSearch.ts
+│       ├── pypiSearch.ts
+│       ├── newsSearch.ts
+│       ├── searxngSearch.ts
+│       └── healthCheck.ts
+├── services/               # Python bridge services
+│   └── rag-anything-bridge/  # multimodal document extraction
+├── sidecar/                # local service sidecars
+│   ├── embedding/          # FastAPI embedding server
+│   └── openai-embedding-proxy/
+├── eval/                   # evaluation framework
+│   └── golden-queries/     # query datasets
+├── docker-compose.yml      # full-stack deployment
+├── Dockerfile              # container image
 ├── package.json
 ├── tsconfig.json
 └── eslint.config.js
@@ -102,10 +161,37 @@ Shared retrieval pipeline for semantic tools. The pipeline separates corpus prep
 - `prepareCorpus()` builds a typed `PreparedCorpus`
 - `retrieveCorpus()` runs BM25/vector fusion and returns ranked chunks with score details
 - profiles such as `balanced`, `lexical-heavy`, `semantic-heavy`, and `high-precision` keep retrieval tuning stable at the API boundary
+- `metrics.ts` provides counters, histograms, gauges with label support
+- `instrumentation.ts` provides `spanSync`/`spanAsync` wrappers, run tracking, and `InstrumentedPipeline`
+- `dedup.ts` implements three-layer dedup (exact URL, source+id, company+title)
+- `constraints.ts` implements hard filter rules and constraint scoring
 
 The code adapter lives under `src/rag/adapters/code.ts` with parser helpers under `src/rag/code/`. It uses lazy-loaded tree-sitter WASM grammars so non-code users do not pay parser startup cost. Supported code languages are TypeScript, JavaScript, Python, Go, and Rust; unsupported files fall back to text chunking.
 
 Code retrieval defaults to `lexical-heavy` because identifiers, function names, and import paths are often more precise than prose-like semantic similarity. If `EMBEDDING_CODE_MODEL` is not configured, code tools warn that they are falling back to the prose embedding model. This warning is intentional: identifier searches remain useful through BM25, but conceptual code queries can degrade without a code-tuned embedding model.
+
+### Embedding Providers
+
+Embedding provider dispatch lives in `src/utils/embedding.ts`. Provider selection via `EMBEDDING_PROVIDER` env var (default `sidecar`):
+
+- **`sidecar`** (default): FastAPI server at `sidecar/embedding/`, with OpenAI-compatible proxy at `sidecar/openai-embedding-proxy/`
+- **`ollama`**: Local embeddings via `src/utils/ollamaEmbedding.ts`, defaults to `http://localhost:11434` with `nomic-embed-text`
+- **`transformers`**: In-process ONNX embeddings via `src/utils/transformersEmbedding.ts`, no external service needed
+- **`openai`**: OpenAI-compatible API via `src/utils/embedding.ts`, supports any OpenAI-compatible endpoint
+
+### Docker Compose Deployment
+
+Full-stack `docker-compose.yml` with four services:
+- `search-mcp` — MCP server (port 8050 stdio HTTP proxy)
+- `search-mcp-crawl4ai` — Crawl4AI browser service (port 8051)
+- `search-mcp-embedding` — Embedding sidecar (port 8001)
+- `search-mcp-searxng` — SearXNG meta-search (port 8081)
+
+Start: `docker compose up -d`
+
+### Evaluation Framework
+
+`src/eval/` provides golden query datasets across academic, general, job, and QA domains. Supports precision/recall/nDCG scoring with a batch runner across retrieval profiles.
 
 ### `src/tools/`
 

@@ -6,7 +6,7 @@ A feature comparison of search-mcp (v3.2.0) against other MCP search/retrieval s
 
 | Feature | **search-mcp** | Kindly | Vera | mcp-local-rag | mcp-crawl4ai-rag |
 |---|---|---|---|---|---|
-| **Total tools** | **36** | 3 | 4 | 6 | 9 |
+| **Total tools** | **28** | 3 | 4 | 6 | 9 |
 | **Web search** | ✅ Exa, Brave, SearXNG | ✅ | ✅ | ✅ | ✅ |
 | **Web read/crawl** | ✅ Crawl4AI deep crawl | ✅ | ❌ | ✅ | ✅ |
 | **Smart extraction** | ✅ LLM + schema | ❌ | ❌ | ❌ | ❌ |
@@ -22,8 +22,8 @@ A feature comparison of search-mcp (v3.2.0) against other MCP search/retrieval s
 | **npm/PyPI** | ✅ | ❌ | ❌ | ❌ | ❌ |
 | **Patents** | ✅ | ❌ | ❌ | ❌ | ❌ |
 | **Podcasts** | ✅ | ❌ | ❌ | ❌ | ❌ |
-| **Job search** | ✅ SEEK + Indeed + LinkedIn + Jora | ❌ | ❌ | ❌ | ❌ |
-| **News search** | ✅ | ❌ | ❌ | ❌ | ❌ |
+| **Job search** | ✅ SEEK + Indeed + Jora | ❌ | ❌ | ❌ | ❌ |
+| **Knowledge graph** | ✅ Corpus cache + SQLite | ❌ | ❌ | ❌ | ❌ |
 | **Dedup (3-layer)** | ✅ URL + fingerprint + semantic | ❌ | ❌ | ❌ | ❌ |
 | **Constraint ranking** | ✅ Hard + soft constraints | ❌ | ❌ | ❌ | ❌ |
 | **Evaluation harness** | ✅ Golden queries + P/R/nDCG | ❌ | ❌ | ❌ | ❌ |

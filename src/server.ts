@@ -24,7 +24,6 @@ import { arxivSearch } from './tools/arxivSearch.js';
 import { stackoverflowSearch } from './tools/stackoverflowSearch.js';
 import { npmSearch } from './tools/npmSearch.js';
 import { pypiSearch } from './tools/pypiSearch.js';
-import { newsSearch } from './tools/newsSearch.js';
 import { webCrawl } from './tools/webCrawl.js';
 import { webRead } from './tools/webRead.js';
 import { semanticCrawl } from './tools/semanticCrawl.js';
@@ -1715,49 +1714,6 @@ export function createServer(): McpServer {
         return successResponse(result);
       } catch (err: unknown) {
         logger.error({ err, tool: 'pypi_search' }, 'Tool failed');
-        return errorResponse(err);
-      }
-    },
-  );
-
-  // ── news_search ─────────────────────────────────────────────────────────
-  server.registerTool(
-    'news_search',
-    {
-      description:
-        'Search recent news articles via the GDELT Global Knowledge Graph. Returns article title, URL, source, domain, publish date, language, and image URL. Supports date range filtering and language selection. Free, no API key required. Excellent for "last 24 hours" or "this week" news queries.',
-      inputSchema: {
-        query: z.string().describe('News search query string'),
-        dateFrom: z
-          .string()
-          .optional()
-          .describe('Start date (YYYY-MM-DD format, e.g. "2025-03-01")'),
-        dateTo: z.string().optional().describe('End date (YYYY-MM-DD format, e.g. "2025-03-29")'),
-        language: z
-          .string()
-          .optional()
-          .default('english')
-          .describe(
-            'Source language filter (e.g. "english", "spanish", "french", "german"). Default: english.',
-          ),
-        limit: z
-          .number()
-          .int()
-          .min(1)
-          .max(250)
-          .optional()
-          .default(20)
-          .describe('Maximum number of articles to return (1–250, default 20)'),
-      },
-    },
-    async () => {
-      const start = Date.now();
-      try {
-        const data = await newsSearch();
-        const result = makeResult('news_search', data, Date.now() - start);
-        return successResponse(result);
-      } catch (err: unknown) {
-        logger.error({ err, tool: 'news_search' }, 'Tool failed');
         return errorResponse(err);
       }
     },

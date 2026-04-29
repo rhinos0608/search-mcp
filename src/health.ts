@@ -120,7 +120,6 @@ export const FREE_TOOLS = [
   'arxiv_search',
   'npm_search',
   'pypi_search',
-  'news_search',
 ] as const;
 
 // ── configHealth (sync, startup) ────────────────────────────────────────────

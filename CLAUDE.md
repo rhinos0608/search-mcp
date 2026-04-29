@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-> **Version: 3.1.5** — RAG-Anything Integration: multimodal document extraction (PDFs, Office, scanned docs) via Python bridge service, plus code review-driven quality fixes across the RAG pipeline.
+> **Version: 3.2.0** — Semantic RAG pipeline with multi-provider embeddings (sidecar/Ollama/Transformers.js/OpenAI), Docker Compose full-stack deployment, evaluation framework, observability/metrics, and RAG-Anything multimodal document extraction.
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
@@ -8,7 +8,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 An MCP (Model Context Protocol) server that exposes web search, web reading, deep crawling, **semantic RAG search**, GitHub (repo, file, tree, search, corpus), YouTube, Reddit, Twitter/X, Product Hunt, patent, podcast, academic research, Hacker News, Stack Overflow, npm, PyPI, and news tools over stdio JSON-RPC. Clients like Claude Desktop or the Claude CLI connect via stdin/stdout; all logging goes to stderr.
 
-V3.0.0 extracts the retrieval pipeline into reusable `src/rag/` modules and adds two new semantic tools: `semantic_youtube` (search + transcripts + RAG) and `semantic_reddit` (search + comments + RAG). V3.0.5 adds the `semantic_jobs` tool with structured job listing extraction (SEEK, Indeed, Jora), three-layer dedup, and constraint-aware weighted ranking. V3.1.0 adds `semantic_github_code` (AST-aware code search via lazy-loaded tree-sitter WASM grammars, lexical-heavy profile). V3.1.1 fixes three reliability bugs: `semantic_jobs` now receives full HTML from Crawl4AI for structured extraction; `web_crawl` timeout scales with `maxPages` (30s + 15s × pages, capped at 5 min); `semantic_crawl` has a two-layer response-size guard (preflight `maxPages` cap + in-flight byte accumulator) to prevent MCP 52MB response limit crashes. V3.1.5 adds RAG-Anything integration for multimodal document extraction (PDFs, Office, scanned documents) via a Python bridge service, plus code review-driven fixes: 'job' adapter type, code adapter identity fix, semantic score mapping by documentId, corpus ID versioning, corpus cache type cleanup, and crawlBudget type canonicalization. The `semantic_crawl` tool remains the primary crawl entry point. The shared RAG core: bi-encoder embeddings → BM25+ → RRF fusion → top-K.
+V3.0.0 extracts the retrieval pipeline into reusable `src/rag/` modules. V3.0.5 adds `semantic_jobs`. V3.1.0 adds `semantic_github_code` (AST-aware code search via tree-sitter). V3.1.1 fixes three reliability bugs (HTML threading, timeout scaling, response-size guard). V3.1.5 adds RAG-Anything integration for multimodal document extraction (PDFs, Office, scanned docs) via a Python bridge service. V3.2.0 adds multi-provider embeddings (Ollama, Transformers.js, OpenAI dispatch), Docker Compose full-stack deployment, evaluation framework with golden queries, observability/metrics/instrumentation, two-phase job crawl, Stack Overflow adapter, and academic/QA adapters. The shared RAG core: bi-encoder embeddings → BM25+ → RRF fusion → top-K, now with pluggable embedding providers.
 
 ## Commands
 
@@ -68,7 +68,6 @@ _Research & Discovery_
 - `arxiv_search` — Fast direct ArXiv-only search with full date range filtering via `submittedDate`. Supports category filtering. Faster than `academic_search` for ArXiv-only queries.
 - `hackernews_search` — HN Algolia API for searching stories/comments (free, no auth). Supports type filtering, sort by relevance/date, and date range.
 - `stackoverflow_search` — Stack Exchange API for searching questions. Supports tag filtering and accepted-answer filtering. Optional `STACKEXCHANGE_API_KEY` for higher rate limits.
-- `news_search` — GDELT Global Knowledge Graph API for news articles (free, no auth). Supports date range filtering and language selection.
 
 _Packages & Products_
 
@@ -87,9 +86,10 @@ Key env vars:
 
 - Search: `EXA_API_KEY`, `BRAVE_API_KEY`, `SEARXNG_BASE_URL`, `SEARCH_BACKEND`
 - Social: `NITTER_BASE_URL`, `REDDIT_CLIENT_ID`, `REDDIT_CLIENT_SECRET`, `REDDIT_USER_AGENT`
-- Specialist: `LISTENNOTES_API_KEY`, `PRODUCTHUNT_API_TOKEN`, `PATENTSVIEW_API_KEY`, `YOUTUBE_API_KEY`, `STACKEXCHANGE_API_KEY`
+- Specialist: `LISTENNOTES_API_KEY`, `PRODUCTHUNT_API_TOKEN`, `PATENTSVIEW_API_KEY`, `YOUTUBE_API_KEY`, `STACKEXCHANGE_API_KEY`, `GITHUB_TOKEN`
 - Crawl: `CRAWL4AI_BASE_URL`, `CRAWL4AI_API_TOKEN`
-- Embedding: `EMBEDDING_SIDECAR_BASE_URL`, `EMBEDDING_SIDECAR_API_TOKEN`, `EMBEDDING_DIMENSIONS` (default 768), `EMBEDDING_CODE_MODEL` (optional; code-tuned model endpoint for `semantic_github_code` — without it the tool warns and falls back to the prose model)
+- Embedding: `EMBEDDING_PROVIDER` (sidecar|ollama|transformers|openai, default sidecar), `EMBEDDING_SIDECAR_BASE_URL`, `EMBEDDING_SIDECAR_API_TOKEN`, `EMBEDDING_DIMENSIONS` (default 768), `EMBEDDING_CODE_MODEL` (optional), `EMBEDDING_OLLAMA_BASE_URL` (default http://localhost:11434), `EMBEDDING_OLLAMA_MODEL` (default nomic-embed-text), `EMBEDDING_TRANSFORMERS_MODEL` (default Xenova/all-MiniLM-L6-v2), `EMBEDDING_OPENAI_BASE_URL`, `EMBEDDING_OPENAI_MODEL` (default text-embedding-3-small), `EMBEDDING_OPENAI_API_KEY`
+- RAG-Anything: `RAGA_ENABLED`, `RAGA_BRIDGE_URL` (default http://localhost:8000), `RAGA_DEFAULT_PARSER`, `RAGA_TIMEOUT_MS` (default 30000)
 - Persistence: `DATABASE_PATH` (SQLite corpus cache path; defaults under `~/.cache/search-mcp/semantic-crawl/`)
 
 Reddit OAuth is optional: both `REDDIT_CLIENT_ID` and `REDDIT_CLIENT_SECRET` must be set together; setting exactly one is treated as invalid configuration (server starts, health reports degraded, Reddit tools throw `VALIDATION_ERROR` at first use).
@@ -98,7 +98,7 @@ Reddit OAuth is optional: both `REDDIT_CLIENT_ID` and `REDDIT_CLIENT_SECRET` mus
 
 - `types.ts` — `RagChunk`, `PreparedCorpus`, `RetrievalResponse`, `RetrievalProfileName`, etc.
 - `pipeline.ts` — `prepareCorpus()`, `retrieveCorpus()`, `prepareAndRetrieve()` (embedding → BM25 → RRF → top-K); `corpusIdFor()` includes chunking parameters for cache compatibility
-- `embedding.ts` — `embedTexts()`, `embedTextsBatched()` (sidecar client, bypasses SSRF guard)
+- `embedding.ts` — `embedTexts()`, `embedTextsBatched()` (multi-provider dispatch: sidecar, ollama, transformers, openai; bypasses SSRF guard)
 - `profiles.ts` — `balanced`, `lexical-heavy`, `semantic-heavy`, `high-precision`, `fast`, `precision`, `recall` retrieval profiles
 - `adapters/text.ts` — crawl pages → `RagChunk[]`
 - `adapters/transcript.ts` — YouTube transcript segments → `RagChunk[]`
@@ -116,7 +116,7 @@ Reddit OAuth is optional: both `REDDIT_CLIENT_ID` and `REDDIT_CLIENT_SECRET` mus
 **Semantic pipeline** (`src/tools/semanticCrawl.ts` + `src/chunking.ts` + `src/utils/`):
 
 1. Corpus ingestion: crawl pages via Crawl4AI → strip cookie banners → `chunkMarkdown()` (400-token max, 20% overlap, atomic units for code blocks/tables, boilerplate heuristics)
-2. **Response-size guard** (`src/utils/crawlBudget.ts`): preflight heuristic cap on `maxPages` (site-aware: 8MB/page JS-heavy, 1.5MB/page default; safe budget ~41MB) + in-flight per-page byte accumulator that stops collection and records `omittedPages` when budget is approached. Emits typed `SemanticCrawlSizeWarning` objects in `structuredWarnings`.
+2. **Response-size guard** (`src/utils/crawlBudget.ts`): preflight heuristic cap on `maxPages` (site-aware: 8MB/page JS-heavy, 1.5MB/page default; safe budget ~41MB) + in-flight per-page byte accumulator that stops collection and records `omittedPages` when budget is approached. Emits typed `SemanticCrawlWarning` objects in `structuredWarnings`.
 3. Embedding: batched document embeddings via sidecar (max 512/batch, document/query asymmetric, title-aware). Query embedded in parallel.
 4. Hybrid ranking: bi-encoder cosine → BM25+ (`src/utils/bm25.ts`) → RRF fusion via `src/rag/pipeline.ts` (internal `retrieveSemanticChunks()` wrapper)
 5. Post-filtering: semantic coherence filter (centroid similarity for borderline chunks) → soft IDF-weighted lexical constraint (`src/utils/lexicalConstraint.ts`)
@@ -124,6 +124,13 @@ Reddit OAuth is optional: both `REDDIT_CLIENT_ID` and `REDDIT_CLIENT_SECRET` mus
 7. Corpus cache (`src/utils/corpusCache.ts`): Persistent via SQLite (`better-sqlite3`), configurable TTL, byte-weighted LRU eviction, default database path from `DATABASE_PATH` or `~/.cache/search-mcp/semantic-crawl/corpus-cache.sqlite`. Re-query via `source: { type: 'cached', corpusId }`.
 
 GitHub corpus (`src/utils/githubCorpus.ts`): fetches repo files via GitHub API, uses `chunkMarkdown` with path-prefixed sections. Supports branch, file extension filter, and query pre-filter.
+
+**Embedding providers** (`src/utils/`):
+
+- `embedding.ts` — Provider dispatch: selects runtime provider based on `EMBEDDING_PROVIDER` env var
+- `ollamaEmbedding.ts` — Ollama local embedding via HTTP API
+- `transformersEmbedding.ts` — In-process Transformers.js embedding (ONNX)
+- Sidecar: FastAPI server at `sidecar/embedding/` with OpenAI-compatible proxy at `sidecar/openai-embedding-proxy/`
 
 **Sidecar services** (`sidecar/`):
 
@@ -139,6 +146,8 @@ GitHub corpus (`src/utils/githubCorpus.ts`): fetches repo files via GitHub API, 
 - `bm25.ts` — BM25+ full-text index
 - `fusion.ts` — Reciprocal Rank Fusion (RRF) merge across ranked lists
 - `rerank.ts` — Cross-encoder reranking via ONNX runtime
+- `metrics.ts` — Counters, histograms, gauges with label support for observability
+- `instrumentation.ts` — Tracing spans, run tracking, pipeline wrappers (`spanSync`, `spanAsync`, `InstrumentedPipeline`)
 - `corpusCache.ts` — SQLite-backed corpus store (chunks + embeddings + BM25 index); `normalizeSource()` sorts URL arrays and GitHub extensions for stable identity; `CachedCorpus` is a clean type (no phantom fields)
 - `crawlBudget.ts` — Response-size budget utilities: `SAFE_BYTES`, `DEFAULT_AVG_PAGE_BYTES`, `JS_HEAVY_AVG_PAGE_BYTES`, `isLikelyJsHeavySite()`; uses canonical `SemanticCrawlSourceType` from `src/types.ts`
 - `lexicalConstraint.ts` — IDF-weighted soft token coverage constraint
@@ -159,7 +168,7 @@ GitHub corpus (`src/utils/githubCorpus.ts`): fetches repo files via GitHub API, 
 - youtube-transcript has a broken ESM export; the workaround imports directly from `youtube-transcript/dist/youtube-transcript.esm.js` with `@ts-expect-error`
 - `config.json` and `config.enc` are gitignored — never commit API keys
 - `rerank.ts` and `githubCorpus.ts` are dynamically imported (`await import(...)`) to keep startup fast when those features are unused
-- Embedding sidecar URLs bypass SSRF guards — they come from operator config, not user input
+- Embedding sidecar and RAGA bridge URLs bypass SSRF guards — they come from operator config, not user input
 - Corpus cache is persistent via SQLite; the `cached` source type works across server restarts
 - `AdapterType` includes `job` (for `semantic_jobs`), `code` (for `semantic_github_code`), `text`, `transcript`, `conversation`, `github`, `url`, `sitemap`, `search`, `cached`
 
@@ -183,7 +192,24 @@ GitHub corpus (`src/utils/githubCorpus.ts`): fetches repo files via GitHub API, 
 - **Document ID**: set by adapters (file path for code, jobId/sourceUrl for jobs, index for generic)
 - **Chunk identity**: corpus-scoped `chunkIndex` (position within the chunk array); not globally unique
 
-**Structured warnings** (V4 direction — currently string arrays, should become typed codes):
+**Docker Compose deployment** (`docker-compose.yml`):
+
+Full-stack deployment with four services:
+- `search-mcp` — The MCP server (port 8050, stdio HTTP proxy)
+- `search-mcp-crawl4ai` — Crawl4AI browser service (port 8051)
+- `search-mcp-embedding` — Embedding sidecar (port 8001)
+- `search-mcp-searxng` — SearXNG meta-search (port 8081)
+
+Start with `docker compose up -d`.
+
+**Evaluation framework** (`src/eval/`):
+
+- Golden query datasets covering academic, general, job, and QA domains
+- Scoring: precision, recall, nDCG
+- Runner for batch evaluation across retrieval profiles
+- Test suite for evaluation components
+
+**Structured warnings** (V4 direction — currently typed unions, should become consistent across all tools):
 
 - `semantic_crawl`: already uses `SemanticCrawlSizeWarning` typed objects for response-size guard
 - `semantic_jobs`: uses string warnings (e.g., crawl failures, markdown-only pages, byte budget truncation)
@@ -199,7 +225,7 @@ fix(security): block SSRF targets in smart extraction
 docs(roadmap): align v3.1 plan
 test(jobs): cover source normalization
 refactor(server): split tool registration
-chore(release): tag v3.1.5
+chore(release): tag v3.2.0
 ```
 
 - Use [Conventional Commits](https://www.conventionalcommits.org/).
