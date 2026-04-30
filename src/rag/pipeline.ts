@@ -6,11 +6,7 @@ import { validationError } from '../errors.js';
 import { MAX_TOKENS, MIN_TOKENS, TOKEN_RATIO, OVERLAP_RATIO } from '../chunking.js';
 import { dedupeByUrl, dedupeByFingerprint, deduplicateCorpus } from './dedup.js';
 import { applyConstraints } from './constraints.js';
-import {
-  recordRetrievalMetrics,
-  recordDedupMetrics,
-  recordConstraintMetrics,
-} from './metrics.js';
+import { recordRetrievalMetrics, recordDedupMetrics, recordConstraintMetrics } from './metrics.js';
 import type { ConstraintConfig, ConstraintExtractors } from './constraints.js';
 import type { DedupeConfig, Coverage } from './types.js';
 import type {
@@ -114,7 +110,10 @@ function validateEmbeddingsForChunks(embeddings: number[][], chunkCount: number)
   }
 }
 
-function applySyncDedup(documents: RawDocument[], config: DedupeConfig): {
+function applySyncDedup(
+  documents: RawDocument[],
+  config: DedupeConfig,
+): {
   items: RawDocument[];
   urlRemoved: number;
   fpRemoved: number;

@@ -260,9 +260,15 @@ export async function fetchGitHubCorpus(
   try {
     const treeResult = await getTree(opts.owner, opts.repo, '', opts.branch, true, 500);
     treeFiles = treeResult.entries.filter((e) => shouldIncludeFile(e, extensions));
-    logger.info({ repo: opts.repo, treeFiles: treeFiles.length }, 'fetchGitHubCorpus: repo tree fetched');
+    logger.info(
+      { repo: opts.repo, treeFiles: treeFiles.length },
+      'fetchGitHubCorpus: repo tree fetched',
+    );
   } catch (err) {
-    logger.warn({ err, repo: opts.repo }, 'fetchGitHubCorpus: repo tree fetch failed, trying search-only fallback');
+    logger.warn(
+      { err, repo: opts.repo },
+      'fetchGitHubCorpus: repo tree fetch failed, trying search-only fallback',
+    );
   }
 
   // Phase 2: If a query is provided, also search to find relevant files.
@@ -289,7 +295,10 @@ export async function fetchGitHubCorpus(
           searchFiles.push(entry);
         }
       }
-      logger.info({ repo: opts.repo, searchFiles: searchFiles.length }, 'fetchGitHubCorpus: search results merged');
+      logger.info(
+        { repo: opts.repo, searchFiles: searchFiles.length },
+        'fetchGitHubCorpus: search results merged',
+      );
     } catch (err) {
       logger.warn({ err, repo: opts.repo }, 'fetchGitHubCorpus: search failed');
     }

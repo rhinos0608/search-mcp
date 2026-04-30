@@ -232,7 +232,16 @@ function decryptConfigFile(filePath: string, password: string): SearchConfig {
 
 type EnvConfig = Omit<
   Partial<SearchConfig>,
-  'reddit' | 'crawl4ai' | 'github' | 'embeddingSidecar' | 'semanticCrawl' | 'domainTrust' | 'llm' | 'raga' | 'scrubContent' | 'exa'
+  | 'reddit'
+  | 'crawl4ai'
+  | 'github'
+  | 'embeddingSidecar'
+  | 'semanticCrawl'
+  | 'domainTrust'
+  | 'llm'
+  | 'raga'
+  | 'scrubContent'
+  | 'exa'
 > & {
   reddit?: Partial<RedditConfig>;
   crawl4ai?: Partial<Crawl4aiConfig>;
@@ -372,7 +381,11 @@ function loadFromEnv(): EnvConfig {
   const domainTrustEnabled = process.env.DOMAIN_TRUST_ENABLED;
   const trustedDomains = process.env.TRUSTED_DOMAINS;
   const blockedDomains = process.env.BLOCKED_DOMAINS;
-  if (domainTrustEnabled !== undefined || trustedDomains !== undefined || blockedDomains !== undefined) {
+  if (
+    domainTrustEnabled !== undefined ||
+    trustedDomains !== undefined ||
+    blockedDomains !== undefined
+  ) {
     const dt: Partial<DomainTrustConfig> = {};
     if (domainTrustEnabled !== undefined) dt.enabled = domainTrustEnabled === 'true';
     if (trustedDomains !== undefined) {
@@ -542,7 +555,9 @@ export function loadConfig(): SearchConfig {
     },
     domainTrust: {
       enabled:
-        fileConfig.domainTrust?.enabled ?? envConfig.domainTrust?.enabled ?? DEFAULTS.domainTrust.enabled,
+        fileConfig.domainTrust?.enabled ??
+        envConfig.domainTrust?.enabled ??
+        DEFAULTS.domainTrust.enabled,
       trustedDomains:
         fileConfig.domainTrust?.trustedDomains ??
         envConfig.domainTrust?.trustedDomains ??
@@ -552,26 +567,24 @@ export function loadConfig(): SearchConfig {
         envConfig.domainTrust?.blockedDomains ??
         DEFAULTS.domainTrust.blockedDomains,
     },
-    scrubContent:
-      fileConfig.scrubContent ?? envConfig.scrubContent ?? DEFAULTS.scrubContent,
+    scrubContent: fileConfig.scrubContent ?? envConfig.scrubContent ?? DEFAULTS.scrubContent,
     llm: {
       provider: fileConfig.llm?.provider ?? envConfig.llm?.provider ?? DEFAULTS.llm.provider,
       apiToken: fileConfig.llm?.apiToken ?? envConfig.llm?.apiToken ?? DEFAULTS.llm.apiToken,
       baseUrl: fileConfig.llm?.baseUrl ?? envConfig.llm?.baseUrl ?? DEFAULTS.llm.baseUrl,
     },
     raga: {
-      enabled:
-        fileConfig.raga?.enabled ?? envConfig.raga?.enabled ?? DEFAULTS.raga.enabled,
-      baseUrl:
-        fileConfig.raga?.baseUrl ?? envConfig.raga?.baseUrl ?? DEFAULTS.raga.baseUrl,
-      timeoutMs:
-        fileConfig.raga?.timeoutMs ?? envConfig.raga?.timeoutMs ?? DEFAULTS.raga.timeoutMs,
+      enabled: fileConfig.raga?.enabled ?? envConfig.raga?.enabled ?? DEFAULTS.raga.enabled,
+      baseUrl: fileConfig.raga?.baseUrl ?? envConfig.raga?.baseUrl ?? DEFAULTS.raga.baseUrl,
+      timeoutMs: fileConfig.raga?.timeoutMs ?? envConfig.raga?.timeoutMs ?? DEFAULTS.raga.timeoutMs,
       maxRetries:
         fileConfig.raga?.maxRetries ?? envConfig.raga?.maxRetries ?? DEFAULTS.raga.maxRetries,
       cacheEnabled:
         fileConfig.raga?.cacheEnabled ?? envConfig.raga?.cacheEnabled ?? DEFAULTS.raga.cacheEnabled,
       defaultParser:
-        fileConfig.raga?.defaultParser ?? envConfig.raga?.defaultParser ?? DEFAULTS.raga.defaultParser,
+        fileConfig.raga?.defaultParser ??
+        envConfig.raga?.defaultParser ??
+        DEFAULTS.raga.defaultParser,
     },
     rescoreWeights: DEFAULT_RESCORE_WEIGHTS,
   };

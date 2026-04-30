@@ -797,6 +797,14 @@ export function filterSafeUrls(urls: string[], trustConfig?: DomainTrustConfig):
   return safe;
 }
 
+function safeRecordOutcomeDomain(url: string): string {
+  try {
+    return new URL(url).hostname.replace(/^www\./, '');
+  } catch {
+    return '';
+  }
+}
+
 /** Divide a numeric budget across N seeds, with a floor of 1. */
 function divideBudget(total: number, seeds: number): number {
   return Math.max(1, Math.ceil(total / seeds));
@@ -1072,10 +1080,7 @@ export async function crawlSeeds(
   };
 }
 
-export function pagesToCorpus(
-  pages: CrawlPageResult[],
-  scrub?: boolean,
-): CorpusChunk[] {
+export function pagesToCorpus(pages: CrawlPageResult[], scrub?: boolean): CorpusChunk[] {
   const cfg = scrub ?? loadConfig().scrubContent;
   const chunks: CorpusChunk[] = [];
   let pagesWithContent = 0;
@@ -1259,7 +1264,14 @@ export async function semanticCrawl(
       crawlOmittedPages.push(...result.omittedPages);
       // Record outcomes for self-improvement tracking
       for (const page of result.pages) {
-        recordOutcome({ url: page.url, domain: new URL(page.url).hostname.replace(/^www\./, ''), success: page.success, strategy: 'semantic-crawl', timestamp: Date.now(), chars: page.markdown.length });
+        recordOutcome({
+          url: page.url,
+          domain: safeRecordOutcomeDomain(page.url),
+          success: page.success,
+          strategy: 'semantic-crawl',
+          timestamp: Date.now(),
+          chars: page.markdown.length,
+        });
       }
       corpusChunks = pagesToCorpus(result.pages);
       lastPages = result.pages;
@@ -1347,7 +1359,14 @@ export async function semanticCrawl(
       crawlOmittedPages.push(...result.omittedPages);
       // Record outcomes for self-improvement tracking
       for (const page of result.pages) {
-        recordOutcome({ url: page.url, domain: new URL(page.url).hostname.replace(/^www\./, ''), success: page.success, strategy: 'semantic-crawl', timestamp: Date.now(), chars: page.markdown.length });
+        recordOutcome({
+          url: page.url,
+          domain: safeRecordOutcomeDomain(page.url),
+          success: page.success,
+          strategy: 'semantic-crawl',
+          timestamp: Date.now(),
+          chars: page.markdown.length,
+        });
       }
       corpusChunks = pagesToCorpus(result.pages);
       lastPages = result.pages;
@@ -1387,7 +1406,12 @@ export async function semanticCrawl(
           'semantic_crawl: search mode ignores maxDepth > 0, forcing depth 0',
         );
       }
-      const searchOpts = { ...opts, maxDepth: 0, sourceType: opts.source.type, allowPathDrift: true };
+      const searchOpts = {
+        ...opts,
+        maxDepth: 0,
+        sourceType: opts.source.type,
+        allowPathDrift: true,
+      };
       const result = await crawlSeeds(safeUrls, crawl4aiCfg, searchOpts);
       crawlWarnings.push(...result.warnings);
       for (const sw of result.structuredWarnings) {
@@ -1396,7 +1420,14 @@ export async function semanticCrawl(
       crawlOmittedPages.push(...result.omittedPages);
       // Record outcomes for self-improvement tracking
       for (const page of result.pages) {
-        recordOutcome({ url: page.url, domain: new URL(page.url).hostname.replace(/^www\./, ''), success: page.success, strategy: 'semantic-crawl', timestamp: Date.now(), chars: page.markdown.length });
+        recordOutcome({
+          url: page.url,
+          domain: safeRecordOutcomeDomain(page.url),
+          success: page.success,
+          strategy: 'semantic-crawl',
+          timestamp: Date.now(),
+          chars: page.markdown.length,
+        });
       }
       corpusChunks = pagesToCorpus(result.pages);
       lastPages = result.pages;

@@ -564,8 +564,14 @@ const LISTING_CARD_SELECTORS = [
 
 /** CSS selectors for job title elements within a listing card. */
 const TITLE_SELECTORS = [
-  'h2 a', 'h2', 'h3 a', 'h3', 'h4 a', 'h4',
-  'a[class*=title]', 'a[class*=job-title]',
+  'h2 a',
+  'h2',
+  'h3 a',
+  'h3',
+  'h4 a',
+  'h4',
+  'a[class*=title]',
+  'a[class*=job-title]',
   'a[data-jobtitle]',
   'span[class*=title]',
   'div[class*=title]',
@@ -602,7 +608,9 @@ const SALARY_SELECTORS = [
 
 /** CSS selectors for anchor elements containing job links within a listing card. */
 const LINK_SELECTORS = [
-  'h2 a[href]', 'h3 a[href]', 'h4 a[href]',
+  'h2 a[href]',
+  'h3 a[href]',
+  'h4 a[href]',
   'a[class*=title][href]',
   'a[class*=job-title][href]',
   'a[data-automation*=job-title][href]',
@@ -655,9 +663,16 @@ function extractListingFromCard(
   let jobUrl: string | undefined;
   for (const selector of LINK_SELECTORS) {
     const href = $card.find(selector).first().attr('href');
-    if (href && tryParseUrl(href)) {
-      jobUrl = href;
-      break;
+    if (!href) continue;
+
+    try {
+      const resolved = new URL(href, _base);
+      if (tryParseUrl(resolved.toString())) {
+        jobUrl = resolved.toString();
+        break;
+      }
+    } catch {
+      // Ignore malformed or unresolvable links.
     }
   }
 
@@ -732,7 +747,7 @@ function extractListingFromCard(
     source,
     extractedText,
     confidence,
-    verificationStatus: 'listing_page_fetched',
+    verificationStatus: 'search_result_only',
     caveats: [],
   };
 

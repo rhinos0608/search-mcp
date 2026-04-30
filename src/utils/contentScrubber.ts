@@ -84,7 +84,8 @@ const PATTERNS: Pattern[] = [
   {
     type: 'data_exfiltration',
     confidence: 0.95,
-    regex: /\b(?:export|send|copy|log|print|echo|display|show)\s+(?:the|your|all)\s+(?:API|secret|credential|token|password|key)\b/gim,
+    regex:
+      /\b(?:export|send|copy|log|print|echo|display|show)\s+(?:the|your|all)\s+(?:API|secret|credential|token|password|key)\b/gim,
     description: 'Export credentials/tokens',
   },
   {
@@ -110,7 +111,8 @@ const PATTERNS: Pattern[] = [
   {
     type: 'impersonation',
     confidence: 0.85,
-    regex: /\b(?:as\s+(?:a|an)\s+|i\s+am\s+)(?:admin|administrator|moderator|system|superuser|root)\b/gim,
+    regex:
+      /\b(?:as\s+(?:a|an)\s+|i\s+am\s+)(?:admin|administrator|moderator|system|superuser|root)\b/gim,
     description: 'Authority impersonation',
   },
   {
@@ -138,7 +140,7 @@ const PATTERNS: Pattern[] = [
   {
     type: 'xss_injection',
     confidence: 0.85,
-    regex: /on(?:error|load|click|mouseover)\s*=\s*['"].*/gi,
+    regex: /on(?:error|load|click|mouseover)\s*=\s*['"][^'"]{0,1000}/gi,
     description: 'Inline event handler',
   },
 ];

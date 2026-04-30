@@ -7,12 +7,7 @@
 
 import { runEvaluation } from './metrics.js';
 import { getAllQueries, getQueriesByDomain } from './golden-queries/index.js';
-import type {
-  GoldenQuery,
-  RetrievalAPI,
-  EvalSummary,
-  CorpusSnapshot,
-} from './metrics.js';
+import type { GoldenQuery, RetrievalAPI, EvalSummary, CorpusSnapshot } from './metrics.js';
 
 // ── Fixture-based (offline) runner ──────────────────────────────────────────
 
@@ -101,7 +96,10 @@ export async function runOfflineEval(
  * Used for optional live evals outside CI.
  */
 export function createLiveAPI(
-  retrieveFn: (query: string, topK: number) => Promise<{
+  retrieveFn: (
+    query: string,
+    topK: number,
+  ) => Promise<{
     results: { text: string; score?: number; metadata?: Record<string, unknown> }[];
   }>,
 ): RetrievalAPI {
@@ -116,7 +114,10 @@ export function createLiveAPI(
  * Run live evaluation against a retrieval function.
  */
 export async function runLiveEval(
-  retrieveFn: (query: string, topK: number) => Promise<{
+  retrieveFn: (
+    query: string,
+    topK: number,
+  ) => Promise<{
     results: { text: string; score?: number; metadata?: Record<string, unknown> }[];
   }>,
   options?: {
@@ -192,10 +193,10 @@ export function formatEvalSummary(summary: EvalSummary): string {
       if (d === undefined) continue;
       lines.push(
         `  ${domain.padEnd(15)} ` +
-        `${String(d.passed)}/${String(d.total)} ` +
-        `P@10:${(d.averagePrecision * 100).toFixed(1)}% ` +
-        `R@10:${(d.averageRecall * 100).toFixed(1)}% ` +
-        `nDCG:${(d.averageNdcg * 100).toFixed(1)}%`,
+          `${String(d.passed)}/${String(d.total)} ` +
+          `P@10:${(d.averagePrecision * 100).toFixed(1)}% ` +
+          `R@10:${(d.averageRecall * 100).toFixed(1)}% ` +
+          `nDCG:${(d.averageNdcg * 100).toFixed(1)}%`,
       );
     }
     lines.push('');
@@ -209,9 +210,9 @@ export function formatEvalSummary(summary: EvalSummary): string {
       if (d === undefined) continue;
       lines.push(
         `  ${diff.padEnd(10)} ` +
-        `${String(d.passed)}/${String(d.total)} ` +
-        `P@10:${(d.averagePrecision * 100).toFixed(1)}% ` +
-        `R@10:${(d.averageRecall * 100).toFixed(1)}%`,
+          `${String(d.passed)}/${String(d.total)} ` +
+          `P@10:${(d.averagePrecision * 100).toFixed(1)}% ` +
+          `R@10:${(d.averageRecall * 100).toFixed(1)}%`,
       );
     }
     lines.push('');
@@ -222,10 +223,10 @@ export function formatEvalSummary(summary: EvalSummary): string {
     const status = result.passed ? '✓' : '✗';
     lines.push(
       `  ${status} ${result.queryId.padEnd(10)} ` +
-      `P@10:${(result.precisionAtK * 100).toFixed(1)}% ` +
-      `R@10:${(result.recallAtK * 100).toFixed(1)}% ` +
-      `nDCG:${(result.ndcg * 100).toFixed(1)}% ` +
-      `(relevant: ${String(result.relevantFound)}/${String(result.numRelevant)})`,
+        `P@10:${(result.precisionAtK * 100).toFixed(1)}% ` +
+        `R@10:${(result.recallAtK * 100).toFixed(1)}% ` +
+        `nDCG:${(result.ndcg * 100).toFixed(1)}% ` +
+        `(relevant: ${String(result.relevantFound)}/${String(result.numRelevant)})`,
     );
   }
 

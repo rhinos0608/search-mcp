@@ -12,7 +12,7 @@ export const goldenQueries: GoldenQueriesIndex = {
 };
 
 export function getQueriesByDomain(domain: string): GoldenQuery[] {
-const key = domain as keyof GoldenQueriesIndex; // eslint-disable-line @typescript-eslint/no-unnecessary-type-assertion
+  const key = domain as keyof GoldenQueriesIndex; // eslint-disable-line @typescript-eslint/no-unnecessary-type-assertion
   const queries = goldenQueries[key];
   return queries ?? [];
 }

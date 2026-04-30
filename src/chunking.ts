@@ -11,11 +11,13 @@ export interface MarkdownChunk {
     contextBefore?: string | undefined;
     contextAfter?: string | undefined;
     codeFence?: true | undefined;
-    codeBlocks?: {
-      language: string;
-      offset: number;
-      length: number;
-    }[] | undefined;
+    codeBlocks?:
+      | {
+          language: string;
+          offset: number;
+          length: number;
+        }[]
+      | undefined;
   };
 }
 
@@ -765,7 +767,7 @@ function attachCodeFenceContext(chunks: MarkdownChunk[]): MarkdownChunk[] {
     let match: RegExpExecArray | null;
     while ((match = codeFenceRegex.exec(chunk.content)) !== null) {
       const codeContent = match[2] ?? '';
-      if (codeContent.length >= 200) {
+      if (codeContent.length >= 300) {
         codeBlocks.push({
           language: (match[1] ?? '').trim().toLowerCase(),
           offset: match.index,

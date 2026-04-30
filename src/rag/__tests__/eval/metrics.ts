@@ -58,19 +58,25 @@ export interface EvalSummary {
   averagePrecision: number;
   averageRecall: number;
   averageNdcg: number;
-  byDomain: Record<string, {
-    total: number;
-    passed: number;
-    averagePrecision: number;
-    averageRecall: number;
-    averageNdcg: number;
-  }>;
-  byDifficulty: Record<string, {
-    total: number;
-    passed: number;
-    averagePrecision: number;
-    averageRecall: number;
-  }>;
+  byDomain: Record<
+    string,
+    {
+      total: number;
+      passed: number;
+      averagePrecision: number;
+      averageRecall: number;
+      averageNdcg: number;
+    }
+  >;
+  byDifficulty: Record<
+    string,
+    {
+      total: number;
+      passed: number;
+      averagePrecision: number;
+      averageRecall: number;
+    }
+  >;
   results: EvalResult[];
 }
 
@@ -94,10 +100,7 @@ export interface CorpusSnapshot {
 /**
  * Calculate precision@k: fraction of top-k results that are relevant.
  */
-export function precisionAtK(
-  relevantIndices: Set<number>,
-  k: number,
-): number {
+export function precisionAtK(relevantIndices: Set<number>, k: number): number {
   if (k === 0) return 0;
   let relevant = 0;
   for (let i = 0; i < k; i++) {
@@ -109,11 +112,7 @@ export function precisionAtK(
 /**
  * Calculate recall@k: fraction of all relevant items found in top-k.
  */
-export function recallAtK(
-  relevantIndices: Set<number>,
-  totalRelevant: number,
-  k: number,
-): number {
+export function recallAtK(relevantIndices: Set<number>, totalRelevant: number, k: number): number {
   if (totalRelevant === 0) return 0;
   let found = 0;
   for (let i = 0; i < k; i++) {
@@ -128,11 +127,7 @@ export function recallAtK(
  * DCG = sum(rel_i / log2(i + 1)) for i = 1..k
  * nDCG = DCG / IDCG (ideal DCG with perfect ranking)
  */
-export function ndcgAtK(
-  scores: number[],
-  relevantIndices: Set<number>,
-  k: number,
-): number {
+export function ndcgAtK(scores: number[], relevantIndices: Set<number>, k: number): number {
   if (k === 0 || scores.length === 0) return 0;
 
   const actualK = Math.min(k, scores.length);
@@ -172,9 +167,7 @@ export function isResultRelevant(
 
   // Check expected terms
   if (query.expectedTerms && query.expectedTerms.length > 0) {
-    const matched = query.expectedTerms.filter((term) =>
-      text.includes(term.toLowerCase()),
-    );
+    const matched = query.expectedTerms.filter((term) => text.includes(term.toLowerCase()));
     if (matched.length === 0) return false;
   }
 
@@ -219,7 +212,10 @@ export function findRelevantIndices(
 // ── Evaluation Runner ───────────────────────────────────────────────────────
 
 export interface RetrievalAPI {
-  retrieve: (query: string, topK?: number) => Promise<{
+  retrieve: (
+    query: string,
+    topK?: number,
+  ) => Promise<{
     results: { text: string; score?: number; metadata?: Record<string, unknown> }[];
   }>;
 }
@@ -244,9 +240,8 @@ export async function evaluateQuery(
   const rAt10 = recallAtK(relevantIndices, Math.max(numRelevant, 1), Math.min(10, results.length));
   const ndcg = ndcgAtK(scores, relevantIndices, Math.min(10, results.length));
 
-  const averageScore = scores.length > 0
-    ? scores.reduce((sum, s) => sum + s, 0) / scores.length
-    : 0;
+  const averageScore =
+    scores.length > 0 ? scores.reduce((sum, s) => sum + s, 0) / scores.length : 0;
 
   const topResultScore = scores[0] ?? 0;
 
@@ -289,20 +284,20 @@ export async function runEvaluation(
   topK = 10,
 ): Promise<EvalSummary> {
   const results: EvalResult[] = [];
-interface ByDomainAccum {
-  total: number;
-  passed: number;
-  precisionSum: number;
-  recallSum: number;
-  ndcgSum: number;
-}
+  interface ByDomainAccum {
+    total: number;
+    passed: number;
+    precisionSum: number;
+    recallSum: number;
+    ndcgSum: number;
+  }
 
-interface ByDifficultyAccum {
-  total: number;
-  passed: number;
-  precisionSum: number;
-  recallSum: number;
-}
+  interface ByDifficultyAccum {
+    total: number;
+    passed: number;
+    precisionSum: number;
+    recallSum: number;
+  }
 
   const byDomain: Record<string, ByDomainAccum> = {};
 
@@ -313,7 +308,7 @@ interface ByDifficultyAccum {
     results.push(result);
 
     // Aggregate by domain
-byDomain[result.domain] ??= { total: 0, passed: 0, precisionSum: 0, recallSum: 0, ndcgSum: 0 };
+    byDomain[result.domain] ??= { total: 0, passed: 0, precisionSum: 0, recallSum: 0, ndcgSum: 0 };
     const domainEntry = byDomain[result.domain];
     if (domainEntry !== undefined) {
       domainEntry.total++;
@@ -324,7 +319,7 @@ byDomain[result.domain] ??= { total: 0, passed: 0, precisionSum: 0, recallSum: 0
     }
 
     // Aggregate by difficulty
-byDifficulty[result.difficulty] ??= { total: 0, passed: 0, precisionSum: 0, recallSum: 0 };
+    byDifficulty[result.difficulty] ??= { total: 0, passed: 0, precisionSum: 0, recallSum: 0 };
     const diffEntry = byDifficulty[result.difficulty];
     if (diffEntry !== undefined) {
       diffEntry.total++;

@@ -175,10 +175,26 @@ function readabilityFallbackResult(
 
 /** Document file extensions that should use RAG-Anything extraction. */
 const DOCUMENT_EXTENSIONS = new Set([
-  '.pdf', '.doc', '.docx', '.ppt', '.pptx', '.xls', '.xlsx',
-  '.odt', '.ods', '.odp',
-  '.rtf', '.tex',
-  '.png', '.jpg', '.jpeg', '.gif', '.bmp', '.tiff', '.tif', '.webp',
+  '.pdf',
+  '.doc',
+  '.docx',
+  '.ppt',
+  '.pptx',
+  '.xls',
+  '.xlsx',
+  '.odt',
+  '.ods',
+  '.odp',
+  '.rtf',
+  '.tex',
+  '.png',
+  '.jpg',
+  '.jpeg',
+  '.gif',
+  '.bmp',
+  '.tiff',
+  '.tif',
+  '.webp',
   '.djvu',
 ]);
 
@@ -249,16 +265,23 @@ export function createServer(): McpServer {
           .boolean()
           .optional()
           .default(false)
-          .describe('Generate query variations (question, concept, scope, opposition) and merge results for broader coverage.'),
+          .describe(
+            'Generate query variations (question, concept, scope, opposition) and merge results for broader coverage.',
+          ),
         mergeSearchBackends: z
           .boolean()
           .optional()
           .default(false)
-          .describe('When multiple search backends are configured, query all of them and merge + deduplicate results. Adds engines field tracking which backend returned each result.'),
+          .describe(
+            'When multiple search backends are configured, query all of them and merge + deduplicate results. Adds engines field tracking which backend returned each result.',
+          ),
       },
     },
     async ({ query, limit, safeSearch, expandQuery, mergeSearchBackends }) => {
-      logger.info({ tool: 'web_search', limit, safeSearch, expandQuery, mergeSearchBackends }, 'Tool invoked');
+      logger.info(
+        { tool: 'web_search', limit, safeSearch, expandQuery, mergeSearchBackends },
+        'Tool invoked',
+      );
       const start = Date.now();
       try {
         const data = await webSearch(query, limit, safeSearch, expandQuery, mergeSearchBackends);
@@ -327,7 +350,10 @@ export function createServer(): McpServer {
 
         // RAG-Anything escalation for document URLs (PDF, Office, images, etc.)
         if (isDocumentUrl(url) && cfg.raga.enabled && cfg.raga.baseUrl) {
-          logger.info({ tool: 'web_read', url }, 'Document URL detected — using RAG-Anything extraction');
+          logger.info(
+            { tool: 'web_read', url },
+            'Document URL detected — using RAG-Anything extraction',
+          );
           const markdown = await extractWithRAGA(url, cfg.raga.baseUrl);
           data = readabilityFallbackResult(
             url,
@@ -2092,7 +2118,9 @@ export function createServer(): McpServer {
               jsCode,
               ...(extractionConfig ? { extractionConfig } : {}),
               ...(llmFallback ? { llmFallback } : {}),
-              ...(useContextualEmbeddings ? { useContextualEmbeddings, contextualEmbedding: cfg.llm } : {}),
+              ...(useContextualEmbeddings
+                ? { useContextualEmbeddings, contextualEmbedding: cfg.llm }
+                : {}),
               domainTrust: cfg.domainTrust,
             },
             cfg.crawl4ai,

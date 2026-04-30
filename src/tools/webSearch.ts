@@ -126,10 +126,10 @@ export async function searchWithBackends(
       return { results: merged, strategy: qv.strategy };
     }
 
-    const merged = rrfMerge(
-      Array.from(validResults.values()),
-      { k: 60, keyFn: (r) => normalizeUrl(r.url) },
-    );
+    const merged = rrfMerge(Array.from(validResults.values()), {
+      k: 60,
+      keyFn: (r) => normalizeUrl(r.url),
+    });
 
     return { results: merged, strategy: qv.strategy };
   });
@@ -141,14 +141,17 @@ export async function searchWithBackends(
   for (const { results } of queryResults) {
     for (const result of results) {
       // results might be wrapped { item, rrfScore } from rrfMerge or bare from mergeSearchResults
-      const item: SearchResult = 'item' in (result as unknown as Record<string, unknown>) ? (result as { item: SearchResult }).item : result as SearchResult;
-      const rrfScore: number = 'rrfScore' in (result as unknown as Record<string, unknown>) ? (result as { rrfScore: number }).rrfScore : 0.5;
+      const item: SearchResult =
+        'item' in (result as unknown as Record<string, unknown>)
+          ? (result as { item: SearchResult }).item
+          : (result as SearchResult);
+      const rrfScore: number =
+        'rrfScore' in (result as unknown as Record<string, unknown>)
+          ? (result as { rrfScore: number }).rrfScore
+          : 0.5;
       const key = normalizeUrl(item.url);
       const existing = seen.get(key);
-      if (
-        existing === undefined ||
-        item.description.length > existing.item.description.length
-      ) {
+      if (existing === undefined || item.description.length > existing.item.description.length) {
         seen.set(key, { item, rrfScore });
       }
     }
@@ -189,9 +192,17 @@ export async function webSearch(
   expandQueryOpt = false,
   mergeBackends = false,
 ): Promise<SearchResult[]> {
-  return searchWithBackends(query, limit, safeSearch, {
-    braveSearch,
-    searxngSearch,
-    exaSearch,
-  }, undefined, expandQueryOpt, mergeBackends);
+  return searchWithBackends(
+    query,
+    limit,
+    safeSearch,
+    {
+      braveSearch,
+      searxngSearch,
+      exaSearch,
+    },
+    undefined,
+    expandQueryOpt,
+    mergeBackends,
+  );
 }

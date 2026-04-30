@@ -5,60 +5,78 @@ export interface QueryVariation {
 
 const CONCEPT_MAP: Record<string, string[]> = {
   // Tech
-  'api': ['rest', 'graphql', 'endpoint', 'integration', 'sdk'],
-  'database': ['sql', 'nosql', 'postgres', 'mysql', 'mongodb', 'indexing', 'query'],
-  'security': ['vulnerability', 'authentication', 'authorization', 'encryption', 'xss', 'csrf'],
-  'testing': ['unit test', 'integration test', 'e2e', 'coverage', 'mocking', 'assertion'],
-  'deployment': ['ci/cd', 'docker', 'kubernetes', 'release', 'rollback', 'pipeline'],
-  'monitoring': ['observability', 'logging', 'metrics', 'alerting', 'tracing', 'dashboard'],
-  'frontend': ['react', 'vue', 'angular', 'svelte', 'dom', 'css', 'rendering'],
-  'backend': ['server', 'middleware', 'routing', 'caching', 'queue', 'worker'],
-  'machine-learning': ['neural network', 'training', 'inference', 'transformer', 'llm', 'fine-tuning'],
-  'cloud': ['aws', 'azure', 'gcp', 'serverless', 'lambda', 's3', 'ec2'],
-  'compiler': ['parser', 'lexer', 'ast', 'optimization', 'codegen', 'jit', 'llvm'],
-  'networking': ['tcp', 'http', 'dns', 'proxy', 'load balancer', 'cdn'],
-  'cryptography': ['hash', 'signature', 'certificate', 'key exchange', 'zero-knowledge'],
-  'os': ['kernel', 'scheduler', 'memory management', 'file system', 'syscall'],
-  'distributed': ['consensus', 'raft', 'paxos', 'sharding', 'replication', 'cap'],
-  'devops': ['terraform', 'ansible', 'pulumi', 'infrastructure as code', 'gitops'],
-  'storage': ['ssd', 'block', 'object', 'nfs', 'redundancy', 'raid'],
-  'mobile': ['ios', 'android', 'swift', 'kotlin', 'react native', 'flutter'],
+  api: ['rest', 'graphql', 'endpoint', 'integration', 'sdk'],
+  database: ['sql', 'nosql', 'postgres', 'mysql', 'mongodb', 'indexing', 'query'],
+  security: ['vulnerability', 'authentication', 'authorization', 'encryption', 'xss', 'csrf'],
+  testing: ['unit test', 'integration test', 'e2e', 'coverage', 'mocking', 'assertion'],
+  deployment: ['ci/cd', 'docker', 'kubernetes', 'release', 'rollback', 'pipeline'],
+  monitoring: ['observability', 'logging', 'metrics', 'alerting', 'tracing', 'dashboard'],
+  frontend: ['react', 'vue', 'angular', 'svelte', 'dom', 'css', 'rendering'],
+  backend: ['server', 'middleware', 'routing', 'caching', 'queue', 'worker'],
+  'machine-learning': [
+    'neural network',
+    'training',
+    'inference',
+    'transformer',
+    'llm',
+    'fine-tuning',
+  ],
+  cloud: ['aws', 'azure', 'gcp', 'serverless', 'lambda', 's3', 'ec2'],
+  compiler: ['parser', 'lexer', 'ast', 'optimization', 'codegen', 'jit', 'llvm'],
+  networking: ['tcp', 'http', 'dns', 'proxy', 'load balancer', 'cdn'],
+  cryptography: ['hash', 'signature', 'certificate', 'key exchange', 'zero-knowledge'],
+  os: ['kernel', 'scheduler', 'memory management', 'file system', 'syscall'],
+  distributed: ['consensus', 'raft', 'paxos', 'sharding', 'replication', 'cap'],
+  devops: ['terraform', 'ansible', 'pulumi', 'infrastructure as code', 'gitops'],
+  storage: ['ssd', 'block', 'object', 'nfs', 'redundancy', 'raid'],
+  mobile: ['ios', 'android', 'swift', 'kotlin', 'react native', 'flutter'],
 
   // Business
-  'startup': ['funding', 'vc', 'series a', 'pitch deck', 'mrr', 'growth', 'churn'],
-  'marketing': ['seo', 'content', 'social media', 'email', 'conversion', 'funnel', 'brand'],
-  'sales': ['b2b', 'outbound', 'pipeline', 'crm', 'demo', 'negotiation', 'closing'],
-  'finance': ['accounting', 'valuation', 'cap table', 'equity', 'revenue', 'profit'],
-  'product': ['roadmap', 'sprint', 'backlog', 'user story', 'mvp', 'iteration', 'okr'],
-  'management': ['leadership', 'delegation', 'feedback', '1:1', 'performance', 'hiring'],
-  'legal': ['contract', 'nda', 'ip', 'compliance', 'gdpr', 'terms of service'],
-  'support': ['ticket', 'sla', 'on-call', 'escalation', 'kb', 'faq'],
+  startup: ['funding', 'vc', 'series a', 'pitch deck', 'mrr', 'growth', 'churn'],
+  marketing: ['seo', 'content', 'social media', 'email', 'conversion', 'funnel', 'brand'],
+  sales: ['b2b', 'outbound', 'pipeline', 'crm', 'demo', 'negotiation', 'closing'],
+  finance: ['accounting', 'valuation', 'cap table', 'equity', 'revenue', 'profit'],
+  product: ['roadmap', 'sprint', 'backlog', 'user story', 'mvp', 'iteration', 'okr'],
+  management: ['leadership', 'delegation', 'feedback', '1:1', 'performance', 'hiring'],
+  legal: ['contract', 'nda', 'ip', 'compliance', 'gdpr', 'terms of service'],
+  support: ['ticket', 'sla', 'on-call', 'escalation', 'kb', 'faq'],
 
   // Manufacturing / Systems
-  'manufacturing': ['supply chain', 'inventory', 'procurement', 'logistics', 'warehouse'],
-  'safety': ['hazard', 'ppe', 'iso', 'audit', 'incident', 'compliance'],
-  'quality': ['qa', 'qc', 'six sigma', 'inspection', 'tolerance', 'defect'],
-  'maintenance': ['preventive', 'predictive', 'downtime', 'asset', 'cmms'],
-  'engineering': ['cad', 'simulation', 'prototype', 'tolerance', 'material'],
-  'automation': ['plc', 'scada', 'robot', 'sensor', 'actuator', 'hmi'],
-  'energy': ['renewable', 'solar', 'battery', 'grid', 'efficiency', 'emissions'],
-  'aerospace': ['avionics', 'propulsion', 'aerodynamics', 'composite', 'satellite'],
+  manufacturing: ['supply chain', 'inventory', 'procurement', 'logistics', 'warehouse'],
+  safety: ['hazard', 'ppe', 'iso', 'audit', 'incident', 'compliance'],
+  quality: ['qa', 'qc', 'six sigma', 'inspection', 'tolerance', 'defect'],
+  maintenance: ['preventive', 'predictive', 'downtime', 'asset', 'cmms'],
+  engineering: ['cad', 'simulation', 'prototype', 'tolerance', 'material'],
+  automation: ['plc', 'scada', 'robot', 'sensor', 'actuator', 'hmi'],
+  energy: ['renewable', 'solar', 'battery', 'grid', 'efficiency', 'emissions'],
+  aerospace: ['avionics', 'propulsion', 'aerodynamics', 'composite', 'satellite'],
 };
 
 const OPPOSITION_PAIRS: Record<string, string> = {
-  'pros': 'cons', 'cons': 'pros',
-  'advantages': 'disadvantages', 'disadvantages': 'advantages',
-  'benefits': 'drawbacks', 'drawbacks': 'benefits',
-  'best': 'worst', 'worst': 'best',
-  'good': 'bad', 'bad': 'good',
-  'fast': 'slow', 'slow': 'fast',
-  'increase': 'decrease', 'decrease': 'increase',
-  'performance': 'performance bottleneck',
-  'scalability': 'scalability limits',
-  'security': 'security vulnerability',
-  'reliability': 'failure modes',
-  'simplicity': 'complexity tradeoffs',
+  pros: 'cons',
+  cons: 'pros',
+  advantages: 'disadvantages',
+  disadvantages: 'advantages',
+  benefits: 'drawbacks',
+  drawbacks: 'benefits',
+  best: 'worst',
+  worst: 'best',
+  good: 'bad',
+  bad: 'good',
+  fast: 'slow',
+  slow: 'fast',
+  increase: 'decrease',
+  decrease: 'increase',
+  performance: 'performance bottleneck',
+  scalability: 'scalability limits',
+  security: 'security vulnerability',
+  reliability: 'failure modes',
+  simplicity: 'complexity tradeoffs',
 };
+
+function escapeRegExp(term: string): string {
+  return term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
 
 function toQuestion(query: string, words: string[]): string | undefined {
   if (query.length < 5) return undefined;
@@ -103,11 +121,10 @@ function expandConcepts(_query: string, words: string[]): string | undefined {
 }
 
 function adjustScope(query: string, words: string[]): string | undefined {
-  const qLower = query.toLowerCase();
-
   for (const [term, opposite] of Object.entries(OPPOSITION_PAIRS)) {
-    if (qLower.includes(term)) {
-      return query.replace(new RegExp(term, 'i'), opposite);
+    const pattern = new RegExp(`\\b${escapeRegExp(term)}\\b`, 'i');
+    if (pattern.test(query)) {
+      return query.replace(pattern, opposite);
     }
   }
 

@@ -86,11 +86,7 @@ export function registerCounter(
   }
 }
 
-export function incrementCounter(
-  name: string,
-  delta = 1,
-  labels?: Record<string, string>,
-): void {
+export function incrementCounter(name: string, delta = 1, labels?: Record<string, string>): void {
   const key = metricKey(name, labels);
   const existing = counters.get(key);
   if (existing) {
@@ -106,10 +102,7 @@ export function incrementCounter(
   }
 }
 
-export function getCounter(
-  name: string,
-  labels?: Record<string, string>,
-): Counter | undefined {
+export function getCounter(name: string, labels?: Record<string, string>): Counter | undefined {
   const key = metricKey(name, labels);
   const entry = counters.get(key);
   if (!entry) return undefined;
@@ -229,10 +222,7 @@ export function observeHistogram(
   histograms.set(key, existing);
 }
 
-export function getHistogram(
-  name: string,
-  labels?: Record<string, string>,
-): Histogram | undefined {
+export function getHistogram(name: string, labels?: Record<string, string>): Histogram | undefined {
   const key = metricKey(name, labels);
   const entry = histograms.get(key);
   if (!entry) return undefined;
@@ -283,11 +273,7 @@ export function registerGauge(
   }
 }
 
-export function setGauge(
-  name: string,
-  value: number,
-  labels?: Record<string, string>,
-): void {
+export function setGauge(name: string, value: number, labels?: Record<string, string>): void {
   const key = metricKey(name, labels);
   const existing = gauges.get(key);
   if (existing) {
@@ -305,10 +291,7 @@ export function setGauge(
   }
 }
 
-export function getGauge(
-  name: string,
-  labels?: Record<string, string>,
-): Gauge | undefined {
+export function getGauge(name: string, labels?: Record<string, string>): Gauge | undefined {
   const key = metricKey(name, labels);
   const entry = gauges.get(key);
   if (!entry) return undefined;

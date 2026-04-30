@@ -15,6 +15,7 @@
  */
 
 import { logger } from '../logger.js';
+import { assertSafeUrl, safeResponseJson, safeResponseText } from '../httpGuards.js';
 import type { LlmConfig } from '../config.js';
 import type { CorpusChunk } from '../types.js';
 
@@ -81,32 +82,45 @@ export async function enrichChunkWithContext(
     'Write 1-2 sentences of context for this chunk (within the document above).';
 
   try {
+    assertSafeUrl(endpoint);
+
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
       ...(llm.apiToken ? { Authorization: `Bearer ${llm.apiToken}` } : {}),
     };
-    const response = await fetch(endpoint, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify({
-        model,
-        messages: [
-          { role: 'system', content: systemPrompt },
-          { role: 'user', content: userPrompt },
-        ],
-        max_tokens: MAX_CONTEXT_TOKENS,
-        temperature: CONTEXT_TEMPERATURE,
-      }),
-    });
+    const controller = new AbortController();
+    const timeout = setTimeout(() => {
+      controller.abort();
+    }, 30_000);
+
+    let response: Response | undefined;
+    try {
+      response = await fetch(endpoint, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          model,
+          messages: [
+            { role: 'system', content: systemPrompt },
+            { role: 'user', content: userPrompt },
+          ],
+          max_tokens: MAX_CONTEXT_TOKENS,
+          temperature: CONTEXT_TEMPERATURE,
+        }),
+        signal: controller.signal,
+      });
+    } finally {
+      clearTimeout(timeout);
+    }
 
     if (!response.ok) {
       const status = response.status;
-      const text = await response.text().catch(() => '');
+      const text = await safeResponseText(response, endpoint).catch(() => '');
       logger.warn({ status, text }, 'LLM contextual enrichment request failed');
       return { embedText: chunk, originalText: chunk, context: '', enriched: false };
     }
 
-    const data = (await response.json()) as {
+    const data = (await safeResponseJson(response, endpoint)) as {
       choices?: [{ message?: { content?: string } }];
     };
     const rawContent = data.choices?.[0]?.message?.content ?? '';
@@ -186,11 +200,12 @@ export async function enrichChunksBatched(
   }
 
   function releaseSemaphore(): void {
-    permits++;
     const next = waiters.shift();
     if (next) {
       next();
+      return;
     }
+    permits++;
   }
 
   // ── Worker pool ──────────────────────────────────────────────────────────
@@ -231,12 +246,13 @@ export async function enrichChunksBatched(
   const workers = Array.from({ length: workerCount }, () => worker());
   await Promise.all(workers);
 
-  return results.map((result, index) =>
-    result ?? {
-      embedText: work[index]?.chunk.text ?? '',
-      originalText: work[index]?.chunk.text ?? '',
-      context: '',
-      enriched: false,
-    },
+  return results.map(
+    (result, index) =>
+      result ?? {
+        embedText: work[index]?.chunk.text ?? '',
+        originalText: work[index]?.chunk.text ?? '',
+        context: '',
+        enriched: false,
+      },
   );
 }

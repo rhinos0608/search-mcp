@@ -350,8 +350,7 @@ async function concurrencyLimitedMap<T, R>(
       if (r.status === 'fulfilled') {
         results.push(r.value);
       } else {
-        const reason =
-          r.reason instanceof Error ? r.reason.message : String(r.reason);
+        const reason = r.reason instanceof Error ? r.reason.message : String(r.reason);
         throw new Error(`Concurrent crawl failed: ${reason}`);
       }
     }
