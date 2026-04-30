@@ -85,9 +85,15 @@ export function mergeSearchResults(
   // Step 2: score each result
   const scored = Array.from(byUrl.values()).map((entry) => {
     const engineAgreement = entry.engines.size;
-    const domainAuthority = getDomainAuthority(
-      entry.result.domain || new URL(entry.result.url).hostname,
-    );
+    let hostname = entry.result.domain;
+    if (hostname.length === 0) {
+      try {
+        hostname = new URL(entry.result.url).hostname;
+      } catch {
+        hostname = '';
+      }
+    }
+    const domainAuthority = getDomainAuthority(hostname);
     const positionPenalty = 1 / Math.log(entry.bestPosition + Math.E);
 
     // Composite score: engine agreement * 0.4 + domain authority * 0.3 + position * 0.3

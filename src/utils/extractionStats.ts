@@ -51,9 +51,7 @@ function pruneIfNeeded(): void {
   lastPruneTimestamp = now;
 }
 
-export function getDomainStats(
-  days?: number,
-): Map<string, { total: number; successRate: number }> {
+export function getDomainStats(days?: number): Map<string, { total: number; successRate: number }> {
   const cutoff = days !== undefined ? Date.now() - days * 24 * 60 * 60 * 1000 : 0;
 
   const byDomain = new Map<string, { total: number; successes: number }>();

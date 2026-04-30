@@ -118,7 +118,10 @@ const SUSPICIOUS_TLDS = new Set([
 ]);
 
 function normalizeHost(hostname: string): string {
-  return hostname.trim().toLowerCase().replace(/^www\./, '');
+  return hostname
+    .trim()
+    .toLowerCase()
+    .replace(/^www\./, '');
 }
 
 function domainMatches(hostname: string, domain: string): boolean {
@@ -140,7 +143,9 @@ function isBlockedDomain(hostname: string, blockedDomains: string[]): boolean {
 }
 
 function getRegistrableLabels(hostname: string): string[] {
-  return normalizeHost(hostname).split('.').filter((part) => part.length > 0);
+  return normalizeHost(hostname)
+    .split('.')
+    .filter((part) => part.length > 0);
 }
 
 function getTld(hostname: string): string {

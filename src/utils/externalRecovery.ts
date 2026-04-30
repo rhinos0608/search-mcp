@@ -43,7 +43,11 @@ async function attemptWaybackRecovery(url: string): Promise<RecoveryResult> {
     });
 
     if (!snapshotResp.ok) {
-      return { content: null, source: null, error: `Snapshot fetch returned ${String(snapshotResp.status)}` };
+      return {
+        content: null,
+        source: null,
+        error: `Snapshot fetch returned ${String(snapshotResp.status)}`,
+      };
     }
 
     const html = await safeResponseText(snapshotResp, snapshotUrl, 5_000_000);
@@ -80,7 +84,9 @@ async function attemptGoogleCacheRecovery(url: string): Promise<RecoveryResult> 
     }
 
     // Guard: ensure this is an HTML page, not JSON or binary
-    const looksLikeHtml = /<\s*(?:html|body|head|div|p|span|a|!DOCTYPE)\b/i.test(html.slice(0, 2000));
+    const looksLikeHtml = /<\s*(?:html|body|head|div|p|span|a|!DOCTYPE)\b/i.test(
+      html.slice(0, 2000),
+    );
     if (!looksLikeHtml) {
       return { content: null, source: null, error: 'Google Cache returned non-HTML content' };
     }
@@ -103,20 +109,20 @@ function stripGoogleCacheBanner(html: string): string {
   // wrapped in various div structures; remove the first major banner block
   // and return the rest.
 
-  // Try removing the banner div
-  const bannerEnd = html.lastIndexOf('</div><hr>');
-  if (bannerEnd !== -1) {
-    return html.slice(bannerEnd + 11);
+  // Try removing the banner div.
+  const bannerMatch = /<\/div>\s*<hr\b[^>]*>/i.exec(html);
+  if (bannerMatch?.index !== undefined) {
+    return html.slice(bannerMatch.index + bannerMatch[0].length);
   }
 
-  // Alternative: look for the standard banner text
+  // Alternative: look for the standard banner text.
   const cacheTextIdx = html.indexOf("This is Google's cache of");
   if (cacheTextIdx === -1) return html;
 
-  // Find the end of the banner — typically <hr> or a major content start
-  const hrIdx = html.indexOf('<hr', cacheTextIdx);
-  if (hrIdx !== -1) {
-    return html.slice(hrIdx + 4);
+  // Find the end of the banner — typically <hr> or a major content start.
+  const hrMatch = /<hr\b[^>]*>/i.exec(html.slice(cacheTextIdx));
+  if (hrMatch?.index !== undefined) {
+    return html.slice(cacheTextIdx + hrMatch.index + hrMatch[0].length);
   }
 
   return html;
@@ -142,7 +148,10 @@ export async function attemptExternalRecovery(url: string): Promise<RecoveryResu
     return wayback;
   }
 
-  logger.debug({ url, error: wayback.error }, 'externalRecovery: Wayback failed, trying Google Cache');
+  logger.debug(
+    { url, error: wayback.error },
+    'externalRecovery: Wayback failed, trying Google Cache',
+  );
 
   const cache = await attemptGoogleCacheRecovery(url);
   if (cache.content !== null) {
@@ -154,5 +163,9 @@ export async function attemptExternalRecovery(url: string): Promise<RecoveryResu
     { url, waybackError: wayback.error, cacheError: cache.error },
     'externalRecovery: all recovery sources failed',
   );
-  return { content: null, source: null, error: `${wayback.error ?? ''}; ${cache.error ?? ''}`.trim() };
+  return {
+    content: null,
+    source: null,
+    error: `${wayback.error ?? ''}; ${cache.error ?? ''}`.trim(),
+  };
 }

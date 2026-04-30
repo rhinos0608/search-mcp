@@ -45,9 +45,7 @@ export function getEmbeddingProvider(): EmbeddingProvider {
  * Embed texts using the configured provider.
  * Wraps all providers with the same EmbedResponse contract.
  */
-export async function embedTextsWithProvider(
-  request: EmbedRequest,
-): Promise<EmbedResponse> {
+export async function embedTextsWithProvider(request: EmbedRequest): Promise<EmbedResponse> {
   const provider = getEmbeddingProvider();
 
   switch (provider) {
@@ -146,9 +144,7 @@ async function embedWithOpenAICompatible(request: EmbedRequest): Promise<EmbedRe
 /**
  * Embed texts batched using the configured provider.
  */
-export async function embedTextsBatchedWithProvider(
-  request: EmbedRequest,
-): Promise<EmbedResponse> {
+export async function embedTextsBatchedWithProvider(request: EmbedRequest): Promise<EmbedResponse> {
   const provider = getEmbeddingProvider();
 
   // Ollama and OpenAI handle batching internally; sidecar and transformers use our batching
