@@ -185,7 +185,7 @@ export function getGitHubCorpusWarnings(input: GitHubCorpusWarningInput): string
 
   if (input.candidateCount === 0) {
     warnings.push(
-      `GitHub search for "${String(input.query ?? '')}" in ${input.repo} returned 0 results. The repo may be private, the query may not match, or GitHub code search limits may apply.`,
+      `GitHub search for "${input.query ?? ''}" in ${input.repo} returned 0 results. The repo may be private, the query may not match, or GitHub code search limits may apply.`,
     );
     return warnings;
   }
@@ -259,9 +259,7 @@ export async function fetchGitHubCorpus(
   let treeFiles: GitHubTreeEntry[] = [];
   try {
     const treeResult = await getTree(opts.owner, opts.repo, '', opts.branch, true, 500);
-    if (treeResult?.entries) {
-      treeFiles = treeResult.entries.filter((e) => shouldIncludeFile(e, extensions));
-    }
+    treeFiles = treeResult.entries.filter((e) => shouldIncludeFile(e, extensions));
     logger.info({ repo: opts.repo, treeFiles: treeFiles.length }, 'fetchGitHubCorpus: repo tree fetched');
   } catch (err) {
     logger.warn({ err, repo: opts.repo }, 'fetchGitHubCorpus: repo tree fetch failed, trying search-only fallback');
@@ -279,18 +277,16 @@ export async function fetchGitHubCorpus(
         undefined,
         Math.min(maxFiles, 100),
       );
-      if (searchResult?.results) {
-        for (const r of searchResult.results) {
-          const entry: GitHubTreeEntry = {
-            name: r.name,
-            path: r.path,
-            type: 'file' as const,
-            htmlUrl: r.htmlUrl,
-            apiUrl: r.url,
-          };
-          if (shouldIncludeFile(entry, extensions)) {
-            searchFiles.push(entry);
-          }
+      for (const r of searchResult.results) {
+        const entry: GitHubTreeEntry = {
+          name: r.name,
+          path: r.path,
+          type: 'file' as const,
+          htmlUrl: r.htmlUrl,
+          apiUrl: r.url,
+        };
+        if (shouldIncludeFile(entry, extensions)) {
+          searchFiles.push(entry);
         }
       }
       logger.info({ repo: opts.repo, searchFiles: searchFiles.length }, 'fetchGitHubCorpus: search results merged');

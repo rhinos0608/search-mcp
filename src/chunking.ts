@@ -11,6 +11,11 @@ export interface MarkdownChunk {
     contextBefore?: string | undefined;
     contextAfter?: string | undefined;
     codeFence?: true | undefined;
+    codeBlocks?: {
+      language: string;
+      offset: number;
+      length: number;
+    }[] | undefined;
   };
 }
 
@@ -753,16 +758,33 @@ function attachCodeFenceContext(chunks: MarkdownChunk[]): MarkdownChunk[] {
 
     const before = chunk.content.slice(0, fenceMatch.index).trim();
     const after = chunk.content.slice(fenceMatch.index + fenceMatch[0].length).trim();
-    if (before.length === 0 && after.length === 0) return chunk;
+
+    // Extract code blocks >= 300 chars with language detection
+    const codeBlocks: { language: string; offset: number; length: number }[] = [];
+    const codeFenceRegex = /```(\w*)\s*\n([\s\S]*?)```/g;
+    let match: RegExpExecArray | null;
+    while ((match = codeFenceRegex.exec(chunk.content)) !== null) {
+      const codeContent = match[2] ?? '';
+      if (codeContent.length >= 200) {
+        codeBlocks.push({
+          language: (match[1] ?? '').trim().toLowerCase(),
+          offset: match.index,
+          length: match[0].length,
+        });
+      }
+    }
+
+    const meta: MarkdownChunk['metadata'] = {
+      ...(chunk.metadata ?? {}),
+      contextBefore: before.length > 0 ? before : undefined,
+      contextAfter: after.length > 0 ? after : undefined,
+      codeFence: true as const,
+      ...(codeBlocks.length > 0 ? { codeBlocks } : {}),
+    };
 
     return {
       ...chunk,
-      metadata: {
-        ...(chunk.metadata ?? {}),
-        contextBefore: before.length > 0 ? before : undefined,
-        contextAfter: after.length > 0 ? after : undefined,
-        codeFence: true,
-      },
+      metadata: meta,
     };
   });
 }
