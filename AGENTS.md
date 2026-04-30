@@ -142,10 +142,22 @@ CRAWL4AI_BASE_URL
 CRAWL4AI_API_TOKEN
 
 # Embedding
-EMBEDDING_PROVIDER           # 'sidecar'
+EMBEDDING_PROVIDER           # 'sidecar' | 'ollama' | 'transformers' | 'openai'
 EMBEDDING_SIDECAR_BASE_URL
 EMBEDDING_SIDECAR_API_TOKEN
 EMBEDDING_DIMENSIONS        # default 768
+EMBEDDING_CODE_MODEL        # optional code-tuned embedding model
+
+# LLM (for contextual embeddings)
+LLM_PROVIDER                # provider label (e.g. 'openai', 'anthropic')
+LLM_API_TOKEN
+LLM_BASE_URL
+
+# Security (V3.3.0 — all opt-in, off by default)
+DOMAIN_TRUST_ENABLED        # 'true' | 'false' (default: false)
+TRUSTED_DOMAINS             # comma-separated trusted domains
+BLOCKED_DOMAINS             # comma-separated blocked domains
+SCRUB_CONTENT               # 'true' | 'false' (default: false)
 
 # RAG-Anything Bridge (multimodal document extraction)
 RAGA_ENABLED                # 'true' | 'false' (default: false)
@@ -172,6 +184,8 @@ Reddit OAuth is optional, but `REDDIT_CLIENT_ID` and `REDDIT_CLIENT_SECRET` must
 - Default HTTP response size limit is 10MB.
 - Embedding sidecar and RAGA bridge URLs bypass SSRF guards because they come from operator config, not user input.
 - Never commit `config.json`, `config.enc`, or API keys.
+- `config.example.json` is a template showing all available config fields.
+  Copy it to `config.json` and fill in your values.
 
 ## Docker Deployment
 
