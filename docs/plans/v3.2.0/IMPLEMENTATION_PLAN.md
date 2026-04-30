@@ -1360,7 +1360,7 @@ Add to `src/rag/adapters/job.ts`:
 // Per-host canonical job URL patterns
 const JOB_URL_PATTERNS: { hostname: RegExp; path: RegExp }[] = [
   { hostname: /seek\.com\.au$/, path: /^\/job\/\d+/ },
-  { hostname: /indeed\.com$/, path: /\bjk=[a-f0-9]+/ },     // query param
+  { hostname: /indeed\.com$/, path: /\bjk=[a-f0-9]+/ }, // query param
   { hostname: /linkedin\.com$/, path: /\/jobs\/view\// },
   { hostname: /jora\.com$/, path: /\/job\// },
 ];
@@ -1407,7 +1407,10 @@ async function defaultCrawl(urls: string[]): Promise<SemanticJobsCrawledPage[]> 
   const cfg = loadConfig();
   const crawlOne = async (url: string) => {
     const result = await webCrawl(url, cfg.crawl4ai.baseUrl, cfg.crawl4ai.apiToken, {
-      strategy: 'bfs', maxDepth: 1, maxPages: 1, includeExternalLinks: false,
+      strategy: 'bfs',
+      maxDepth: 1,
+      maxPages: 1,
+      includeExternalLinks: false,
     });
     return { url, page: result.pages[0] };
   };
@@ -1442,7 +1445,8 @@ async function defaultCrawl(urls: string[]): Promise<SemanticJobsCrawledPage[]> 
         ...(page?.errorMessage ? { error: page.errorMessage } : {}),
       });
     } else {
-      const reason = outcome.reason instanceof Error ? outcome.reason.message : String(outcome.reason);
+      const reason =
+        outcome.reason instanceof Error ? outcome.reason.message : String(outcome.reason);
       pages.push({ url, html: '', success: false, error: reason });
     }
   }
@@ -1592,12 +1596,14 @@ services:
 ```
 
 **Files to create/modify**:
+
 - `Dockerfile` — multi-stage Node.js build (dev + production)
 - `docker-compose.yml` — full stack
 - `searxng/settings.yml` — pre-configured SearXNG (engines, privacy defaults)
 - `docs/quickstart.md` — update with Docker instructions
 
 **Acceptance criteria**:
+
 - [ ] `docker compose up -d` launches all 4 services
 - [ ] MCP clients connect via `http://host.docker.internal:8050`
 - [ ] SearXNG fallback works when no Exa/Brave API keys configured
@@ -1615,7 +1621,7 @@ type EmbeddingProvider = 'sidecar' | 'openai' | 'ollama' | 'transformers';
 
 interface OllamaEmbedder {
   baseUrl: string; // e.g., http://localhost:11434
-  model: string;   // e.g., 'nomic-embed-text'
+  model: string; // e.g., 'nomic-embed-text'
   dimensions?: number;
 }
 
@@ -1643,6 +1649,7 @@ async function getEmbedder(modelName: string) {
 ```
 
 **Files to create/modify**:
+
 - `src/utils/embedding.ts` — provider dispatch (embedTexts routes to correct backend)
 - `src/utils/ollamaEmbedding.ts` — new Ollama client
 - `src/utils/transformersEmbedding.ts` — new Transformers.js client
@@ -1651,6 +1658,7 @@ async function getEmbedder(modelName: string) {
 - `docs/quickstart.md` — document fully-local paths
 
 **Acceptance criteria**:
+
 - [ ] Ollama embeddings work with `EMBEDDING_PROVIDER=ollama` + `ollama pull nomic-embed-text`
 - [ ] Transformers.js embeddings work with `EMBEDDING_PROVIDER=transformers` (no external deps)
 - [ ] Existing sidecar path unchanged when `EMBEDDING_PROVIDER` is unset (backward compat)
@@ -1662,11 +1670,13 @@ async function getEmbedder(modelName: string) {
 **What**: List search-mcp on the three major MCP directories.
 
 **Where**:
+
 - [ ] **mcp.so** — https://mcp.so/submit (largest directory, 20,414 servers)
 - [ ] **FastMCP.market** — https://fastmcp.market/submit
 - [ ] **MCP Registry** — Package as npm with MCP manifest
 
 **What to include in listings**:
+
 - Feature matrix comparison (36 tools vs competitors' 3-9)
 - Docker Compose one-command setup
 - Privacy-first positioning (no data leaves user machine with SearXNG)
@@ -1674,45 +1684,48 @@ async function getEmbedder(modelName: string) {
 - Links to docs: tools.md, architecture.md, quickstart.md
 
 **Files to create/modify**:
+
 - `README.md` — add badges, feature comparison table, Docker setup
 - `docs/comparison.md` — detailed feature matrix vs Kindly, Vera, mcp-local-rag, mcp-crawl4ai-rag
 
 **Acceptance criteria**:
+
 - [ ] Listed on mcp.so with feature matrix
 - [ ] Listed on FastMCP.market
 - [ ] npm package has MCP manifest for registry discovery
 
 ### Phase 6 Files
 
-| File | Action | Purpose |
-|------|--------|---------|
-| `Dockerfile` | Create | Multi-stage Node.js build |
-| `docker-compose.yml` | Create | Full stack (SearXNG + Crawl4AI + sidecar) |
-| `searxng/settings.yml` | Create | Pre-configured SearXNG |
-| `src/utils/ollamaEmbedding.ts` | Create | Ollama embedding client |
-| `src/utils/transformersEmbedding.ts` | Create | Transformers.js embedding client |
-| `src/utils/embedding.ts` | Modify | Provider dispatch |
-| `src/config.ts` | Modify | New env vars |
-| `package.json` | Modify | Optional transformers dependency |
-| `README.md` | Modify | Badges, comparison, Docker setup |
-| `docs/quickstart.md` | Modify | Docker + fully-local paths |
-| `docs/comparison.md` | Create | Feature matrix vs competitors |
+| File                                 | Action | Purpose                                   |
+| ------------------------------------ | ------ | ----------------------------------------- |
+| `Dockerfile`                         | Create | Multi-stage Node.js build                 |
+| `docker-compose.yml`                 | Create | Full stack (SearXNG + Crawl4AI + sidecar) |
+| `searxng/settings.yml`               | Create | Pre-configured SearXNG                    |
+| `src/utils/ollamaEmbedding.ts`       | Create | Ollama embedding client                   |
+| `src/utils/transformersEmbedding.ts` | Create | Transformers.js embedding client          |
+| `src/utils/embedding.ts`             | Modify | Provider dispatch                         |
+| `src/config.ts`                      | Modify | New env vars                              |
+| `package.json`                       | Modify | Optional transformers dependency          |
+| `README.md`                          | Modify | Badges, comparison, Docker setup          |
+| `docs/quickstart.md`                 | Modify | Docker + fully-local paths                |
+| `docs/comparison.md`                 | Create | Feature matrix vs competitors             |
 
 ### Estimated Scope
 
-| Component | New LOC | Modified LOC |
-|-----------|---------|--------------|
-| Dockerfile + compose + SearXNG config | ~50 | 0 |
-| Ollama embedding client | ~60 | 0 |
-| Transformers.js embedding client | ~80 | 0 |
-| Provider dispatch refactor | ~30 | ~50 |
-| Config additions | ~20 | ~30 |
-| Docs + README + registry | ~100 | ~80 |
-| **Total** | **~340** | **~160** |
+| Component                             | New LOC  | Modified LOC |
+| ------------------------------------- | -------- | ------------ |
+| Dockerfile + compose + SearXNG config | ~50      | 0            |
+| Ollama embedding client               | ~60      | 0            |
+| Transformers.js embedding client      | ~80      | 0            |
+| Provider dispatch refactor            | ~30      | ~50          |
+| Config additions                      | ~20      | ~30          |
+| Docs + README + registry              | ~100     | ~80          |
+| **Total**                             | **~340** | **~160**     |
 
 ### Review Gate 6: Distribution Review
 
 **Focus**:
+
 1. Docker Compose: does `docker compose up -d` work on a clean machine?
 2. Ollama: correct error handling when server not running
 3. Transformers.js: in-process embeddings without segfaults

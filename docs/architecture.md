@@ -43,6 +43,7 @@ search-mcp/
 │   │   ├── fusion.ts        # RRF + weighted linear fusion
 │   │   ├── rerank.ts        # cross-encoder reranking (ONNX)
 │   │   ├── corpusCache.ts   # SQLite-backed corpus cache
+│   │   ├── contextualEmbedding.ts # LLM-based chunk enrichment (V3.3.0)
 │   │   ├── jobRanking.ts    # weighted composite job scoring
 │   │   ├── jobDedup.ts      # three-layer job dedup
 │   │   ├── lexicalConstraint.ts # IDF-weighted soft token coverage
@@ -71,18 +72,32 @@ search-mcp/
 │   │   ├── embedding.ts     # provider dispatch
 │   │   ├── ollamaEmbedding.ts # Ollama local embedding
 │   │   ├── transformersEmbedding.ts # Transformers.js in-process
-│   │   ├── ragAnythingClient.ts # RAG-Anything bridge client
-│   │   ├── extractionQuality.ts  # quality thresholds
-│   │   ├── extractionConfig.ts   # extraction config schema
-│   │   ├── smartExtraction.ts    # quality-based escalation
-│   │   ├── llmSummarizer.ts      # LLM summarization
-│   │   ├── semanticResponse.ts   # response compaction
-│   │   ├── renderRecovery.ts     # placeholder content recovery
+│   │   ├── domainTrust.ts          # domain reputation & typosquat detection
 │   │   ├── elementHelpers.ts     # element utilities
 │   │   ├── elementTruncation.ts  # truncation logic
+│   │   ├── embedding.ts          # provider dispatch
+│   │   ├── externalRecovery.ts   # Wayback Machine & Google Cache fallbacks
+│   │   ├── extractionConfig.ts   # extraction config schema
+│   │   ├── extractionQuality.ts  # quality thresholds
+│   │   ├── extractionStats.ts    # self-improvement outcome tracking
+│   │   ├── fusion.ts             # RRF merge across ranked lists
+│   │   ├── githubCorpus.ts       # GitHub API file collector (dynamically imported)
 │   │   ├── htmlElements.ts       # HTML element types
-│   │   └── markdownElements.ts   # markdown element types
-│   └── tools/               # one file per tool (29 tools)
+│   │   ├── lexicalConstraint.ts  # IDF-weighted soft token coverage
+│   │   ├── llmSummarizer.ts      # LLM summarization
+│   │   ├── markdownElements.ts   # markdown element types
+│   │   ├── ollamaEmbedding.ts    # Ollama local embedding
+│   │   ├── ragAnythingClient.ts  # RAG-Anything bridge client
+│   │   ├── renderRecovery.ts     # placeholder content recovery
+│   │   ├── rescore.ts            # score normalization
+│   │   ├── searchMerge.ts        # cross-backend search result merging
+│   │   ├── semanticResponse.ts   # response compaction
+│   │   ├── sitemap.ts            # XML sitemap parser
+│   │   ├── contentScrubber.ts      # threat detection & redaction (V3.3.0)
+│   │   ├── smartExtraction.ts    # quality-based escalation
+│   │   ├── transformersEmbedding.ts # Transformers.js in-process
+│   │   └── url.ts                # URL dedup
+│   └── tools/               # one file per tool (28 tools)
 │       ├── webSearch.ts
 │       ├── webRead.ts
 │       ├── webCrawl.ts
@@ -115,7 +130,8 @@ search-mcp/
 │       ├── stackoverflowSearch.ts
 │       ├── npmSearch.ts
 │       ├── pypiSearch.ts
-│       ├── newsSearch.ts
+│       ├── queryExpansion.ts      # V3.3.0: rule-based query variation generation
+│       ├── newsSearch.ts (deprecated, removed from server registration)
 │       ├── searxngSearch.ts
 │       └── healthCheck.ts
 ├── services/               # Python bridge services
@@ -182,16 +198,17 @@ Embedding provider dispatch lives in `src/utils/embedding.ts`. Provider selectio
 ### Docker Compose Deployment
 
 Full-stack `docker-compose.yml` with four services:
+
 - `search-mcp` — MCP server (port 8050 stdio HTTP proxy)
 - `search-mcp-crawl4ai` — Crawl4AI browser service (port 8051)
-- `search-mcp-embedding` — Embedding sidecar (port 8001)
+- `search-mcp-embedding` — Embedding sidecar (host port 8001 mapped to container port 8000; `8001:8000` in `docker-compose.yml`)
 - `search-mcp-searxng` — SearXNG meta-search (port 8081)
 
 Start: `docker compose up -d`
 
 ### Evaluation Framework
 
-`src/eval/` provides golden query datasets across academic, general, job, and QA domains. Supports precision/recall/nDCG scoring with a batch runner across retrieval profiles.
+`src/rag/__tests__/eval/` provides golden query datasets across academic, general, job, and QA domains. Supports precision/recall/nDCG scoring with a batch runner across retrieval profiles.
 
 ### `src/tools/`
 

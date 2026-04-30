@@ -4,34 +4,34 @@ A feature comparison of search-mcp (v3.2.0) against other MCP search/retrieval s
 
 ## Feature Matrix
 
-| Feature | **search-mcp** | Kindly | Vera | mcp-local-rag | mcp-crawl4ai-rag |
-|---|---|---|---|---|---|
-| **Total tools** | **28** | 3 | 4 | 6 | 9 |
-| **Web search** | ✅ Exa, Brave, SearXNG | ✅ | ✅ | ✅ | ✅ |
-| **Web read/crawl** | ✅ Crawl4AI deep crawl | ✅ | ❌ | ✅ | ✅ |
-| **Smart extraction** | ✅ LLM + schema | ❌ | ❌ | ❌ | ❌ |
-| **Semantic RAG** | ✅ BM25+embed+RRF+rerank | ❌ | ❌ | ✅ basic | ❌ |
-| **Academic search** | ✅ ArXiv + Semantic Scholar | ❌ | ❌ | ❌ | ❌ |
-| **YouTube transcripts** | ✅ Search + transcripts + RAG | ❌ | ❌ | ❌ | ❌ |
-| **Reddit** | ✅ Search + comments + RAG | ❌ | ❌ | ❌ | ❌ |
-| **GitHub** | ✅ Repo + code search + trending | ❌ | ❌ | ❌ | ❌ |
-| **Stack Overflow** | ✅ Q&A search + code blocks | ❌ | ❌ | ❌ | ❌ |
-| **Hacker News** | ✅ | ❌ | ❌ | ❌ | ❌ |
-| **Twitter/X** | ✅ | ❌ | ❌ | ❌ | ❌ |
-| **Product Hunt** | ✅ | ❌ | ❌ | ❌ | ❌ |
-| **npm/PyPI** | ✅ | ❌ | ❌ | ❌ | ❌ |
-| **Patents** | ✅ | ❌ | ❌ | ❌ | ❌ |
-| **Podcasts** | ✅ | ❌ | ❌ | ❌ | ❌ |
-| **Job search** | ✅ SEEK + Indeed + Jora | ❌ | ❌ | ❌ | ❌ |
-| **Knowledge graph** | ✅ Corpus cache + SQLite | ❌ | ❌ | ❌ | ❌ |
-| **Dedup (3-layer)** | ✅ URL + fingerprint + semantic | ❌ | ❌ | ❌ | ❌ |
-| **Constraint ranking** | ✅ Hard + soft constraints | ❌ | ❌ | ❌ | ❌ |
-| **Evaluation harness** | ✅ Golden queries + P/R/nDCG | ❌ | ❌ | ❌ | ❌ |
-| **Tracing/metrics** | ✅ Instrumentation + counters | ❌ | ❌ | ❌ | ❌ |
-| **Docker Compose** | ✅ Full stack (4 services) | ❌ | ❌ | ❌ | ✅ |
-| **Local embeddings** | ✅ Ollama + Transformers.js | ❌ | ❌ | ✅ | ❌ |
-| **Privacy-first mode** | ✅ No API keys (SearXNG) | ❌ | ❌ | ✅ local | ❌ |
-| **MCP registry** | Listed on mcp.so, FastMCP.market | ✅ | ✅ | ❌ | ❌ |
+| Feature                 | **search-mcp**                   | Kindly | Vera | mcp-local-rag | mcp-crawl4ai-rag |
+| ----------------------- | -------------------------------- | ------ | ---- | ------------- | ---------------- |
+| **Total tools**         | **28**                           | 3      | 4    | 6             | 9                |
+| **Web search**          | ✅ Exa, Brave, SearXNG           | ✅     | ✅   | ✅            | ✅               |
+| **Web read/crawl**      | ✅ Crawl4AI deep crawl           | ✅     | ❌   | ✅            | ✅               |
+| **Smart extraction**    | ✅ LLM + schema                  | ❌     | ❌   | ❌            | ❌               |
+| **Semantic RAG**        | ✅ BM25+embed+RRF+rerank         | ❌     | ❌   | ✅ basic      | ❌               |
+| **Academic search**     | ✅ ArXiv + Semantic Scholar      | ❌     | ❌   | ❌            | ❌               |
+| **YouTube transcripts** | ✅ Search + transcripts + RAG    | ❌     | ❌   | ❌            | ❌               |
+| **Reddit**              | ✅ Search + comments + RAG       | ❌     | ❌   | ❌            | ❌               |
+| **GitHub**              | ✅ Repo + code search + trending | ❌     | ❌   | ❌            | ❌               |
+| **Stack Overflow**      | ✅ Q&A search + code blocks      | ❌     | ❌   | ❌            | ❌               |
+| **Hacker News**         | ✅                               | ❌     | ❌   | ❌            | ❌               |
+| **Twitter/X**           | ✅                               | ❌     | ❌   | ❌            | ❌               |
+| **Product Hunt**        | ✅                               | ❌     | ❌   | ❌            | ❌               |
+| **npm/PyPI**            | ✅                               | ❌     | ❌   | ❌            | ❌               |
+| **Patents**             | ✅                               | ❌     | ❌   | ❌            | ❌               |
+| **Podcasts**            | ✅                               | ❌     | ❌   | ❌            | ❌               |
+| **Job search**          | ✅ SEEK + Indeed + Jora          | ❌     | ❌   | ❌            | ❌               |
+| **Knowledge graph**     | ✅ Corpus cache + SQLite         | ❌     | ❌   | ❌            | ❌               |
+| **Dedup (3-layer)**     | ✅ URL + fingerprint + semantic  | ❌     | ❌   | ❌            | ❌               |
+| **Constraint ranking**  | ✅ Hard + soft constraints       | ❌     | ❌   | ❌            | ❌               |
+| **Evaluation harness**  | ✅ Golden queries + P/R/nDCG     | ❌     | ❌   | ❌            | ❌               |
+| **Tracing/metrics**     | ✅ Instrumentation + counters    | ❌     | ❌   | ❌            | ❌               |
+| **Docker Compose**      | ✅ Full stack (4 services)       | ❌     | ❌   | ❌            | ✅               |
+| **Local embeddings**    | ✅ Ollama + Transformers.js      | ❌     | ❌   | ✅            | ❌               |
+| **Privacy-first mode**  | ✅ No API keys (SearXNG)         | ❌     | ❌   | ✅ local      | ❌               |
+| **MCP registry**        | Listed on mcp.so, FastMCP.market | ✅     | ✅   | ❌            | ❌               |
 
 ## When to Choose search-mcp
 
@@ -51,14 +51,14 @@ A feature comparison of search-mcp (v3.2.0) against other MCP search/retrieval s
 
 ## Quick Decision Guide
 
-| Need | Recommended |
-|---|---|
-| Just web search | Kindly, mcp-crawl4ai-rag |
-| Web + crawl + RAG | search-mcp, mcp-local-rag |
-| Multi-source research (academic, social, code) | **search-mcp** |
-| Job search with structured data | **search-mcp** |
-| Fully local, no API keys | **search-mcp** + SearXNG + Ollama |
-| Minimal resource usage | Kindly (3 tools) |
+| Need                                           | Recommended                       |
+| ---------------------------------------------- | --------------------------------- |
+| Just web search                                | Kindly, mcp-crawl4ai-rag          |
+| Web + crawl + RAG                              | search-mcp, mcp-local-rag         |
+| Multi-source research (academic, social, code) | **search-mcp**                    |
+| Job search with structured data                | **search-mcp**                    |
+| Fully local, no API keys                       | **search-mcp** + SearXNG + Ollama |
+| Minimal resource usage                         | Kindly (3 tools)                  |
 
 ## MCP Directory Listings
 

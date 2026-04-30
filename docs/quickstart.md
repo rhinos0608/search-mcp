@@ -35,7 +35,7 @@ EXA_API_KEY=your_key search-mcp
 ### From Source
 
 ```bash
-git clone https://github.com/your-org/search-mcp.git
+git clone https://github.com/rhinos0608/search-mcp.git
 cd search-mcp
 npm install
 npm run build
@@ -83,20 +83,20 @@ docker compose up -d
 
 ## What You Can Do
 
-| Tool | Example |
-|---|---|
-| `web_search` | Search the web with Exa/Brave/SearXNG |
-| `web_read` | Extract article content from a URL |
-| `web_crawl` | Deep-crawl a site with Crawl4AI |
-| `semantic_crawl` | Crawl + chunk + embed + RAG-rank a site |
-| `semantic_github_code` | AST-aware code search in a repo |
-| `youtube_transcript` | Get video captions |
-| `reddit_search` | Search Reddit posts |
-| `reddit_comments` | Fetch comment trees |
-| `academic_search` | Search ArXiv + Semantic Scholar |
-| `hackernews_search` | Search HN stories |
-| `semantic_jobs` | Extract structured job listings |
-| `health_check` | Verify server status |
+| Tool                   | Example                                 |
+| ---------------------- | --------------------------------------- |
+| `web_search`           | Search the web with Exa/Brave/SearXNG   |
+| `web_read`             | Extract article content from a URL      |
+| `web_crawl`            | Deep-crawl a site with Crawl4AI         |
+| `semantic_crawl`       | Crawl + chunk + embed + RAG-rank a site |
+| `semantic_github_code` | AST-aware code search in a repo         |
+| `youtube_transcript`   | Get video captions                      |
+| `reddit_search`        | Search Reddit posts                     |
+| `reddit_comments`      | Fetch comment trees                     |
+| `academic_search`      | Search ArXiv + Semantic Scholar         |
+| `hackernews_search`    | Search HN stories                       |
+| `semantic_jobs`        | Extract structured job listings         |
+| `health_check`         | Verify server status                    |
 
 ## Next Steps
 

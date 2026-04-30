@@ -1,6 +1,6 @@
 # AGENTS.md
 
-> **Version: 3.2.0** — Search MCP server. Keep stdout JSON-RPC only; log to stderr.
+> **Version: 3.3.0** — Search MCP server. Keep stdout JSON-RPC only; log to stderr.
 
 Guidance for AI coding agents working in this repository.
 
@@ -29,19 +29,19 @@ npm run config:decrypt   # config.enc -> config.json
 
 ## Architecture
 
-- `src/server.ts` registers 29 tools inline with Zod schemas via `server.registerTool()` and delegates to `src/tools/*`.
+- `src/server.ts` registers 28 tools inline with Zod schemas via `server.registerTool()` and delegates to `src/tools/*`.
 - `src/index.ts` Entry point. Creates `McpServer`, attaches `StdioServerTransport`, calls `server.connect()`.
 - `src/logger.ts` routes pino logs to stderr. Never write non-JSON-RPC output to stdout.
 - `src/config.ts` resolves config in this order: encrypted config → env vars → defaults, then caches it.
 - Tool handlers return `ToolResult<T>` as JSON text content. Errors are sanitized and returned with `isError: true`.
 
-## Main Tools (29 total)
+## Main Tools (28 total)
 
 ### Search/Read/Crawl
-- `web_search`: Exa, Brave, or SearXNG with fallback chain.
+- `web_search`: Exa, Brave, or SearXNG with fallback chain, optional query expansion and cross-backend merging.
 - `web_read`: fetch URL and extract readable article content.
-- `web_crawl`: Crawl4AI multi-page crawl; timeout = `30s + 15s * maxPages`, capped at 5 min.
-- `semantic_crawl`: primary crawl RAG entry point. Supports `url`, `sitemap`, `search`, `github`, and `cached` sources.
+- `web_crawl`: Crawl4AI multi-page crawl; timeout = `30s + 15s * maxPages`, capped at 5 min. Includes external recovery (Wayback Machine, Google Cache) when crawl fails.
+- `semantic_crawl`: primary crawl RAG entry point. Supports `url`, `sitemap`, `search`, `github`, and `cached` sources. Supports contextual chunk embeddings, content scrubbing, domain trust filtering, and self-improvement extraction stats.
 
 ### Semantic/RAG
 - `semantic_youtube`: YouTube search + transcripts + RAG.
@@ -99,6 +99,32 @@ Provider selection via `EMBEDDING_PROVIDER` env var (default `sidecar`):
 | `openai` | OpenAI-compatible API | `EMBEDDING_OPENAI_API_KEY` |
 
 Code search may use `EMBEDDING_CODE_MODEL` for a code-tuned model endpoint.
+
+## V3.3.0 Features
+
+### Contextual Embeddings (`src/rag/contextualEmbedding.ts`)
+Optional LLM-based chunk enrichment for `semantic_crawl`. When `useContextualEmbeddings: true` and LLM config is present, each chunk is prefixed with a short LLM-generated context string before embedding. Original chunk text is preserved for display; enriched text is used only for embedding. Gracefully degrades to raw chunks if the LLM call fails.
+
+### Query Expansion (`src/tools/queryExpansion.ts`)
+Rule-based query variation generator: concept/synonym expansion, question form, scope adjustment, opposition pairs. Wired into `web_search` via `expandQuery` param (default `false`). ~60-entry concept map, no LLM calls.
+
+### External Recovery (`src/utils/externalRecovery.ts`)
+When Crawl4AI returns placeholder/empty content, attempts Wayback Machine CDX API and Google Cache as fallbacks. Recovered content tagged with `recoverySource` metadata. Bounded timeout and size limits.
+
+### Content Scrubbing (`src/utils/contentScrubber.ts`)
+Regex-based detection of prompt injection, data exfiltration, impersonation, and XSS patterns. Redacts with `[REDACTED]` tags. Returns risk score and threat summary. Opt-in via `SCRUB_CONTENT=true`.
+
+### Cross-Backend Search Merging (`src/utils/searchMerge.ts`)
+When both Brave and SearXNG are configured, queries both in parallel and merges results by normalized URL. Scoring: engine agreement (40%), domain authority (30%), position (30%). Wired into `web_search` via `mergeSearchBackends` param.
+
+### Domain Trust (`src/utils/domainTrust.ts`)
+Evaluates domain reputation: established-domain allowlist, suspicious TLDs, HTTPS enforcement, Levenshtein typosquat detection. Opt-in via `DOMAIN_TRUST_ENABLED=true`.
+
+### Extraction Stats (`src/utils/extractionStats.ts`)
+Tracks per-domain crawl success rates in-memory. Surfaces via health endpoint. Can short-circuit known-failing domains. Prunes by TTL, max 10k entries.
+
+### Code Example Extraction (`src/chunking.ts`)
+Detects fenced code blocks >=300 chars during chunking, attaches language and offset metadata to nearest section.
 
 ## Semantic Crawl Pipeline
 
@@ -196,11 +222,11 @@ docker compose up -d
 
 ## Evaluation Framework
 
-`src/eval/` provides a golden-query evaluation harness:
+`src/rag/__tests__/eval/` provides a golden-query evaluation harness:
 
 - Golden query datasets covering academic, general, job, and QA domains
 - Scoring: precision, recall, nDCG
-- Runner script for batch evaluation
+- Runner script for batch evaluation (`scripts/eval-retrieval.ts`)
 - Test suite for evaluation components
 
 ## Commit Style

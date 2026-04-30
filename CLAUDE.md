@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-> **Version: 3.2.0** — Semantic RAG pipeline with multi-provider embeddings (sidecar/Ollama/Transformers.js/OpenAI), Docker Compose full-stack deployment, evaluation framework, observability/metrics, and RAG-Anything multimodal document extraction.
+> **Version: 3.3.0** — Semantic RAG pipeline with multi-provider embeddings (sidecar/Ollama/Transformers.js/OpenAI), Docker Compose full-stack deployment, evaluation framework, observability/metrics, RAG-Anything multimodal document extraction, and extraction resilience features (contextual embeddings, domain trust, external recovery, content scrubbing, query expansion, cross-backend merging, code extraction, self-improvement tracking).
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
@@ -8,7 +8,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 An MCP (Model Context Protocol) server that exposes web search, web reading, deep crawling, **semantic RAG search**, GitHub (repo, file, tree, search, corpus), YouTube, Reddit, Twitter/X, Product Hunt, patent, podcast, academic research, Hacker News, Stack Overflow, npm, PyPI, and news tools over stdio JSON-RPC. Clients like Claude Desktop or the Claude CLI connect via stdin/stdout; all logging goes to stderr.
 
-V3.0.0 extracts the retrieval pipeline into reusable `src/rag/` modules. V3.0.5 adds `semantic_jobs`. V3.1.0 adds `semantic_github_code` (AST-aware code search via tree-sitter). V3.1.1 fixes three reliability bugs (HTML threading, timeout scaling, response-size guard). V3.1.5 adds RAG-Anything integration for multimodal document extraction (PDFs, Office, scanned docs) via a Python bridge service. V3.2.0 adds multi-provider embeddings (Ollama, Transformers.js, OpenAI dispatch), Docker Compose full-stack deployment, evaluation framework with golden queries, observability/metrics/instrumentation, two-phase job crawl, Stack Overflow adapter, and academic/QA adapters. The shared RAG core: bi-encoder embeddings → BM25+ → RRF fusion → top-K, now with pluggable embedding providers.
+V3.0.0 extracts the retrieval pipeline into reusable `src/rag/` modules. V3.0.5 adds `semantic_jobs`. V3.1.0 adds `semantic_github_code` (AST-aware code search via tree-sitter). V3.1.1 fixes three reliability bugs (HTML threading, timeout scaling, response-size guard). V3.1.5 adds RAG-Anything integration for multimodal document extraction (PDFs, Office, scanned docs) via a Python bridge service. V3.2.0 adds multi-provider embeddings (Ollama, Transformers.js, OpenAI dispatch), Docker Compose full-stack deployment, evaluation framework with golden queries, observability/metrics/instrumentation, two-phase job crawl, Stack Overflow adapter, and academic/QA adapters. V3.3.0 adds extraction resilience features: contextual embeddings, domain trust, external recovery (Wayback/Google Cache), content scrubbing, query expansion, cross-backend search merging, code example extraction, and self-improvement tracking.
 
 ## Commands
 
@@ -37,10 +37,10 @@ Append `--json` (via `dev:json` / `start:json`) for structured JSON logging inst
 
 _Search & Read_
 
-- `web_search` — Multi-backend search with fallback chain: primary backend (configured) → remaining backend. Supports Exa, Brave, and SearXNG.
+- `web_search` — Multi-backend search with fallback chain: primary backend (configured) → remaining backend. Supports Exa, Brave, and SearXNG. Optional `expandQuery` generates rule-based query variations (concept, question, scope, opposition) for broader coverage. Optional `mergeSearchBackends` queries all configured backends in parallel and merges/deduplicates results with composite scoring (engine agreement 40%, domain authority 30%, position 30%).
 - `web_read` — Fetches a URL and extracts article content via Mozilla Readability + jsdom.
-- `web_crawl` — Deep multi-page crawl via Crawl4AI (JS rendering). Returns markdown + HTML per page. Timeout scales with `maxPages` (30s + 15s × pages, cap 5 min). Requires `CRAWL4AI_BASE_URL`.
-- `semantic_crawl` — Full RAG pipeline over a crawled corpus. Source types: `url`, `sitemap`, `search` (search-then-crawl), `github` (code-aware), `cached` (re-use corpus by ID). Returns top-K semantically ranked chunks with bi-encoder, BM25, and RRF scores. Requires `CRAWL4AI_BASE_URL` + `EMBEDDING_SIDECAR_BASE_URL`.
+- `web_crawl` — Deep multi-page crawl via Crawl4AI (JS rendering). Returns markdown + HTML per page. Timeout scales with `maxPages` (30s + 15s × pages, cap 5 min). Requires `CRAWL4AI_BASE_URL`. When Crawl4AI returns placeholder/empty content, attempts external recovery via Wayback Machine CDX API and Google Cache (tagged as `recoverySource` in page metadata).
+- `semantic_crawl` — Full RAG pipeline over a crawled corpus. Source types: `url`, `sitemap`, `search` (search-then-crawl), `github` (code-aware), `cached` (re-use corpus by ID). Returns top-K semantically ranked chunks with bi-encoder, BM25, and RRF scores. Requires `CRAWL4AI_BASE_URL` + `EMBEDDING_SIDECAR_BASE_URL`. Supports optional `useContextualEmbeddings` for LLM-enriched chunk context before embedding. Content scrubbing (opt-in via config) redacts injection/exfiltration patterns before chunking. Domain trust evaluation (opt-in) blocks known typosquats and suspicious domains. Extraction stats track per-domain success rates and can short-circuit known-failing domains.
 - `semantic_youtube` — YouTube video search + transcript fetch + RAG pipeline. Returns top-K semantically ranked transcript passages. Requires `YOUTUBE_API_KEY` + `EMBEDDING_SIDECAR_BASE_URL`.
 - `semantic_reddit` — Reddit post search + comment thread fetch + RAG pipeline. Deleted/removed comments auto-filtered. Returns top-K semantically ranked comment passages. Requires `EMBEDDING_SIDECAR_BASE_URL`.
 - `semantic_jobs` — Job listing search across job boards (SEEK, Indeed, Jora) via web search + crawl. Extracts structured fields from HTML (title, company, location, salary, work mode) using Cheerio and JSON-LD; requires Crawl4AI v0.8.x for HTML delivery. Deduplicates across sources, applies constraint filters, and ranks with weighted composite scoring (semantic 0.45, location 0.20, workMode 0.15, recency 0.10, completeness 0.10). Returns structured `JobListingMvp` objects with confidence scores and verification status. `corpusStatus` includes full extraction funnel (requested, fetched, failed, extracted, deduplicated, filtered). Requires `EMBEDDING_SIDECAR_BASE_URL` + a search backend (`BRAVE_API_KEY` or `SEARXNG_BASE_URL`).
@@ -94,6 +94,11 @@ Key env vars:
 
 Reddit OAuth is optional: both `REDDIT_CLIENT_ID` and `REDDIT_CLIENT_SECRET` must be set together; setting exactly one is treated as invalid configuration (server starts, health reports degraded, Reddit tools throw `VALIDATION_ERROR` at first use).
 
+**V3.3.0 env vars (all opt-in, off by default):**
+
+- Security: `DOMAIN_TRUST_ENABLED` (true/false), `TRUSTED_DOMAINS`, `BLOCKED_DOMAINS` (comma-separated), `SCRUB_CONTENT` (true/false)
+- LLM (contextual embeddings): `LLM_PROVIDER` (model name), `LLM_API_TOKEN` (optional), `LLM_BASE_URL` (required)
+
 **RAG core** (`src/rag/`): shared pipeline used by `semantic_crawl`, `semantic_youtube`, `semantic_reddit`, `semantic_jobs`, and `semantic_github_code`.
 
 - `types.ts` — `RagChunk`, `PreparedCorpus`, `RetrievalResponse`, `RetrievalProfileName`, etc.
@@ -115,13 +120,14 @@ Reddit OAuth is optional: both `REDDIT_CLIENT_ID` and `REDDIT_CLIENT_SECRET` mus
 
 **Semantic pipeline** (`src/tools/semanticCrawl.ts` + `src/chunking.ts` + `src/utils/`):
 
-1. Corpus ingestion: crawl pages via Crawl4AI → strip cookie banners → `chunkMarkdown()` (400-token max, 20% overlap, atomic units for code blocks/tables, boilerplate heuristics)
-2. **Response-size guard** (`src/utils/crawlBudget.ts`): preflight heuristic cap on `maxPages` (site-aware: 8MB/page JS-heavy, 1.5MB/page default; safe budget ~41MB) + in-flight per-page byte accumulator that stops collection and records `omittedPages` when budget is approached. Emits typed `SemanticCrawlWarning` objects in `structuredWarnings`.
-3. Embedding: batched document embeddings via sidecar (max 512/batch, document/query asymmetric, title-aware). Query embedded in parallel.
-4. Hybrid ranking: bi-encoder cosine → BM25+ (`src/utils/bm25.ts`) → RRF fusion via `src/rag/pipeline.ts` (internal `retrieveSemanticChunks()` wrapper)
-5. Post-filtering: semantic coherence filter (centroid similarity for borderline chunks) → soft IDF-weighted lexical constraint (`src/utils/lexicalConstraint.ts`)
-6. Optional cross-encoder reranking (`src/utils/rerank.ts`, ONNX-based, local, default off)
-7. Corpus cache (`src/utils/corpusCache.ts`): Persistent via SQLite (`better-sqlite3`), configurable TTL, byte-weighted LRU eviction, default database path from `DATABASE_PATH` or `~/.cache/search-mcp/semantic-crawl/corpus-cache.sqlite`. Re-query via `source: { type: 'cached', corpusId }`.
+1. Corpus ingestion: crawl pages via Crawl4AI → strip cookie banners → optional domain trust filtering → optional content scrubbing → `chunkMarkdown()` (400-token max, 20% overlap, atomic units for code blocks/tables, boilerplate heuristics). Code blocks >=300 chars are extracted with language metadata.
+2. **V3.3.0: Contextual embeddings** (opt-in): when `useContextualEmbeddings` is true and LLM is configured, each chunk is enriched with LLM-generated context (`src/rag/contextualEmbedding.ts`) before embedding.
+3. **Response-size guard** (`src/utils/crawlBudget.ts`): preflight heuristic cap on `maxPages` (site-aware: 8MB/page JS-heavy, 1.5MB/page default; safe budget ~41MB) + in-flight per-page byte accumulator that stops collection and records `omittedPages` when budget is approached. Emits typed `SemanticCrawlWarning` objects in `structuredWarnings`.
+4. Embedding: batched document embeddings via sidecar (max 512/batch, document/query asymmetric, title-aware). Query embedded in parallel.
+5. Hybrid ranking: bi-encoder cosine → BM25+ (`src/utils/bm25.ts`) → RRF fusion via `src/rag/pipeline.ts` (internal `retrieveSemanticChunks()` wrapper)
+6. Post-filtering: semantic coherence filter (centroid similarity for borderline chunks) → soft IDF-weighted lexical constraint (`src/utils/lexicalConstraint.ts`)
+7. Optional cross-encoder reranking (`src/utils/rerank.ts`, ONNX-based, local, default off)
+8. Corpus cache (`src/utils/corpusCache.ts`): Persistent via SQLite (`better-sqlite3`), configurable TTL, byte-weighted LRU eviction, default database path from `DATABASE_PATH` or `~/.cache/search-mcp/semantic-crawl/corpus-cache.sqlite`. Re-query via `source: { type: 'cached', corpusId }`.
 
 GitHub corpus (`src/utils/githubCorpus.ts`): fetches repo files via GitHub API, uses `chunkMarkdown` with path-prefixed sections. Supports branch, file extension filter, and query pre-filter.
 
@@ -159,6 +165,11 @@ GitHub corpus (`src/utils/githubCorpus.ts`): fetches repo files via GitHub API, 
 - `url.ts` — URL deduplication
 - `cookieBanner.ts` — Cookie-banner page detection
 - `rescore.ts` — Score normalization utilities
+- `externalRecovery.ts` — Wayback Machine CDX + Google Cache fallback when Crawl4AI fails
+- `contentScrubber.ts` — Regex-based threat detection and redaction (prompt injection, exfiltration, impersonation, XSS)
+- `domainTrust.ts` — Domain reputation evaluation, typosquat detection, blocklist/allowlist
+- `searchMerge.ts` — Cross-backend search result dedup and scoring
+- `extractionStats.ts` — Per-domain crawl outcome tracking and self-improvement skip logic
 
 ## Key Constraints
 
@@ -211,7 +222,7 @@ Start with `docker compose up -d`.
 
 **Structured warnings** (V4 direction — currently typed unions, should become consistent across all tools):
 
-- `semantic_crawl`: already uses `SemanticCrawlSizeWarning` typed objects for response-size guard
+- `semantic_crawl`: already uses `SemanticCrawlWarning` typed objects for response-size guard
 - `semantic_jobs`: uses string warnings (e.g., crawl failures, markdown-only pages, byte budget truncation)
 - All other tools: string-only warnings in `ToolResult.meta.warnings`
 - V4 should introduce a `WarningCode` type union and `StructuredWarning { code, severity, message, source? }` across all tools

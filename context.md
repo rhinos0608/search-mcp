@@ -21,11 +21,11 @@ search-mcp process
 | File | Role |
 |------|------|
 | `src/index.ts` | CLI entry. Creates `McpServer`, attaches `StdioServerTransport`, calls `server.connect()`. |
-| `src/server.ts` | `createServer()` — instantiates `McpServer` and calls `server.registerTool()` for all 29 tools. |
+| `src/server.ts` | `createServer()` — instantiates `McpServer` and calls `server.registerTool()` for all 28 tools. |
 | `src/logger.ts` | pino — writes all log output to `process.stderr`. |
 | `src/config.ts` | Config resolution: encrypted file → env vars → defaults. Cached after first load. |
 
-## Tools (29)
+## Tools (28)
 
 | Category | Tools |
 |---|---|

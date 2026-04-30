@@ -10,11 +10,13 @@ Perform a web search using Brave or SearXNG and return a ranked list of results.
 
 ### Inputs
 
-| Parameter    | Type    | Required | Default | Description                                               |
-| ------------ | ------- | -------- | ------- | --------------------------------------------------------- |
-| `query`      | string  | yes      | —       | The search query string.                                  |
-| `limit`      | number  | no       | `10`    | Maximum number of results to return. Maximum value: `25`. |
-| `safeSearch` | boolean | no       | `true`  | When `true`, filters adult content from results.          |
+| Parameter             | Type    | Required | Default | Description                                                                                                         |
+| --------------------- | ------- | -------- | ------- | ------------------------------------------------------------------------------------------------------------------- |
+| `query`               | string  | yes      | —       | The search query string.                                                                                            |
+| `limit`               | number  | no       | `10`    | Maximum number of results to return. Maximum value: `25`.                                                           |
+| `safeSearch`          | boolean | no       | `true`  | When `true`, filters adult content from results.                                                                    |
+| `expandQuery`         | boolean | no       | `false` | Generate rule-based query variations (question, concept, scope, opposition) and merge results for broader coverage. |
+| `mergeSearchBackends` | boolean | no       | `false` | When multiple search backends are configured, query all of them and merge + deduplicate results.                    |
 
 ### Output
 
@@ -31,6 +33,13 @@ Array<{
 ### Underlying approach
 
 Uses a multi-backend search strategy with Brave as the primary backend and SearXNG as the fallback. The configured primary backend is tried first; if it fails, the remaining backend is attempted. Brave requires a `BRAVE_API_KEY`; SearXNG requires a `SEARXNG_BASE_URL` pointing to a running instance.
+
+**V3.3.0 enhancements (opt-in):**
+
+- **Query expansion** (`expandQuery: true`): Generates 2-4 query variations using rule-based strategies — concept/synonym expansion (e.g. "llm" → "large language model"), question form conversion, scope adjustment (broader/narrower), and opposition pairs. Each variation is searched independently, then all results are deduplicated by normalized URL, keeping the best snippet per URL. No LLM calls needed.
+- **Cross-backend merging** (`mergeSearchBackends: true`): When both Brave and SearXNG are configured, queries both backends in parallel instead of sequential fallback. Results are deduplicated and scored by: engine agreement (40%), domain authority (30%), and position rank (30%). Each result includes an `engines` field showing which backends returned it.
+
+Both features default to `false` for backward compatibility.
 
 ### Rate limits / caveats
 
@@ -691,27 +700,36 @@ Crawl a URL or corpus source and return the most semantically relevant passages 
 
 ### Inputs
 
-| Parameter               | Type               | Required | Default     | Description                                                            |
-| ----------------------- | ------------------ | -------- | ----------- | ---------------------------------------------------------------------- |
-| `source`                | object             | yes      | —           | Crawl source (`url`, `sitemap`, `search`, `github`, or `cached`).      |
-| `query`                 | string             | yes      | —           | Semantic search query.                                                 |
-| `topK`                  | number             | no       | `10`        | Number of passages to return.                                          |
-| `strategy`              | `"bfs"` \| `"dfs"` | no       | `"bfs"`     | Crawl strategy.                                                        |
-| `maxDepth`              | number             | no       | `2`         | Maximum crawl depth.                                                   |
-| `maxPages`              | number             | no       | `20`        | Maximum pages to crawl.                                                |
-| `includeExternalLinks`  | boolean            | no       | `false`     | Follow external links.                                                 |
-| `maxBytes`              | number             | no       | `250000000` | Maximum total source corpus size in bytes. Maximum value: `250000000`. |
-| `useReranker`           | boolean            | no       | `false`     | Apply cross-encoder re-ranking to top candidates.                      |
-| `allowPathDrift`        | boolean            | no       | `false`     | Allow links outside the seed URL path.                                 |
-| `extractionConfig`      | object             | no       | —           | Structured extraction config forwarded to crawl4ai.                    |
-| `waitFor`               | string             | no       | —           | CSS selector or JS predicate to wait for before extraction.            |
-| `delayBeforeReturnHtml` | number             | no       | `0.1`       | Extra seconds to wait for dynamic content to settle.                   |
-| `pageTimeout`           | number             | no       | `60000`     | Page timeout in milliseconds.                                          |
-| `jsCode`                | string             | no       | —           | Custom JavaScript to run before extraction.                            |
+| Parameter                 | Type               | Required | Default     | Description                                                                                                       |
+| ------------------------- | ------------------ | -------- | ----------- | ----------------------------------------------------------------------------------------------------------------- |
+| `source`                  | object             | yes      | —           | Crawl source (`url`, `sitemap`, `search`, `github`, or `cached`).                                                 |
+| `query`                   | string             | yes      | —           | Semantic search query.                                                                                            |
+| `topK`                    | number             | no       | `10`        | Number of passages to return.                                                                                     |
+| `strategy`                | `"bfs"` \| `"dfs"` | no       | `"bfs"`     | Crawl strategy.                                                                                                   |
+| `maxDepth`                | number             | no       | `2`         | Maximum crawl depth.                                                                                              |
+| `maxPages`                | number             | no       | `20`        | Maximum pages to crawl.                                                                                           |
+| `includeExternalLinks`    | boolean            | no       | `false`     | Follow external links.                                                                                            |
+| `maxBytes`                | number             | no       | `250000000` | Maximum total source corpus size in bytes. Maximum value: `250000000`.                                            |
+| `useReranker`             | boolean            | no       | `false`     | Apply cross-encoder re-ranking to top candidates.                                                                 |
+| `allowPathDrift`          | boolean            | no       | `false`     | Allow links outside the seed URL path.                                                                            |
+| `extractionConfig`        | object             | no       | —           | Structured extraction config forwarded to crawl4ai.                                                               |
+| `waitFor`                 | string             | no       | —           | CSS selector or JS predicate to wait for before extraction.                                                       |
+| `delayBeforeReturnHtml`   | number             | no       | `0.1`       | Extra seconds to wait for dynamic content to settle.                                                              |
+| `pageTimeout`             | number             | no       | `60000`     | Page timeout in milliseconds.                                                                                     |
+| `jsCode`                  | string             | no       | —           | Custom JavaScript to run before extraction.                                                                       |
+| `useContextualEmbeddings` | boolean            | no       | `false`     | Use LLM to generate contextual context for each chunk before embedding. Requires `LLM_PROVIDER` + `LLM_BASE_URL`. |
 
 ### Underlying approach
 
 Crawls pages, chunks them, embeds them through the shared sidecar, and ranks passages with dense + lexical retrieval. Optional cross-encoder re-ranking can be enabled with `useReranker`.
+
+**V3.3.0 enhancements (all opt-in):**
+
+- **Contextual embeddings** (`useContextualEmbeddings: true`): Each chunk is enriched with a brief LLM-generated context string before embedding (via `src/rag/contextualEmbedding.ts`). The original chunk text is preserved for display; only the embedding uses the enriched text. Requires `LLM_PROVIDER` and `LLM_BASE_URL` to be configured. Gracefully degrades: if the LLM call fails for a chunk, it falls back to raw embedding.
+- **Content scrubbing** (config-level, `SCRUB_CONTENT=true`): Before chunking, page content is scanned for prompt injection, data exfiltration, and impersonation patterns. Detected patterns are replaced with `[REDACTED]` tags. Risk score and threat summary are available in the response metadata.
+- **Domain trust filtering** (config-level, `DOMAIN_TRUST_ENABLED=true`): Evaluates each discovered URL against established-domain allowlists, suspicious TLD detection, and Levenshtein typosquat detection for known brands. `BLOCKED_DOMAINS` URLs are dropped before crawling; `suspicious` URLs are logged but allowed.
+- **Code example extraction**: During chunking, fenced code blocks >=300 chars are detected and annotated with language metadata near their parent section.
+- **Self-improvement tracking**: Per-domain crawl success rates are tracked in-memory. Domains with >5 failures and <5% success rate are automatically skipped on subsequent crawls.
 
 **Response-size protection:** To prevent MCP response limit errors, `semantic_crawl` implements a two-layer size guard:
 
@@ -763,11 +781,13 @@ Each page is fetched via Playwright through the Crawl4AI sidecar. The sidecar re
 
 **Timeout scaling:** The outer HTTP timeout scales with `maxPages` to prevent premature cancellation of large crawls: `min(30,000 + maxPages × 15,000, 300,000)` ms. A single-page crawl times out at 45s; a 10-page crawl at 180s; 25+ pages cap at 300s (5 minutes).
 
+**External recovery (V3.3.0):** When Crawl4AI returns placeholder or empty content (e.g. `Loading...`, shell HTML), the tool first retries once with aggressive render options. If that also fails, it attempts external recovery via: (1) **Wayback Machine** — CDX API lookup for the latest snapshot, fetches archived HTML and extracts content via Readability; (2) **Google Cache** — fetches from `webcache.googleusercontent.com` and extracts via Readability. Recovered pages are tagged with `metadata.recoverySource` (`'wayback'` or `'google-cache'`).
+
 ### Output
 
 Returns a `WebCrawlResult` with:
 
-- `pages` — array of `CrawlPageResult` objects, each with `url`, `success`, `markdown`, `html?`, `title`, `description`, `links`, `statusCode`, `errorMessage`
+- `pages` — array of `CrawlPageResult` objects, each with `url`, `success`, `markdown`, `html?`, `title`, `description`, `links`, `statusCode`, `errorMessage`, `metadata.recoverySource?` (set to `'wayback'` or `'google-cache'` when external recovery was used)
 - `totalPages` — pages attempted
 - `successfulPages` — pages successfully fetched
 - `warnings?` — any non-fatal issues
@@ -825,11 +845,69 @@ Each result is a `JobListingMvp` with: `title`, `company?`, `location?`, `workMo
 
 Fetch a single file from a GitHub repository.
 
-**Inputs:** `owner` (string), `repo` (string), `path` (string), `ref?` (string, default branch), `lineOffset?` (number), `lineLimit?` (number), `byteOffset?` (number), `byteLimit?` (number)
+### Inputs
 
-**Output:** `GitHubFileResult` with decoded content, encoding, truncation info, line range, and structured content `elements`.
+| Parameter    | Type    | Required | Default        | Description                                                |
+| ------------ | ------- | -------- | -------------- | ---------------------------------------------------------- |
+| `owner`      | string  | yes      | —              | GitHub username or organization.                           |
+| `repo`       | string  | yes      | —              | Repository name.                                           |
+| `path`       | string  | yes      | —              | File path within the repo.                                 |
+| `branch`     | string  | no       | default branch | Git ref (branch, tag, or commit SHA).                      |
+| `raw`        | boolean | no       | `true`         | `true` returns decoded UTF-8 text; `false` returns base64. |
+| `offset`     | number  | no       | —              | 0-based line offset for text mode.                         |
+| `limit`      | number  | no       | —              | Maximum number of lines to return for text mode.           |
+| `byteOffset` | number  | no       | —              | 0-based byte offset for raw fetches.                       |
+| `byteLimit`  | number  | no       | —              | Maximum number of bytes to return for raw fetches.         |
 
-**Caveats:** Public repos only without `GITHUB_TOKEN`. Large files truncated per `lineLimit`/`byteLimit`.
+### Output
+
+```ts
+interface GitHubFileResult {
+  name: string;
+  path: string;
+  size: number;
+  sha: string;
+  content: string;
+  encoding: 'utf-8' | 'base64';
+  htmlUrl: string;
+  apiUrl: string;
+  truncated: boolean;
+  isBinary: boolean;
+  totalLines: number;
+  lineOffset: number;
+  lineLimit: number | null;
+  hasMore: boolean;
+  byteOffset: number | null;
+  byteLimit: number | null;
+  elements?: ContentElement[];
+}
+```
+
+### Underlying approach
+
+Uses the GitHub Contents API for normal text files and raw.githubusercontent.com for byte/line slicing. Binary files are base64-encoded and text files can include structured `elements` from the shared content model.
+
+### Rate limits / caveats
+
+- Public repos work without `GITHUB_TOKEN`; auth increases quota.
+- Large files may be truncated by line or byte limits.
+- `offset`/`limit` are line-based and only apply to text mode.
+
+### Example
+
+```json
+{
+  "name": "github_repo_file",
+  "arguments": {
+    "owner": "rhinos0608",
+    "repo": "search-mcp",
+    "path": "src/server.ts",
+    "branch": "main",
+    "offset": 0,
+    "limit": 80
+  }
+}
+```
 
 ---
 
@@ -837,23 +915,123 @@ Fetch a single file from a GitHub repository.
 
 Browse the directory tree of a GitHub repository.
 
-**Inputs:** `owner` (string), `repo` (string), `ref?` (string, default branch)
+### Inputs
 
-**Output:** `GitHubTreeResult` with `entries` (name, path, type, size, sha, htmlUrl) and `truncated` flag.
+| Parameter   | Type    | Required | Default        | Description                                                |
+| ----------- | ------- | -------- | -------------- | ---------------------------------------------------------- |
+| `owner`     | string  | yes      | —              | GitHub username or organization.                           |
+| `repo`      | string  | yes      | —              | Repository name.                                           |
+| `path`      | string  | no       | `''`           | Directory path within the repo.                            |
+| `branch`    | string  | no       | default branch | Git ref (branch, tag, or commit SHA).                      |
+| `recursive` | boolean | no       | `false`        | Return the full recursive tree.                            |
+| `limit`     | number  | no       | `100`          | Maximum number of entries to return. Maximum value: `500`. |
 
-**Caveats:** Public repos only without `GITHUB_TOKEN`. Very large repos may return truncated results.
+### Output
+
+```ts
+interface GitHubTreeEntry {
+  name: string;
+  path: string;
+  type: 'file' | 'dir' | 'symlink' | 'submodule';
+  size?: number;
+  sha?: string;
+  htmlUrl: string;
+  apiUrl: string;
+}
+
+interface GitHubTreeResult {
+  entries: GitHubTreeEntry[];
+  truncated: boolean;
+  warnings?: string[];
+}
+```
+
+### Underlying approach
+
+Uses the GitHub Contents API for shallow browsing and the Git Trees API for recursive traversal. Recursive mode falls back to contents browsing if GitHub returns a 404 for the tree ref.
+
+### Rate limits / caveats
+
+- Public repos work without `GITHUB_TOKEN`.
+- Recursive trees can be large; results may be truncated at the API limit.
+- `limit` is capped at 500 even if you request more.
+
+### Example
+
+```json
+{
+  "name": "github_repo_tree",
+  "arguments": {
+    "owner": "rhinos0608",
+    "repo": "search-mcp",
+    "path": "src",
+    "recursive": true,
+    "limit": 50
+  }
+}
+```
 
 ---
 
 ## `github_repo_search`
 
-Search GitHub repositories by query string.
+Search code across GitHub using the GitHub Search API.
 
-**Inputs:** `query` (string), `limit?` (number, default 10, max 25)
+### Inputs
 
-**Output:** Array of repo results with full name, description, stars, forks, language, topics.
+| Parameter  | Type   | Required | Default | Description                                                 |
+| ---------- | ------ | -------- | ------- | ----------------------------------------------------------- |
+| `query`    | string | yes      | —       | GitHub code-search query (e.g. `function parse`).           |
+| `owner`    | string | no       | —       | Narrow to a user or organization.                           |
+| `repo`     | string | no       | —       | Narrow to a single repo (requires `owner`).                 |
+| `language` | string | no       | —       | Filter by language.                                         |
+| `path`     | string | no       | —       | Filter to files under a path.                               |
+| `limit`    | number | no       | `30`    | Maximum number of results to return. Maximum value: `1000`. |
 
-**Caveats:** Unauthenticated rate limit is 60/hr. Set `GITHUB_TOKEN` for higher quota.
+### Output
+
+```ts
+interface GitHubCodeResult {
+  url: string;
+  htmlUrl: string;
+  repo: string;
+  path: string;
+  name: string;
+  score: number;
+  textMatches?: { fragment: string; matches: { text: string; indices: [number, number][] }[] }[];
+}
+
+interface GitHubCodeSearchResult {
+  totalCount: number;
+  results: GitHubCodeResult[];
+}
+```
+
+### Underlying approach
+
+Builds a GitHub code-search query with optional repo/user, language, and path qualifiers. Results are paginated in 100-item pages and merged until the requested limit or the API ceiling is reached.
+
+### Rate limits / caveats
+
+- Public code search is rate-limited; `GITHUB_TOKEN` helps a lot.
+- `limit` is capped at 1000.
+- Results are code-search hits, not repo search hits.
+
+### Example
+
+```json
+{
+  "name": "github_repo_search",
+  "arguments": {
+    "query": "AbortController",
+    "owner": "rhinos0608",
+    "repo": "search-mcp",
+    "language": "typescript",
+    "path": "src",
+    "limit": 25
+  }
+}
+```
 
 ---
 
@@ -861,35 +1039,156 @@ Search GitHub repositories by query string.
 
 Search YouTube videos via the YouTube Data API v3.
 
-**Inputs:** `query` (string), `maxResults?` (number, default 10, max 50), `channel?` (string), `sort?` (`relevance`|`date`|`viewCount`)
+### Inputs
 
-**Output:** Array of `YouTubeVideo` with videoId, title, description, channelTitle, publishedAt, thumbnailUrl.
+| Parameter | Type   | Required | Default     | Description                                                |
+| --------- | ------ | -------- | ----------- | ---------------------------------------------------------- |
+| `query`   | string | yes      | —           | Search query string.                                       |
+| `order`   | string | no       | `relevance` | Sort order: `relevance`, `date`, `viewCount`, or `rating`. |
+| `limit`   | number | no       | `10`        | Maximum number of videos to return. Maximum value: `50`.   |
 
-**Caveats:** Requires `YOUTUBE_API_KEY`. Pairs with `youtube_transcript`.
+### Output
+
+```ts
+interface YouTubeVideo {
+  videoId: string;
+  title: string;
+  description: string;
+  channelTitle: string;
+  publishedAt: string;
+  thumbnailUrl: string | null;
+  url: string;
+}
+```
+
+### Underlying approach
+
+Uses `search.list` from the YouTube Data API, filters to videos, and normalizes each hit into a canonical watch URL. Results are cached briefly to reduce quota usage.
+
+### Rate limits / caveats
+
+- Requires `YOUTUBE_API_KEY`.
+- API quota applies; `limit` is capped at 50.
+- Use `semantic_youtube` if you want transcript-aware retrieval.
+
+### Example
+
+```json
+{
+  "name": "youtube_search",
+  "arguments": {
+    "query": "search mcp tutorial",
+    "order": "relevance",
+    "limit": 5
+  }
+}
+```
 
 ---
 
 ## `twitter_search`
 
-Search Twitter/X via a Nitter instance (cheerio scraping).
+Search Twitter/X posts via a Nitter instance.
 
-**Inputs:** `query` (string), `limit?` (number, default 20, max 50)
+### Inputs
 
-**Output:** Array of `TwitterPost` with author, handle, content, url, timestamp, likes, retweets, replies.
+| Parameter | Type   | Required | Default | Description                                             |
+| --------- | ------ | -------- | ------- | ------------------------------------------------------- |
+| `query`   | string | yes      | —       | Search query string.                                    |
+| `limit`   | number | no       | `20`    | Maximum number of posts to return. Maximum value: `50`. |
 
-**Caveats:** Requires `NITTER_BASE_URL`. Nitter reliability depends on the instance.
+### Output
+
+```ts
+interface TwitterPost {
+  author: string;
+  handle: string;
+  content: string;
+  url: string;
+  timestamp: string | null;
+  likes: number;
+  retweets: number;
+  replies: number;
+}
+```
+
+### Underlying approach
+
+Scrapes Nitter search pages with Cheerio, extracts the tweet text, author, handle, timestamp, and engagement counts, then normalizes relative links against the configured Nitter base URL.
+
+### Rate limits / caveats
+
+- Requires `NITTER_BASE_URL`.
+- Instance reliability varies; selectors may break when the DOM changes.
+- `limit` is capped at 50.
+
+### Example
+
+```json
+{
+  "name": "twitter_search",
+  "arguments": {
+    "query": "search mcp",
+    "limit": 10
+  }
+}
+```
 
 ---
 
 ## `academic_search`
 
-Search academic papers across ArXiv + Semantic Scholar.
+Search academic papers across ArXiv and Semantic Scholar.
 
-**Inputs:** `query` (string), `sources?` (`arxiv`|`semantic_scholar`|`both`), `limit?` (number, default 10), `yearFrom?` (number)
+### Inputs
 
-**Output:** Array of `AcademicPaper` with title, authors, abstract, url, year, venue, citationCount, doi, pdfUrl.
+| Parameter  | Type   | Required | Default | Description                                              |
+| ---------- | ------ | -------- | ------- | -------------------------------------------------------- |
+| `query`    | string | yes      | —       | Academic search query.                                   |
+| `source`   | string | no       | `all`   | Search backend: `arxiv`, `semantic_scholar`, or `all`.   |
+| `limit`    | number | no       | `20`    | Maximum number of papers to return. Maximum value: `50`. |
+| `yearFrom` | number | no       | —       | Filter papers published from this year onward.           |
 
-**Caveats:** Free, no auth required. Results merged and deduplicated across sources.
+### Output
+
+```ts
+interface AcademicPaper {
+  title: string;
+  authors: string[];
+  abstract: string;
+  url: string;
+  year: number | null;
+  venue: string | null;
+  citationCount: number | null;
+  source: 'arxiv' | 'semantic_scholar';
+  doi: string | null;
+  pdfUrl: string | null;
+}
+```
+
+### Underlying approach
+
+Queries ArXiv and/or Semantic Scholar, deduplicates by canonical identifiers, and uses a shared ranking path when both backends return results.
+
+### Rate limits / caveats
+
+- Free, no auth required.
+- `source: all` merges results from both backends.
+- `limit` is capped at 50.
+
+### Example
+
+```json
+{
+  "name": "academic_search",
+  "arguments": {
+    "query": "retrieval augmented generation",
+    "source": "all",
+    "limit": 10,
+    "yearFrom": 2022
+  }
+}
+```
 
 ---
 
@@ -897,95 +1196,435 @@ Search academic papers across ArXiv + Semantic Scholar.
 
 Fast direct ArXiv-only search with date range filtering.
 
-**Inputs:** `query` (string), `maxResults?` (number, default 10, max 50), `categories?` (string[]), `dateFrom?`/`dateTo?` (ISO dates)
+### Inputs
 
-**Output:** Array of `ArXivPaper` with title, authors, abstract, url, publishedDate, categories, pdfUrl.
+| Parameter  | Type   | Required | Default     | Description                                                     |
+| ---------- | ------ | -------- | ----------- | --------------------------------------------------------------- |
+| `query`    | string | yes      | —           | Search query string.                                            |
+| `category` | string | no       | —           | ArXiv category filter (for example `cs.AI`).                    |
+| `sortBy`   | string | no       | `relevance` | Sort order: `relevance`, `lastUpdatedDate`, or `submittedDate`. |
+| `dateFrom` | string | no       | —           | Start date in `YYYY-MM-DD` format.                              |
+| `dateTo`   | string | no       | —           | End date in `YYYY-MM-DD` format.                                |
+| `limit`    | number | no       | `20`        | Maximum number of papers to return. Maximum value: `50`.        |
 
-**Caveats:** Faster than `academic_search` for ArXiv-only queries. Full `submittedDate` range filtering.
+### Output
+
+```ts
+interface ArXivPaper {
+  title: string;
+  authors: string[];
+  abstract: string;
+  url: string;
+  publishedDate: string | null;
+  updatedDate: string | null;
+  categories: string[];
+  pdfUrl: string | null;
+  doi: string | null;
+}
+```
+
+### Underlying approach
+
+Builds an ArXiv Atom API query, adds optional category and submitted-date filters, then parses the feed into normalized paper records.
+
+### Rate limits / caveats
+
+- Free, no auth required.
+- `dateFrom`/`dateTo` map to ArXiv's `submittedDate` filter.
+- `limit` is capped at 50.
+
+### Example
+
+```json
+{
+  "name": "arxiv_search",
+  "arguments": {
+    "query": "graph neural networks",
+    "category": "cs.LG",
+    "sortBy": "submittedDate",
+    "dateFrom": "2024-01-01",
+    "dateTo": "2024-12-31",
+    "limit": 10
+  }
+}
+```
 
 ---
 
 ## `hackernews_search`
 
-Search Hacker News via Algolia API.
+Search Hacker News via the Algolia API.
 
-**Inputs:** `query` (string), `type?` (`story`|`comment`|`all`), `sort?` (`relevance`|`date`), `limit?` (number, default 20), `dateFrom?`/`dateTo?` (ISO dates)
+### Inputs
 
-**Output:** Array of `HackerNewsItem` with title, url, author, points, numComments, createdAt.
+| Parameter  | Type   | Required | Default     | Description                                             |
+| ---------- | ------ | -------- | ----------- | ------------------------------------------------------- |
+| `query`    | string | yes      | —           | Search query string.                                    |
+| `type`     | string | no       | `story`     | Item type filter: `story`, `comment`, or `all`.         |
+| `sort`     | string | no       | `relevance` | Sort order: `relevance` or `date`.                      |
+| `dateFrom` | string | no       | —           | Start date in ISO 8601 format.                          |
+| `dateTo`   | string | no       | —           | End date in ISO 8601 format.                            |
+| `limit`    | number | no       | `20`        | Maximum number of items to return. Maximum value: `50`. |
 
-**Caveats:** Free, no auth required.
+### Output
+
+```ts
+interface HackerNewsItem {
+  id: number;
+  title: string;
+  url: string | null;
+  author: string;
+  points: number;
+  numComments: number;
+  createdAt: string;
+  storyText: string | null;
+  type: string;
+  objectId: string;
+}
+```
+
+### Underlying approach
+
+Uses the Algolia HN API for search and date filtering, then normalizes each item into the shared `HackerNewsItem` shape.
+
+### Rate limits / caveats
+
+- Free, no auth required.
+- `limit` is capped at 50.
+- Search relevance depends on Algolia's index, not our own ranking.
+
+### Example
+
+```json
+{
+  "name": "hackernews_search",
+  "arguments": {
+    "query": "mcp server",
+    "type": "story",
+    "sort": "relevance",
+    "limit": 10
+  }
+}
+```
 
 ---
 
 ## `stackoverflow_search`
 
-Search Stack Exchange questions.
+Search Stack Overflow questions via the Stack Exchange API.
 
-**Inputs:** `query` (string), `tags?` (string[]), `acceptedOnly?` (boolean), `limit?` (number, default 10, max 25)
+### Inputs
 
-**Output:** Array of `StackOverflowQuestion` with title, body, link, score, answerCount, tags, acceptedAnswerId.
+| Parameter  | Type    | Required | Default     | Description                                                  |
+| ---------- | ------- | -------- | ----------- | ------------------------------------------------------------ |
+| `query`    | string  | yes      | —           | Search query string.                                         |
+| `sort`     | string  | no       | `relevance` | Sort order: `relevance`, `votes`, `creation`, or `activity`. |
+| `tagged`   | string  | no       | `''`        | Semicolon-separated tags to filter by.                       |
+| `accepted` | boolean | no       | `false`     | Only return questions with accepted answers.                 |
+| `limit`    | number  | no       | `20`        | Maximum number of questions to return. Maximum value: `100`. |
 
-**Caveats:** Optional `STACKEXCHANGE_API_KEY` for higher rate limits.
+### Output
+
+```ts
+interface StackOverflowQuestion {
+  questionId: number;
+  title: string;
+  body: string;
+  link: string;
+  score: number;
+  answerCount: number;
+  isAnswered: boolean;
+  acceptedAnswerId: number | null;
+  tags: string[];
+  creationDate: number;
+  author: string;
+  viewCount: number;
+}
+```
+
+### Underlying approach
+
+Queries the Stack Exchange API, applies tag/accepted-answer filters, and normalizes the response into rich question objects.
+
+### Rate limits / caveats
+
+- `STACKEXCHANGE_API_KEY` is optional but strongly recommended.
+- Free quota is limited without a key.
+- `limit` is capped at 100.
+
+### Example
+
+```json
+{
+  "name": "stackoverflow_search",
+  "arguments": {
+    "query": "typescript zod v4",
+    "tagged": "typescript;zod",
+    "accepted": true,
+    "limit": 10
+  }
+}
+```
 
 ---
 
 ## `npm_search`
 
-Search npm packages via registry API.
+Search the npm package registry.
 
-**Inputs:** `query` (string), `limit?` (number, default 10, max 50)
+### Inputs
 
-**Output:** Array of `NpmPackage` with name, version, description, keywords, author, repository, score.
+| Parameter | Type   | Required | Default | Description                                                 |
+| --------- | ------ | -------- | ------- | ----------------------------------------------------------- |
+| `query`   | string | yes      | —       | Search query string.                                        |
+| `limit`   | number | no       | `20`    | Maximum number of packages to return. Maximum value: `250`. |
 
-**Caveats:** Free, no auth required.
+### Output
+
+```ts
+interface NpmPackage {
+  name: string;
+  version: string;
+  description: string;
+  keywords: string[];
+  author: string | null;
+  publisher: string | null;
+  url: string;
+  repository: string | null;
+  date: string | null;
+  score: number | null;
+}
+```
+
+### Underlying approach
+
+Queries the npm registry search API and returns normalized package metadata with a relevance score.
+
+### Rate limits / caveats
+
+- Free, no auth required.
+- `limit` is capped at 250.
+- Results are package metadata, not install/download telemetry.
+
+### Example
+
+```json
+{
+  "name": "npm_search",
+  "arguments": {
+    "query": "mcp server",
+    "limit": 10
+  }
+}
+```
 
 ---
 
 ## `pypi_search`
 
-Search PyPI packages via HTML scraping + JSON API enrichment.
+Search the Python Package Index (PyPI).
 
-**Inputs:** `query` (string), `limit?` (number, default 10, max 50)
+### Inputs
 
-**Output:** Array of `PypiPackage` with name, version, description, url, author, releaseDate.
+| Parameter | Type   | Required | Default | Description                                                |
+| --------- | ------ | -------- | ------- | ---------------------------------------------------------- |
+| `query`   | string | yes      | —       | Search query string.                                       |
+| `limit`   | number | no       | `20`    | Maximum number of packages to return. Maximum value: `50`. |
 
-**Caveats:** Free, no auth required.
+### Output
+
+```ts
+interface PypiPackage {
+  name: string;
+  version: string;
+  description: string;
+  url: string;
+  author: string | null;
+  releaseDate: string | null;
+}
+```
+
+### Underlying approach
+
+Scrapes PyPI search results and enriches the top hits from the JSON API for author and release-date metadata.
+
+### Rate limits / caveats
+
+- Free, no auth required.
+- PyPI search is keyword-based, not semantic.
+- `limit` is capped at 50.
+
+### Example
+
+```json
+{
+  "name": "pypi_search",
+  "arguments": {
+    "query": "fastapi auth",
+    "limit": 10
+  }
+}
+```
 
 ---
 
 ## `producthunt_search`
 
-Search Product Hunt posts via GraphQL API or public leaderboard fallback.
+Search Product Hunt for products, tools, and apps.
 
-**Inputs:** `query` (string), `limit?` (number, default 10, max 25)
+### Inputs
 
-**Output:** Array of `ProductHuntProduct` with name, tagline, description, votesCount, commentsCount, topics, thumbnail.
+| Parameter | Type   | Required | Default      | Description                                                |
+| --------- | ------ | -------- | ------------ | ---------------------------------------------------------- |
+| `query`   | string | yes      | —            | Search query string.                                       |
+| `sort`    | string | no       | `popularity` | Sort order: `popularity`, `newest`, or `votes`.            |
+| `limit`   | number | no       | `20`         | Maximum number of products to return. Maximum value: `50`. |
 
-**Caveats:** `PRODUCTHUNT_API_TOKEN` required for GraphQL; falls back to public scraping.
+### Output
+
+```ts
+interface ProductHuntProduct {
+  name: string;
+  tagline: string;
+  description: string;
+  url: string;
+  votesCount: number;
+  commentsCount: number;
+  rank: number;
+  topics: string[];
+  thumbnail: string | null;
+  maker: string | null;
+  launchDate: string | null;
+}
+```
+
+### Underlying approach
+
+Uses the Product Hunt GraphQL API when `PRODUCTHUNT_API_TOKEN` is configured. The tool caches results briefly and normalizes vote/comment counts, launch date, and maker metadata.
+
+### Rate limits / caveats
+
+- `PRODUCTHUNT_API_TOKEN` is required.
+- Public scraping is not used here; anti-bot protections make it unreliable.
+- `limit` is capped at 50.
+
+### Example
+
+```json
+{
+  "name": "producthunt_search",
+  "arguments": {
+    "query": "developer tools",
+    "sort": "popularity",
+    "limit": 10
+  }
+}
+```
 
 ---
 
 ## `patent_search`
 
-Search US patents via USPTO PatentsView API.
+Search US patents via the USPTO PatentsView API.
 
-**Inputs:** `query` (string), `limit?` (number, default 10, max 50)
+### Inputs
 
-**Output:** Array of `PatentResult` with patentNumber, title, abstract, inventors, assignees, filingDate, grantDate.
+| Parameter  | Type   | Required | Default | Description                                                |
+| ---------- | ------ | -------- | ------- | ---------------------------------------------------------- |
+| `query`    | string | yes      | —       | Patent search query (searches abstracts).                  |
+| `assignee` | string | no       | `''`    | Filter by company/assignee name.                           |
+| `limit`    | number | no       | `25`    | Maximum number of patents to return. Maximum value: `100`. |
 
-**Caveats:** Requires `PATENTSVIEW_API_KEY` (free registration).
+### Output
+
+```ts
+interface PatentResult {
+  patentNumber: string;
+  title: string;
+  abstract: string;
+  inventors: string[];
+  assignees: string[];
+  filingDate: string | null;
+  grantDate: string | null;
+  url: string;
+  citations: number | null;
+}
+```
+
+### Underlying approach
+
+Queries PatentsView, then normalizes the response into patent records with a Google Patents URL and citation count when available.
+
+### Rate limits / caveats
+
+- Requires `PATENTSVIEW_API_KEY`.
+- Free registration is available at PatentsView.
+- `limit` is capped at 100.
+
+### Example
+
+```json
+{
+  "name": "patent_search",
+  "arguments": {
+    "query": "distributed search indexing",
+    "assignee": "Google",
+    "limit": 10
+  }
+}
+```
 
 ---
 
 ## `podcast_search`
 
-Search podcast episodes via ListenNotes API.
+Search podcast episodes via the ListenNotes API.
 
-**Inputs:** `query` (string), `limit?` (number, default 10, max 50)
+### Inputs
 
-**Output:** Array of `PodcastResult` with title, description, podcast name, publisher, audioUrl, duration, publishedDate.
+| Parameter | Type   | Required | Default     | Description                                                |
+| --------- | ------ | -------- | ----------- | ---------------------------------------------------------- |
+| `query`   | string | yes      | —           | Search query string.                                       |
+| `sort`    | string | no       | `relevance` | Sort order: `relevance` or `date`.                         |
+| `limit`   | number | no       | `20`        | Maximum number of episodes to return. Maximum value: `50`. |
 
-**Caveats:** Requires `LISTENNOTES_API_KEY`.
+### Output
+
+```ts
+interface PodcastResult {
+  title: string;
+  description: string;
+  podcast: string;
+  publisher: string;
+  url: string;
+  audioUrl: string | null;
+  duration: number;
+  publishedDate: string | null;
+}
+```
+
+### Underlying approach
+
+Queries ListenNotes, filters to episode results, and normalizes episode, podcast, and audio metadata for downstream ranking or display.
+
+### Rate limits / caveats
+
+- Requires `LISTENNOTES_API_KEY`.
+- ListenNotes quota applies.
+- `limit` is capped at 50.
+
+### Example
+
+```json
+{
+  "name": "podcast_search",
+  "arguments": {
+    "query": "machine learning systems",
+    "sort": "date",
+    "limit": 10
+  }
+}
+```
 
 ---
 

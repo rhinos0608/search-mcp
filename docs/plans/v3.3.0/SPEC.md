@@ -1,6 +1,6 @@
 # V3.3.0 — Extraction Resilience & Search Recall
 
-**Status**: Spec  
+**Status**: Complete ✅ (merged 2026-04-30)  
 **Priority**: High  
 **Depends On**: V3.2.0
 
@@ -329,6 +329,10 @@ Extraction failures are logged but not analyzed. No mechanism exists to learn fr
 | 6     | **Cross-Backend Merging**     | Medium | High when both backends configured | None                        |
 | 7     | **Code Example Extraction**   | Low    | Medium                             | None                        |
 | 8     | **Self-Improvement Tracking** | Low    | Medium                             | None                        |
+
+---
+
+**All 8 stages implemented and merged. See `docs/plans/v3.3.0/IMPLEMENTATION.md` for implementation details.**
 
 ---
 

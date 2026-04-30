@@ -41,7 +41,7 @@ services:
       searxng:
         condition: service_started
       rag-anything-bridge:
-        condition: service_started
+        condition: service_healthy
     restart: unless-stopped
     networks:
       - search-mcp-net
@@ -122,6 +122,7 @@ services:
       # Async limits
       - RAGA_ASYNC_MAX_PAGES=200
       - RAGA_ASYNC_MAX_SIZE_MB=100
+      - REDIS_URL=redis://redis:6379
     volumes:
       - raga-cache:/cache
       - raga-tmp:/tmp/rag-anything
@@ -140,6 +141,9 @@ services:
         reservations:
           cpus: '1'
           memory: 2G
+    depends_on:
+      redis:
+        condition: service_started
     networks:
       - search-mcp-net
 

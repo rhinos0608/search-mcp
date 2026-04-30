@@ -1,6 +1,6 @@
 {
 	"name": "search-mcp",
-	"version": "3.1.0",
+	"version": "3.3.0",
 	"description": "MCP server providing web search, web read, GitHub, YouTube, Reddit, Twitter/X, Product Hunt, patent, podcast, and academic research tools",
 	"type": "module",
 	"main": "dist/index.js",
