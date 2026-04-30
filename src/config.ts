@@ -113,6 +113,12 @@ export interface SemanticCrawlConfig {
   maxMaxBytes: number;
 }
 
+export interface DomainTrustConfig {
+  enabled: boolean;
+  trustedDomains: string[];
+  blockedDomains: string[];
+}
+
 export interface LlmConfig {
   provider: string;
   apiToken: string;
@@ -144,6 +150,8 @@ export interface SearchConfig {
   crawl4ai: Crawl4aiConfig;
   embeddingSidecar: EmbeddingSidecarConfig;
   semanticCrawl: SemanticCrawlConfig;
+  domainTrust: DomainTrustConfig;
+  scrubContent: boolean;
   llm: LlmConfig;
   raga: RAGAConfig;
   rescoreWeights: RescoreConfig;
@@ -179,6 +187,12 @@ const DEFAULTS: Omit<SearchConfig, 'rescoreWeights'> = {
     defaultMaxBytes: DEFAULT_SEMANTIC_MAX_BYTES,
     maxMaxBytes: DEFAULT_SEMANTIC_MAX_BYTES,
   },
+  domainTrust: {
+    enabled: false,
+    trustedDomains: [],
+    blockedDomains: [],
+  },
+  scrubContent: false,
   llm: { provider: '', apiToken: '', baseUrl: '' },
   raga: {
     enabled: false,
@@ -218,7 +232,7 @@ function decryptConfigFile(filePath: string, password: string): SearchConfig {
 
 type EnvConfig = Omit<
   Partial<SearchConfig>,
-  'reddit' | 'crawl4ai' | 'github' | 'embeddingSidecar' | 'semanticCrawl' | 'llm' | 'raga' | 'exa'
+  'reddit' | 'crawl4ai' | 'github' | 'embeddingSidecar' | 'semanticCrawl' | 'domainTrust' | 'llm' | 'raga' | 'scrubContent' | 'exa'
 > & {
   reddit?: Partial<RedditConfig>;
   crawl4ai?: Partial<Crawl4aiConfig>;
@@ -226,8 +240,10 @@ type EnvConfig = Omit<
   exa?: Partial<ExaConfig>;
   embeddingSidecar?: Partial<EmbeddingSidecarConfig>;
   semanticCrawl?: Partial<SemanticCrawlConfig>;
+  domainTrust?: Partial<DomainTrustConfig>;
   llm?: Partial<LlmConfig>;
   raga?: Partial<RAGAConfig>;
+  scrubContent?: boolean;
 };
 
 function loadFromEnv(): EnvConfig {
@@ -353,6 +369,27 @@ function loadFromEnv(): EnvConfig {
     cfg.semanticCrawl = scc;
   }
 
+  const domainTrustEnabled = process.env.DOMAIN_TRUST_ENABLED;
+  const trustedDomains = process.env.TRUSTED_DOMAINS;
+  const blockedDomains = process.env.BLOCKED_DOMAINS;
+  if (domainTrustEnabled !== undefined || trustedDomains !== undefined || blockedDomains !== undefined) {
+    const dt: Partial<DomainTrustConfig> = {};
+    if (domainTrustEnabled !== undefined) dt.enabled = domainTrustEnabled === 'true';
+    if (trustedDomains !== undefined) {
+      dt.trustedDomains = trustedDomains
+        .split(',')
+        .map((item) => item.trim())
+        .filter((item) => item.length > 0);
+    }
+    if (blockedDomains !== undefined) {
+      dt.blockedDomains = blockedDomains
+        .split(',')
+        .map((item) => item.trim())
+        .filter((item) => item.length > 0);
+    }
+    cfg.domainTrust = dt;
+  }
+
   const llmProvider = process.env.LLM_PROVIDER;
   const llmApiToken = process.env.LLM_API_TOKEN;
   const llmBaseUrl = process.env.LLM_BASE_URL;
@@ -364,6 +401,12 @@ function loadFromEnv(): EnvConfig {
     if (llmApiToken !== undefined) llmCfg.apiToken = llmApiToken;
     if (llmBaseUrl !== undefined) llmCfg.baseUrl = llmBaseUrl;
     cfg.llm = llmCfg;
+  }
+
+  // Content scrubbing
+  const scrubContent = process.env.SCRUB_CONTENT;
+  if (scrubContent !== undefined) {
+    cfg.scrubContent = scrubContent === 'true';
   }
 
   // RAG-Anything Bridge configuration
@@ -497,6 +540,20 @@ export function loadConfig(): SearchConfig {
         envConfig.semanticCrawl?.maxMaxBytes ??
         DEFAULTS.semanticCrawl.maxMaxBytes,
     },
+    domainTrust: {
+      enabled:
+        fileConfig.domainTrust?.enabled ?? envConfig.domainTrust?.enabled ?? DEFAULTS.domainTrust.enabled,
+      trustedDomains:
+        fileConfig.domainTrust?.trustedDomains ??
+        envConfig.domainTrust?.trustedDomains ??
+        DEFAULTS.domainTrust.trustedDomains,
+      blockedDomains:
+        fileConfig.domainTrust?.blockedDomains ??
+        envConfig.domainTrust?.blockedDomains ??
+        DEFAULTS.domainTrust.blockedDomains,
+    },
+    scrubContent:
+      fileConfig.scrubContent ?? envConfig.scrubContent ?? DEFAULTS.scrubContent,
     llm: {
       provider: fileConfig.llm?.provider ?? envConfig.llm?.provider ?? DEFAULTS.llm.provider,
       apiToken: fileConfig.llm?.apiToken ?? envConfig.llm?.apiToken ?? DEFAULTS.llm.apiToken,

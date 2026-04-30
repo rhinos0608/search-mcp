@@ -1,0 +1,98 @@
+{
+  "//": "Copy to config.json and fill in your values. Never commit config.json.",
+  "searchBackend": "searxng",
+  "brave": {
+    "apiKey": ""
+  },
+  "searxng": {
+    "baseUrl": ""
+  },
+  "exa": {
+    "apiKey": ""
+  },
+  "nitter": {
+    "baseUrl": ""
+  },
+  "listennotes": {
+    "apiKey": ""
+  },
+  "producthunt": {
+    "apiToken": ""
+  },
+  "patentsview": {
+    "apiKey": ""
+  },
+  "youtube": {
+    "apiKey": ""
+  },
+  "stackexchange": {
+    "apiKey": ""
+  },
+  "github": {
+    "token": ""
+  },
+  "reddit": {
+    "clientId": "",
+    "clientSecret": "",
+    "userAgent": ""
+  },
+  "crawl4ai": {
+    "baseUrl": "",
+    "apiToken": ""
+  },
+  "embeddingSidecar": {
+    "baseUrl": "",
+    "apiToken": "",
+    "dimensions": 768,
+    "codeModel": ""
+  },
+  "semanticCrawl": {
+    "defaultMaxBytes": 52428800,
+    "maxMaxBytes": 52428800
+  },
+  "domainTrust": {
+    "//": "Opt-in domain reputation filtering. Off by default.",
+    "enabled": false,
+    "trustedDomains": [],
+    "blockedDomains": []
+  },
+  "scrubContent": false,
+  "llm": {
+    "//": "LLM provider for contextual embeddings (optional).",
+    "provider": "",
+    "apiToken": "",
+    "baseUrl": ""
+  },
+  "raga": {
+    "//": "RAG-Anything Bridge for multimodal document extraction (PDFs, Office, etc.).",
+    "enabled": false,
+    "baseUrl": "http://localhost:8000",
+    "timeoutMs": 30000,
+    "maxRetries": 2,
+    "cacheEnabled": true,
+    "defaultParser": "auto"
+  },
+  "rescoreWeights": {
+    "//": "Per-tool rescoring weights. Tune these to prioritize recency, citations, etc.",
+    "webSearch": {
+      "rrfAnchor": 0.6,
+      "recency": 0.1,
+      "citations": 0.1
+    },
+    "academicSearch": {
+      "rrfAnchor": 0.6,
+      "recency": 0.1,
+      "citations": 0.1
+    },
+    "hackernewsSearch": {
+      "rrfAnchor": 0.6,
+      "recency": 0.1,
+      "engagement": 0.1
+    },
+    "redditSearch": {
+      "rrfAnchor": 0.6,
+      "recency": 0.1,
+      "commentEngagement": 0.1
+    }
+  }
+}
