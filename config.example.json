@@ -58,7 +58,7 @@
   },
   "scrubContent": false,
   "llm": {
-    "//": "LLM provider for contextual embeddings (optional).",
+    "//": "OpenAI-compatible LLM for contextual embeddings (optional). Base URL required; API token optional. provider = model name (e.g. gpt-4o-mini, llama3).",
     "provider": "",
     "apiToken": "",
     "baseUrl": ""

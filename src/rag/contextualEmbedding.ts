@@ -60,12 +60,12 @@ export async function enrichChunkWithContext(
     throw new Error('Document text must not be empty');
   }
 
-  // No-op path: LLM not configured
-  if (!llm?.apiToken) {
+  // No-op path: LLM not configured (needs at least a base URL)
+  if (!llm?.baseUrl) {
     return { embedText: chunk, originalText: chunk, context: '', enriched: false };
   }
 
-  const baseUrl = llm.baseUrl.replace(/\/+$/, '') || 'https://api.openai.com';
+  const baseUrl = llm.baseUrl.replace(/\/+$/, '');
   const endpoint = `${baseUrl}/v1/chat/completions`;
   const model = llm.provider || 'gpt-4o-mini';
 
@@ -81,12 +81,13 @@ export async function enrichChunkWithContext(
     'Write 1-2 sentences of context for this chunk (within the document above).';
 
   try {
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+      ...(llm.apiToken ? { Authorization: `Bearer ${llm.apiToken}` } : {}),
+    };
     const response = await fetch(endpoint, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${llm.apiToken}`,
-      },
+      headers,
       body: JSON.stringify({
         model,
         messages: [
@@ -143,7 +144,7 @@ export async function enrichChunksBatched(
   llm: LlmConfig | undefined,
   concurrency = 5,
 ): Promise<ContextualEnrichment[]> {
-  if (!llm?.apiToken) {
+  if (!llm?.baseUrl) {
     // Fast no-op path
     return chunks.map((c) => ({
       embedText: c.text,

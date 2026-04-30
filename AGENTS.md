@@ -148,10 +148,10 @@ EMBEDDING_SIDECAR_API_TOKEN
 EMBEDDING_DIMENSIONS        # default 768
 EMBEDDING_CODE_MODEL        # optional code-tuned embedding model
 
-# LLM (for contextual embeddings)
-LLM_PROVIDER                # provider label (e.g. 'openai', 'anthropic')
-LLM_API_TOKEN
-LLM_BASE_URL
+# LLM (for contextual embeddings — OpenAI-compatible endpoint, API key optional)
+LLM_PROVIDER                # model name (e.g. 'gpt-4o-mini', 'llama3'), passed as-is to /v1/chat/completions
+LLM_API_TOKEN               # optional — omit for local servers without auth
+LLM_BASE_URL                # base URL for /v1/chat/completions (required)
 
 # Security (V3.3.0 — all opt-in, off by default)
 DOMAIN_TRUST_ENABLED        # 'true' | 'false' (default: false)
