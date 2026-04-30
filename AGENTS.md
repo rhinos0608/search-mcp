@@ -142,17 +142,10 @@ CRAWL4AI_BASE_URL
 CRAWL4AI_API_TOKEN
 
 # Embedding
-EMBEDDING_PROVIDER           # 'sidecar' | 'ollama' | 'transformers' | 'openai' (default: sidecar)
+EMBEDDING_PROVIDER           # 'sidecar'
 EMBEDDING_SIDECAR_BASE_URL
 EMBEDDING_SIDECAR_API_TOKEN
 EMBEDDING_DIMENSIONS        # default 768
-EMBEDDING_CODE_MODEL        # optional, code-tuned model endpoint
-EMBEDDING_OLLAMA_BASE_URL   # default http://localhost:11434
-EMBEDDING_OLLAMA_MODEL      # default nomic-embed-text
-EMBEDDING_TRANSFORMERS_MODEL # default Xenova/all-MiniLM-L6-v2
-EMBEDDING_OPENAI_BASE_URL   # default https://api.openai.com/v1
-EMBEDDING_OPENAI_MODEL      # default text-embedding-3-small
-EMBEDDING_OPENAI_API_KEY
 
 # RAG-Anything Bridge (multimodal document extraction)
 RAGA_ENABLED                # 'true' | 'false' (default: false)

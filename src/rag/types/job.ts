@@ -1,4 +1,26 @@
-export type JobSource = 'seek' | 'indeed' | 'jora' | 'other';
+export type JobSource =
+  | 'seek'
+  | 'indeed'
+  | 'jora'
+  | 'linkedin'
+  | 'monster'
+  | 'glassdoor'
+  | 'ziprecruiter'
+  | 'careerbuilder'
+  | 'dice'
+  | 'workable'
+  | 'lever'
+  | 'greenhouse'
+  | 'ashby'
+  | 'breezy'
+  | 'wellfound'
+  | 'otta'
+  | 'simplyhired'
+  | 'flexjobs'
+  | 'upwork'
+  | 'jooble'
+  | 'adzuna'
+  | 'other';
 export type WorkMode = 'onsite' | 'hybrid' | 'remote' | 'unknown';
 export type VerificationStatus =
   | 'listing_page_fetched'

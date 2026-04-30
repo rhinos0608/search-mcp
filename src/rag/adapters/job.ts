@@ -1,4 +1,8 @@
 import * as cheerio from 'cheerio';
+import type { Cheerio } from 'cheerio';
+import type { AnyNode } from 'domhandler';
+
+type CheerioEl = Cheerio<AnyNode>;
 
 import type { RawDocument, RagChunk } from '../types.js';
 import type {
@@ -45,6 +49,13 @@ export function extractJobListingsFromHtml(html: string, url: string): JobListin
       .filter((listing): listing is JobListingMvp => listing !== undefined);
   }
 
+  // Try multi-listing extraction for search results / collection pages
+  const multiListings = extractMultiListingsFromHtml(html, url);
+  if (multiListings.length > 0) {
+    return multiListings;
+  }
+
+  // Fall back to single-listing extraction
   const listing = buildListing(html, url, source);
   return listing ? [listing] : [];
 }
@@ -528,17 +539,272 @@ function stripSiteSuffix(value: string | undefined): string | undefined {
   return normalized;
 }
 
+// ── Multi-listing extraction for search results / collection pages ────────
+
+/** CSS selectors that commonly contain job listing cards on search result pages. */
+const LISTING_CARD_SELECTORS = [
+  'article[class*=job]',
+  'article[class*=position]',
+  'article[class*=listing]',
+  'li[class*=job]',
+  'li[class*=position]',
+  'li[class*=result]',
+  'div[class*=job-card]',
+  'div[class*=job-result]',
+  'div[class*=job-listing]',
+  'div[class*=job-search]',
+  'div[class*=search-result]',
+  'div[class*=jobRow]',
+  'div[data-jobid]',
+  'div[data-job-id]',
+  'tr[class*=job]',
+  'section[class*=job]',
+  'section[class*=result]',
+];
+
+/** CSS selectors for job title elements within a listing card. */
+const TITLE_SELECTORS = [
+  'h2 a', 'h2', 'h3 a', 'h3', 'h4 a', 'h4',
+  'a[class*=title]', 'a[class*=job-title]',
+  'a[data-jobtitle]',
+  'span[class*=title]',
+  'div[class*=title]',
+  '[data-automation=jobTitle]',
+  '[data-automation=job-title]',
+];
+
+/** CSS selectors for company name elements within a listing card. */
+const COMPANY_SELECTORS = [
+  'span[class*=company]',
+  'div[class*=company]',
+  'a[class*=company]',
+  '[data-automation=jobCompany]',
+  '[itemprop=hiringOrganization]',
+  '.hiringOrganization',
+];
+
+/** CSS selectors for location elements within a listing card. */
+const LOCATION_SELECTORS = [
+  'span[class*=location]',
+  'div[class*=location]',
+  'li[class*=location]',
+  '[data-automation=jobLocation]',
+  '[itemprop=jobLocation]',
+];
+
+/** CSS selectors for salary elements within a listing card. */
+const SALARY_SELECTORS = [
+  'span[class*=salary]',
+  'div[class*=salary]',
+  '[data-automation=jobSalary]',
+  '[itemprop=baseSalary]',
+];
+
+/** CSS selectors for anchor elements containing job links within a listing card. */
+const LINK_SELECTORS = [
+  'h2 a[href]', 'h3 a[href]', 'h4 a[href]',
+  'a[class*=title][href]',
+  'a[class*=job-title][href]',
+  'a[data-automation*=job-title][href]',
+  'a[href*=/job/]',
+  'a[href*=/jobs/]',
+  'a[href*=/viewjob]',
+  'a[href*=/job-detail]',
+  'a[href*=/job-openings]',
+];
+
+/**
+ * Extract multiple job listings from search result / collection pages.
+ * Uses heuristic HTML structure parsing rather than JSON-LD.
+ */
+export function extractMultiListingsFromHtml(html: string, baseUrl: string): JobListingMvp[] {
+  const $ = loadHtml(html);
+  const base = tryParseUrl(baseUrl);
+  if (!base) return [];
+
+  const listings: JobListingMvp[] = [];
+
+  // Try to find listing card containers
+  for (const selector of LISTING_CARD_SELECTORS) {
+    const cards = $(selector);
+    if (cards.length < 2) continue; // Need at least 2 to be a multi-listing page
+    if (cards.length > 100) continue; // Suspicious — likely a false positive
+
+    cards.each((_, card) => {
+      const cardEl = $(card);
+      const listing = extractListingFromCard(cardEl, base, baseUrl);
+      if (listing) {
+        listings.push(listing);
+      }
+    });
+
+    if (listings.length >= 2) break; // Found valid multi-listings
+  }
+
+  return listings;
+}
+
+function extractListingFromCard(
+  $card: CheerioEl,
+  _base: URL,
+  pageUrl: string,
+): JobListingMvp | undefined {
+  const source = detectJobSource(pageUrl);
+
+  // Extract job link
+  let jobUrl: string | undefined;
+  for (const selector of LINK_SELECTORS) {
+    const href = $card.find(selector).first().attr('href');
+    if (href && tryParseUrl(href)) {
+      jobUrl = href;
+      break;
+    }
+  }
+
+  // Extract title
+  let title: string | undefined;
+  for (const selector of TITLE_SELECTORS) {
+    const text = normalizeText($card.find(selector).first().text());
+    if (text) {
+      title = text;
+      break;
+    }
+  }
+  title ??= normalizeText($card.find('a').first().text());
+  if (!title) return undefined;
+
+  // Extract company
+  let company: string | undefined;
+  for (const selector of COMPANY_SELECTORS) {
+    const text = normalizeText($card.find(selector).first().text());
+    if (text) {
+      company = text;
+      break;
+    }
+  }
+
+  // Extract location
+  let location: string | undefined;
+  for (const selector of LOCATION_SELECTORS) {
+    const text = normalizeText($card.find(selector).first().text());
+    if (text) {
+      location = text;
+      break;
+    }
+  }
+
+  // Extract salary
+  let salaryRaw: string | undefined;
+  for (const selector of SALARY_SELECTORS) {
+    const text = normalizeText($card.find(selector).first().text());
+    if (text) {
+      salaryRaw = text;
+      break;
+    }
+  }
+
+  // Extract work mode from card context
+  const cardText = $card.text().toLowerCase();
+  let workMode: WorkMode = 'unknown';
+  if (/\bremote\b/i.test(cardText)) workMode = 'remote';
+  else if (/\bhybrid\b/i.test(cardText)) workMode = 'hybrid';
+  else if (/\bonsite\b|\bon[- ]site\b|\bin[- ]office\b/i.test(cardText)) workMode = 'onsite';
+
+  // Extract job ID from URL
+  const jobId = jobUrl ? extractJobIdFromUrl(jobUrl) : undefined;
+
+  const confidence = calculateJobConfidence({ title, location, workMode, salaryRaw });
+
+  // Build listing text from available fields
+  const extractedText = [
+    title,
+    company,
+    location,
+    workMode !== 'unknown' ? workMode : undefined,
+    salaryRaw,
+  ]
+    .filter((part): part is string => typeof part === 'string' && part.trim().length > 0)
+    .join('\n');
+
+  const listing: JobListingMvp = {
+    title,
+    workMode,
+    source,
+    extractedText,
+    confidence,
+    verificationStatus: 'listing_page_fetched',
+    caveats: [],
+  };
+
+  if (company) listing.company = company;
+  if (location) listing.location = location;
+  if (salaryRaw) listing.salaryRaw = salaryRaw;
+  if (jobUrl) listing.sourceUrl = jobUrl;
+  if (jobId) listing.jobId = jobId;
+
+  return listing;
+}
+
+function tryParseUrl(url: string): URL | undefined {
+  try {
+    return new URL(url);
+  } catch {
+    return undefined;
+  }
+}
+
 // ── Two-phase job discovery ────────────────────────────────────────────────
 
-// Per-host canonical job URL patterns
 const JOB_URL_PATTERNS: { hostname: RegExp; path: RegExp }[] = [
-  { hostname: /seek\.com\.au$/, path: /^\/job\/\d+/ },
-  { hostname: /seek\.co\.nz$/, path: /^\/job\/\d+/ },
+  // SEEK
+  { hostname: /seek\.(?:com\.au|co\.nz)$/, path: /^\/job\/\d+/ },
+  // Indeed
   { hostname: /indeed\.com$/, path: /\bjk=[a-f0-9]+/ },
-  { hostname: /indeed\.\w+$/, path: /\bjk=[a-f0-9]+/ }, // au.indeed.com, uk.indeed.com
+  { hostname: /indeed\.\w+$/, path: /\bjk=[a-f0-9]+/ },
+  // LinkedIn
   { hostname: /linkedin\.com$/, path: /\/jobs\/view\// },
+  // Jora
   { hostname: /jora\.com$/, path: /\/job\// },
   { hostname: /jora\.\w+$/, path: /\/job\// },
+  // Monster
+  { hostname: /monster\.com$/, path: /\/job-openings\// },
+  { hostname: /monster\.\w+$/, path: /\/job-openings\// },
+  // Glassdoor
+  { hostname: /glassdoor\.(?:com|co\.uk|co\.in|de|fr|ca)$/, path: /\/Job\// },
+  { hostname: /glassdoor\.(?:com|co\.uk|co\.in|de|fr|ca)$/, path: /\/job-listing\// },
+  // ZipRecruiter
+  { hostname: /ziprecruiter\.com$/, path: /\/jobs\// },
+  // CareerBuilder
+  { hostname: /careerbuilder\.com$/, path: /\/job\// },
+  // Dice
+  { hostname: /dice\.com$/, path: /\/job\// },
+  { hostname: /dice\.com$/, path: /\/job-detail\// },
+  // Workable
+  { hostname: /workable\.com$/, path: /\/j\// },
+  { hostname: /workable\.com$/, path: /\/jobs\// },
+  // Lever
+  { hostname: /lever\.co$/, path: /\/[^/]+\/[^/]+$/ }, // jobs.lever.co/company/id
+  // Greenhouse
+  { hostname: /greenhouse\.io$/, path: /\/jobs\// },
+  // Ashby
+  { hostname: /ashbyhq\.com$/, path: /\/[^/]+$/ }, // jobs.ashbyhq.com/company/id
+  // Breezy
+  { hostname: /breezy\.hr$/, path: /\/p\// },
+  // Wellfound (AngelList)
+  { hostname: /wellfound\.com$/, path: /\/company\/[^/]+\/jobs\// },
+  // Otta
+  { hostname: /otta\.com$/, path: /\/jobs\// },
+  // SimplyHired
+  { hostname: /simplyhired\.com$/, path: /\/job\// },
+  // FlexJobs
+  { hostname: /flexjobs\.com$/, path: /\/jobs\// },
+  // Upwork
+  { hostname: /upwork\.com$/, path: /\/freelance-jobs\// },
+  // Jooble
+  { hostname: /jooble\.org$/, path: /\/job\// },
+  // Adzuna
+  { hostname: /adzuna\.(?:com|co\.uk|de|fr|ca|com\.au)$/, path: /\/job\// },
+  { hostname: /adzuna\.(?:com|co\.uk|de|fr|ca|com\.au)$/, path: /\/jobs\// },
 ];
 
 export function extractJobLinksFromHtml(html: string, baseUrl: string): string[] {

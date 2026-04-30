@@ -24,6 +24,17 @@ const MAX_PAGES = 50;
 const DEFAULT_TOP_K = 10;
 const MAX_TOP_K = 50;
 
+/**
+ * Maximum concurrent crawl requests per domain to avoid rate limiting.
+ */
+const CRAWL_CONCURRENCY = 3;
+
+/**
+ * Retry settings for failed crawls.
+ */
+const MAX_RETRIES = 2;
+const RETRY_BASE_DELAY_MS = 1000;
+
 export interface SemanticJobsOptions {
   query: string;
   embeddingBaseUrl: string;
@@ -37,6 +48,8 @@ export interface SemanticJobsOptions {
   topK?: number;
   maxBytes?: number;
   debug?: boolean;
+  /** When true (default), appends "jobs" keyword to the search query. */
+  addJobSuffix?: boolean;
 }
 
 export interface SemanticJobsCrawledPage {
@@ -71,7 +84,8 @@ export async function semanticJobs(
   const maxPages = Math.min(opts.maxPages ?? DEFAULT_MAX_PAGES, MAX_PAGES);
   const topK = Math.min(opts.topK ?? DEFAULT_TOP_K, MAX_TOP_K);
   const constraints = buildConstraints(opts);
-  const query = buildSearchQuery(opts.query, constraints);
+  const addJobSuffix = opts.addJobSuffix !== false;
+  const query = buildSearchQuery(opts.query, constraints, addJobSuffix);
 
   logger.info({ tool: 'semantic_jobs', query, maxPages, topK }, 'Starting semantic job search');
 
@@ -281,7 +295,11 @@ function buildConstraints(opts: SemanticJobsOptions): JobSearchConstraints {
   };
 }
 
-function buildSearchQuery(query: string, constraints: JobSearchConstraints): string {
+function buildSearchQuery(
+  query: string,
+  constraints: JobSearchConstraints,
+  addJobSuffix: boolean,
+): string {
   const parts = [query.trim()];
   if (constraints.location !== undefined) {
     parts.push(
@@ -293,7 +311,9 @@ function buildSearchQuery(query: string, constraints: JobSearchConstraints): str
       ...constraints.workMode.map((mode) => mode.trim()).filter((term) => term.length > 0),
     );
   }
-  parts.push('jobs');
+  if (addJobSuffix) {
+    parts.push('jobs');
+  }
   return parts.filter((part) => part.length > 0).join(' ');
 }
 
@@ -314,29 +334,107 @@ async function defaultSearch(query: string, limit: number): Promise<SearchResult
   return webSearch(query, limit);
 }
 
+/**
+ * Concurrency-limited map: process items in batches, at most `concurrency` at a time.
+ */
+async function concurrencyLimitedMap<T, R>(
+  items: T[],
+  concurrency: number,
+  fn: (item: T) => Promise<R>,
+): Promise<R[]> {
+  const results: R[] = [];
+  for (let index = 0; index < items.length; index += concurrency) {
+    const batch = items.slice(index, index + concurrency);
+    const batchResults = await Promise.allSettled(batch.map(fn));
+    for (const r of batchResults) {
+      if (r.status === 'fulfilled') {
+        results.push(r.value);
+      } else {
+        const reason =
+          r.reason instanceof Error ? r.reason.message : String(r.reason);
+        throw new Error(`Concurrent crawl failed: ${reason}`);
+      }
+    }
+  }
+  return results;
+}
+
+/**
+ * Crawl a URL with retry and exponential backoff.
+ */
+async function crawlWithRetry(
+  url: string,
+  cfg: ReturnType<typeof loadConfig>,
+  maxRetries: number,
+): Promise<{ url: string; page: import('../types.js').CrawlPageResult | undefined }> {
+  let lastError: string | undefined;
+
+  for (let attempt = 0; attempt <= maxRetries; attempt += 1) {
+    try {
+      const result = await webCrawl(url, cfg.crawl4ai.baseUrl, cfg.crawl4ai.apiToken, {
+        strategy: 'bfs',
+        maxDepth: 1,
+        maxPages: 1,
+        includeExternalLinks: false,
+      });
+      return { url, page: result.pages[0] };
+    } catch (err) {
+      lastError = err instanceof Error ? err.message : String(err);
+      if (attempt < maxRetries) {
+        const delay = RETRY_BASE_DELAY_MS * 2 ** attempt;
+        logger.debug({ url, attempt, delay, err: lastError }, 'Crawl attempt failed, retrying');
+        await sleep(delay);
+      }
+    }
+  }
+
+  logger.warn({ url, err: lastError, maxRetries }, 'Crawl failed after all retries');
+  return {
+    url,
+    page: {
+      url,
+      success: false,
+      markdown: '',
+      title: '',
+      description: '',
+      links: [],
+      statusCode: null,
+      errorMessage: lastError ?? 'Max retries exceeded',
+    },
+  };
+}
+
+/**
+ * Crawl phase URLs with concurrency control, then build the result array.
+ */
+async function crawlPhase(
+  urls: string[],
+  cfg: ReturnType<typeof loadConfig>,
+  maxRetries: number,
+): Promise<SemanticJobsCrawledPage[]> {
+  const results = await concurrencyLimitedMap(urls, CRAWL_CONCURRENCY, (url: string) =>
+    crawlWithRetry(url, cfg, maxRetries),
+  );
+
+  return results.map(({ url, page }) => ({
+    url,
+    html: page?.html ?? page?.markdown ?? '',
+    success: page?.success ?? false,
+    ...(page?.errorMessage !== null && page?.errorMessage !== undefined
+      ? { error: page.errorMessage }
+      : {}),
+  })) satisfies SemanticJobsCrawledPage[];
+}
+
 async function defaultCrawl(urls: string[]): Promise<SemanticJobsCrawledPage[]> {
   const cfg = loadConfig();
 
-  const crawlOne = async (
-    url: string,
-  ): Promise<{ url: string; page: import('../types.js').CrawlPageResult | undefined }> => {
-    const result = await webCrawl(url, cfg.crawl4ai.baseUrl, cfg.crawl4ai.apiToken, {
-      strategy: 'bfs',
-      maxDepth: 1,
-      maxPages: 1,
-      includeExternalLinks: false,
-    });
-    return { url, page: result.pages[0] };
-  };
-
   // Phase 1: crawl collection pages to extract individual job links
-  const phase1 = await Promise.allSettled(urls.map(crawlOne));
+  const phase1Pages = await crawlPhase(urls, cfg, MAX_RETRIES);
   const jobLinks: string[] = [];
-  for (const outcome of phase1) {
-    if (outcome.status !== 'fulfilled') continue;
-    const { url, page } = outcome.value;
-    if (page?.html) {
-      jobLinks.push(...extractJobLinksFromHtml(page.html, url));
+  for (const page of phase1Pages) {
+    if (page.html) {
+      jobLinks.push(...extractJobLinksFromHtml(page.html, page.url));
     }
   }
 
@@ -344,27 +442,9 @@ async function defaultCrawl(urls: string[]): Promise<SemanticJobsCrawledPage[]> 
   const targets = jobLinks.length > 0 ? dedupUrls(jobLinks) : urls;
 
   // Phase 2: crawl individual job pages (or fall back to collection pages)
-  const phase2 = await Promise.allSettled(targets.map(crawlOne));
-  const pages: SemanticJobsCrawledPage[] = [];
-  for (let i = 0; i < phase2.length; i += 1) {
-    const outcome = phase2[i];
-    const url = targets[i] ?? 'unknown';
-    if (outcome === undefined) continue;
-    if (outcome.status === 'fulfilled') {
-      const { page } = outcome.value;
-      pages.push({
-        url,
-        html: page?.html ?? page?.markdown ?? '',
-        success: page?.success ?? false,
-        ...(page?.errorMessage !== null && page?.errorMessage !== undefined
-          ? { error: page.errorMessage }
-          : {}),
-      } satisfies SemanticJobsCrawledPage);
-    } else {
-      const reason =
-        outcome.reason instanceof Error ? outcome.reason.message : String(outcome.reason);
-      pages.push({ url, html: '', success: false, error: reason });
-    }
-  }
-  return pages;
+  return crawlPhase(targets, cfg, MAX_RETRIES);
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }

@@ -19,3 +19,5 @@ __pycache__/
 *.pyo
 
 docs/superpowers/plans/
+
+.pi-smartread.tags.cache/

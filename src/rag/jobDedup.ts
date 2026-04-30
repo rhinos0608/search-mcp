@@ -8,9 +8,27 @@ export interface DedupResult {
 
 const SOURCE_RELIABILITY: Record<JobListingMvp['source'], number> = {
   seek: 0,
-  indeed: 1,
-  jora: 2,
-  other: 3,
+  linkedin: 1,
+  indeed: 2,
+  glassdoor: 3,
+  monster: 4,
+  greenhouse: 5,
+  lever: 5,
+  workable: 5,
+  ziprecruiter: 6,
+  careerbuilder: 6,
+  ashby: 7,
+  breezy: 7,
+  dice: 7,
+  wellfound: 8,
+  otta: 8,
+  simplyhired: 8,
+  flexjobs: 8,
+  adzuna: 9,
+  upwork: 9,
+  jora: 10,
+  jooble: 11,
+  other: 99,
 };
 
 export function dedupJobListings(listings: JobListingMvp[]): JobListingMvp[] {

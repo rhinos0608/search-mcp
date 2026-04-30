@@ -1426,7 +1426,9 @@ export function createServer(): McpServer {
       'semantic_jobs',
       {
         description:
-          'Search for job listings across job boards (SEEK, Indeed, Jora), extract structured fields (title, company, location, salary, work mode), ' +
+          'Search for job listings across 20+ job boards (SEEK, Indeed, LinkedIn, Monster, Glassdoor, ZipRecruiter, ' +
+          'CareerBuilder, Dice, Workable, Lever, Greenhouse, Ashby, Breezy, Wellfound, Otta, SimplyHired, FlexJobs, ' +
+          'Upwork, Jooble, Adzuna, Jora), extract structured fields (title, company, location, salary, work mode), ' +
           'apply constraint filters, rank with weighted composite scoring, and return structured job results. ' +
           'Uses web search + crawl for discovery, then extracts structured data from listing pages. ' +
           'Requires EMBEDDING_SIDECAR_BASE_URL for semantic ranking. Falls back to constraint-only ranking without it.',
@@ -1479,9 +1481,27 @@ export function createServer(): McpServer {
             .optional()
             .default(DEFAULT_SEMANTIC_MAX_BYTES)
             .describe('Maximum total bytes of listing text to embed (1–250MB, default 250MB)'),
+          addJobSuffix: z
+            .boolean()
+            .optional()
+            .default(true)
+            .describe(
+              'When true (default), appends "jobs" keyword to the search query for better discovery. ' +
+                'Set false to use the query as-is without the "jobs" suffix.',
+            ),
         },
       },
-      async ({ query, location, workMode, maxSalary, excludeTitles, maxPages, topK, maxBytes }) => {
+      async ({
+        query,
+        location,
+        workMode,
+        maxSalary,
+        excludeTitles,
+        maxPages,
+        topK,
+        maxBytes,
+        addJobSuffix,
+      }) => {
         logger.info({ tool: 'semantic_jobs', query, maxPages, topK }, 'Tool invoked');
         const start = Date.now();
         try {
@@ -1499,6 +1519,7 @@ export function createServer(): McpServer {
             maxPages,
             topK,
             maxBytes,
+            addJobSuffix,
           });
           const elapsed = Date.now() - start;
           const result = makeResult(
