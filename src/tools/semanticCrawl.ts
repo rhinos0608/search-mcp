@@ -14,8 +14,12 @@ import { buildBm25Index, type Bm25Index } from '../utils/bm25.js';
 import { getOrBuildCorpus, loadCorpusById } from '../utils/corpusCache.js';
 import { embedTexts as ragEmbedTexts } from '../rag/embedding.js';
 import { prepareCorpus, retrieveCorpus } from '../rag/pipeline.js';
+import { enrichChunksBatched } from '../rag/contextualEmbedding.js';
 import type { RagChunk } from '../rag/types.js';
 import { finalizeStructuredContent } from '../utils/elementHelpers.js';
+import { evaluateDomainTrust, type DomainTrustOptions } from '../utils/domainTrust.js';
+import { scrubContent } from '../utils/contentScrubber.js';
+import { recordOutcome } from '../utils/extractionStats.js';
 import type { ContentElement, StructuredContent } from '../types.js';
 import type {
   SemanticCrawlResult,
@@ -25,7 +29,8 @@ import type {
   CrawlPageResult,
   SemanticCrawlWarning,
 } from '../types.js';
-import type { Crawl4aiConfig } from '../config.js';
+import type { Crawl4aiConfig, DomainTrustConfig, LlmConfig } from '../config.js';
+import { loadConfig } from '../config.js';
 import type { ExtractionConfig } from '../utils/extractionConfig.js';
 import { createHash } from 'node:crypto';
 import {
@@ -758,11 +763,32 @@ function cosineSimilarity(a: number[], b: number[]): number {
 // ── Source Helpers ────────────────────────────────────────────────────────
 
 /** SSRF-validate every URL in a list, dropping unsafe ones. */
-function filterSafeUrls(urls: string[]): string[] {
+export function filterSafeUrls(urls: string[], trustConfig?: DomainTrustConfig): string[] {
   const safe: string[] = [];
+  const trustOptions: DomainTrustOptions | undefined =
+    trustConfig?.enabled === true
+      ? {
+          trustedDomains: trustConfig.trustedDomains,
+          blockedDomains: trustConfig.blockedDomains,
+        }
+      : undefined;
+
   for (const u of urls) {
     try {
       assertSafeUrl(u);
+      if (!trustConfig?.enabled) {
+        safe.push(u);
+        continue;
+      }
+
+      const trust = evaluateDomainTrust(u, trustOptions);
+      if (trust.tier === 'blocked') {
+        logger.warn({ url: u, trust }, 'semantic_crawl: dropping blocked adapter URL');
+        continue;
+      }
+      if (trust.tier === 'suspicious') {
+        logger.warn({ url: u, trust }, 'semantic_crawl: suspicious adapter URL');
+      }
       safe.push(u);
     } catch {
       logger.warn({ url: u }, 'semantic_crawl: dropping unsafe adapter URL');
@@ -972,12 +998,12 @@ export async function crawlSeeds(
         omittedPages.push({
           url: page.url,
           reason: 'response_size_budget_exceeded',
-          estimatedBytes: Buffer.byteLength(page.markdown ?? '', 'utf8'),
+          estimatedBytes: Buffer.byteLength(page.markdown, 'utf8'),
         });
         continue;
       }
 
-      const pageBytes = Buffer.byteLength(page.markdown ?? '', 'utf8');
+      const pageBytes = Buffer.byteLength(page.markdown, 'utf8');
       if (accumulatedBytes + pageBytes > SAFE_BYTES) {
         omittedPages.push({
           url: page.url,
@@ -1046,17 +1072,35 @@ export async function crawlSeeds(
   };
 }
 
-export function pagesToCorpus(pages: CrawlPageResult[]): CorpusChunk[] {
+export function pagesToCorpus(
+  pages: CrawlPageResult[],
+  scrub?: boolean,
+): CorpusChunk[] {
+  const cfg = scrub ?? loadConfig().scrubContent;
   const chunks: CorpusChunk[] = [];
   let pagesWithContent = 0;
   let droppedBannerPages = 0;
+  let scrubbedCount = 0;
+  let threatDetections = 0;
+
   for (const page of pages) {
     if (!page.success || !page.markdown) continue;
     if (isCookieBannerPage(page.markdown)) {
       droppedBannerPages++;
       continue;
     }
-    const mdChunks = chunkMarkdown(page.markdown, page.url);
+
+    let markdown = page.markdown;
+    if (cfg) {
+      const result = scrubContent(page.markdown);
+      if (!result.clean) {
+        scrubbedCount++;
+        threatDetections += result.threats.length;
+      }
+      markdown = result.content;
+    }
+
+    const mdChunks = chunkMarkdown(markdown, page.url);
     if (mdChunks.length === 0) continue;
     pagesWithContent++;
     chunks.push(
@@ -1074,6 +1118,12 @@ export function pagesToCorpus(pages: CrawlPageResult[]): CorpusChunk[] {
     logger.warn(
       { droppedBannerPages, totalPages: pages.length },
       'Dropped cookie-banner pages before chunking',
+    );
+  }
+  if (scrubbedCount > 0) {
+    logger.warn(
+      { scrubbedCount, threatDetections, totalPages: pages.length },
+      'Content scrubbing redacted threats in pages before chunking',
     );
   }
   if (pagesWithContent < pages.filter((p) => p.success).length - droppedBannerPages) {
@@ -1154,6 +1204,12 @@ export interface SemanticCrawlOptions {
   extractionConfig?: ExtractionConfig | undefined;
   /** LLM provider credentials for LLM extraction strategy fallback. */
   llmFallback?: { provider: string; apiToken: string; baseUrl?: string } | undefined;
+  /** Optional LLM config for contextual embedding enrichment. */
+  contextualEmbedding?: LlmConfig | undefined;
+  /** Use LLM-generated context when embedding chunks. */
+  useContextualEmbeddings?: boolean | undefined;
+  /** Optional security policy for domain trust evaluation. Disabled by default. */
+  domainTrust?: DomainTrustConfig | undefined;
 }
 
 export async function semanticCrawl(
@@ -1170,6 +1226,7 @@ export async function semanticCrawl(
   // Pre-computed data from cache (populated for 'cached' source only)
   let precomputedEmbeddings: number[][] | undefined;
   let cachedCorpusId: string | undefined;
+  let contextualDocuments: Map<string, string> | undefined;
   // Aggregated extracted data from non-cached crawl sources
   let extractedData: Record<string, Record<string, unknown>[]> | undefined;
   // Recovery and crawl warnings collected across seed URLs.
@@ -1190,7 +1247,7 @@ export async function semanticCrawl(
         opts.source.urls && opts.source.urls.length > 0
           ? [opts.source.url, ...opts.source.urls]
           : [opts.source.url];
-      const safeUrls = filterSafeUrls(seedUrls);
+      const safeUrls = filterSafeUrls(seedUrls, opts.domainTrust);
       const result = await crawlSeeds(safeUrls, crawl4aiCfg, {
         ...opts,
         sourceType: opts.source.type,
@@ -1200,8 +1257,17 @@ export async function semanticCrawl(
         crawlStructuredWarnings.push(sw);
       }
       crawlOmittedPages.push(...result.omittedPages);
+      // Record outcomes for self-improvement tracking
+      for (const page of result.pages) {
+        recordOutcome({ url: page.url, domain: new URL(page.url).hostname.replace(/^www\./, ''), success: page.success, strategy: 'semantic-crawl', timestamp: Date.now(), chars: page.markdown.length });
+      }
       corpusChunks = pagesToCorpus(result.pages);
       lastPages = result.pages;
+      contextualDocuments = new Map(
+        result.pages
+          .filter((page) => page.success && page.markdown.length > 0)
+          .map((page) => [page.url, page.markdown] as const),
+      );
       pagesCrawled = result.totalPages;
       successfulPages = result.successfulPages;
       extractedData = aggregateExtractedData(result.pages);
@@ -1251,7 +1317,7 @@ export async function semanticCrawl(
         );
       }
 
-      const safeUrls = filterSafeUrls(sitemapUrls).slice(0, opts.maxPages);
+      const safeUrls = filterSafeUrls(sitemapUrls, opts.domainTrust).slice(0, opts.maxPages);
       logger.info(
         {
           sitemapUrl: seedUrl,
@@ -1279,8 +1345,17 @@ export async function semanticCrawl(
         crawlStructuredWarnings.push(sw);
       }
       crawlOmittedPages.push(...result.omittedPages);
+      // Record outcomes for self-improvement tracking
+      for (const page of result.pages) {
+        recordOutcome({ url: page.url, domain: new URL(page.url).hostname.replace(/^www\./, ''), success: page.success, strategy: 'semantic-crawl', timestamp: Date.now(), chars: page.markdown.length });
+      }
       corpusChunks = pagesToCorpus(result.pages);
       lastPages = result.pages;
+      contextualDocuments = new Map(
+        result.pages
+          .filter((page) => page.success && page.markdown.length > 0)
+          .map((page) => [page.url, page.markdown] as const),
+      );
       pagesCrawled = result.totalPages;
       successfulPages = result.successfulPages;
       extractedData = aggregateExtractedData(result.pages);
@@ -1295,7 +1370,7 @@ export async function semanticCrawl(
         'moderate',
       );
       const searchUrls = searchResults.map((r) => r.url).filter((url) => url.length > 0);
-      const safeUrls = filterSafeUrls(searchUrls).slice(0, opts.maxPages);
+      const safeUrls = filterSafeUrls(searchUrls, opts.domainTrust).slice(0, opts.maxPages);
       logger.info(
         {
           searchQuery: opts.source.query,
@@ -1319,8 +1394,17 @@ export async function semanticCrawl(
         crawlStructuredWarnings.push(sw);
       }
       crawlOmittedPages.push(...result.omittedPages);
+      // Record outcomes for self-improvement tracking
+      for (const page of result.pages) {
+        recordOutcome({ url: page.url, domain: new URL(page.url).hostname.replace(/^www\./, ''), success: page.success, strategy: 'semantic-crawl', timestamp: Date.now(), chars: page.markdown.length });
+      }
       corpusChunks = pagesToCorpus(result.pages);
       lastPages = result.pages;
+      contextualDocuments = new Map(
+        result.pages
+          .filter((page) => page.success && page.markdown.length > 0)
+          .map((page) => [page.url, page.markdown] as const),
+      );
       pagesCrawled = result.totalPages;
       successfulPages = result.successfulPages;
       extractedData = aggregateExtractedData(result.pages);
@@ -1340,7 +1424,9 @@ export async function semanticCrawl(
       if (opts.source.query !== undefined) ghOpts.query = opts.source.query;
       const docs = await fetchGitHubCorpus(ghOpts);
       corpusChunks = [];
+      contextualDocuments = new Map<string, string>();
       for (const doc of docs) {
+        contextualDocuments.set(doc.url, doc.content);
         const chunks = chunkMarkdown(doc.content, doc.url);
         corpusChunks.push(
           ...chunks.map((c) => ({
@@ -1430,8 +1516,32 @@ export async function semanticCrawl(
   }
 
   // Non-cached sources: build corpus (embed + cache)
-  const deduped = deduplicateCorpusChunks(corpusChunks);
-  const chunkTexts = deduped.map((c) => c.text);
+  let deduped = deduplicateCorpusChunks(corpusChunks);
+  if (opts.useContextualEmbeddings) {
+    if (!opts.contextualEmbedding) {
+      const msg =
+        'useContextualEmbeddings requested but no LLM config was provided; using original chunk text';
+      crawlWarnings.push(msg);
+      logger.warn({ sourceType: opts.source.type }, msg);
+    } else if (!contextualDocuments || contextualDocuments.size === 0) {
+      const msg =
+        'useContextualEmbeddings requested but source documents were unavailable; using original chunk text';
+      crawlWarnings.push(msg);
+      logger.warn({ sourceType: opts.source.type }, msg);
+    } else if (deduped.length > 0) {
+      const enrichments = await enrichChunksBatched(
+        deduped,
+        contextualDocuments,
+        opts.contextualEmbedding,
+      );
+      deduped = deduped.map((chunk, index) => {
+        const enrichment = enrichments[index];
+        if (enrichment?.enriched !== true) return chunk;
+        return { ...chunk, embedText: enrichment.embedText };
+      });
+    }
+  }
+  const chunkTexts = deduped.map((c) => c.embedText ?? c.text);
   const chunkTitles = deduped.map(
     (c) =>
       c.section

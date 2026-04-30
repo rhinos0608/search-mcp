@@ -245,13 +245,23 @@ export function createServer(): McpServer {
           .optional()
           .default('moderate')
           .describe('Safe-search level: strict | moderate | off'),
+        expandQuery: z
+          .boolean()
+          .optional()
+          .default(false)
+          .describe('Generate query variations (question, concept, scope, opposition) and merge results for broader coverage.'),
+        mergeSearchBackends: z
+          .boolean()
+          .optional()
+          .default(false)
+          .describe('When multiple search backends are configured, query all of them and merge + deduplicate results. Adds engines field tracking which backend returned each result.'),
       },
     },
-    async ({ query, limit, safeSearch }) => {
-      logger.info({ tool: 'web_search', limit, safeSearch }, 'Tool invoked');
+    async ({ query, limit, safeSearch, expandQuery, mergeSearchBackends }) => {
+      logger.info({ tool: 'web_search', limit, safeSearch, expandQuery, mergeSearchBackends }, 'Tool invoked');
       const start = Date.now();
       try {
-        const data = await webSearch(query, limit, safeSearch);
+        const data = await webSearch(query, limit, safeSearch, expandQuery, mergeSearchBackends);
         const result = makeResult('web_search', data, Date.now() - start);
         return successResponse(result);
       } catch (err: unknown) {
@@ -1980,6 +1990,11 @@ export function createServer(): McpServer {
             .optional()
             .default(false)
             .describe('Apply cross-encoder re-ranking to top candidates (default false)'),
+          useContextualEmbeddings: z
+            .boolean()
+            .optional()
+            .default(false)
+            .describe('Use LLM-generated context for embedding corpus chunks (default false)'),
           allowPathDrift: z
             .boolean()
             .optional()
@@ -2031,6 +2046,7 @@ export function createServer(): McpServer {
         includeExternalLinks,
         maxBytes,
         useReranker,
+        useContextualEmbeddings,
         allowPathDrift,
         extractionConfig,
         waitFor,
@@ -2076,6 +2092,8 @@ export function createServer(): McpServer {
               jsCode,
               ...(extractionConfig ? { extractionConfig } : {}),
               ...(llmFallback ? { llmFallback } : {}),
+              ...(useContextualEmbeddings ? { useContextualEmbeddings, contextualEmbedding: cfg.llm } : {}),
+              domainTrust: cfg.domainTrust,
             },
             cfg.crawl4ai,
             cfg.embeddingSidecar.baseUrl,

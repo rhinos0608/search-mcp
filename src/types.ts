@@ -23,6 +23,8 @@ export interface SearchResult {
   domain: string;
   /** Which search backend produced this result. */
   source: 'brave' | 'searxng' | 'exa';
+  /** Which backends reported this result (when cross-backend merging is active). */
+  engines?: string[] | undefined;
   /** Page age / publication date hint when available (e.g. "2 days ago", ISO date). */
   age: string | null;
   /** Additional snippet text beyond the primary description. */
@@ -423,6 +425,8 @@ export interface CrawlPageResult extends StructuredContent {
   statusCode: number | null;
   errorMessage: string | null;
   extractedData?: Record<string, unknown>[];
+  /** Source of recovered content when the primary crawl failed. */
+  recoverySource?: 'wayback' | 'google-cache' | 'aggressive-render';
 }
 
 export interface WebCrawlResult {
@@ -555,6 +559,8 @@ export type SemanticCrawlSource =
 
 export interface CorpusChunk {
   text: string;
+  /** Optional alternate text used for embeddings while preserving `text` for display. */
+  embedText?: string;
   url: string;
   section: string;
   charOffset: number;

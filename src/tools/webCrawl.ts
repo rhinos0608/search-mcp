@@ -8,6 +8,8 @@ import type { ExtractionConfig } from '../utils/extractionConfig.js';
 import { mapToCrawl4ai } from '../utils/extractionConfig.js';
 import { assessMarkdownBatchQuality } from '../utils/renderRecovery.js';
 import { safeStructuredFromMarkdown } from '../utils/elementHelpers.js';
+import { attemptExternalRecovery } from '../utils/externalRecovery.js';
+import { recordOutcome } from '../utils/extractionStats.js';
 
 export interface WebCrawlOptions {
   strategy: 'bfs' | 'dfs';
@@ -383,6 +385,7 @@ export async function webCrawl(
   const baseline = await crawlOnce(url, endpoint, apiToken, opts);
   const baselineQuality = assessMarkdownBatchQuality(baseline.pages.map((page) => page.markdown));
   if (baselineQuality.meaningful) {
+    recordOutcome({ url, domain: new URL(url).hostname.replace(/^www\./, ''), success: true, strategy: 'baseline', timestamp: Date.now(), chars: baseline.pages.reduce((sum, p) => sum + p.markdown.length, 0) });
     return baseline;
   }
 
@@ -400,10 +403,38 @@ export async function webCrawl(
     ];
     if (recoveryQuality.meaningful) {
       warnings.push('web_crawl: aggressive render profile recovered meaningful content');
+      recordOutcome({ url, domain: new URL(url).hostname.replace(/^www\./, ''), success: true, strategy: 'aggressive-render', timestamp: Date.now(), chars: recovery.pages.reduce((sum, p) => sum + p.markdown.length, 0) });
       return { ...recovery, warnings };
     }
 
+    // ── External recovery fallback ──────────────────────────────────
     warnings.push('web_crawl: aggressive render profile still produced low-quality content');
+    logger.info({ url }, 'web_crawl: attempting external recovery fallback');
+
+    const externalResult = await attemptExternalRecovery(url);
+    if (externalResult.content !== null && externalResult.source !== null) {
+      const recoveredPage: CrawlPageResult = {
+        url,
+        success: true,
+        markdown: externalResult.content,
+        title: null,
+        description: null,
+        links: [],
+        statusCode: null,
+        errorMessage: null,
+        recoverySource: externalResult.source,
+      };
+      recordOutcome({ url, domain: new URL(url).hostname.replace(/^www\./, ''), success: true, strategy: 'external-recovery', timestamp: Date.now(), chars: externalResult.content.length });
+      return {
+        ...recovery,
+        pages: [recoveredPage, ...recovery.pages],
+        totalPages: recovery.pages.length + 1,
+        successfulPages: recovery.successfulPages + 1,
+        warnings: [...warnings, `web_crawl: recovered ${url} from ${externalResult.source}`],
+      };
+    }
+
+    recordOutcome({ url, domain: new URL(url).hostname.replace(/^www\./, ''), success: false, strategy: 'all-failed', timestamp: Date.now(), chars: 0 });
     return { ...recovery, warnings };
   } catch (err) {
     logger.warn(
