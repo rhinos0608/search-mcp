@@ -37,10 +37,11 @@ test('extracts Jora job links', () => {
   assert.ok(links[0]?.includes('/job/'));
 });
 
-test('ignores cross-domain links', () => {
-  const html = '<a href="https://other.com/job/123">Cross-domain</a>';
+test('extracts cross-domain links (job links can point to external domains)', () => {
+  const html = '<a href="https://other.com/job/123">Senior Developer</a>';
   const links = extractJobLinksFromHtml(html, 'https://www.seek.com.au/jobs');
-  assert.equal(links.length, 0);
+  assert.equal(links.length, 1);
+  assert.equal(links[0], 'https://other.com/job/123');
 });
 
 test('deduplicates identical links', () => {

@@ -5,21 +5,39 @@ import { chunkMarkdown } from '../src/chunking.js';
 test('chunkMarkdown extracts code block metadata with language', () => {
   const markdown = `# Example
 
-Here is a Python function:
+Here is a Python class:
 
 \`\`\`python
-def fibonacci(n):
-    if n <= 1:
-        return n
-    return fibonacci(n - 1) + fibonacci(n - 2)
+from dataclasses import dataclass
+from typing import Optional, List
 
-def test_fib():
-    assert fibonacci(0) == 0
-    assert fibonacci(1) == 1
-    assert fibonacci(10) == 55
+@dataclass
+class Fibonacci:
+    """Memoized Fibonacci sequence generator."""
+    max_n: int
+    _cache: dict = None
 
-for i in range(20):
-    print(fibonacci(i))
+    def __post_init__(self):
+        if self._cache is None:
+            self._cache = {0: 0, 1: 1}
+        self._precompute()
+
+    def _precompute(self) -> None:
+        """Pre-compute all values up to max_n."""
+        for n in range(2, self.max_n + 1):
+            if n not in self._cache:
+                self._cache[n] = self._cache[n - 1] + self._cache[n - 2]
+
+    def get(self, n: int) -> int:
+        if n < 0:
+            raise ValueError("n must be non-negative")
+        return self._cache.get(n, -1)
+
+    def sequence(self) -> List[int]:
+        return [self._cache[i] for i in range(self.max_n + 1)]
+
+fib = Fibonacci(20)
+print(fib.sequence())
 \`\`\`
 `;
 

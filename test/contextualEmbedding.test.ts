@@ -15,6 +15,18 @@ function makeChunk(text: string, url = 'https://example.com/page'): CorpusChunk 
   return { text, url, section: 'page', charOffset: 0, chunkIndex: 0, totalChunks: 1 };
 }
 
+/** Create a mock fetch Response with all required properties. */
+function makeMockResponse(bodyObj: unknown, status = 200): Response {
+  const bodyText = JSON.stringify(bodyObj);
+  return {
+    ok: status >= 200 && status < 300,
+    status,
+    headers: new Headers({ 'content-type': 'application/json' }),
+    json: () => Promise.resolve(bodyObj),
+    text: () => Promise.resolve(bodyText),
+  } as Response;
+}
+
 /** Mock LLM config. */
 function makeLlmConfig(): LlmConfig {
   return {
@@ -107,13 +119,11 @@ describe('contextualEmbedding', () => {
 
       const originalFetch = globalThis.fetch;
       globalThis.fetch = mock.fn(() =>
-        Promise.resolve({
-          ok: true,
-          json: () =>
-            Promise.resolve({
-              choices: [{ message: { content: 'Context: function declaration in TypeScript file.\n---\nfunction hello() { return "world"; }' } }],
-            }),
-        } as Response),
+        Promise.resolve(
+          makeMockResponse({
+            choices: [{ message: { content: 'Context: function declaration in TypeScript file.\n---\nfunction hello() { return "world"; }' } }],
+          }),
+        ),
       );
 
       try {
@@ -145,19 +155,17 @@ describe('contextualEmbedding', () => {
       const originalFetch = globalThis.fetch;
       globalThis.fetch = mock.fn(() => {
         callCount++;
-        return Promise.resolve({
-          ok: true,
-          json: () =>
-            Promise.resolve({
-              choices: [
-                {
-                  message: {
-                    content: `Context: chunk ${callCount}.\n---\nchunk content`,
-                  },
+        return Promise.resolve(
+          makeMockResponse({
+            choices: [
+              {
+                message: {
+                  content: `Context: chunk ${callCount}.\n---\nchunk content`,
                 },
-              ],
-            }),
-        } as Response);
+              },
+            ],
+          }),
+        );
       });
 
       try {
@@ -206,15 +214,13 @@ describe('contextualEmbedding', () => {
         return new Promise<Response>((resolve) => {
           setTimeout(() => {
             currentConcurrent--;
-            resolve({
-              ok: true,
-              json: () =>
-                Promise.resolve({
-                  choices: [
-                    { message: { content: 'Context.\n---\nchunk content' } },
-                  ],
-                }),
-            } as Response);
+            resolve(
+              makeMockResponse({
+                choices: [
+                  { message: { content: 'Context.\n---\nchunk content' } },
+                ],
+              }),
+            );
           }, 50);
         });
       });
@@ -250,13 +256,11 @@ describe('contextualEmbedding', () => {
 
       const originalFetch = globalThis.fetch;
       globalThis.fetch = mock.fn(() =>
-        Promise.resolve({
-          ok: true,
-          json: () =>
-            Promise.resolve({
-              choices: [{ message: { content: '' } }],
-            }),
-        } as Response),
+        Promise.resolve(
+          makeMockResponse({
+            choices: [{ message: { content: '' } }],
+          }),
+        ),
       );
 
       try {
@@ -343,20 +347,18 @@ describe('contextualEmbedding', () => {
       globalThis.fetch = mock.fn((_url, init) => {
         const body = (init as { body?: string })?.body;
         if (body) capturedBody = body;
-        return Promise.resolve({
-          ok: true,
-          json: () =>
-            Promise.resolve({
-              choices: [
-                {
-                  message: {
-                    content:
-                      'Context: doc.\n---\nchunk',
-                  },
+        return Promise.resolve(
+          makeMockResponse({
+            choices: [
+              {
+                message: {
+                  content:
+                    'Context: doc.\n---\nchunk',
                 },
-              ],
-            }),
-        } as Response);
+              },
+            ],
+          }),
+        );
       });
 
       try {
