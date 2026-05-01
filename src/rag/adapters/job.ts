@@ -580,7 +580,9 @@ const LISTING_CARD_SELECTORS = [
   'article[class*=job]',
   'article[class*=position]',
   'article[class*=listing]',
-  'article', // Catch-all: any <article> element (common in modern job boards)
+  // 'article' is a broad catch-all used by many modern job boards.
+  // extractListingFromCard performs keyword validation on these elements to reduce false positives.
+  'article',
   'li[class*=job]',
   'li[class*=position]',
   'li[class*=result]',
@@ -706,6 +708,13 @@ function extractListingFromCard(
   _base: URL,
   pageUrl: string,
 ): JobListingMvp | undefined {
+  // Validate candidate cards by checking for job-related keywords in the card's text
+  const cardText = $card.text().toLowerCase();
+  const jobKeywords = ['job', 'position', 'apply', 'salary', 'role', 'opening', 'hiring'];
+  if (!jobKeywords.some((kw) => cardText.includes(kw))) {
+    return undefined;
+  }
+
   const source = detectJobSource(pageUrl);
 
   // Extract job link
@@ -768,7 +777,6 @@ function extractListingFromCard(
   }
 
   // Extract work mode from card context
-  const cardText = $card.text().toLowerCase();
   let workMode: WorkMode = 'unknown';
   if (/\bremote\b/i.test(cardText)) workMode = 'remote';
   else if (/\bhybrid\b/i.test(cardText)) workMode = 'hybrid';
@@ -852,7 +860,7 @@ const JOB_URL_PATTERNS: { hostname: RegExp; path: RegExp }[] = [
   // Greenhouse
   { hostname: /greenhouse\.io$/, path: /\/jobs\// },
   // Ashby
-  { hostname: /ashbyhq\.com$/, path: /\/[^/]+$/ },
+  { hostname: /ashbyhq\.com$/, path: /^\/(jobs|positions)\/[^/]+(?:\/.*)?$/ },
   // Breezy
   { hostname: /breezy\.hr$/, path: /\/p\// },
   // Wellfound (AngelList)
@@ -893,7 +901,7 @@ const JOB_PATH_SEGMENTS = [
 
 /** Anchor text that should never be treated as a job title. */
 const NAV_ANCHOR_PATTERNS =
-  /\b(home|about|contact|login|sign\s*up|register|privacy|terms|blog|faq|help|support|news|press|careers?|jobs?)\b/i;
+  /^\s*(?:home|about|contact|login|sign\s*up|register|privacy|terms|blog|faq|help|support|news|press|careers|jobs)\s*$/i;
 
 /** Known job-related data attributes on anchor elements. */
 const JOB_DATA_ATTRIBUTES = [

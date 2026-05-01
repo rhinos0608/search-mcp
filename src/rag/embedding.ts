@@ -320,7 +320,25 @@ async function embedWithOpenAICompatible(request: EmbedRequest): Promise<EmbedRe
     );
   }
 
-  const raw = await response.json();
+  let raw: unknown;
+  try {
+    raw = await response.json();
+  } catch (err) {
+    // Attempt to capture response body for context even if JSON parsing failed
+    const body = await response.clone().text().catch(() => 'unreadable');
+    throw parseError(
+      `OpenAI embedding API returned malformed JSON: ${err instanceof Error ? err.message : String(err)}`,
+      {
+        statusCode: response.status,
+        metadata: {
+          textsCount: request.texts.length,
+          dimensions: request.dimensions,
+          responseBody: body.slice(0, 500),
+        },
+      },
+    );
+  }
+
   const { embeddings } = normalizeEmbeddingResponse(raw, request.texts.length, request.dimensions);
 
   const data = raw as {

@@ -7,7 +7,6 @@ import {
   isBorderline,
   applyReranking,
   embedAndRank,
-  embedTexts,
   filterByPathPrefix,
   isDirectChild,
   pagesToCorpus,
@@ -16,6 +15,7 @@ import {
   type SemanticCrawlOptions,
   type SemanticCrawlSeedsOptions,
 } from '../src/tools/semanticCrawl.js';
+import { embedTexts } from '../src/rag/embedding.js';
 import { SAFE_BYTES, JS_HEAVY_AVG_PAGE_BYTES } from '../src/utils/crawlBudget.js';
 import type {
   SemanticCrawlChunk,
@@ -1177,7 +1177,14 @@ describe('embedTexts timeout', () => {
     };
 
     await assert.rejects(
-      () => embedTexts('https://embed.example.com', '', ['hello'], 'document', 4),
+      () =>
+        embedTexts({
+          baseUrl: 'https://embed.example.com',
+          apiToken: '',
+          texts: ['hello'],
+          mode: 'document',
+          dimensions: 4,
+        }),
       (err: Error) => err.message.includes('Embedding sidecar request timed out after 60 seconds'),
     );
   });
@@ -1190,7 +1197,14 @@ describe('embedTexts timeout', () => {
     };
 
     await assert.rejects(
-      () => embedTexts('https://embed.example.com', '', ['hello'], 'document', 4),
+      () =>
+        embedTexts({
+          baseUrl: 'https://embed.example.com',
+          apiToken: '',
+          texts: ['hello'],
+          mode: 'document',
+          dimensions: 4,
+        }),
       (err: Error) => err.message.includes('Embedding sidecar request timed out after 60 seconds'),
     );
   });
