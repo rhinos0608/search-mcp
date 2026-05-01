@@ -158,8 +158,8 @@ export async function searchWithBackends(
   safeSearch: 'strict' | 'moderate' | 'off',
   deps: WebSearchDeps,
   overrideBackends?: SearchBackend[],
-  expandQueryOpt?: boolean,
-  mergeBackends?: boolean,
+  expandQueryOpt = true,
+  mergeBackends = true,
 ): Promise<SearchResult[]> {
   const cfg = loadConfig();
 
@@ -287,8 +287,8 @@ export async function webSearch(
   query: string,
   limit = 10,
   safeSearch: 'strict' | 'moderate' | 'off' = 'moderate',
-  expandQueryOpt = false,
-  mergeBackends = false,
+  expandQueryOpt = true,
+  mergeBackends = true,
 ): Promise<SearchResult[]> {
   return searchWithBackends(
     query,

@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { searchWithBackends, type WebSearchDeps } from '../src/tools/webSearch.js';
+import { createServer } from '../src/server.js';
 import { resetConfig } from '../src/config.js';
 import type { SearchResult } from '../src/types.js';
 
@@ -22,6 +23,50 @@ function makeResult(
     deepLinks,
   };
 }
+
+interface RegisteredToolEntry {
+  inputSchema?: { parse: (value: unknown) => unknown };
+}
+
+function getRegisteredTool(server: ReturnType<typeof createServer>, name: string): RegisteredToolEntry {
+  const tools = (server as unknown as { _registeredTools: Record<string, RegisteredToolEntry> })
+    ._registeredTools;
+  const entry = tools[name];
+  assert.ok(entry !== undefined, `tool ${name} should be registered`);
+  return entry;
+}
+
+test('web_search input schema defaults expansion and backend merging to true', () => {
+  const server = createServer();
+  const entry = getRegisteredTool(server, 'web_search');
+  assert.ok(entry.inputSchema !== undefined);
+
+  const parsed = entry.inputSchema.parse({ query: 'api' }) as {
+    expandQuery: boolean;
+    mergeSearchBackends: boolean;
+  };
+
+  assert.equal(parsed.expandQuery, true);
+  assert.equal(parsed.mergeSearchBackends, true);
+});
+
+test('searchWithBackends defaults to expanded, merged results', async () => {
+  const result = makeResult('https://example.com/api', 1);
+
+  const deps: WebSearchDeps = {
+    braveSearch: async (query: string) => (query === 'rest graphql' ? [result] : []),
+    searxngSearch: async (query: string) =>
+      query === 'rest graphql' ? [{ ...result, source: 'searxng' as const }] : [],
+    exaSearch: async () => [],
+  };
+
+  const results = await searchWithBackends('api', 1, 'moderate', deps, ['brave', 'searxng']);
+
+  assert.equal(results.length, 1);
+  const merged = results[0] as SearchResult & { engines?: string[] };
+  assert.deepEqual(merged.engines, ['brave', 'searxng']);
+  assert.equal(merged.url, result.url);
+});
 
 test('skips unconfigured backends when overrideBackends is omitted', async () => {
   const origBrave = process.env.BRAVE_API_KEY;
