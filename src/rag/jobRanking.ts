@@ -408,5 +408,16 @@ function collectMatchedConstraints(
     }
   }
 
+  if (constraints.excludeTitles !== undefined && constraints.excludeTitles.length > 0) {
+    const title = listing.title.toLowerCase();
+    const matchedExclude = constraints.excludeTitles.find((keyword) => {
+      const normalizedKeyword = keyword.trim().toLowerCase();
+      return normalizedKeyword.length > 0 && title.includes(normalizedKeyword);
+    });
+    if (matchedExclude !== undefined) {
+      matchedConstraints.push(`excluded keyword: ${matchedExclude}`);
+    }
+  }
+
   return matchedConstraints;
 }
