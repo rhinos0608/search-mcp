@@ -90,9 +90,19 @@ export async function semanticJobs(
     const acquisitionParams: JobSpyAcquisitionParams = {
       query: opts.query,
     };
-    if (opts.location?.[0] !== undefined) acquisitionParams.location = opts.location[0];
+    if (opts.location && opts.location[0] !== undefined) {
+      if (opts.location.length > 1) {
+        logger.warn(
+          { locations: opts.location },
+          'semantic_jobs: JobSpy only supports a single location; using the first entry.',
+        );
+      }
+      acquisitionParams.location = opts.location[0];
+    }
     if (opts.workMode?.includes('remote')) acquisitionParams.isRemote = true;
-    if (opts.maxPages !== undefined) acquisitionParams.resultsWanted = opts.maxPages * 5;
+
+    const maxPages = Math.min(opts.maxPages ?? DEFAULT_MAX_PAGES, MAX_PAGES);
+    acquisitionParams.resultsWanted = maxPages * 5;
 
     const discovery = await pipeline.discover(acquisitionParams);
 
@@ -139,8 +149,8 @@ export async function semanticJobs(
       results,
       corpusStatus: {
         requested: discovery.length,
-        fetched: finalRecords.length,
-        failed: discovery.length - finalRecords.length,
+        fetched: discovery.length,
+        failed: 0,
         extracted: discovery.length,
         deduplicated: discovery.length - normalized.length,
         filtered: normalized.length - scored.length,

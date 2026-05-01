@@ -214,8 +214,8 @@ export function mergeRedditClientOptions(overrides: RedditClientOptions): Reddit
       clientSecret: cfg.reddit.clientSecret ?? '',
     };
   }
-  if (overrides.userAgent === undefined && cfg.reddit.userAgent !== '') {
-    merged.userAgent = cfg.reddit.userAgent ?? '';
+  if (overrides.userAgent === undefined && cfg.reddit.userAgent) {
+    merged.userAgent = cfg.reddit.userAgent;
   }
   return merged;
 }

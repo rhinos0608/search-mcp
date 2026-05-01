@@ -70,7 +70,10 @@ function parseLiteHtml(html: string, startPosition: number): SearchResult[] {
     const displayUrl = urlMatch ? (urlMatch[1] ?? '').trim() : '';
 
     // The href in the link is the actual URL — guard against empty fields
-    const url = rawUrl || (displayUrl ? `https://${displayUrl}` : '');
+    let url = rawUrl;
+    if (!url && displayUrl) {
+      url = displayUrl.startsWith('http') ? displayUrl : `https://${displayUrl}`;
+    }
     if (url.length === 0) continue;
 
     // Extract domain

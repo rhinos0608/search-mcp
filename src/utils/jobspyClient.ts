@@ -165,12 +165,13 @@ export async function jobSpyHealth(): Promise<boolean> {
       site_name: ['linkedin'],
     });
     const ok = result !== undefined;
+    const recordsReturned = (result as { jobs: FlatJobRecord[] })?.jobs?.length ?? 0;
 
     logger.debug(
-      { tool: 'jobspy', healthCheck: 'ok', recordsReturned: ok ? (result as { jobs: FlatJobRecord[] }).jobs?.length : 0 },
+      { tool: 'jobspy', healthCheck: 'ok', recordsReturned },
       'JobSpy: health check passed',
     );
-    return true;
+    return ok;
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
     logger.warn(

@@ -20,7 +20,7 @@ import type { SearchResult } from '../types.js';
  */
 const FALLBACK_ORDER: SearchBackend[] = ['duckduckgo', 'searxng', 'brave', 'exa', 'ollama-search'];
 
-function backendAvailable(backend: SearchBackend): boolean {
+function backendAvailable(backend: SearchBackend, allCandidates?: SearchBackend[]): boolean {
   const cfg = loadConfig();
 
   // Check circuit breaker first
@@ -29,25 +29,47 @@ function backendAvailable(backend: SearchBackend): boolean {
     return false;
   }
 
+  // checkConfigured: internal helper to check if backend is configured
+  const isConfigured = (b: SearchBackend): boolean => {
+    switch (b) {
+      case 'brave':
+        return (cfg.brave.apiKey ?? '').length > 0;
+      case 'searxng':
+        return cfg.searxng.baseUrl.length > 0;
+      case 'exa':
+        return (cfg.exa.apiKey ?? '').length > 0;
+      case 'duckduckgo':
+        return true;
+      case 'ollama-search':
+        return cfg.ollamaSearch.baseUrl.length > 0;
+      default:
+        return false;
+    }
+  };
+
+  if (!isConfigured(backend)) return false;
+
   // Check health tracker — skip degraded backends unless they're the only option
   if (isDegraded(backend)) {
-    logger.debug({ backend }, 'Skipping degraded backend');
-    return false;
+    logger.debug({ backend }, 'Backend is degraded');
+
+    // If we have any candidates, check if there's a non-degraded one
+    if (allCandidates) {
+      const hasHealthyAlternative = allCandidates.some(
+        (b) => b !== backend && isConfigured(b) && !isCircuitTripped(b) && !isDegraded(b),
+      );
+      if (hasHealthyAlternative) {
+        logger.debug({ backend }, 'Skipping degraded backend since healthy alternative exists');
+        return false;
+      }
+      logger.debug({ backend }, 'Using degraded backend as last resort (no healthy alternatives)');
+    } else {
+      // Legacy behavior if no candidates passed
+      return false;
+    }
   }
 
-  switch (backend) {
-    case 'brave':
-      return (cfg.brave.apiKey ?? '').length > 0;
-    case 'searxng':
-      return cfg.searxng.baseUrl.length > 0;
-    case 'exa':
-      return (cfg.exa.apiKey ?? '').length > 0;
-    case 'duckduckgo':
-      // Zero-key backend — always available unless circuit-tripped or degraded (checked above)
-      return true;
-    case 'ollama-search':
-      return cfg.ollamaSearch.baseUrl.length > 0;
-  }
+  return true;
 }
 
 async function runBackend(
@@ -161,7 +183,7 @@ export async function searchWithBackends(
   const available = overrideBackends
     ? backends
     : backends.filter((b) => {
-        if (!backendAvailable(b)) {
+        if (!backendAvailable(b, backends)) {
           logger.debug({ backend: b }, 'Skipping unavailable backend');
           return false;
         }

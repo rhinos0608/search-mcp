@@ -118,26 +118,37 @@ export async function ollamaSearch(
     logger.debug({ query }, 'Ollama search returned no results');
   }
 
-  const mapped: SearchResult[] = results.slice(0, limit).map((r, i) => {
-    let domain = '';
-    try {
-      domain = r.domain ?? new URL(r.url ?? '').hostname;
-    } catch {
-      /* invalid URL — leave domain empty */
-    }
+  const mapped: SearchResult[] = results
+    .filter((r) => {
+      if (!r.url) return false;
+      try {
+        new URL(r.url);
+        return true;
+      } catch {
+        return false;
+      }
+    })
+    .slice(0, limit)
+    .map((r, i) => {
+      let domain = '';
+      try {
+        domain = r.domain ?? new URL(r.url!).hostname;
+      } catch {
+        /* should not happen due to filter */
+      }
 
-    return {
-      title: r.title ?? '',
-      url: r.url ?? '',
-      description: r.snippet ?? r.description ?? '',
-      position: i + 1,
-      domain,
-      source: 'ollama-search' as const,
-      age: r.age ?? null,
-      extraSnippet: null,
-      deepLinks: null,
-    };
-  });
+      return {
+        title: r.title ?? '',
+        url: r.url!,
+        description: r.snippet ?? r.description ?? '',
+        position: i + 1,
+        domain,
+        source: 'ollama-search' as const,
+        age: r.age ?? null,
+        extraSnippet: null,
+        deepLinks: null,
+      };
+    });
 
   cache.set(key, mapped);
   logger.info({ count: mapped.length, backend: 'ollama-search' }, 'Ollama search complete');
