@@ -290,7 +290,7 @@ export function getJobGraphDb(): BetterSqliteDatabase | null {
 /** Deserialize a JSON text array to a string[]. */
 function parseJsonArray(value: string): string[] {
   try {
-    const parsed = JSON.parse(value);
+    const parsed: unknown = JSON.parse(value);
     return Array.isArray(parsed) ? (parsed as string[]) : [];
   } catch {
     return [];
@@ -492,7 +492,6 @@ export function insertDuplicateCluster(
 
 // ── Row types ──────────────────────────────────────────────────────────────
 
-// eslint-disable-next-line @typescript-eslint/no-redundant-type-constituents
 type NullOr<T> = T | null;
 
 interface JobPostingRow {

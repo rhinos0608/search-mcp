@@ -132,14 +132,14 @@ export async function ollamaSearch(
     .map((r, i) => {
       let domain = '';
       try {
-        domain = r.domain ?? new URL(r.url!).hostname;
+        domain = r.domain ?? (r.url ? new URL(r.url).hostname : '');
       } catch {
         /* should not happen due to filter */
       }
 
       return {
         title: r.title ?? '',
-        url: r.url!,
+        url: r.url ?? '',
         description: r.snippet ?? r.description ?? '',
         position: i + 1,
         domain,

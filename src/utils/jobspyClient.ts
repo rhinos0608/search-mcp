@@ -86,6 +86,8 @@ export interface JobSpyAcquisitionParams {
 
 // ── Internal helper ───────────────────────────────────────────────────────
 
+type ScrapeJobs = (options: Record<string, unknown>) => Promise<{ jobs: FlatJobRecord[] }>;
+
 /** Map our typed params to the jobspy-js ScrapeJobsParams shape. */
 function toJobspyParams(p: JobSpyAcquisitionParams): Record<string, unknown> {
   return {
@@ -131,8 +133,8 @@ export async function searchJobSpy(
   );
 
   try {
-    const result = await scrapeJobs(opts as Parameters<typeof scrapeJobs>[0]);
-    const records = (result as { jobs: FlatJobRecord[] }).jobs ?? [];
+    const result = await (scrapeJobs as unknown as ScrapeJobs)(opts);
+    const records = result.jobs;
 
     logger.info(
       { tool: 'jobspy', sites: opts.site_name, recordsReturned: records.length },
@@ -159,19 +161,18 @@ export async function searchJobSpy(
  */
 export async function jobSpyHealth(): Promise<boolean> {
   try {
-    const result = await scrapeJobs({
+    const result = await (scrapeJobs as unknown as ScrapeJobs)({
       search_term: '__health_probe__',
       results_wanted: 0,
       site_name: ['linkedin'],
     });
-    const ok = result !== undefined;
-    const recordsReturned = (result as { jobs: FlatJobRecord[] })?.jobs?.length ?? 0;
+    const recordsReturned = result.jobs.length;
 
     logger.debug(
       { tool: 'jobspy', healthCheck: 'ok', recordsReturned },
       'JobSpy: health check passed',
     );
-    return ok;
+    return true;
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
     logger.warn(

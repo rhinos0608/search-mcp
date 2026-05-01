@@ -24,7 +24,7 @@ import { prepareCorpus, retrieveCorpus } from './pipeline.js';
 import {
   applySemanticByteBudget,
 } from '../semanticLimits.js';
-import type { JobListingMvp, JobSearchConstraints } from './types/job.js';
+import type { JobListingMvp, JobSearchConstraints, JobSource } from './types/job.js';
 import type { GraphJobPosting, GraphCompany, GraphLocation } from './types/jobGraph.js';
 
 export interface RawJobRecord {
@@ -137,7 +137,7 @@ export class JobPipeline {
   /**
    * Stage 2: Normalization
    */
-  async normalize(records: RawJobRecord[], _query: string): Promise<PipelineJobRecord[]> {
+  normalize(records: RawJobRecord[], _query: string): PipelineJobRecord[] {
     logger.info({ tool: 'job_pipeline', stage: 'normalization', inputCount: records.length, query: _query }, 'Starting normalization');
 
     const mvpListings = records.map(r => this.mapPipelineToMvp(this.mapMvpToPipeline(this.mapRawToMvp(r))));
@@ -173,15 +173,18 @@ export class JobPipeline {
 
       for (const [clusterId, info] of clusters) {
         if (info.jobIds.length > 1) {
-          insertDuplicateCluster({
-            clusterId,
-            canonicalJobId: info.jobIds[0]!,
-            memberJobIds: info.jobIds,
-            memberSites: [...info.sites],
-            clusterSize: info.jobIds.length,
-            firstSeenAt: Date.now(),
-            lastSeenAt: Date.now(),
-          }, db);
+          const canonicalId = info.jobIds[0];
+          if (canonicalId) {
+            insertDuplicateCluster({
+              clusterId,
+              canonicalJobId: canonicalId,
+              memberJobIds: info.jobIds,
+              memberSites: [...info.sites],
+              clusterSize: info.jobIds.length,
+              firstSeenAt: Date.now(),
+              lastSeenAt: Date.now(),
+            }, db);
+          }
         }
       }
     }
@@ -229,8 +232,13 @@ export class JobPipeline {
       // Try lightweight fetchJobDetails first (no full page load)
       try {
         if (record.jobUrl && record.id) {
-          const detailResult = await fetchJobDetails(record.site, record.id, { format: 'markdown' });
-          if (detailResult?.description) {
+          const fetchDetails = fetchJobDetails as (
+            site: string,
+            id: string,
+            options: { format: string }
+          ) => Promise<{ description?: string }>;
+          const detailResult = await fetchDetails(record.site, record.id, { format: 'markdown' });
+          if (detailResult.description) {
             enrichedDescription = detailResult.description;
           }
         }
@@ -262,22 +270,24 @@ export class JobPipeline {
         if (page?.success && page.html) {
           const listings = extractJobListingsFromHtml(page.html, record.jobUrl);
           if (listings.length > 0) {
-            const best = listings[0]!;
-            const updated: EnrichedRecord = {
-              ...record,
-              enrichedExtractedText: best.extractedText,
-            };
-            const newDesc = best.extractedText || record.description;
-            if (newDesc !== undefined) updated.description = newDesc;
+            const best = listings[0];
+            if (best) {
+              const updated: EnrichedRecord = {
+                ...record,
+                enrichedExtractedText: best.extractedText,
+              };
+              const newDesc = best.extractedText || record.description;
+              if (newDesc !== undefined) updated.description = newDesc;
 
-            if (best.title !== 'Untitled Job Listing') updated.title = best.title;
-            if (best.company) updated.company = best.company;
-            if (best.location) updated.location = best.location;
-            if (best.workMode !== 'unknown') updated.workMode = best.workMode;
-            
-            this.upsertGraphEntities(updated);
-            enriched.push(updated);
-            continue;
+              if (best.title !== 'Untitled Job Listing') updated.title = best.title;
+              if (best.company) updated.company = best.company;
+              if (best.location) updated.location = best.location;
+              if (best.workMode !== 'unknown') updated.workMode = best.workMode;
+              
+              this.upsertGraphEntities(updated);
+              enriched.push(updated);
+              continue;
+            }
           }
         }
         enriched.push(record);
@@ -396,8 +406,8 @@ export class JobPipeline {
     const jobSpyHealthFn = this.deps.jobSpyHealth ?? jobSpyHealth;
     const graphHealthFn = this.deps.graphHealth ?? graphHealth;
     const jobspyOk = await jobSpyHealthFn();
-    const graphOk = await graphHealthFn();
-    return jobspyOk && !!graphOk;
+    const graphOk = graphHealthFn();
+    return jobspyOk && graphOk;
   }
 
   private mapFlatToRaw(f: FlatJobRecord): RawJobRecord {
@@ -424,16 +434,18 @@ export class JobPipeline {
     const mvp: JobListingMvp = {
       title: r.title,
       workMode: r.isRemote ? 'remote' : 'unknown',
-      source: (r.site as any) || 'other',
-      extractedText: r.description || '',
+      source: (r.site as JobSource | undefined) ?? 'other',
+      extractedText: r.description ?? '',
       confidence: { title: 1, location: 0.5, workMode: 0.5, salary: 0.5, overall: 0.5 },
       verificationStatus: 'aggregator_result',
       caveats: [],
     };
     if (r.company !== undefined) mvp.company = r.company;
     if (r.location !== undefined) mvp.location = r.location;
-    if (r.salaryMin !== undefined) mvp.salaryRaw = `${r.salaryMin} - ${r.salaryMax} ${r.salaryCurrency}`;
-    if (r.jobUrl !== undefined) mvp.sourceUrl = r.jobUrl;
+    if (r.salaryMin !== undefined && r.salaryMax !== undefined) {
+      mvp.salaryRaw = `${String(r.salaryMin)} - ${String(r.salaryMax)} ${r.salaryCurrency ?? ''}`;
+    }
+    mvp.sourceUrl = r.jobUrl;
     if (r.id !== undefined) mvp.jobId = r.id;
     if (r.datePosted !== undefined) mvp.postedRaw = r.datePosted;
     return mvp;
@@ -441,9 +453,9 @@ export class JobPipeline {
 
   private mapMvpToPipeline(mvp: JobListingMvp, raw?: RawJobRecord): PipelineJobRecord {
     const p: PipelineJobRecord = {
-      site: raw?.site || 'other',
+      site: raw?.site ?? 'other',
       title: mvp.title,
-      jobUrl: mvp.sourceUrl || '',
+      jobUrl: mvp.sourceUrl ?? '',
       workMode: mvp.workMode,
       confidence: mvp.confidence.overall,
       caveats: mvp.caveats,
@@ -451,7 +463,7 @@ export class JobPipeline {
     if (raw?.id !== undefined) p.id = raw.id;
     if (mvp.company !== undefined) p.company = mvp.company;
     if (mvp.location !== undefined) p.location = mvp.location;
-    if (mvp.extractedText !== undefined) p.description = mvp.extractedText;
+    p.description = mvp.extractedText;
     if (raw?.salaryMin !== undefined) p.salaryMin = raw.salaryMin;
     if (raw?.salaryMax !== undefined) p.salaryMax = raw.salaryMax;
     if (raw?.salaryCurrency !== undefined) p.salaryCurrency = raw.salaryCurrency;
@@ -466,16 +478,18 @@ export class JobPipeline {
     const mvp: JobListingMvp = {
       title: p.title,
       workMode: p.workMode,
-      source: (p.site as any) || 'other',
-      extractedText: p.description || '',
+      source: (p.site as JobSource | undefined) ?? 'other',
+      extractedText: p.description ?? '',
       confidence: { title: 1, location: 0.5, workMode: 0.5, salary: 0.5, overall: p.confidence },
       verificationStatus: 'aggregator_result',
       caveats: p.caveats,
     };
     if (p.company !== undefined) mvp.company = p.company;
     if (p.location !== undefined) mvp.location = p.location;
-    if (p.salaryMin !== undefined) mvp.salaryRaw = `${p.salaryMin} - ${p.salaryMax} ${p.salaryCurrency}`;
-    if (p.jobUrl !== undefined) mvp.sourceUrl = p.jobUrl;
+    if (p.salaryMin !== undefined && p.salaryMax !== undefined) {
+      mvp.salaryRaw = `${String(p.salaryMin)} - ${String(p.salaryMax)} ${p.salaryCurrency ?? ''}`;
+    }
+    mvp.sourceUrl = p.jobUrl;
     if (p.id !== undefined) mvp.jobId = p.id;
     if (p.datePosted !== undefined) mvp.postedRaw = p.datePosted;
     return mvp;
@@ -483,7 +497,7 @@ export class JobPipeline {
 
   private mapPipelineToGraph(p: PipelineJobRecord): GraphJobPosting {
     const g: GraphJobPosting = {
-      jobId: p.id || `ext-${Buffer.from(p.jobUrl).toString('base64').slice(0, 16)}`,
+      jobId: p.id ?? `ext-${Buffer.from(p.jobUrl).toString('base64').slice(0, 16)}`,
       title: p.title,
       sourceSite: p.site,
       sourceUrl: p.jobUrl,
@@ -497,7 +511,9 @@ export class JobPipeline {
     if (p.salaryMax !== undefined) g.salaryMax = p.salaryMax;
     if (p.salaryCurrency !== undefined) g.salaryCurrency = p.salaryCurrency;
     if (p.salaryInterval !== undefined) g.salaryInterval = p.salaryInterval;
-    if (p.workMode !== 'unknown') g.workMode = p.workMode as any;
+    if (p.workMode === 'remote' || p.workMode === 'hybrid' || p.workMode === 'onsite') {
+      g.workMode = p.workMode;
+    }
     if (p.jobType !== undefined) g.jobType = p.jobType;
     if (p.datePosted !== undefined) g.postedAt = p.datePosted;
     if (p.description !== undefined) {

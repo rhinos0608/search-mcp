@@ -569,7 +569,7 @@ export function loadConfig(): SearchConfig {
         },
       };
       logger.info(
-        { hasToken: !!encryptedConfig.github?.token },
+        { hasToken: !!encryptedConfig.github.token },
         'Merged encrypted config from config.enc',
       );
     } catch (err) {

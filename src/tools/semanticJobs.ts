@@ -90,7 +90,7 @@ export async function semanticJobs(
     const acquisitionParams: JobSpyAcquisitionParams = {
       query: opts.query,
     };
-    if (opts.location && opts.location[0] !== undefined) {
+    if (opts.location?.[0] !== undefined) {
       if (opts.location.length > 1) {
         logger.warn(
           { locations: opts.location },
@@ -121,7 +121,7 @@ export async function semanticJobs(
       };
     }
 
-    const normalized = await pipeline.normalize(discovery, opts.query);
+    const normalized = pipeline.normalize(discovery, opts.query);
     const constraints = buildConstraints(opts);
     const scored = pipeline.scoreMetadata(normalized, constraints);
 
@@ -137,9 +137,9 @@ export async function semanticJobs(
       topK?: number;
       maxBytes?: number;
     } = {};
-    if (opts.embeddingBaseUrl !== undefined) embedOpts.baseUrl = opts.embeddingBaseUrl;
+    embedOpts.baseUrl = opts.embeddingBaseUrl;
     if (opts.embeddingApiToken !== undefined) embedOpts.apiToken = opts.embeddingApiToken;
-    if (opts.embeddingDimensions !== undefined) embedOpts.dimensions = opts.embeddingDimensions;
+    embedOpts.dimensions = opts.embeddingDimensions;
     if (opts.topK !== undefined) embedOpts.topK = opts.topK;
     if (opts.maxBytes !== undefined) embedOpts.maxBytes = opts.maxBytes;
 
