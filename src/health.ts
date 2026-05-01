@@ -378,6 +378,68 @@ async function probeUrl(url: string): Promise<number> {
   }
 }
 
+// ── Sidecar-aware probes (parse /health JSON body) ───────────────────────────
+
+interface SidecarHealthBody {
+  modelLoaded?: boolean | undefined;
+  model?: string | undefined;
+  upstream?: string | undefined;   // openai-embedding-proxy: upstream LM Studio URL
+  torchDtype?: string | undefined; // torch sidecar: 'bfloat16' | 'float32'
+  detail?: string | undefined;     // FastAPI error detail on 4xx/5xx
+}
+
+async function probeSidecarUrl(
+  url: string,
+): Promise<{ latencyMs: number; body: SidecarHealthBody }> {
+  const start = Date.now();
+  const controller = new AbortController();
+  const timeout = setTimeout(() => {
+    controller.abort();
+  }, PROBE_TIMEOUT_MS);
+
+  try {
+    const res = await fetch(url, {
+      headers: { 'User-Agent': 'search-mcp/1.0 health-check' },
+      signal: controller.signal,
+    });
+    const latencyMs = Date.now() - start;
+
+    let body: SidecarHealthBody = {};
+    const text = await res.text();
+    try {
+      body = JSON.parse(text) as SidecarHealthBody;
+    } catch {
+      /* ignore non-JSON body */
+    }
+
+    if (!res.ok) {
+      const detail =
+        typeof body.detail === 'string' ? body.detail : `HTTP ${String(res.status)}`;
+      throw new Error(detail);
+    }
+
+    return { latencyMs, body };
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+function sidecarStatusMessage(label: string, body: SidecarHealthBody): string {
+  const model = body.model ?? 'unknown';
+  if (label === 'embedding-sidecar') {
+    if (body.upstream !== undefined) {
+      return `OpenAI-compatible proxy at ${body.upstream}, model: ${model}`;
+    }
+    if (body.torchDtype !== undefined) {
+      return `Torch sidecar, model: ${model}, dtype: ${body.torchDtype}`;
+    }
+    return `Embedding sidecar running, model: ${model}`;
+  }
+  return `${label} running`;
+}
+
+const SIDECAR_LABELS = new Set(['crawl4ai', 'embedding-sidecar']);
+
 interface NetworkProbe {
   label: string;
   url: string;
@@ -474,23 +536,30 @@ export async function runHealthProbes(cfg: SearchConfig): Promise<HealthReport> 
   }
 
   // Layer 3: network probes for free APIs (parallel, 5s timeout each)
+  // Sidecar probes (crawl4ai, embedding-sidecar) parse the /health JSON body for richer status.
   const probes = getNetworkProbes(cfg);
   const probeResults = await Promise.allSettled(
     probes.map(async (probe) => {
+      if (SIDECAR_LABELS.has(probe.label)) {
+        const { latencyMs, body } = await probeSidecarUrl(probe.url);
+        return { probe, latencyMs, sidecarBody: body };
+      }
       const latencyMs = await probeUrl(probe.url);
-      return { probe, latencyMs };
+      return { probe, latencyMs, sidecarBody: null as SidecarHealthBody | null };
     }),
   );
 
   for (const result of probeResults) {
     if (result.status === 'fulfilled') {
-      const { probe, latencyMs } = result.value;
+      const { probe, latencyMs, sidecarBody } = result.value;
       for (const tool of probe.tools) {
         const existing = tools[tool];
         if (existing === undefined || existing.status === 'unconfigured') continue;
         // Enrich with latency if healthy, don't downgrade rate_limited/degraded
         if (existing.status === 'healthy') {
-          tools[tool] = { ...existing, latencyMs };
+          const message =
+            sidecarBody !== null ? sidecarStatusMessage(probe.label, sidecarBody) : 'Configured.';
+          tools[tool] = { ...existing, latencyMs, message };
         }
       }
     } else {
@@ -552,4 +621,46 @@ export async function runHealthProbes(cfg: SearchConfig): Promise<HealthReport> 
     tools,
     timestamp: new Date().toISOString(),
   };
+}
+
+// ── Startup sidecar probe ────────────────────────────────────────────────────
+
+/**
+ * Non-blocking probe of configured sidecars (crawl4ai, embedding sidecar).
+ * Called at server startup to surface early warnings without blocking the stdio transport.
+ */
+export async function probeConfiguredSidecars(cfg: SearchConfig): Promise<void> {
+  const probes: { label: string; url: string }[] = [];
+
+  if (cfg.crawl4ai.baseUrl.length > 0) {
+    probes.push({
+      label: 'crawl4ai',
+      url: `${cfg.crawl4ai.baseUrl.replace(/\/+$/, '')}/health`,
+    });
+  }
+  if (cfg.embeddingSidecar.baseUrl.length > 0) {
+    probes.push({
+      label: 'embedding-sidecar',
+      url: `${cfg.embeddingSidecar.baseUrl.replace(/\/+$/, '')}/health`,
+    });
+  }
+
+  if (probes.length === 0) return;
+
+  await Promise.allSettled(
+    probes.map(async (probe) => {
+      try {
+        const { latencyMs, body } = await probeSidecarUrl(probe.url);
+        logger.info(
+          { probe: probe.label, latencyMs, status: sidecarStatusMessage(probe.label, body) },
+          'Sidecar reachable at startup',
+        );
+      } catch (err) {
+        logger.warn(
+          { probe: probe.label, error: err instanceof Error ? err.message : String(err) },
+          'Sidecar unreachable at startup — dependent tools will fail until it becomes available',
+        );
+      }
+    }),
+  );
 }

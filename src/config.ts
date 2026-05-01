@@ -14,6 +14,40 @@ import { fileURLToPath } from 'node:url';
 import { logger } from './logger.js';
 import { DEFAULT_SEMANTIC_MAX_BYTES } from './semanticLimits.js';
 
+/** Load .env from the project root if present. Only sets vars not already in the environment. */
+function loadDotEnv(pkgRoot: string): void {
+  const envPath = join(pkgRoot, '.env');
+  if (!existsSync(envPath)) return;
+  try {
+    const lines = readFileSync(envPath, 'utf8').split('\n');
+    let loaded = 0;
+    for (const raw of lines) {
+      const line = raw.trim();
+      if (!line || line.startsWith('#')) continue;
+      const eqIdx = line.indexOf('=');
+      if (eqIdx === -1) continue;
+      const key = line.slice(0, eqIdx).trim();
+      let value = line.slice(eqIdx + 1).trim();
+      // Strip surrounding quotes
+      if (
+        (value.startsWith('"') && value.endsWith('"')) ||
+        (value.startsWith("'") && value.endsWith("'"))
+      ) {
+        value = value.slice(1, -1);
+      }
+      if (key && process.env[key] === undefined) {
+        process.env[key] = value;
+        loaded++;
+      }
+    }
+    if (loaded > 0) {
+      logger.debug({ envPath, loaded }, 'Loaded .env file');
+    }
+  } catch (err) {
+    logger.warn({ err, envPath }, 'Failed to read .env file');
+  }
+}
+
 /** Directory containing this file (dist/ or src/). Go up one level to reach project root. */
 const PKG_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -479,6 +513,8 @@ let cached: SearchConfig | undefined;
 
 export function loadConfig(): SearchConfig {
   if (cached) return cached;
+
+  loadDotEnv(PKG_ROOT);
 
   let fileConfig: EnvConfig = {};
   const encPath = join(PKG_ROOT, 'config.enc');

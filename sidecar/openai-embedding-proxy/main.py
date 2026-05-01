@@ -31,7 +31,7 @@ logger = logging.getLogger("openai-embedding-proxy")
 # ── Config ───────────────────────────────────────────────────────────────────
 
 OPENAI_BASE_URL = os.getenv("OPENAI_BASE_URL", "http://localhost:1234").rstrip("/")
-EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "embeddinggemma-300m")
+EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "text-embedding-embeddinggemma-300m")
 DEFAULT_DIMS = int(os.getenv("EMBEDDING_DEFAULT_DIMENSIONS", "256"))
 MAX_BATCH = int(os.getenv("EMBEDDING_MAX_BATCH", "512"))
 REQUEST_TIMEOUT = float(os.getenv("EMBEDDING_REQUEST_TIMEOUT", "120"))

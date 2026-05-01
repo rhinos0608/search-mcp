@@ -1320,7 +1320,7 @@ export function createServer(): McpServer {
             query,
             apiKey: cfg.youtube.apiKey ?? '',
             embeddingBaseUrl: cfg.embeddingSidecar.baseUrl,
-            embeddingApiToken: cfg.embeddingSidecar.apiToken ?? undefined,
+            embeddingApiToken: cfg.embeddingSidecar.apiToken ?? '',
             embeddingDimensions: cfg.embeddingSidecar.dimensions,
             maxVideos,
             channel: channel !== '' ? channel : undefined,
@@ -1435,7 +1435,7 @@ export function createServer(): McpServer {
             maxPosts,
             commentLimit,
             embeddingBaseUrl: cfg.embeddingSidecar.baseUrl,
-            embeddingApiToken: cfg.embeddingSidecar.apiToken ?? undefined,
+            embeddingApiToken: cfg.embeddingSidecar.apiToken ?? '',
             embeddingDimensions: cfg.embeddingSidecar.dimensions,
             profile,
             topK,
@@ -1526,6 +1526,15 @@ export function createServer(): McpServer {
               'When true (default), appends "jobs" keyword to the search query for better discovery. ' +
                 'Set false to use the query as-is without the "jobs" suffix.',
             ),
+          useJobSpy: z
+            .boolean()
+            .optional()
+            .default(true)
+            .describe(
+              'Use JobSpy as primary acquisition layer instead of web search. ' +
+                'Provides structured job data from LinkedIn, Indeed, Glassdoor, ZipRecruiter, and more. ' +
+                'Set false to fall back to traditional web search + crawl.',
+            ),
         },
       },
       async ({
@@ -1538,6 +1547,7 @@ export function createServer(): McpServer {
         topK,
         maxBytes,
         addJobSuffix,
+        useJobSpy,
       }) => {
         logger.info({ tool: 'semantic_jobs', query, maxPages, topK }, 'Tool invoked');
         const start = Date.now();
@@ -1557,6 +1567,7 @@ export function createServer(): McpServer {
             topK,
             maxBytes,
             addJobSuffix,
+            useJobSpy,
           });
           const elapsed = Date.now() - start;
           const result = makeResult(
