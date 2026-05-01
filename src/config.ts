@@ -17,7 +17,7 @@ import { DEFAULT_SEMANTIC_MAX_BYTES } from './semanticLimits.js';
 /** Directory containing this file (dist/ or src/). Go up one level to reach project root. */
 const PKG_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 
-export type SearchBackend = 'brave' | 'searxng' | 'exa';
+export type SearchBackend = 'brave' | 'searxng' | 'exa' | 'duckduckgo' | 'ollama-search';
 
 export interface RescoreWeights {
   rrfAnchor: number;
@@ -154,6 +154,8 @@ export interface SearchConfig {
   scrubContent: boolean;
   llm: LlmConfig;
   raga: RAGAConfig;
+  duckduckgo: { region: string; safeSearch: string };
+  ollamaSearch: { baseUrl: string; apiKey: string };
   rescoreWeights: RescoreConfig;
 }
 
@@ -202,9 +204,11 @@ const DEFAULTS: Omit<SearchConfig, 'rescoreWeights'> = {
     cacheEnabled: true,
     defaultParser: 'auto',
   },
+  duckduckgo: { region: 'us-en', safeSearch: 'moderate' },
+  ollamaSearch: { baseUrl: '', apiKey: '' },
 };
 
-const VALID_BACKENDS = new Set<string>(['brave', 'searxng', 'exa']);
+const VALID_BACKENDS = new Set<string>(['brave', 'searxng', 'exa', 'duckduckgo', 'ollama-search']);
 
 /**
  * Decrypt config.enc using AES-256-GCM.
@@ -242,6 +246,8 @@ type EnvConfig = Omit<
   | 'raga'
   | 'scrubContent'
   | 'exa'
+  | 'duckduckgo'
+  | 'ollamaSearch'
 > & {
   reddit?: Partial<RedditConfig>;
   crawl4ai?: Partial<Crawl4aiConfig>;
@@ -253,6 +259,8 @@ type EnvConfig = Omit<
   llm?: Partial<LlmConfig>;
   raga?: Partial<RAGAConfig>;
   scrubContent?: boolean;
+  duckduckgo?: Partial<{ region: string; safeSearch: string }>;
+  ollamaSearch?: Partial<{ baseUrl: string; apiKey: string }>;
 };
 
 function loadFromEnv(): EnvConfig {
@@ -439,6 +447,26 @@ function loadFromEnv(): EnvConfig {
     cfg.raga = ragaCfg;
   }
 
+  // DuckDuckGo — optional region/safesearch knobs (zero-key backend, always-on)
+  const ddgRegion = process.env.SEARCH_DUCKDUCKGO_REGION;
+  const ddgSafeSearch = process.env.SEARCH_DUCKDUCKGO_SAFESEARCH;
+  if (ddgRegion !== undefined || ddgSafeSearch !== undefined) {
+    const ddgCfg: Partial<{ region: string; safeSearch: string }> = {};
+    if (ddgRegion !== undefined) ddgCfg.region = ddgRegion;
+    if (ddgSafeSearch !== undefined) ddgCfg.safeSearch = ddgSafeSearch;
+    cfg.duckduckgo = ddgCfg;
+  }
+
+  // Ollama search config — distinct from EMBEDDING_OLLAMA_* vars
+  const ollamaSearchUrl = process.env.SEARCH_OLLAMA_BASE_URL;
+  const ollamaSearchKey = process.env.SEARCH_OLLAMA_API_KEY;
+  if (ollamaSearchUrl !== undefined || ollamaSearchKey !== undefined) {
+    const osc: Partial<{ baseUrl: string; apiKey: string }> = {};
+    if (ollamaSearchUrl !== undefined) osc.baseUrl = ollamaSearchUrl;
+    if (ollamaSearchKey !== undefined) osc.apiKey = ollamaSearchKey;
+    cfg.ollamaSearch = osc;
+  }
+
   return cfg;
 }
 
@@ -585,6 +613,24 @@ export function loadConfig(): SearchConfig {
         fileConfig.raga?.defaultParser ??
         envConfig.raga?.defaultParser ??
         DEFAULTS.raga.defaultParser,
+    },
+    duckduckgo: {
+      region:
+        fileConfig.duckduckgo?.region ?? envConfig.duckduckgo?.region ?? DEFAULTS.duckduckgo.region,
+      safeSearch:
+        fileConfig.duckduckgo?.safeSearch ??
+        envConfig.duckduckgo?.safeSearch ??
+        DEFAULTS.duckduckgo.safeSearch,
+    },
+    ollamaSearch: {
+      baseUrl:
+        fileConfig.ollamaSearch?.baseUrl ??
+        envConfig.ollamaSearch?.baseUrl ??
+        DEFAULTS.ollamaSearch.baseUrl,
+      apiKey:
+        fileConfig.ollamaSearch?.apiKey ??
+        envConfig.ollamaSearch?.apiKey ??
+        DEFAULTS.ollamaSearch.apiKey,
     },
     rescoreWeights: DEFAULT_RESCORE_WEIGHTS,
   };
