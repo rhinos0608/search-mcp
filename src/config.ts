@@ -519,21 +519,21 @@ export function loadConfig(): SearchConfig {
       fileConfig = {
         ...fileConfig,
         ...encryptedConfig,
-        github: { 
-          ...(fileConfig.github || {}), 
-          ...(encryptedConfig.github || {}) 
+        github: {
+          ...(fileConfig.github ?? {}),
+          ...encryptedConfig.github,
         },
-        reddit: { 
-          ...(fileConfig.reddit || {}), 
-          ...(encryptedConfig.reddit || {}) 
+        reddit: {
+          ...(fileConfig.reddit ?? {}),
+          ...encryptedConfig.reddit,
         },
-        embeddingSidecar: { 
-          ...(fileConfig.embeddingSidecar || {}), 
-          ...(encryptedConfig.embeddingSidecar || {}) 
+        embeddingSidecar: {
+          ...(fileConfig.embeddingSidecar ?? {}),
+          ...encryptedConfig.embeddingSidecar,
         },
       };
       logger.info(
-        { hasToken: !!encryptedConfig.github?.token },
+        { hasToken: !!encryptedConfig.github.token },
         'Merged encrypted config from config.enc',
       );
     } catch (err) {

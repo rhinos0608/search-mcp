@@ -117,20 +117,26 @@ function isBotChallengePage(html: string): boolean {
 export async function duckduckgoSearch(
   query: string,
   limit = 10,
-  safeSearch: 'strict' | 'moderate' | 'off' | undefined = undefined,
-  config: DuckDuckGoConfig,
+  safeSearch?: 'strict' | 'moderate' | 'off',
+  config?: DuckDuckGoConfig,
 ): Promise<SearchResult[]> {
   // Resolve safesearch: explicit arg trumps config, config trumps default
   const effectiveSafeSearch =
-    safeSearch !== undefined
-      ? safeSearch
-      : ((config.safeSearch as 'strict' | 'moderate' | 'off' | undefined) ?? 'moderate');
+    safeSearch ??
+    ((config?.safeSearch as 'strict' | 'moderate' | 'off' | undefined) ?? 'moderate');
+  const effectiveConfig = config ?? { region: 'us-en', safeSearch: 'moderate' };
   logger.info(
-    { limit, safeSearch: effectiveSafeSearch, region: config.region },
+    { limit, safeSearch: effectiveSafeSearch, region: effectiveConfig.region },
     'Running DuckDuckGo search (experimental)',
   );
 
-  const key = cacheKey('duckduckgo', query, String(limit), effectiveSafeSearch, config.region);
+  const key = cacheKey(
+    'duckduckgo',
+    query,
+    String(limit),
+    effectiveSafeSearch,
+    effectiveConfig.region,
+  );
   const cached = cache.get(key);
   if (cached !== null) {
     logger.debug({ cacheHit: true }, 'DuckDuckGo search cache hit');
@@ -148,8 +154,8 @@ export async function duckduckgoSearch(
   }
 
   // Region: DDG Lite uses the 'kl' parameter for locale (e.g., us-en, de-de)
-  if (config.region.length > 0) {
-    params.set('kl', config.region);
+  if (effectiveConfig.region.length > 0) {
+    params.set('kl', effectiveConfig.region);
   }
 
   const url = `${DUCKDUCKGO_LITE_URL}?${params.toString()}`;
