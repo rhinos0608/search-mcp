@@ -6,8 +6,15 @@
 - Create `sidecar/jobspy/` directory.
 - Implement `main.py` using FastAPI.
 - Endpoint `POST /search` that wraps `jobspy.scrape_jobs()`.
+    - **Security**: Implement API Key authentication via `X-API-Key` header.
+    - **Input Validation**: Use Pydantic models to validate request payload against `JobPost` schema; sanitize strings to prevent injection.
+    - **Robustness**:
+        - Rate limiting: 20 requests/min per IP/API key.
+        - Error handling: Explicit codes (400: validation, 401/403: auth, 429: rate limit, 504: scrape timeout, 500: internal).
+        - Structured errors: `{ "error": "code", "message": "...", "retryable": true/false }`.
+        - Configurable timeout (default 55s) with graceful cancellation.
 - Support JSON responses with the full `JobPost` schema.
-- Dockerize the sidecar for consistent deployment.
+- Dockerize the sidecar for consistent deployment; reference in `docker-compose.yml`.
 
 ### 1.2 TypeScript Client
 - Create `src/utils/jobspyClient.ts`.
@@ -17,11 +24,19 @@
 ## Phase 2: Domain Model & Persistence
 
 ### 2.1 Graph Schema (SQLite)
-- Extend `src/rag/corpusCache.ts` with new tables:
+- Extend `src/utils/jobGraphDb.ts` (proxied via `corpusCache.ts`) with new tables:
+    - `schema_version`: Tracks migration state.
     - `jobs_graph_metadata`: Links `JobPosting` to `Company`, `Location`, etc.
     - `companies`: Basic metadata + career page tracking.
     - `duplicate_clusters`: Grouping identical postings.
-- Add migrations logic to ensure backward compatibility.
+- **Migration Path**:
+    - Migration Runner: New function `runMigrations()` called on DB init.
+    - Scripts: Versioned idempotent up/down migrations (e.g., `v1__init_graph.sql`).
+    - Failure Handling: Transactional checkpoints; resumable state tracked in `schema_version`.
+    - Rollback: `rollbackHandler()` executes down migrations; manual backup+restore steps documented.
+- **Backfill Strategy**:
+    - Task `backfillJobData()`: Batch job mapping existing `JobPosting` -> `jobs_graph_metadata` and `companies` using domain heuristics or null placeholders.
+    - Reconcile Company/Location FK changes.
 
 ### 2.2 Canonical Mapping
 - Update `src/rag/adapters/job.ts` to include `fromJobSpy(raw: JobSpyResult): JobListing`.
@@ -39,7 +54,9 @@
 
 ### 3.2 Enrichment Adapter
 - Update `extractJobListingsFromHtml` to support "Enrichment Mode":
-    - If a listing already exists, update missing fields (salary, description, applyUrl) instead of creating a new one.
+    - **Conflict Resolution**: Only populate fields that are missing or empty on the existing `JobListing`. Do not overwrite unless source priority (Source Precedence: JobSpy > Crawled Data) forces it.
+    - **Audit/Versioning**: Increment `version` field and append to `enrichment_log` on every change.
+    - **Validation**: Enforce rules (salary format, URL normalization/whitelisting, min description length > 200 chars) before applying enriched values.
 
 ## Phase 4: Intelligence & Scoring
 
