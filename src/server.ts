@@ -277,14 +277,14 @@ export function createServer(): McpServer {
         expandQuery: z
           .boolean()
           .optional()
-          .default(false)
+          .default(true)
           .describe(
             'Generate query variations (question, concept, scope, opposition) and merge results for broader coverage.',
           ),
         mergeSearchBackends: z
           .boolean()
           .optional()
-          .default(false)
+          .default(true)
           .describe(
             'When multiple search backends are configured, query all of them and merge + deduplicate results. Adds engines field tracking which backend returned each result.',
           ),
@@ -1489,23 +1489,31 @@ export function createServer(): McpServer {
             .array(z.string())
             .optional()
             .describe(
-              'Preferred locations (e.g. ["Sydney", "Melbourne"]). Used for ranking boost, not hard filter.',
+              'Preferred locations (e.g. ["Sydney", "Melbourne"]). Used for ranking boost - matches appear higher in results. ' +
+                'Set enforceConstraints: true to filter out non-matches.',
             ),
           workMode: z
             .array(z.enum(['remote', 'hybrid', 'onsite']))
             .optional()
-            .describe('Preferred work modes. Used for ranking boost, not hard filter.'),
+            .describe(
+              'Preferred work modes. Used for ranking boost - matches appear higher in results. ' +
+                'Set enforceConstraints: true to filter out non-matches.',
+            ),
           maxSalary: z
             .number()
             .positive()
             .optional()
             .describe(
-              'Maximum annual salary. Listings with parseable salary exceeding this are filtered out.',
+              'Maximum annual salary. Listings exceeding this are ranked lower. ' +
+                'Set enforceConstraints: true to filter out exceeding listings.',
             ),
           excludeTitles: z
             .array(z.string())
             .optional()
-            .describe('Title keywords to exclude (e.g. ["senior", "principal", "manager"])'),
+            .describe(
+              'Title keywords to exclude. Used for ranking penalty - excluded keywords ranked lower. ' +
+                'Set enforceConstraints: true to filter out listings with these keywords.',
+            ),
           maxPages: z
             .number()
             .int()
@@ -1547,6 +1555,15 @@ export function createServer(): McpServer {
                 'Provides structured job data from LinkedIn, Indeed, Glassdoor, ZipRecruiter, and more. ' +
                 'Set false to fall back to traditional web search + crawl.',
             ),
+          enforceConstraints: z
+            .boolean()
+            .optional()
+            .default(false)
+            .describe(
+              'When true, applies hard filtering to exclude listings that dont match constraints. ' +
+                'When false (default), constraints only influence ranking scores - all results are returned ' +
+                'but listings matching your constraints are ranked higher. Use true to filter out non-matches.',
+            ),
         },
       },
       async ({
@@ -1560,6 +1577,7 @@ export function createServer(): McpServer {
         maxBytes,
         addJobSuffix,
         useJobSpy,
+        enforceConstraints,
       }) => {
         logger.info({ tool: 'semantic_jobs', query, maxPages, topK }, 'Tool invoked');
         const start = Date.now();
@@ -1580,6 +1598,7 @@ export function createServer(): McpServer {
             maxBytes,
             addJobSuffix,
             useJobSpy,
+            enforceConstraints,
           });
           const elapsed = Date.now() - start;
           const result = makeResult(
