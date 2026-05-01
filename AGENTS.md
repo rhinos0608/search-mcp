@@ -106,7 +106,7 @@ Code search may use `EMBEDDING_CODE_MODEL` for a code-tuned model endpoint.
 Optional LLM-based chunk enrichment for `semantic_crawl`. When `useContextualEmbeddings: true` and LLM config is present, each chunk is prefixed with a short LLM-generated context string before embedding. Original chunk text is preserved for display; enriched text is used only for embedding. Gracefully degrades to raw chunks if the LLM call fails.
 
 ### Query Expansion (`src/tools/queryExpansion.ts`)
-Rule-based query variation generator: concept/synonym expansion, question form, scope adjustment, opposition pairs. Wired into `web_search` via `expandQuery` param (default `false`). ~60-entry concept map, no LLM calls.
+Rule-based query variation generator: concept/synonym expansion, question form, scope adjustment, opposition pairs. Wired into `web_search` via `expandQuery` param (default `true`). ~60-entry concept map, no LLM calls.
 
 ### External Recovery (`src/utils/externalRecovery.ts`)
 When Crawl4AI returns placeholder/empty content, attempts Wayback Machine CDX API and Google Cache as fallbacks. Recovered content tagged with `recoverySource` metadata. Bounded timeout and size limits.
@@ -115,7 +115,7 @@ When Crawl4AI returns placeholder/empty content, attempts Wayback Machine CDX AP
 Regex-based detection of prompt injection, data exfiltration, impersonation, and XSS patterns. Redacts with `[REDACTED]` tags. Returns risk score and threat summary. Opt-in via `SCRUB_CONTENT=true`.
 
 ### Cross-Backend Search Merging (`src/utils/searchMerge.ts`)
-When both Brave and SearXNG are configured, queries both in parallel and merges results by normalized URL. Scoring: engine agreement (40%), domain authority (30%), position (30%). Wired into `web_search` via `mergeSearchBackends` param.
+When both Brave and SearXNG are configured, queries both in parallel and merges results by normalized URL. Scoring: engine agreement (40%), domain authority (30%), position (30%). Wired into `web_search` via `mergeSearchBackends` param (default `true`).
 
 ### Domain Trust (`src/utils/domainTrust.ts`)
 Evaluates domain reputation: established-domain allowlist, suspicious TLDs, HTTPS enforcement, Levenshtein typosquat detection. Opt-in via `DOMAIN_TRUST_ENABLED=true`.
