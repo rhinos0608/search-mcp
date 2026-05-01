@@ -49,7 +49,7 @@ function parseLiteHtml(html: string, startPosition: number): SearchResult[] {
     const tableContent = tables[t] ?? '';
 
     // Extract URL and title from result-header
-    const headerRe = /<a[^>]*href="([^"]*)"[^>]*rel="nofollow"[^>]*>([\s\S]*?)<\/a>/i;
+    const headerRe = /<a[^>]*(?=.*href="([^"]*)")(?=.*rel="nofollow")[^>]*>([\s\S]*?)<\/a>/i;
     const headerMatch = headerRe.exec(tableContent);
     if (!headerMatch) continue;
 
@@ -117,12 +117,12 @@ function isBotChallengePage(html: string): boolean {
 export async function duckduckgoSearch(
   query: string,
   limit = 10,
-  safeSearch: 'strict' | 'moderate' | 'off' = 'moderate',
+  safeSearch: 'strict' | 'moderate' | 'off' | undefined = undefined,
   config: DuckDuckGoConfig,
 ): Promise<SearchResult[]> {
   // Resolve safesearch: explicit arg trumps config, config trumps default
   const effectiveSafeSearch =
-    safeSearch !== 'moderate'
+    safeSearch !== undefined
       ? safeSearch
       : ((config.safeSearch as 'strict' | 'moderate' | 'off' | undefined) ?? 'moderate');
   logger.info(

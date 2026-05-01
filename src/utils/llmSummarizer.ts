@@ -154,7 +154,7 @@ async function callLlm(
   maxTokens: number,
   temperature: number,
 ): Promise<string> {
-  // Caller (summarizeText) already guards apiToken — narrow for TS
+  // Caller (summarizeContent) already guards apiToken — narrow for TS
   if (!config.apiToken) {
     throw new Error('llmSummarizer: apiToken required but not provided');
   }

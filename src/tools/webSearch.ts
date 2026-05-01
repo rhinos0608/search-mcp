@@ -80,6 +80,8 @@ async function runBackend(
         results = await ollamaSearch(query, limit, safeSearch, cfg.ollamaSearch);
         break;
       }
+      default:
+        throw new Error(`Unhandled search backend: ${backend as string}`);
     }
     // Record success outcome
     recordOutcome(backend, 'success');
@@ -97,12 +99,12 @@ async function runBackend(
         (err.code === 'UNAVAILABLE' && err.statusCode === 429);
     } else {
       // Fallback: string matching for non-ToolError exceptions (network errors, etc.)
-      const errMsg = err instanceof Error ? err.message : String(err);
-      isTimeout = errMsg.toLowerCase().includes('timeout') || errMsg.includes('abort');
+      const msg = (err instanceof Error ? err.message : String(err)).toLowerCase();
+      isTimeout = msg.includes('timeout') || msg.includes('abort');
       isChallenge =
-        errMsg.toLowerCase().includes('challenge') ||
-        errMsg.toLowerCase().includes('captcha') ||
-        (errMsg.toLowerCase().includes('403') && !errMsg.toLowerCase().includes('[403]'));
+        msg.includes('challenge') ||
+        msg.includes('captcha') ||
+        (msg.includes('403') && !msg.includes('[403]'));
     }
 
     if (isChallenge) {

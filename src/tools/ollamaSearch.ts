@@ -68,7 +68,7 @@ export async function ollamaSearch(
   const body = JSON.stringify({
     query,
     limit,
-    safe_screen: safeSearch,
+    safeSearch: safeSearch,
   });
 
   const response = await retryWithBackoff(
@@ -90,9 +90,11 @@ export async function ollamaSearch(
       }
 
       if (!res.ok) {
+        const isTransient = res.status >= 500 || res.status === 429;
         throw unavailableError(`Ollama search returned ${String(res.status)}: ${res.statusText}`, {
           statusCode: res.status,
           backend: 'ollama-search',
+          ...(isTransient ? { retryable: true } : {}),
         });
       }
 

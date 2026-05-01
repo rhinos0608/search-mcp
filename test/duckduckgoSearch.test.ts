@@ -285,23 +285,34 @@ test('passes strict safesearch as kp=1 query param', async () => {
   );
 });
 
-test('uses config safeSearch as fallback when arg is default moderate', async () => {
+test('honors explicit moderate safeSearch arg over config', async () => {
   let calledUrl = '';
-
   globalThis.fetch = async (input: RequestInfo | URL) => {
     calledUrl = String(input);
     return new Response(
-      `<html><table class="result"><tr class="result-header"><td><a href="https://x.com" rel="nofollow">X</a></td></tr><tr class="result-snippet"><td>x</td></tr><tr class="result-url"><td>x.com</td></tr></table></html>`,
+      `<html><table class="result"><tr class="result-header"><td><a href="https://x.com" rel="nofollow">X</a></td></tr></table></html>`,
       { status: 200, headers: { 'content-type': 'text/html' } },
     );
   };
 
-  await duckduckgoSearch('config-safe', 10, 'moderate', { ...DEFAULT_CONFIG, safeSearch: 'strict' });
+  // Call with moderate explicitly — should NOT set kp=1 even if config is strict
+  await duckduckgoSearch('test', 10, 'moderate', { ...DEFAULT_CONFIG, safeSearch: 'strict' });
+  assert.ok(!calledUrl.includes('kp=1'), 'Explicit moderate should not set kp=1');
+});
 
-  assert.ok(
-    calledUrl.includes('kp=1'),
-    `Expected config strict to set kp=1, got: ${calledUrl}`,
-  );
+test('uses config safeSearch as fallback when arg is undefined', async () => {
+  let calledUrl = '';
+  globalThis.fetch = async (input: RequestInfo | URL) => {
+    calledUrl = String(input);
+    return new Response(
+      `<html><table class="result"><tr class="result-header"><td><a href="https://x.com" rel="nofollow">X</a></td></tr></table></html>`,
+      { status: 200, headers: { 'content-type': 'text/html' } },
+    );
+  };
+
+  // Pass undefined safely (simulating calling without the argument)
+  await duckduckgoSearch('test', 10, undefined, { ...DEFAULT_CONFIG, safeSearch: 'strict' });
+  assert.ok(calledUrl.includes('kp=1'), 'Undefined safeSearch should fallback to config strict');
 });
 
 test('passes region as kl query param', async () => {
