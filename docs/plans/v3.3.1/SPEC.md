@@ -31,16 +31,16 @@ Existing providers stay in place:
 
 ## Backend Classes
 
-| Backend | Class | Setup friction | Notes |
-| --- | --- | --- | --- |
-| DuckDuckGo | zero-key / always-on | none | HTML scraping, experimental, bot-challenge risk |
-| Ollama web search | opt-in / account-gated | low-medium | proposed label: `ollama-search`; use `SEARCH_OLLAMA_*` config so it does not collide with embeddings |
-| SearXNG | self-hosted/free | medium | already supported; remains the structured self-hosted fallback |
-| Brave / Exa | key-backed | medium | retained, not the out-of-box anchor |
+| Backend           | Class                  | Setup friction | Notes                                                                                                |
+| ----------------- | ---------------------- | -------------- | ---------------------------------------------------------------------------------------------------- |
+| DuckDuckGo        | zero-key / always-on   | none           | HTML scraping, experimental, bot-challenge risk                                                      |
+| Ollama web search | opt-in / account-gated | low-medium     | proposed label: `ollama-search`; use `SEARCH_OLLAMA_*` config so it does not collide with embeddings |
+| SearXNG           | self-hosted/free       | medium         | already supported; remains the structured self-hosted fallback                                       |
+| Brave / Exa       | key-backed             | medium         | retained, not the out-of-box anchor                                                                  |
 
 ## Problem
 
-Today the default search path still leans on either self-hosted SearXNG or key-backed providers. That leaves a gap for users who want immediate search coverage without paid APIs *and* without self-hosting.
+Today the default search path still leans on either self-hosted SearXNG or key-backed providers. That leaves a gap for users who want immediate search coverage without paid APIs _and_ without self-hosting.
 
 ## Goals
 
@@ -88,6 +88,10 @@ When more than one backend is healthy and merge mode is enabled, the current `se
   - add new backend source labels and keep canonical URL dedupe stable
 - `src/types.ts`
   - expand `SearchResult.source` union for new backends
+- `src/utils/backendHealth.ts` (new)
+  - per-backend sliding-window health monitoring with degradation/recovery thresholds
+- `src/utils/botChallenge.ts` (new)
+  - bot-challenge detection, exponential backoff with jitter, circuit-breaker state machine
 - `src/server.ts`
   - keep the current tool surface; only add schema fields if config surfaces need them
 
@@ -110,9 +114,17 @@ When more than one backend is healthy and merge mode is enabled, the current `se
 
 ## Mitigation
 
+### Backend health criteria
+
 - Keep explicit provider selection first-class.
 - Use short per-backend timeouts and existing retry guards.
-- Keep merge opt-in unless the backend roster is clearly healthy.
+- Keep merge opt-in unless the backend roster meets the health threshold: at least 2 distinct search backends returned non-empty results within the configured per-backend timeout for the last N requests (configurable N, e.g., 50). Additionally, a backend is considered degraded if its recent timeout/error rate exceeds 20% over the last 50 requests. Degraded backends are excluded from the healthy roster until the rate drops below 10%.
 - Keep Ollama opt-in and disabled by default unless explicitly configured.
 - Use distinct `SEARCH_OLLAMA_*` env vars so search config does not collide with embeddings.
 - Fall back to SearXNG / Brave / Exa when zero-key providers fail.
+
+### Bot-challenge detection and response
+
+- **Detection**: Monitor provider responses for repeated HTTP 403/429 status codes, challenge HTML fingerprints (e.g., CAPTCHA iframes, challenge script tags, redirect to challenge domain), or unusually high latency indicative of rate limiting.
+- **Immediate actions**: When a bot challenge is detected on a provider, immediately mark that provider as unhealthy, apply exponential backoff with jitter on retries (initial delay 10s, multiplier 2x, max 300s), and engage a circuit-breaker retry guard that trips after 3 consecutive challenge responses within a 5-minute window.
+- **Fallback behavior**: Switch to the next provider in the fallback chain (DuckDuckGo → SearXNG → Brave → Exa when zero-key providers are challenged; reverse order for key-backed or opt-in providers). Log each challenge incident with provider name, response code, and fallback action taken for operator review.

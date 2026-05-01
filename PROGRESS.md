@@ -3,50 +3,30 @@
 > Canonical plan status lives in `docs/plans/index.md`.
 
 ## Status
-Complete — V3.3.0 Extraction Resilience & Search Recall merged (2026-04-30); V3.3.1 search-backend expansion now planned
 
-## V3.3.0 — Extraction Resilience & Search Recall
+V3.3.1 implementation in progress — DuckDuckGo + Ollama providers, health tracker, circuit breaker, availability-aware merge. All phases through Phase 5 (Availability-Aware Merge) implemented and passing.
 
-### Status: Complete ✅
+## V3.3.1 — Search Backend Expansion
 
-All 8 stages from `docs/plans/v3.3.0/SPEC.md` are implemented, tested, and merged into `main`.
+### Status: In Progress
 
-| # | Stage | Status | Files Created | Files Modified |
+| # | Phase | Status | Files Created | Files Modified |
 |---|-------|--------|---------------|----------------|
-| 1 | **Contextual Embeddings** | ✅ | `src/rag/contextualEmbedding.ts` | `semanticCrawl.ts`, `server.ts`, `types.ts` |
-| 2 | **Domain Trust & Typosquat** | ✅ | `src/utils/domainTrust.ts` | `semanticCrawl.ts`, `config.ts` |
-| 3 | **Query Expansion** | ✅ | `src/tools/queryExpansion.ts` | `webSearch.ts`, `server.ts` |
-| 4 | **External Recovery Fallbacks** | ✅ | `src/utils/externalRecovery.ts` | `webCrawl.ts`, `types.ts` |
-| 5 | **Content Scrubbing** | ✅ | `src/utils/contentScrubber.ts` | `semanticCrawl.ts`, `config.ts` |
-| 6 | **Cross-Backend Search Merge** | ✅ | `src/utils/searchMerge.ts` | `webSearch.ts`, `types.ts`, `server.ts` |
-| 7 | **Code Example Extraction** | ✅ | — | `chunking.ts` |
-| 8 | **Self-Improvement Tracking** | ✅ | `src/utils/extractionStats.ts` | `semanticCrawl.ts`, `webCrawl.ts` |
+| 0 | **Contracts + Config** | ✅ | `duckduckgoSearch.ts` (stub), `ollamaSearch.ts` (stub) | `types.ts`, `config.ts`, `webSearch.ts` |
+| 1 | **DuckDuckGo Provider** | ✅ | `test/duckduckgoSearch.test.ts` | `duckduckgoSearch.ts` (replaced stub) |
+| 2 | **Ollama Web Search Provider** | ✅ | `test/ollamaSearch.test.ts` | `ollamaSearch.ts` (replaced stub) |
+| 3 | **Backend Health Tracker** | ✅ | `src/utils/backendHealth.ts`, `test/backendHealth.test.ts` | — |
+| 4 | **Bot-Challenge Circuit Breaker** | ✅ | `src/utils/botChallenge.ts`, `test/botChallenge.test.ts` | — |
+| 5 | **Availability-Aware Selection + Merge** | ✅ | — | `webSearch.ts` |
+| 6 | **Docs, Examples, Verification** | 🟡 | — | `config.example.json`, `docs/plans/index.md`, `PROGRESS.md` |
 
-### Verification
-- Typecheck: ✅ (strict mode)
-- Lint: ✅
-- Tests: 884 pass (all V3.3.0-specific tests included)
-- All stages are additive with zero behavior change by default
+**923 tests pass** (2 pre-existing failures); typecheck ✅, lint ✅
 
-## Phase Status
+## Verification
 
-| Phase/Version | Feature | Status |
-|---------------|---------|--------|
-| V3.0.0 | Universal RAG Core | ✅ |
-| V3.0.5 | Job Adapter MVP | ✅ |
-| V3.1.0 | Code/GitHub Adapter | ✅ |
-| V3.1.1 | Crawl Reliability Fixes | ✅ |
-| V3.1.5 | RAG-Anything Integration | ✅ |
-| V3.2.0 | Domain Adapters + Distribution | 🟡 In progress |
-| V3.3.0 | Extraction Resilience | ✅ |
-| V3.3.1 | Search Backend Expansion | 🟡 Planned |
+Minimum gates:
 
-## Up Next
-
-### V3.3.1 — Search Backend Expansion (planned)
-- DuckDuckGo zero-key fallback
-- Opt-in Ollama web search backend
-- Preserve crawl4ai/browser rendering and search fusion
-
-### V3.4.0 — Integration (planned)
-- Resolver pattern, output budget, structured errors, diagnostics
+- `npm run lint` ✅
+- `npm run typecheck` ✅
+- `npm run test` — 923 pass, 2 pre-existing fail
+- `git diff --check` ✅

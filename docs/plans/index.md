@@ -1,6 +1,6 @@
 # Search MCP Roadmap — Implementation Plans Index
 
-**Version**: V3.3.1 (2026-05-01) → V3.4.0
+**Version**: V3.3.0 (Released) → V3.3.1 (Planning) → V3.4.0 (Future)
 
 This document indexes all implementation plans for the Search MCP roadmap.
 
@@ -196,16 +196,16 @@ This document indexes all implementation plans for the Search MCP roadmap.
 
 ### 8 Independently Shippable Stages
 
-| #   | Stage                           | Source           | Effort | New Files                        | Modified Files                                 |
-| --- | ------------------------------- | ---------------- | ------ | -------------------------------- | ---------------------------------------------- |
-| 1   | **Contextual Embeddings**       | mcp-crawl4ai-rag | Medium | `src/rag/contextualEmbedding.ts` | `semanticCrawl.ts`, `server.ts`, `types.ts`    |
-| 2   | **Domain Trust & Typosquat**    | agent-search     | Low    | `src/utils/domainTrust.ts`       | `semanticCrawl.ts`, `config.ts`                |
-| 3   | **Query Expansion**             | agent-search     | Low    | `src/tools/queryExpansion.ts`    | `webSearch.ts`, `server.ts`                    |
-| 4   | **External Recovery Fallbacks** | agent-search     | Medium | `src/utils/externalRecovery.ts`  | `webCrawl.ts`, `types.ts`                      |
-| 5   | **Content Scrubbing**           | agent-search     | Medium | `src/utils/contentScrubber.ts`   | `semanticCrawl.ts`, `config.ts`                |
-| 6   | **Cross-Backend Search Merge**  | agent-search     | Medium | `src/utils/searchMerge.ts`       | `webSearch.ts`, `types.ts`, `server.ts`        |
-| 7   | **Code Example Extraction**     | mcp-crawl4ai-rag | Low    | —                                | `chunking.ts`                                  |
-| 8   | **Self-Improvement Tracking**   | agent-search     | Low    | `src/utils/extractionStats.ts`   | `webCrawl.ts`, `semanticCrawl.ts`              |
+| #   | Stage                           | Source           | Effort | New Files                        | Modified Files                              |
+| --- | ------------------------------- | ---------------- | ------ | -------------------------------- | ------------------------------------------- |
+| 1   | **Contextual Embeddings**       | mcp-crawl4ai-rag | Medium | `src/rag/contextualEmbedding.ts` | `semanticCrawl.ts`, `server.ts`, `types.ts` |
+| 2   | **Domain Trust & Typosquat**    | agent-search     | Low    | `src/utils/domainTrust.ts`       | `semanticCrawl.ts`, `config.ts`             |
+| 3   | **Query Expansion**             | agent-search     | Low    | `src/tools/queryExpansion.ts`    | `webSearch.ts`, `server.ts`                 |
+| 4   | **External Recovery Fallbacks** | agent-search     | Medium | `src/utils/externalRecovery.ts`  | `webCrawl.ts`, `types.ts`                   |
+| 5   | **Content Scrubbing**           | agent-search     | Medium | `src/utils/contentScrubber.ts`   | `semanticCrawl.ts`, `config.ts`             |
+| 6   | **Cross-Backend Search Merge**  | agent-search     | Medium | `src/utils/searchMerge.ts`       | `webSearch.ts`, `types.ts`, `server.ts`     |
+| 7   | **Code Example Extraction**     | mcp-crawl4ai-rag | Low    | —                                | `chunking.ts`                               |
+| 8   | **Self-Improvement Tracking**   | agent-search     | Low    | `src/utils/extractionStats.ts`   | `webCrawl.ts`, `semanticCrawl.ts`           |
 
 **Estimated Scope**: ~2,500 LOC new code
 
@@ -238,9 +238,18 @@ This document indexes all implementation plans for the Search MCP roadmap.
    - Account/API key gated search path
    - Explicit config only; disabled by default
 
-3. **Availability-aware selection + merge**
-   - Prefer out-of-box providers when no backend is pinned
+3. **Backend health tracker**
+   - Sliding-window per-backend health monitoring
+   - Degradation/recovery thresholds with hysteresis
+
+4. **Bot-challenge circuit breaker**
+   - Challenge detection (403/429, CAPTCHA fingerprints, latency)
+   - Exponential backoff with jitter and automatic circuit-breaker recovery
+
+5. **Availability-aware selection + merge**
+   - Consume health tracker and circuit breaker for intelligent fallback
    - Preserve `mergeSearchBackends`, dedupe, and fusion behavior
+   - Skip degraded or circuit-tripped backends automatically
 
 **Estimated Scope**: ~900 LOC new code
 
@@ -248,17 +257,17 @@ This document indexes all implementation plans for the Search MCP roadmap.
 
 ## Summary Table
 
-| Version | Focus          | Key Deliverables                                                                                     | Est. Scope |
-| ------- | -------------- | ---------------------------------------------------------------------------------------------------- | ---------- |
-| V3.0.0  | Core Pipeline  | RAG module extraction, adapter system, YouTube/Reddit tools, eval                                    | ~1,700 LOC |
-| V3.0.5  | Jobs MVP       | Job adapter (SEEK, Indeed, Jora), structured extraction                                              | ~750 LOC   |
-| V3.1.0  | Code/GitHub    | Code adapter, semantic GitHub search, SQLite cache, Exa                                              | ~800 LOC   |
-| V3.1.1  | Reliability    | HTML threading, timeout scaling, size guard                                                          | ~300 LOC   |
-| V3.1.5  | RAG-Anything   | PDF/Office extraction bridge, code review fixes                                                      | ~1,200 LOC |
-| V3.2.0  | Domains + Dist | SO, HN, academic, news adapters, full jobs, dedup, constraints, **Docker Compose, Ollama, registry** | ~2,840 LOC |
-| V3.3.0  | Resilience     | Contextual embeddings, domain trust, kill chain, query expansion                                     | ~2,500 LOC |
-| V3.3.1  | Search Backend Expansion | DuckDuckGo zero-key fallback, opt-in Ollama web search, availability-aware selection + merge       | ~900 LOC   |
-| V3.4.0  | Integration    | Resolver pattern, output budget, structured errors, diagnostics                                      | ~800 LOC   |
+| Version | Focus                    | Key Deliverables                                                                                     | Est. Scope |
+| ------- | ------------------------ | ---------------------------------------------------------------------------------------------------- | ---------- |
+| V3.0.0  | Core Pipeline            | RAG module extraction, adapter system, YouTube/Reddit tools, eval                                    | ~1,700 LOC |
+| V3.0.5  | Jobs MVP                 | Job adapter (SEEK, Indeed, Jora), structured extraction                                              | ~750 LOC   |
+| V3.1.0  | Code/GitHub              | Code adapter, semantic GitHub search, SQLite cache, Exa                                              | ~800 LOC   |
+| V3.1.1  | Reliability              | HTML threading, timeout scaling, size guard                                                          | ~300 LOC   |
+| V3.1.5  | RAG-Anything             | PDF/Office extraction bridge, code review fixes                                                      | ~1,200 LOC |
+| V3.2.0  | Domains + Dist           | SO, HN, academic, news adapters, full jobs, dedup, constraints, **Docker Compose, Ollama, registry** | ~2,840 LOC |
+| V3.3.0  | Resilience               | Contextual embeddings, domain trust, kill chain, query expansion                                     | ~2,500 LOC |
+| V3.3.1  | Search Backend Expansion | DuckDuckGo zero-key fallback, opt-in Ollama web search, availability-aware selection + merge         | ~900 LOC   |
+| V3.4.0  | Integration              | Resolver pattern, output budget, structured errors, diagnostics                                      | ~800 LOC   |
 
 **Total V3 Series**: ~11,740 LOC new code
 
