@@ -54,6 +54,8 @@ export interface SemanticJobsOptions {
   addJobSuffix?: boolean;
   /** When true, uses the JobSpy acquisition pipeline. */
   useJobSpy?: boolean;
+  /** When true, applies hard filtering to exclude listings that don't match constraints. When false (default), constraints only influence ranking scores. */
+  enforceConstraints?: boolean;
 }
 
 export interface SemanticJobsCrawledPage {
@@ -143,7 +145,8 @@ export async function semanticJobs(
     if (opts.topK !== undefined) embedOpts.topK = opts.topK;
     if (opts.maxBytes !== undefined) embedOpts.maxBytes = opts.maxBytes;
 
-    const results = await pipeline.embedAndRank(finalRecords, opts.query, embedOpts);
+    const enforceConstraints = opts.enforceConstraints ?? false;
+    const results = await pipeline.embedAndRank(finalRecords, opts.query, embedOpts, constraints, enforceConstraints);
 
     return {
       results,
