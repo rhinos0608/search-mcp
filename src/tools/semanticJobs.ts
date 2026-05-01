@@ -16,6 +16,8 @@ import { dedupJobListings } from '../rag/jobDedup.js';
 import { applyHardFilters, rankJobListings, type JobScore } from '../rag/jobRanking.js';
 import { embedTexts, embedTextsBatched } from '../rag/embedding.js';
 import { prepareCorpus, retrieveCorpus } from '../rag/pipeline.js';
+import { JobPipeline, type EnrichedRecord } from '../rag/jobPipeline.js';
+import { type JobSpyAcquisitionParams } from '../utils/jobspyClient.js';
 import type { JobListingMvp, JobSearchConstraints } from '../rag/types/job.js';
 import type { SearchResult } from '../types.js';
 
@@ -50,6 +52,8 @@ export interface SemanticJobsOptions {
   debug?: boolean;
   /** When true (default), appends "jobs" keyword to the search query. */
   addJobSuffix?: boolean;
+  /** When true, uses the JobSpy acquisition pipeline. */
+  useJobSpy?: boolean;
 }
 
 export interface SemanticJobsCrawledPage {
@@ -81,6 +85,70 @@ export async function semanticJobs(
   opts: SemanticJobsOptions,
   deps: SemanticJobsDeps = {},
 ): Promise<SemanticJobsResult> {
+  if (opts.useJobSpy !== false) {
+    const pipeline = new JobPipeline();
+    const acquisitionParams: JobSpyAcquisitionParams = {
+      query: opts.query,
+    };
+    if (opts.location?.[0] !== undefined) acquisitionParams.location = opts.location[0];
+    if (opts.workMode?.includes('remote')) acquisitionParams.isRemote = true;
+    if (opts.maxPages !== undefined) acquisitionParams.resultsWanted = opts.maxPages * 5;
+
+    const discovery = await pipeline.discover(acquisitionParams);
+
+    if (discovery.length === 0) {
+      return {
+        results: [],
+        corpusStatus: {
+          requested: 0,
+          fetched: 0,
+          failed: 0,
+          extracted: 0,
+          deduplicated: 0,
+          filtered: 0,
+        },
+        warnings: [],
+      };
+    }
+
+    const normalized = await pipeline.normalize(discovery, opts.query);
+    const constraints = buildConstraints(opts);
+    const scored = pipeline.scoreMetadata(normalized, constraints);
+
+    let finalRecords: EnrichedRecord[] = scored.map(s => ({ ...s }));
+    if ((opts.maxPages ?? DEFAULT_MAX_PAGES) > 0) {
+      finalRecords = await pipeline.enrich(scored);
+    }
+
+    const embedOpts: {
+      baseUrl?: string;
+      apiToken?: string;
+      dimensions?: number;
+      topK?: number;
+      maxBytes?: number;
+    } = {};
+    if (opts.embeddingBaseUrl !== undefined) embedOpts.baseUrl = opts.embeddingBaseUrl;
+    if (opts.embeddingApiToken !== undefined) embedOpts.apiToken = opts.embeddingApiToken;
+    if (opts.embeddingDimensions !== undefined) embedOpts.dimensions = opts.embeddingDimensions;
+    if (opts.topK !== undefined) embedOpts.topK = opts.topK;
+    if (opts.maxBytes !== undefined) embedOpts.maxBytes = opts.maxBytes;
+
+    const results = await pipeline.embedAndRank(finalRecords, opts.query, embedOpts);
+
+    return {
+      results,
+      corpusStatus: {
+        requested: discovery.length,
+        fetched: finalRecords.length,
+        failed: discovery.length - finalRecords.length,
+        extracted: discovery.length,
+        deduplicated: discovery.length - normalized.length,
+        filtered: normalized.length - scored.length,
+      },
+      warnings: [],
+    };
+  }
+
   const maxPages = Math.min(opts.maxPages ?? DEFAULT_MAX_PAGES, MAX_PAGES);
   const topK = Math.min(opts.topK ?? DEFAULT_TOP_K, MAX_TOP_K);
   const constraints = buildConstraints(opts);

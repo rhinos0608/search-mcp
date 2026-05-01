@@ -1,4 +1,6 @@
-import type { JobListingMvp, JobSearchConstraints } from './types/job.js';
+import type { JobListingMvp, JobSearchConstraints, JobSource } from './types/job.js';
+import type { GraphDuplicateCluster } from './types/jobGraph.js';
+import { findJobsByCompany, findDuplicatesByTitleCompany } from '../utils/jobGraphDb.js';
 
 export interface JobScore {
   listing: JobListingMvp;
@@ -11,6 +13,9 @@ export interface JobScore {
     workMode: number;
     recency: number;
     completeness: number;
+    sourceReliability: number;
+    duplicateDensity: number;
+    companyReliability: number;
   };
 }
 
@@ -44,6 +49,7 @@ export function rankJobListings(
   query: string,
   constraints?: JobSearchConstraints,
   semanticScores?: Map<string, number>,
+  graphScoring = false,
 ): JobScore[] {
   void query;
 
@@ -51,10 +57,33 @@ export function rankJobListings(
     const semantic = resolveSemanticScore(listing, index, semanticScores);
     const location = calculateLocationScore(listing, constraints?.location);
     const workMode = calculateWorkModeScore(listing, constraints?.workMode);
-    const recency = calculateRecencyScore(listing.postedRaw);
+    const recency = calculateFreshnessScore(listing.postedRaw);
     const completeness = calculateCompletenessScore(listing);
-    const overallScore =
-      semantic * 0.45 + location * 0.2 + workMode * 0.15 + recency * 0.1 + completeness * 0.1;
+
+    let overallScore: number;
+    let sourceReliability = 0;
+    let duplicateDensity = 0;
+    let companyReliability = 0;
+
+    if (graphScoring) {
+      sourceReliability = calculateSourceReliability(listing.source);
+      if (listing.company) {
+        duplicateDensity = calculateDuplicateScore(listing.company, listing.title);
+        companyReliability = calculateCompanyReliability(listing.company);
+      }
+      overallScore =
+        semantic * 0.35 +
+        location * 0.15 +
+        workMode * 0.10 +
+        recency * 0.10 +
+        completeness * 0.10 +
+        sourceReliability * 0.10 +
+        duplicateDensity * 0.05 +
+        companyReliability * 0.05;
+    } else {
+      overallScore =
+        semantic * 0.45 + location * 0.2 + workMode * 0.15 + recency * 0.1 + completeness * 0.1;
+    }
 
     return {
       listing,
@@ -67,6 +96,9 @@ export function rankJobListings(
         workMode,
         recency,
         completeness,
+        sourceReliability,
+        duplicateDensity,
+        companyReliability,
       },
     };
   });
@@ -230,7 +262,7 @@ function calculateWorkModeScore(
   return workModeConstraints.includes(listing.workMode) ? 1 : 0;
 }
 
-function calculateRecencyScore(postedRaw: string | undefined): number {
+export function calculateFreshnessScore(postedRaw: string | undefined): number {
   if (postedRaw === undefined) {
     return 0;
   }
@@ -257,6 +289,57 @@ function calculateRecencyScore(postedRaw: string | undefined): number {
 
   const ageInDays = Math.max(0, (Date.now() - parsedDate) / (1000 * 60 * 60 * 24));
   return scoreByAge(ageInDays);
+}
+
+/** @deprecated Use calculateFreshnessScore instead */
+export function calculateRecencyScore(postedRaw: string | undefined): number {
+  return calculateFreshnessScore(postedRaw);
+}
+
+export function calculateSourceReliability(source: JobSource): number {
+  switch (source) {
+    case 'linkedin':
+    case 'indeed':
+      return 1.0;
+    case 'glassdoor':
+    case 'ziprecruiter':
+      return 0.9;
+    case 'seek':
+    case 'monster':
+      return 0.7;
+    case 'jora':
+    case 'jooble':
+    case 'other':
+      return 0.5;
+    default:
+      return 0.5;
+  }
+}
+
+export function calculateDuplicateScore(company: string, title: string): number {
+  const clusters: GraphDuplicateCluster[] = findDuplicatesByTitleCompany(company, title);
+  if (clusters.length === 0) return 0;
+
+  const cluster = clusters[0];
+  if (!cluster) return 0;
+
+  // More duplicates + multiple sites = higher confidence (breadth signal)
+  // Max boost: 0.15
+  const siteCount = cluster.memberSites.length;
+  return Math.min(siteCount * 0.05, 0.15);
+}
+
+export function calculateCompanyReliability(company: string): number {
+  const companyId = company.trim().toLowerCase();
+  const historicalJobs = findJobsByCompany(companyId);
+  const count = historicalJobs.length;
+
+  // Returns 0.0 to 0.1 boost
+  // More consistent postings = more reliable.
+  if (count > 5) return 0.1;
+  if (count >= 3) return 0.05;
+  if (count >= 1) return 0.02;
+  return 0;
 }
 
 function scoreByAge(ageInDays: number): number {
