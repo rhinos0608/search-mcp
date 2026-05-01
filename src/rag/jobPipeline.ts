@@ -17,7 +17,7 @@ import { extractJobListingsFromHtml,
 } from './adapters/job.js';
 import crypto from 'node:crypto';
 import { dedupJobListings } from './jobDedup.js';
-import { rankJobListings, type JobScore } from './jobRanking.js';
+import { rankJobListings, applyHardFilters, type JobScore } from './jobRanking.js';
 import { fetchJobDetails } from 'jobspy-js';
 import { embedTexts, embedTextsBatched } from './embedding.js';
 import { prepareCorpus, retrieveCorpus } from './pipeline.js';
@@ -54,6 +54,7 @@ export interface PipelineJobRecord extends RawJobRecord {
 
 export interface ScoredRecord extends PipelineJobRecord {
   score: number;
+  matchedConstraints: string[];
 }
 
 export interface EnrichedRecord extends ScoredRecord {
@@ -68,6 +69,17 @@ export interface JobPipelineDeps {
   graphHealth?: typeof graphHealth;
   jobSpyHealth?: typeof jobSpyHealth;
 }
+
+/**
+ * Concurrency config for enrichment crawl (per-record fetch).
+ * Higher = faster but more load on job boards.
+ */
+const ENRICH_CONCURRENCY = 5;
+
+/**
+ * Maximum number of records to enrich.
+ */
+const MAX_ENRICH_RECORDS = 20;
 
 export class JobPipeline {
   private deps: JobPipelineDeps;
@@ -208,6 +220,7 @@ export class JobPipeline {
       return {
         ...record,
         score: s.overallScore,
+        matchedConstraints: s.matchedConstraints,
       };
     })
     .filter((r): r is ScoredRecord => r !== null)
@@ -215,89 +228,115 @@ export class JobPipeline {
   }
 
   /**
-   * Stage 4: Enrichment
+   * Stage 4: Enrichment (PARALLEL)
    */
   async enrich(records: ScoredRecord[]): Promise<EnrichedRecord[]> {
-    const topRecords = records.slice(0, 50);
-    logger.info({ tool: 'job_pipeline', stage: 'enrichment', count: topRecords.length }, 'Starting enrichment crawl');
+    const topRecords = records.slice(0, MAX_ENRICH_RECORDS);
+    logger.info({ tool: 'job_pipeline', stage: 'enrichment', count: topRecords.length, concurrency: ENRICH_CONCURRENCY }, 'Starting enrichment crawl (parallel)');
 
     const cfg = loadConfig();
-    const enriched: EnrichedRecord[] = [];
     const webCrawlFn = this.deps.webCrawl ?? webCrawl;
 
-    // Simple sequential crawl for now to avoid overloading
-    for (const record of topRecords) {
-      let enrichedDescription: string | undefined;
+    // Parallel crawl with concurrency limit
+    const results = await this.concurrencyLimitedMap(
+      topRecords,
+      ENRICH_CONCURRENCY,
+      async (record) => {
+        let enrichedDescription: string | undefined;
 
-      // Try lightweight fetchJobDetails first (no full page load)
-      try {
-        if (record.jobUrl && record.id) {
-          const fetchDetails = fetchJobDetails as (
-            site: string,
-            id: string,
-            options: { format: string }
-          ) => Promise<{ description?: string }>;
-          const detailResult = await fetchDetails(record.site, record.id, { format: 'markdown' });
-          if (detailResult.description) {
-            enrichedDescription = detailResult.description;
-          }
-        }
-      } catch {
-        // fetchJobDetails failed silently — fall through to crawl
-      }
-
-      if (enrichedDescription) {
-        const updated: EnrichedRecord = {
-          ...record,
-          enrichedExtractedText: enrichedDescription,
-          description: enrichedDescription,
-        };
-        this.upsertGraphEntities(updated);
-        enriched.push(updated);
-        continue;
-      }
-
-      // Fallback: full Crawl4AI page load
-      try {
-        const crawlResult = await webCrawlFn(record.jobUrl, cfg.crawl4ai.baseUrl, cfg.crawl4ai.apiToken ?? '', {
-          strategy: 'bfs',
-          maxDepth: 1,
-          maxPages: 1,
-          includeExternalLinks: false,
-        });
-
-        const page = crawlResult.pages[0];
-        if (page?.success && page.html) {
-          const listings = extractJobListingsFromHtml(page.html, record.jobUrl);
-          if (listings.length > 0) {
-            const best = listings[0];
-            if (best) {
-              const updated: EnrichedRecord = {
-                ...record,
-                enrichedExtractedText: best.extractedText,
-              };
-              const newDesc = best.extractedText || record.description;
-              if (newDesc !== undefined) updated.description = newDesc;
-
-              if (best.title !== 'Untitled Job Listing') updated.title = best.title;
-              if (best.company) updated.company = best.company;
-              if (best.location) updated.location = best.location;
-              if (best.workMode !== 'unknown') updated.workMode = best.workMode;
-              
-              this.upsertGraphEntities(updated);
-              enriched.push(updated);
-              continue;
+        // Try lightweight fetchJobDetails first (no full page load)
+        try {
+          if (record.jobUrl && record.id) {
+            const fetchDetails = fetchJobDetails as (
+              site: string,
+              id: string,
+              options: { format: string }
+            ) => Promise<{ description?: string }>;
+            const detailResult = await fetchDetails(record.site, record.id, { format: 'markdown' });
+            if (detailResult.description) {
+              enrichedDescription = detailResult.description;
             }
           }
+        } catch {
+          // fetchJobDetails failed silently — fall through to crawl
         }
-        enriched.push(record);
-      } catch (err) {
-        logger.warn({ tool: 'job_pipeline', url: record.jobUrl, err }, 'Enrichment crawl failed for record');
-        enriched.push(record);
+
+        if (enrichedDescription) {
+          const updated: EnrichedRecord = {
+            ...record,
+            enrichedExtractedText: enrichedDescription,
+            description: enrichedDescription,
+          };
+          this.upsertGraphEntities(updated);
+          return updated;
+        }
+
+        // Fallback: full Crawl4AI page load (parallel to other records)
+        try {
+          const crawlResult = await webCrawlFn(record.jobUrl, cfg.crawl4ai.baseUrl, cfg.crawl4ai.apiToken ?? '', {
+            strategy: 'bfs',
+            maxDepth: 1,
+            maxPages: 1,
+            includeExternalLinks: false,
+          });
+
+          const page = crawlResult.pages[0];
+          if (page?.success && page.html) {
+            const listings = extractJobListingsFromHtml(page.html, record.jobUrl);
+            if (listings.length > 0) {
+              const best = listings[0];
+              if (best) {
+                const updated: EnrichedRecord = {
+                  ...record,
+                  enrichedExtractedText: best.extractedText,
+                };
+                const newDesc = best.extractedText || record.description;
+                if (newDesc !== undefined) updated.description = newDesc;
+
+                if (best.title !== 'Untitled Job Listing') updated.title = best.title;
+                if (best.company) updated.company = best.company;
+                if (best.location) updated.location = best.location;
+                if (best.workMode !== 'unknown') updated.workMode = best.workMode;
+
+                this.upsertGraphEntities(updated);
+                return updated;
+              }
+            }
+          }
+          return record;
+        } catch (err) {
+          logger.warn({ tool: 'job_pipeline', url: record.jobUrl, err }, 'Enrichment crawl failed for record');
+          return record;
+        }
+      }
+    );
+
+    logger.info({ tool: 'job_pipeline', stage: 'enrichment', enrichedCount: results.length }, 'Enrichment complete');
+    return results;
+  }
+
+  /**
+   * Concurrency-limited map: process items in batches, at most `concurrency` at a time.
+   */
+  private async concurrencyLimitedMap<T, R>(
+    items: T[],
+    concurrency: number,
+    fn: (item: T) => Promise<R>
+  ): Promise<R[]> {
+    const results: R[] = [];
+    for (let index = 0; index < items.length; index += concurrency) {
+      const batch = items.slice(index, index + concurrency);
+      const batchResults = await Promise.allSettled(batch.map(fn));
+      for (const r of batchResults) {
+        if (r.status === 'fulfilled') {
+          results.push(r.value);
+        } else {
+          const reason = r.reason instanceof Error ? r.reason.message : String(r.reason);
+          logger.warn({ err: reason }, 'concurrencyLimitedMap: batch item failed');
+        }
       }
     }
-
-    return enriched;
+    return results;
   }
 
   /**
@@ -312,11 +351,13 @@ export class JobPipeline {
       dimensions?: number;
       topK?: number;
       maxBytes?: number;
-    }
+    },
+    constraints?: JobSearchConstraints,
+    enforceConstraints = false,
   ): Promise<JobScore[]> {
     logger.info({ tool: 'job_pipeline', stage: 'embedding_rank', count: records.length }, 'Starting embedding and reranking');
 
-    const mvpListings = records.map(r => {
+    let mvpListings = records.map(r => {
       const mvp = this.mapPipelineToMvp(r);
       if (r.enrichedExtractedText) {
         mvp.extractedText = r.enrichedExtractedText;
@@ -324,8 +365,16 @@ export class JobPipeline {
       return mvp;
     });
 
+    // Apply hard filtering if enforceConstraints is true
+    if (enforceConstraints && constraints) {
+      const beforeCount = mvpListings.length;
+      mvpListings = applyHardFilters(mvpListings, constraints);
+      const filteredCount = beforeCount - mvpListings.length;
+      logger.info({ tool: 'job_pipeline', stage: 'hard_filter', before: beforeCount, after: mvpListings.length, filtered: filteredCount }, 'Applied hard constraints');
+    }
+
     if (!opts.baseUrl || opts.dimensions === undefined) {
-      return rankJobListings(mvpListings, query);
+      return rankJobListings(mvpListings, query, constraints);
     }
 
     const documents = documentsFromJobListings(mvpListings);
@@ -358,7 +407,7 @@ export class JobPipeline {
 
     const queryEmbedding = queryEmbed.embeddings[0];
     if (!queryEmbedding) {
-      return rankJobListings(mvpListings, query);
+      return rankJobListings(mvpListings, query, constraints);
     }
 
     const corpus = prepareCorpus({
@@ -381,7 +430,7 @@ export class JobPipeline {
       semanticScores.set(docId ?? res.item.url, res.score.fused);
     }
 
-    const ranked = rankJobListings(mvpListings, query, undefined, semanticScores);
+    const ranked = rankJobListings(mvpListings, query, constraints, semanticScores);
 
     // Update graph with final rank/verification status
     for (const score of ranked) {
