@@ -12,7 +12,8 @@ export type ToolErrorCode =
   | 'NETWORK_ERROR'
   | 'PARSE_ERROR'
   | 'UNAVAILABLE'
-  | 'VALIDATION_ERROR';
+  | 'VALIDATION_ERROR'
+  | 'CONFIG_ERROR';
 
 export class ToolError extends Error {
   readonly code: ToolErrorCode;
@@ -103,6 +104,14 @@ export function unavailableError(message: string, opts?: FactoryOpts): ToolError
 export function validationError(message: string, opts?: FactoryOpts): ToolError {
   return new ToolError(message, {
     code: 'VALIDATION_ERROR',
+    retryable: false,
+    ...opts,
+  });
+}
+
+export function configError(message: string, opts?: FactoryOpts): ToolError {
+  return new ToolError(message, {
+    code: 'CONFIG_ERROR',
     retryable: false,
     ...opts,
   });

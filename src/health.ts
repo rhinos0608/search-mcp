@@ -179,14 +179,24 @@ export function configHealth(cfg: SearchConfig): Record<string, ToolHealth> {
 }
 
 async function jobSpyProbe(): Promise<ToolHealth> {
-  const ok = await jobSpyHealth();
-  return ok
-    ? { status: 'healthy', message: 'JobSpy library functional and reachable.' }
-    : {
-        status: 'degraded',
-        message: 'JobSpy health probe failed.',
-        remediation: 'Check network connectivity or if job boards are blocking requests.',
-      };
+  try {
+    const ok = await jobSpyHealth();
+    if (ok) {
+      return { status: 'healthy', message: 'JobSpy library functional and reachable.' };
+    }
+  } catch (err) {
+    return {
+      status: 'degraded',
+      message: `JobSpy health probe failed: ${err instanceof Error ? err.message : String(err)}`,
+      remediation: 'Check network connectivity or if job boards are blocking requests.',
+    };
+  }
+
+  return {
+    status: 'degraded',
+    message: 'JobSpy health probe failed.',
+    remediation: 'Check network connectivity or if job boards are blocking requests.',
+  };
 }
 
 function redditOAuthHealth(cfg: SearchConfig): ToolHealth {
