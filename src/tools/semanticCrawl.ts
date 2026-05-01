@@ -1,7 +1,5 @@
 import { logger } from '../logger.js';
-import { unavailableError, networkError, parseError } from '../errors.js';
-import { retryWithBackoff } from '../retry.js';
-import { assertSafeUrl, safeResponseJson } from '../httpGuards.js';
+import { assertSafeUrl } from '../httpGuards.js';
 import { webCrawl, type WebCrawlOptions } from './webCrawl.js';
 import { webSearch } from './webSearch.js';
 import { chunkMarkdown } from '../chunking.js';
@@ -12,7 +10,7 @@ import { rrfMerge } from '../utils/fusion.js';
 import { applySoftLexicalConstraint } from '../utils/lexicalConstraint.js';
 import { buildBm25Index, type Bm25Index } from '../utils/bm25.js';
 import { getOrBuildCorpus, loadCorpusById } from '../utils/corpusCache.js';
-import { embedTexts as ragEmbedTexts } from '../rag/embedding.js';
+import { embedTexts, embedTextsBatched } from '../rag/embedding.js';
 import { prepareCorpus, retrieveCorpus } from '../rag/pipeline.js';
 import { enrichChunksBatched } from '../rag/contextualEmbedding.js';
 import type { RagChunk } from '../rag/types.js';
@@ -40,126 +38,7 @@ import {
   isLikelyJsHeavySite,
 } from '../utils/crawlBudget.js';
 
-interface EmbedRequest {
-  texts: string[];
-  titles?: string[];
-  mode: 'document' | 'query';
-  dimensions: number;
-}
 
-interface EmbedResponse {
-  embeddings: number[][];
-  model: string;
-  modelRevision: string;
-  dimensions: number;
-  mode: string;
-  truncatedIndices: number[];
-}
-
-const MAX_EMBEDDING_BATCH = 512;
-
-export async function embedTexts(
-  baseUrl: string,
-  apiToken: string,
-  texts: string[],
-  mode: 'document' | 'query',
-  dimensions: number,
-  titles?: string[],
-): Promise<EmbedResponse> {
-  if (!baseUrl) {
-    throw unavailableError('Embedding sidecar is not configured. Set EMBEDDING_SIDECAR_BASE_URL.');
-  }
-
-  const endpoint = `${baseUrl.replace(/\/+$/, '')}/embed`;
-  // Sidecar URLs come from operator configuration (EMBEDDING_SIDECAR_BASE_URL);
-  // they are inherently trusted and should not be subject to SSRF guards.
-
-  const body: EmbedRequest = { texts, mode, dimensions };
-  if (titles !== undefined && titles.length > 0) {
-    body.titles = titles;
-  }
-
-  const headers: Record<string, string> = {
-    'Content-Type': 'application/json',
-    'User-Agent': 'search-mcp/1.0',
-  };
-  if (apiToken) {
-    headers.Authorization = `Bearer ${apiToken}`;
-  }
-
-  let raw: unknown;
-  try {
-    const response = await retryWithBackoff(
-      async () => {
-        const res = await fetch(endpoint, {
-          method: 'POST',
-          headers,
-          body: JSON.stringify(body),
-          signal: AbortSignal.timeout(60_000),
-        });
-        if (res.status === 503) {
-          throw networkError('Embedding sidecar returned HTTP 503', {
-            statusCode: 503,
-          });
-        }
-        return res;
-      },
-      { label: 'embedding-sidecar', maxAttempts: 2, initialDelayMs: 500 },
-    );
-
-    if (!response.ok) {
-      throw networkError(`Embedding sidecar returned HTTP ${String(response.status)}`, {
-        statusCode: response.status,
-      });
-    }
-
-    raw = await safeResponseJson(response, endpoint);
-  } catch (err) {
-    if (err instanceof Error && (err.name === 'AbortError' || err.name === 'TimeoutError')) {
-      throw networkError('Embedding sidecar request timed out after 60 seconds');
-    }
-    throw err;
-  }
-
-  if (raw === null || typeof raw !== 'object' || !('embeddings' in raw)) {
-    throw parseError('Embedding sidecar returned unexpected response shape');
-  }
-
-  const data = raw as EmbedResponse;
-  if (!Array.isArray(data.embeddings)) {
-    throw parseError('Embedding sidecar response missing embeddings array');
-  }
-
-  if (Array.isArray(data.truncatedIndices) && data.truncatedIndices.length > 0) {
-    logger.warn(
-      { truncatedIndices: data.truncatedIndices },
-      'Some chunks were truncated by the embedding model',
-    );
-  }
-
-  return data;
-}
-
-/** Embed texts in batches, returning all embeddings and the model name from the last batch. */
-async function embedTextsBatched(
-  baseUrl: string,
-  apiToken: string,
-  texts: string[],
-  mode: 'document' | 'query',
-  dimensions: number,
-  titles?: string[],
-): Promise<{ embeddings: number[][]; model: string }> {
-  const embeddings: number[][] = [];
-  let model = '';
-  for (let i = 0; i < texts.length; i += MAX_EMBEDDING_BATCH) {
-    const batchTexts = texts.slice(i, i + MAX_EMBEDDING_BATCH);
-    const batchTitles = titles ? titles.slice(i, i + MAX_EMBEDDING_BATCH) : undefined;
-    const response = await embedTexts(baseUrl, apiToken, batchTexts, mode, dimensions, batchTitles);
-    embeddings.push(...response.embeddings);
-    model = response.model;
-  }
-  return { embeddings, model };
-}
 
 // ── Semantic Coherence Filter ────────────────────────────────────────────
 
@@ -269,7 +148,7 @@ export async function retrieveSemanticChunks(
 ): Promise<SemanticCrawlChunk[]> {
   if (chunks.length === 0) return [];
 
-  const queryResponse = await ragEmbedTexts({
+  const queryResponse = await embedTexts({
     baseUrl: opts.embeddingBaseUrl,
     apiToken: opts.embeddingApiToken,
     texts: [opts.query],
@@ -428,27 +307,27 @@ export async function embedAndRank(
     }
   }
 
-  const queryEmbedPromise = embedTexts(
-    opts.embeddingBaseUrl,
-    opts.embeddingApiToken,
-    [opts.query],
-    'query',
-    opts.embeddingDimensions,
-  );
+  const queryEmbedPromise = embedTexts({
+    baseUrl: opts.embeddingBaseUrl,
+    apiToken: opts.embeddingApiToken,
+    texts: [opts.query],
+    mode: 'query',
+    dimensions: opts.embeddingDimensions,
+  });
 
   let chunkEmbeddings: number[][];
   if (opts.precomputedEmbeddings !== undefined) {
     chunkEmbeddings = opts.precomputedEmbeddings;
   } else {
     const [{ embeddings }] = await Promise.all([
-      embedTextsBatched(
-        opts.embeddingBaseUrl,
-        opts.embeddingApiToken,
-        chunkTexts,
-        'document',
-        opts.embeddingDimensions,
-        chunkTitles,
-      ),
+      embedTextsBatched({
+        baseUrl: opts.embeddingBaseUrl,
+        apiToken: opts.embeddingApiToken,
+        texts: chunkTexts,
+        mode: 'document',
+        dimensions: opts.embeddingDimensions,
+        titles: chunkTitles,
+      }),
       queryEmbedPromise,
     ]);
     chunkEmbeddings = embeddings;
@@ -978,7 +857,12 @@ export async function crawlSeeds(
       ...(opts.llmFallback !== undefined ? { llmFallback: opts.llmFallback } : {}),
     };
 
-    const result = await webCrawl(seedUrl, crawl4aiCfg.baseUrl, crawl4aiCfg.apiToken, crawlOpts);
+    const result = await webCrawl(
+      seedUrl,
+      crawl4aiCfg.baseUrl,
+      crawl4aiCfg.apiToken ?? '',
+      crawlOpts,
+    );
     warnings.push(...(result.warnings ?? []));
 
     // Path focus filter
@@ -1584,14 +1468,14 @@ export async function semanticCrawl(
   const corpus = await getOrBuildCorpus(
     opts.source,
     async () => {
-      const { embeddings, model } = await embedTextsBatched(
-        embeddingBaseUrl,
-        embeddingApiToken,
-        chunkTexts,
-        'document',
-        embeddingDimensions,
-        chunkTitles,
-      );
+      const { embeddings, model } = await embedTextsBatched({
+        baseUrl: embeddingBaseUrl,
+        apiToken: embeddingApiToken,
+        texts: chunkTexts,
+        mode: 'document',
+        dimensions: embeddingDimensions,
+        titles: chunkTitles,
+      });
       const contentHash = createHash('sha256').update(chunkTexts.join('\n')).digest('hex');
       return { chunks: deduped, embeddings, model, contentHash };
     },
