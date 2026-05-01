@@ -7,15 +7,34 @@ import { normalizeUrl, rrfMerge } from '../utils/fusion.js';
 import { multiSignalRescore, extractWebSearchSignals } from '../utils/rescore.js';
 import { expandQuery, type QueryVariation } from './queryExpansion.js';
 import { mergeSearchResults } from '../utils/searchMerge.js';
+import { isDegraded, recordOutcome } from '../utils/backendHealth.js';
+import { isCircuitTripped, recordChallenge } from '../utils/botChallenge.js';
+import { isToolError } from '../errors.js';
 import type { SearchResult } from '../types.js';
 
 // ── Fallback order ───────────────────────────────────────────────────────────
 
-/** Backend priority when the primary fails. */
-const FALLBACK_ORDER: SearchBackend[] = ['exa', 'brave', 'searxng'];
+/** Backend priority when the primary fails.
+ *
+ * Zero-key providers first (cheapest path), then key-backed providers.
+ */
+const FALLBACK_ORDER: SearchBackend[] = ['duckduckgo', 'searxng', 'brave', 'exa', 'ollama-search'];
 
 function backendAvailable(backend: SearchBackend): boolean {
   const cfg = loadConfig();
+
+  // Check circuit breaker first
+  if (isCircuitTripped(backend)) {
+    logger.debug({ backend }, 'Skipping circuit-tripped backend');
+    return false;
+  }
+
+  // Check health tracker — skip degraded backends unless they're the only option
+  if (isDegraded(backend)) {
+    logger.debug({ backend }, 'Skipping degraded backend');
+    return false;
+  }
+
   switch (backend) {
     case 'brave':
       return cfg.brave.apiKey.length > 0;
@@ -23,6 +42,11 @@ function backendAvailable(backend: SearchBackend): boolean {
       return cfg.searxng.baseUrl.length > 0;
     case 'exa':
       return cfg.exa.apiKey.length > 0;
+    case 'duckduckgo':
+      // Zero-key backend — always available unless circuit-tripped or degraded (checked above)
+      return true;
+    case 'ollama-search':
+      return cfg.ollamaSearch.baseUrl.length > 0;
   }
 }
 
@@ -34,13 +58,63 @@ async function runBackend(
   deps: WebSearchDeps,
 ): Promise<SearchResult[]> {
   const cfg = loadConfig();
-  switch (backend) {
-    case 'brave':
-      return deps.braveSearch(query, cfg.brave.apiKey, limit, safeSearch);
-    case 'searxng':
-      return deps.searxngSearch(query, cfg.searxng.baseUrl, limit, safeSearch);
-    case 'exa':
-      return deps.exaSearch(query, cfg.exa.apiKey, limit, safeSearch);
+  try {
+    let results: SearchResult[];
+    switch (backend) {
+      case 'brave':
+        results = await deps.braveSearch(query, cfg.brave.apiKey, limit, safeSearch);
+        break;
+      case 'searxng':
+        results = await deps.searxngSearch(query, cfg.searxng.baseUrl, limit, safeSearch);
+        break;
+      case 'exa':
+        results = await deps.exaSearch(query, cfg.exa.apiKey, limit, safeSearch);
+        break;
+      case 'duckduckgo': {
+        const { duckduckgoSearch } = await import('./duckduckgoSearch.js');
+        results = await duckduckgoSearch(query, limit, safeSearch, cfg.duckduckgo);
+        break;
+      }
+      case 'ollama-search': {
+        const { ollamaSearch } = await import('./ollamaSearch.js');
+        results = await ollamaSearch(query, limit, safeSearch, cfg.ollamaSearch);
+        break;
+      }
+    }
+    // Record success outcome
+    recordOutcome(backend, 'success');
+    return results;
+  } catch (err: unknown) {
+    // Classify the error and record the appropriate outcome
+    let isTimeout = false;
+    let isChallenge = false;
+
+    if (isToolError(err)) {
+      isTimeout = err.code === 'TIMEOUT';
+      isChallenge =
+        err.code === 'RATE_LIMIT' ||
+        (err.code === 'UNAVAILABLE' && err.statusCode === 403) ||
+        (err.code === 'UNAVAILABLE' && err.statusCode === 429);
+    } else {
+      // Fallback: string matching for non-ToolError exceptions (network errors, etc.)
+      const errMsg = err instanceof Error ? err.message : String(err);
+      isTimeout = errMsg.toLowerCase().includes('timeout') || errMsg.includes('abort');
+      isChallenge =
+        errMsg.toLowerCase().includes('challenge') ||
+        errMsg.toLowerCase().includes('captcha') ||
+        (errMsg.toLowerCase().includes('403') && !errMsg.toLowerCase().includes('[403]'));
+    }
+
+    if (isChallenge) {
+      recordOutcome(backend, 'bot_challenge');
+      recordChallenge(backend);
+    } else if (isTimeout) {
+      recordOutcome(backend, 'timeout');
+    } else {
+      recordOutcome(backend, 'error');
+    }
+
+    throw err;
   }
 }
 
@@ -161,7 +235,7 @@ export async function searchWithBackends(
   const allItems = seenEntries.map((e) => e.item);
   if (allItems.length === 0) {
     throw new Error(
-      `All search backends failed across all query variations. Ensure at least one backend is configured (EXA_API_KEY, BRAVE_API_KEY, or SEARXNG_BASE_URL).\n${errors.join('\n')}`,
+      `All search backends failed across all query variations. Ensure at least one backend is configured (DuckDuckGo is zero-key and always available; EXA_API_KEY, BRAVE_API_KEY, or SEARXNG_BASE_URL for key-backed backends).\n${errors.join('\n')}`,
     );
   }
 
