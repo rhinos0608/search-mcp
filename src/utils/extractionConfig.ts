@@ -1,5 +1,5 @@
 import { z } from 'zod/v4';
-import { validationError } from '../errors.js';
+import { validationError, configError } from '../errors.js';
 
 export const REGEX_PATTERNS = [
   'email',
@@ -150,8 +150,8 @@ export function validateExtractionConfig(
     // Local providers (via baseUrl) may not require an API token.
     const baseUrl = config.llmBaseUrl ?? serverLlm?.baseUrl ?? '';
     if (!serverLlm?.apiToken && !baseUrl) {
-      throw validationError(
-        'llm extractionConfig requires LLM_API_TOKEN env var, or LLM_BASE_URL for local providers (not accepted as tool parameter)',
+      throw configError(
+        'llm extractionConfig requires LLM_API_TOKEN env var, or LLM_BASE_URL for local providers',
       );
     }
   }

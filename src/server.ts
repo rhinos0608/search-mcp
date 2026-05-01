@@ -106,6 +106,19 @@ function successResponse<T>(result: ToolResult<T>): {
   };
 }
 
+/** Map LLM config to the shape expected by extractionConfig validator. */
+function normalizeLlmForValidation(llm: LlmConfig): {
+  provider: string;
+  apiToken: string;
+  baseUrl?: string;
+} {
+  return {
+    provider: llm.provider,
+    apiToken: llm.apiToken ?? '',
+    ...(llm.baseUrl ? { baseUrl: llm.baseUrl } : {}),
+  };
+}
+
 /** Build llmFallback config for Crawl4AI extraction when LLM strategy is used. */
 function buildLlmFallback(
   extractionConfig: ExtractionConfig | undefined,
@@ -341,9 +354,8 @@ export function createServer(): McpServer {
       logger.info({ tool: 'web_read' }, 'Tool invoked');
       const start = Date.now();
       try {
-        if (extractionConfig && cfg.llm.apiToken) {
-          const { apiToken, ...rest } = cfg.llm;
-          validateExtractionConfig(extractionConfig, { apiToken, ...rest });
+        if (extractionConfig) {
+          validateExtractionConfig(extractionConfig, normalizeLlmForValidation(cfg.llm));
         }
 
         let data: import('./types.js').WebCrawlResult;
@@ -1883,9 +1895,8 @@ export function createServer(): McpServer {
         logger.info({ tool: 'web_crawl', url, strategy, maxDepth, maxPages }, 'Tool invoked');
         const start = Date.now();
         try {
-          if (extractionConfig && cfg.llm.apiToken) {
-            const { apiToken, ...rest } = cfg.llm;
-            validateExtractionConfig(extractionConfig, { apiToken, ...rest });
+          if (extractionConfig) {
+            validateExtractionConfig(extractionConfig, normalizeLlmForValidation(cfg.llm));
           }
 
           const llmFallback = buildLlmFallback(extractionConfig, cfg.llm);
@@ -2099,9 +2110,8 @@ export function createServer(): McpServer {
         );
         const start = Date.now();
         try {
-          if (extractionConfig && cfg.llm.apiToken) {
-            const { apiToken, ...rest } = cfg.llm;
-            validateExtractionConfig(extractionConfig, { apiToken, ...rest });
+          if (extractionConfig) {
+            validateExtractionConfig(extractionConfig, normalizeLlmForValidation(cfg.llm));
           }
 
           const warnings: string[] = [];
