@@ -118,7 +118,7 @@ When more than one backend is healthy and merge mode is enabled, the current `se
 
 - Keep explicit provider selection first-class.
 - Use short per-backend timeouts and existing retry guards.
-- Keep merge opt-in unless the backend roster meets the health threshold: at least 2 distinct search backends returned non-empty results within the configured per-backend timeout for the last N requests (configurable N, e.g., 50). Additionally, a backend is considered degraded if its recent timeout/error rate exceeds 20% over the last 50 requests. Degraded backends are excluded from the healthy roster until the rate drops below 10%.
+- Keep merge opt-in unless the backend roster meets the health threshold: at least 2 distinct search backends returned non-empty results within the configured per-backend timeout for the last N requests (configurable N). When the healthy roster contains fewer than 2 distinct backends, merge mode remains disabled and the system falls back to using the single healthy backend; if no healthy backends exist, the system returns a 503 Service Unavailable or follows a configurable fallback policy. Additionally, a backend is considered degraded if its recent timeout/error rate exceeds 20% over the last N requests. Degraded backends are excluded from the healthy roster until the rate drops below 10% (relative to the same window N).
 - Keep Ollama opt-in and disabled by default unless explicitly configured.
 - Use distinct `SEARCH_OLLAMA_*` env vars so search config does not collide with embeddings.
 - Fall back to SearXNG / Brave / Exa when zero-key providers fail.
@@ -127,4 +127,4 @@ When more than one backend is healthy and merge mode is enabled, the current `se
 
 - **Detection**: Monitor provider responses for repeated HTTP 403/429 status codes, challenge HTML fingerprints (e.g., CAPTCHA iframes, challenge script tags, redirect to challenge domain), or unusually high latency indicative of rate limiting.
 - **Immediate actions**: When a bot challenge is detected on a provider, immediately mark that provider as unhealthy, apply exponential backoff with jitter on retries (initial delay 10s, multiplier 2x, max 300s), and engage a circuit-breaker retry guard that trips after 3 consecutive challenge responses within a 5-minute window.
-- **Fallback behavior**: Switch to the next provider in the fallback chain (DuckDuckGo → SearXNG → Brave → Exa when zero-key providers are challenged; reverse order for key-backed or opt-in providers). Log each challenge incident with provider name, response code, and fallback action taken for operator review.
+- **Fallback behavior**: Switch to the next provider in the fallback chain. For zero-key providers use DuckDuckGo → SearXNG → Brave → Exa; for key-backed or opt-in providers use Exa → Brave → SearXNG → DuckDuckGo. Log each challenge incident with provider name, response code, and fallback action taken for operator review.

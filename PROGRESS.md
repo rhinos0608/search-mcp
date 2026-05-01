@@ -20,7 +20,7 @@ V3.3.1 implementation in progress — DuckDuckGo + Ollama providers, health trac
 | 5 | **Availability-Aware Selection + Merge** | ✅ | — | `webSearch.ts` |
 | 6 | **Docs, Examples, Verification** | 🟡 | — | `config.example.json`, `docs/plans/index.md`, `PROGRESS.md` |
 
-**923 tests pass** (2 pre-existing failures); typecheck ✅, lint ✅
+**923 tests pass** (2 pre-existing failures: `test/semanticCrawl.test.ts` timeout/abort networkError - verified on v3.3.0); typecheck ✅, lint ✅
 
 ## Verification
 
@@ -28,5 +28,5 @@ Minimum gates:
 
 - `npm run lint` ✅
 - `npm run typecheck` ✅
-- `npm run test` — 923 pass, 2 pre-existing fail
+- `npm run test` — 923 pass, 2 pre-existing fail (`test/semanticCrawl.test.ts` timeout/abort networkError - verified on v3.3.0)
 - `git diff --check` ✅

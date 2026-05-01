@@ -128,8 +128,8 @@ Keep `mergeSearchBackends` opt-in. The point is better zero-config coverage, not
 - Track a configurable window size (default 50 requests).
 - Calculate error rate with hysteresis: degraded at >20%, healthy at <10% over the window.
 - Expose clean API: `isHealthy(backend)`, `isDegraded(backend)`, `getHealth(backend)`, `recordOutcome(backend, outcome)`.
-- Keep in-memory only — no persistence, survives server restarts via cold start.
-- Thread-safe for concurrent access (single Map with atomic updates).
+- Keep in-memory only — no persistence; data is lost on server restart, service starts fresh on cold start.
+- Safe for concurrent async/event-loop access — use a single Map with atomic update operations.
 
 ### Exit Criteria
 
@@ -157,7 +157,8 @@ Keep `mergeSearchBackends` opt-in. The point is better zero-config coverage, not
 - Implement challenge detection:
   - HTTP 403 / 429 status codes.
   - Challenge HTML fingerprints: CAPTCHA iframes, challenge script tags, redirect to challenge domain.
-  - Unusually high response latency (>5s for expected-fast endpoints).
+  - Unusually high response latency (configurable threshold; weak signal that must be paired with status/fingerprints).
+- Implement a scoring-based challenge detection (status/fingerprints = weight 10, high latency = weight 2; threshold 10).
 - Implement exponential backoff with jitter: initial delay 10s, multiplier 2x, cap at 300s.
 - Implement circuit breaker: trips after 3 consecutive challenge responses within a 5-minute sliding window.
 - Expose API: `detectChallenge(response)`, `isCircuitTripped(backend)`, `getBackoffDelay(backend)`, `recordChallenge(backend)`, `resetCircuit(backend)`.
