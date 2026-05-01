@@ -365,16 +365,17 @@ async function crawlWithRetry(
   url: string,
   cfg: ReturnType<typeof loadConfig>,
   maxRetries: number,
+  includeExternalLinks = false,
 ): Promise<{ url: string; page: import('../types.js').CrawlPageResult | undefined }> {
   let lastError: string | undefined;
 
   for (let attempt = 0; attempt <= maxRetries; attempt += 1) {
     try {
-      const result = await webCrawl(url, cfg.crawl4ai.baseUrl, cfg.crawl4ai.apiToken, {
+      const result = await webCrawl(url, cfg.crawl4ai.baseUrl, cfg.crawl4ai.apiToken ?? '', {
         strategy: 'bfs',
         maxDepth: 1,
         maxPages: 1,
-        includeExternalLinks: false,
+        includeExternalLinks,
       });
       return { url, page: result.pages[0] };
     } catch (err) {
@@ -410,9 +411,10 @@ async function crawlPhase(
   urls: string[],
   cfg: ReturnType<typeof loadConfig>,
   maxRetries: number,
+  includeExternalLinks = false,
 ): Promise<SemanticJobsCrawledPage[]> {
   const results = await concurrencyLimitedMap(urls, CRAWL_CONCURRENCY, (url: string) =>
-    crawlWithRetry(url, cfg, maxRetries),
+    crawlWithRetry(url, cfg, maxRetries, includeExternalLinks),
   );
 
   return results.map(({ url, page }) => ({
@@ -428,8 +430,10 @@ async function crawlPhase(
 async function defaultCrawl(urls: string[]): Promise<SemanticJobsCrawledPage[]> {
   const cfg = loadConfig();
 
-  // Phase 1: crawl collection pages to extract individual job links
-  const phase1Pages = await crawlPhase(urls, cfg, MAX_RETRIES);
+  // Phase 1: crawl collection pages to extract individual job links.
+  // Allow external links so aggregator pages can link to job listings on
+  // different domains (e.g. Himalayas linking to Greenhouse/Lever/Ashby).
+  const phase1Pages = await crawlPhase(urls, cfg, MAX_RETRIES, true);
   const jobLinks: string[] = [];
   for (const page of phase1Pages) {
     if (page.html) {

@@ -57,7 +57,41 @@ export function extractJobListingsFromHtml(html: string, url: string): JobListin
 
   // Fall back to single-listing extraction
   const listing = buildListing(html, url, source);
-  return listing ? [listing] : [];
+  if (listing) return [listing];
+
+  // Content-preserving fallback: when no structured extraction works, wrap the
+  // full page text as a single listing. The embedding/retrieval layer can still
+  // surface relevant content from unstructured pages, and this prevents silently
+  // dropping data from unknown job boards.
+  const pageText = extractTextContent(html);
+  if (pageText && pageText.trim().length > 0) {
+    const title = extractTitle(html) ?? tryExtractMeaningfulTitle(pageText);
+    const company = extractCompany(html);
+    const location = extractLocation(html);
+    const salaryRaw = extractSalaryRaw(html);
+    const workMode = extractWorkMode(html);
+    const jobId = extractJobId(url, html);
+    const confidence = calculateJobConfidence({ title, location, workMode, salaryRaw });
+
+    const fallback: JobListingMvp = {
+      title: title ?? 'Untitled Job Listing',
+      workMode,
+      source,
+      extractedText: pageText,
+      confidence,
+      verificationStatus: determineVerificationStatus(source, html),
+      caveats: extractCaveats(html),
+    };
+    if (company) fallback.company = company;
+    if (location) fallback.location = location;
+    if (salaryRaw) fallback.salaryRaw = salaryRaw;
+    if (url) fallback.sourceUrl = url;
+    if (jobId) fallback.jobId = jobId;
+
+    return [fallback];
+  }
+
+  return [];
 }
 
 export function extractTitle(html: string): string | undefined {
@@ -546,6 +580,7 @@ const LISTING_CARD_SELECTORS = [
   'article[class*=job]',
   'article[class*=position]',
   'article[class*=listing]',
+  'article', // Catch-all: any <article> element (common in modern job boards)
   'li[class*=job]',
   'li[class*=position]',
   'li[class*=result]',
@@ -557,12 +592,14 @@ const LISTING_CARD_SELECTORS = [
   'div[class*=jobRow]',
   'div[data-jobid]',
   'div[data-job-id]',
+  'div[itemtype*="JobPosting"]', // schema.org microdata
+  'div[itemtype*="jobposting"]',
   'tr[class*=job]',
   'section[class*=job]',
   'section[class*=result]',
 ];
 
-/** CSS selectors for job title elements within a listing card. */
+/** CSS selectors for title elements within a listing card. */
 const TITLE_SELECTORS = [
   'h2 a',
   'h2',
@@ -577,6 +614,8 @@ const TITLE_SELECTORS = [
   'div[class*=title]',
   '[data-automation=jobTitle]',
   '[data-automation=job-title]',
+  '[itemprop="title"]', // schema.org microdata
+  '[itemprop="name"]',
 ];
 
 /** CSS selectors for company name elements within a listing card. */
@@ -586,6 +625,7 @@ const COMPANY_SELECTORS = [
   'a[class*=company]',
   '[data-automation=jobCompany]',
   '[itemprop=hiringOrganization]',
+  '[itemprop="hiringOrganization"] [itemprop="name"]',
   '.hiringOrganization',
 ];
 
@@ -596,6 +636,8 @@ const LOCATION_SELECTORS = [
   'li[class*=location]',
   '[data-automation=jobLocation]',
   '[itemprop=jobLocation]',
+  '[itemprop="jobLocation"] [itemprop="addressLocality"]',
+  '[itemprop="jobLocation"] [itemprop="addressRegion"]',
 ];
 
 /** CSS selectors for salary elements within a listing card. */
@@ -604,6 +646,7 @@ const SALARY_SELECTORS = [
   'div[class*=salary]',
   '[data-automation=jobSalary]',
   '[itemprop=baseSalary]',
+  '[itemprop="baseSalary"] [itemprop="value"]',
 ];
 
 /** CSS selectors for anchor elements containing job links within a listing card. */
@@ -619,6 +662,12 @@ const LINK_SELECTORS = [
   'a[href*=/viewjob]',
   'a[href*=/job-detail]',
   'a[href*=/job-openings]',
+  'a[href*=/position/]',
+  'a[href*=/positions/]',
+  'a[href*=/career/]',
+  'a[href*=/careers/]',
+  'a[href*=/opening/]',
+  'a[href*=/vacancy/]',
 ];
 
 /**
@@ -770,6 +819,7 @@ function tryParseUrl(url: string): URL | undefined {
 
 // ── Two-phase job discovery ────────────────────────────────────────────────
 
+/** Fast-path patterns for known job boards. Checked first, then heuristic fallback. */
 const JOB_URL_PATTERNS: { hostname: RegExp; path: RegExp }[] = [
   // SEEK
   { hostname: /seek\.(?:com\.au|co\.nz)$/, path: /^\/job\/\d+/ },
@@ -798,11 +848,11 @@ const JOB_URL_PATTERNS: { hostname: RegExp; path: RegExp }[] = [
   { hostname: /workable\.com$/, path: /\/j\// },
   { hostname: /workable\.com$/, path: /\/jobs\// },
   // Lever
-  { hostname: /lever\.co$/, path: /\/[^/]+\/[^/]+$/ }, // jobs.lever.co/company/id
+  { hostname: /lever\.co$/, path: /\/[^/]+\/[^/]+$/ },
   // Greenhouse
   { hostname: /greenhouse\.io$/, path: /\/jobs\// },
   // Ashby
-  { hostname: /ashbyhq\.com$/, path: /\/[^/]+$/ }, // jobs.ashbyhq.com/company/id
+  { hostname: /ashbyhq\.com$/, path: /\/[^/]+$/ },
   // Breezy
   { hostname: /breezy\.hr$/, path: /\/p\// },
   // Wellfound (AngelList)
@@ -822,6 +872,89 @@ const JOB_URL_PATTERNS: { hostname: RegExp; path: RegExp }[] = [
   { hostname: /adzuna\.(?:com|co\.uk|de|fr|ca|com\.au)$/, path: /\/jobs\// },
 ];
 
+/** Path segments that strongly suggest a job listing page. */
+const JOB_PATH_SEGMENTS = [
+  /\/job\//i,
+  /\/jobs\//i,
+  /\/career\//i,
+  /\/careers\//i,
+  /\/position\//i,
+  /\/positions\//i,
+  /\/opening\//i,
+  /\/openings\//i,
+  /\/vacancy\//i,
+  /\/vacancies\//i,
+  /\/opportunity\//i,
+  /\/opportunities\//i,
+  /\/apply\//i,
+  /\/role\//i,
+  /\/roles\//i,
+];
+
+/** Anchor text that should never be treated as a job title. */
+const NAV_ANCHOR_PATTERNS =
+  /\b(home|about|contact|login|sign\s*up|register|privacy|terms|blog|faq|help|support|news|press|careers?|jobs?)\b/i;
+
+/** Known job-related data attributes on anchor elements. */
+const JOB_DATA_ATTRIBUTES = [
+  'data-job-id',
+  'data-jobid',
+  'data-jobtitle',
+  'data-job-title',
+  'data-vacancy-id',
+  'data-listing-id',
+  'data-posting-id',
+  'data-automation', // e.g. data-automation="jobTitle"
+];
+
+/**
+ * Heuristic: does this URL + anchor text look like an individual job posting?
+ * Used as a catch-all for job boards not covered by JOB_URL_PATTERNS.
+ */
+function isLikelyJobUrl(url: URL, anchorText: string | undefined): boolean {
+  // Check path segments against job keywords
+  const pathLower = url.pathname.toLowerCase();
+  const hasJobPathSegment = JOB_PATH_SEGMENTS.some((pattern) => pattern.test(pathLower));
+
+  if (!hasJobPathSegment) {
+    // Also check query parameters for job indicators (e.g. ?jk=..., ?job=...)
+    const hasJobParam =
+      url.searchParams.has('jk') ||
+      url.searchParams.has('job') ||
+      url.searchParams.has('jobid') ||
+      url.searchParams.has('job_id') ||
+      url.searchParams.has('jid') ||
+      url.searchParams.has('vacancy_id');
+    if (!hasJobParam) return false;
+  }
+
+  // If we have anchor text, validate it looks like a job title
+  if (anchorText && anchorText.trim().length > 0) {
+    const text = anchorText.trim();
+
+    // Reject nav-like anchor text
+    if (NAV_ANCHOR_PATTERNS.test(text)) return false;
+
+    // Job titles are typically 2+ words, at least 10 chars, and contain a capital
+    const wordCount = text.split(/\s+/).length;
+    if (wordCount < 2 && text.length < 12) return false;
+
+    // Reject single-word anchors that are just job keywords
+    if (wordCount === 1 && /\b(job|career|position|opening|vacancy)\b/i.test(text)) return false;
+  }
+
+  return true;
+}
+
+/**
+ * Extract job listing links from HTML. Uses three strategies:
+ * 1. Known JOB_URL_PATTERNS (fast path for popular boards)
+ * 2. Heuristic URL + anchor text detection (catch-all for any board)
+ * 3. DOM structure cues (data attributes, schema.org itemprop)
+ *
+ * Allows external domains so aggregator pages can link to individual job pages
+ * hosted on different domains.
+ */
 export function extractJobLinksFromHtml(html: string, baseUrl: string): string[] {
   const links = new Set<string>();
   let base: URL;
@@ -834,22 +967,57 @@ export function extractJobLinksFromHtml(html: string, baseUrl: string): string[]
   const $ = cheerio.load(html);
 
   $('a[href]').each((_, el) => {
-    const href = $(el).attr('href');
+    const $el = $(el);
+    const href = $el.attr('href');
     if (!href) return;
+
     let resolved: URL;
     try {
       resolved = new URL(href, base);
     } catch {
       return;
     }
-    // Only same-host links
-    if (resolved.hostname !== base.hostname) return;
 
-    // Match against known job URL patterns
+    // Skip obviously non-job URLs early
+    const pathLower = resolved.pathname.toLowerCase();
+    if (
+      /(\.(jpg|png|gif|svg|webp|css|js|ico|pdf|xml|rss|atom)|\/cdn\/|\/static\/|\/assets\/)/i.test(
+        pathLower,
+      )
+    )
+      return;
+
+    // Strategy 1: known board patterns
     for (const { hostname, path } of JOB_URL_PATTERNS) {
       if (hostname.test(resolved.hostname) && path.test(resolved.pathname + resolved.search)) {
         links.add(resolved.href);
-        break;
+        return;
+      }
+    }
+
+    // Strategy 2: heuristic URL + anchor text detection
+    const anchorText = normalizeText($el.text());
+    if (isLikelyJobUrl(resolved, anchorText)) {
+      links.add(resolved.href);
+      return;
+    }
+
+    // Strategy 3: DOM data attributes
+    for (const attr of JOB_DATA_ATTRIBUTES) {
+      if ($el.attr(attr) !== undefined) {
+        links.add(resolved.href);
+        return;
+      }
+    }
+
+    // Strategy 4: schema.org microdata — anchor with itemprop="url" inside a JobPosting container
+    const itempropUrl = $el.attr('itemprop');
+    if (itempropUrl === 'url') {
+      // Walk up to see if we're inside a JobPosting
+      const $parent = $el.closest('[itemtype*="JobPosting"], [itemtype*="jobposting"]');
+      if ($parent.length > 0) {
+        links.add(resolved.href);
+        return;
       }
     }
   });
@@ -872,4 +1040,30 @@ function loadHtml(html: string): cheerio.CheerioAPI {
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+/**
+ * Extract a meaningful title from raw page text when no structured title was found.
+ * Looks for the first substantial line that looks like a heading or job title.
+ */
+function tryExtractMeaningfulTitle(pageText: string): string | undefined {
+  const lines = pageText.split('\n').filter((l) => l.trim().length > 0);
+  for (const line of lines) {
+    const trimmed = line.trim();
+    // Skip lines that are clearly nav/boilerplate
+    if (trimmed.length < 10) continue;
+    if (
+      /^(home|about|contact|login|sign up|register|privacy|terms|blog|faq|help|support|news|press|careers?|jobs?|search|menu)$/i.test(
+        trimmed,
+      )
+    )
+      continue;
+    if (/^(\d+|\W+)$/.test(trimmed)) continue;
+    // Heuristic: a good title is 2-10 words, starts with a capital letter
+    const words = trimmed.split(/\s+/);
+    if (words.length >= 2 && words.length <= 12 && /^[A-Z]/.test(trimmed)) {
+      return trimmed;
+    }
+  }
+  return undefined;
 }
