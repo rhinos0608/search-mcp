@@ -1055,7 +1055,9 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
  * Looks for the first substantial line that looks like a heading or job title.
  */
 function tryExtractMeaningfulTitle(pageText: string): string | undefined {
-  const lines = pageText.split('\n').filter((l) => l.trim().length > 0);
+  // Use sentence/newline delimiters or double spaces to recover logical lines
+  // from normalized text that may have collapsed single newlines to spaces.
+  const lines = pageText.split(/\s{2,}|[.\n!?;|]+/).filter((l) => l.trim().length > 0);
   for (const line of lines) {
     const trimmed = line.trim();
     // Skip lines that are clearly nav/boilerplate

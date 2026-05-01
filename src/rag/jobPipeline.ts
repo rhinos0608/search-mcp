@@ -88,10 +88,14 @@ export class JobPipeline {
     const webSearchFn = this.deps.webSearch ?? webSearch;
     const webCrawlFn = this.deps.webCrawl ?? webCrawl;
 
-    const jobspyRecords = await searchJobSpyFn(params);
-    if (jobspyRecords.length > 0) {
-      logger.info({ tool: 'job_pipeline', stage: 'discovery', count: jobspyRecords.length, source: 'jobspy' }, 'Acquired jobs from JobSpy');
-      return jobspyRecords.map(f => this.mapFlatToRaw(f));
+    try {
+      const jobspyRecords = await searchJobSpyFn(params);
+      if (jobspyRecords.length > 0) {
+        logger.info({ tool: 'job_pipeline', stage: 'discovery', count: jobspyRecords.length, source: 'jobspy' }, 'Acquired jobs from JobSpy');
+        return jobspyRecords.map(f => this.mapFlatToRaw(f));
+      }
+    } catch (err) {
+      logger.error({ tool: 'job_pipeline', stage: 'discovery', source: 'jobspy', err }, 'JobSpy discovery failed, falling back');
     }
 
     logger.info({ tool: 'job_pipeline', stage: 'discovery', source: 'jobspy', count: 0 }, 'JobSpy returned no results, falling back to web search');
@@ -171,7 +175,7 @@ export class JobPipeline {
         if (info.jobIds.length > 1) {
           insertDuplicateCluster({
             clusterId,
-            canonicalJobId: info.jobIds[0] ?? info.jobIds[0]!,
+            canonicalJobId: info.jobIds[0]!,
             memberJobIds: info.jobIds,
             memberSites: [...info.sites],
             clusterSize: info.jobIds.length,
@@ -196,12 +200,15 @@ export class JobPipeline {
     const scoredMvp = rankJobListings(mvpListings, '', constraints);
 
     return scoredMvp.map(s => {
-      const record = records.find(r => r.jobUrl === s.listing.sourceUrl)!;
+      const record = records.find(r => r.jobUrl === s.listing.sourceUrl);
+      if (!record) return null;
       return {
         ...record,
         score: s.overallScore,
       };
-    }).sort((a, b) => b.score - a.score);
+    })
+    .filter((r): r is ScoredRecord => r !== null)
+    .sort((a, b) => b.score - a.score);
   }
 
   /**
@@ -370,11 +377,15 @@ export class JobPipeline {
     for (const score of ranked) {
       const record = records.find(r => r.jobUrl === score.listing.sourceUrl);
       if (record) {
-        insertJobPosting({
-          ...this.mapPipelineToGraph(record),
-          verificationStatus: 'verified',
-          confidence: score.overallScore,
-        });
+        try {
+          insertJobPosting({
+            ...this.mapPipelineToGraph(record),
+            verificationStatus: 'verified',
+            confidence: score.overallScore,
+          });
+        } catch (err) {
+          logger.warn({ tool: 'job_pipeline', jobUrl: record.jobUrl, err }, 'Failed to insert final ranked job into graph');
+        }
       }
     }
 
@@ -385,8 +396,8 @@ export class JobPipeline {
     const jobSpyHealthFn = this.deps.jobSpyHealth ?? jobSpyHealth;
     const graphHealthFn = this.deps.graphHealth ?? graphHealth;
     const jobspyOk = await jobSpyHealthFn();
-    const graphOk = graphHealthFn();
-    return jobspyOk && graphOk;
+    const graphOk = await graphHealthFn();
+    return jobspyOk && !!graphOk;
   }
 
   private mapFlatToRaw(f: FlatJobRecord): RawJobRecord {
@@ -432,7 +443,7 @@ export class JobPipeline {
     const p: PipelineJobRecord = {
       site: raw?.site || 'other',
       title: mvp.title,
-      jobUrl: mvp.sourceUrl!,
+      jobUrl: mvp.sourceUrl || '',
       workMode: mvp.workMode,
       confidence: mvp.confidence.overall,
       caveats: mvp.caveats,

@@ -1,5 +1,5 @@
 import { loadConfig } from '../config.js';
-import { networkError, parseError, unavailableError } from '../errors.js';
+import { networkError, parseError, unavailableError, timeoutError } from '../errors.js';
 import { logger } from '../logger.js';
 
 export interface EmbedRequest {
@@ -95,20 +95,9 @@ export function normalizeEmbeddingResponse(
   }
 
   // ── Neither schema matched ──
-  const hasDataArray = Array.isArray(obj.data);
-  const firstDataKeys =
-    hasDataArray &&
-    Array.isArray(obj.data) &&
-    (obj.data as unknown[]).length > 0 &&
-    (obj.data as unknown[])[0] !== null &&
-    typeof (obj.data as unknown[])[0] === 'object'
-      ? Object.keys((obj.data as unknown[])[0] as object)
-      : [];
-
   throw parseError(
     `Embedding response did not match sidecar or OpenAI-compatible schema; ` +
-      `keys=[${topKeys.join(',')}], hasDataArray=${String(hasDataArray)}, ` +
-      `firstDataKeys=[${firstDataKeys.join(',')}]`,
+      `keys=[${topKeys.join(',')}], dataIsArray=${String(Array.isArray(obj.data))}`,
   );
 }
 
@@ -241,12 +230,27 @@ async function embedWithSidecar(request: EmbedRequest, configBaseUrl: string): P
     headers.Authorization = `Bearer ${request.apiToken}`;
   }
 
-  const response = await fetch(endpoint, {
-    method: 'POST',
-    headers,
-    body: JSON.stringify(body),
-    signal: AbortSignal.timeout(60_000),
-  });
+  let response: Response;
+  try {
+    response = await fetch(endpoint, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(60_000),
+    });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    if (
+      msg.toLowerCase().includes('timeout') ||
+      msg.toLowerCase().includes('aborted') ||
+      err instanceof Error && (err.name === 'TimeoutError' || err.name === 'AbortError')
+    ) {
+      throw timeoutError(`Embedding sidecar request timed out after 60 seconds (Error: ${msg})`, {
+        backend: 'sidecar',
+      });
+    }
+    throw networkError(`Embedding sidecar unreachable: ${msg}`, { backend: 'sidecar' });
+  }
 
   if (!response.ok) {
     throw networkError(`Embedding sidecar returned HTTP ${String(response.status)}`, {
@@ -276,7 +280,7 @@ async function embedWithSidecar(request: EmbedRequest, configBaseUrl: string): P
     dimensions: typeof data.dimensions === 'number' ? data.dimensions : request.dimensions,
     mode: typeof data.mode === 'string' ? data.mode : request.mode,
     truncatedIndices: Array.isArray(data.truncatedIndices)
-      ? (data.truncatedIndices as number[])
+      ? data.truncatedIndices.filter((x): x is number => typeof x === 'number' && Number.isFinite(x))
       : [],
   };
 }
@@ -301,16 +305,31 @@ async function embedWithOpenAICompatible(request: EmbedRequest): Promise<EmbedRe
     headers.Authorization = `Bearer ${apiKey}`;
   }
 
-  const response = await fetch(endpoint, {
-    method: 'POST',
-    headers,
-    body: JSON.stringify({
-      model,
-      input: request.texts,
-      dimensions: request.dimensions,
-    }),
-    signal: AbortSignal.timeout(30_000),
-  });
+  let response: Response;
+  try {
+    response = await fetch(endpoint, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        model,
+        input: request.texts,
+        dimensions: request.dimensions,
+      }),
+      signal: AbortSignal.timeout(30_000),
+    });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    if (
+      msg.toLowerCase().includes('timeout') ||
+      msg.toLowerCase().includes('aborted') ||
+      err instanceof Error && (err.name === 'TimeoutError' || err.name === 'AbortError')
+    ) {
+      throw timeoutError(`OpenAI embedding request timed out after 30 seconds (Error: ${msg})`, {
+        backend: 'openai',
+      });
+    }
+    throw networkError(`OpenAI embedding unreachable: ${msg}`, { backend: 'openai' });
+  }
 
   if (!response.ok) {
     const body = await response.text().catch(() => '');
@@ -320,12 +339,13 @@ async function embedWithOpenAICompatible(request: EmbedRequest): Promise<EmbedRe
     );
   }
 
+  const responseClone = response.clone();
   let raw: unknown;
   try {
     raw = await response.json();
   } catch (err) {
     // Attempt to capture response body for context even if JSON parsing failed
-    const body = await response.clone().text().catch(() => 'unreadable');
+    const body = await responseClone.text().catch(() => 'unreadable');
     throw parseError(
       `OpenAI embedding API returned malformed JSON: ${err instanceof Error ? err.message : String(err)}`,
       {
