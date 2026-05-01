@@ -19,6 +19,7 @@ export class ToolError extends Error {
   readonly retryable: boolean;
   readonly statusCode: number | undefined;
   readonly backend: string | undefined;
+  readonly metadata: Record<string, unknown>;
 
   constructor(
     message: string,
@@ -28,6 +29,7 @@ export class ToolError extends Error {
       statusCode?: number;
       backend?: string;
       cause?: unknown;
+      metadata?: Record<string, unknown>;
     },
   ) {
     super(message, options.cause !== undefined ? { cause: options.cause } : undefined);
@@ -36,6 +38,7 @@ export class ToolError extends Error {
     this.retryable = options.retryable;
     this.statusCode = options.statusCode;
     this.backend = options.backend;
+    this.metadata = options.metadata ?? {};
   }
 }
 
@@ -50,6 +53,7 @@ interface FactoryOpts {
   backend?: string;
   cause?: unknown;
   retryable?: boolean;
+  metadata?: Record<string, unknown>;
 }
 
 export function rateLimitError(message: string, opts?: FactoryOpts): ToolError {

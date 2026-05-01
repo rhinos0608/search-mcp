@@ -158,6 +158,7 @@ export interface SearchConfig {
   duckduckgo: { region: string; safeSearch: string };
   ollamaSearch: { baseUrl: string; apiKey?: string };
   rescoreWeights: RescoreConfig;
+  challengeLatencyThreshold: number;
 }
 
 const DEFAULTS: Omit<SearchConfig, 'rescoreWeights'> = {
@@ -208,6 +209,7 @@ const DEFAULTS: Omit<SearchConfig, 'rescoreWeights'> = {
   },
   duckduckgo: { region: 'us-en', safeSearch: 'moderate' },
   ollamaSearch: { baseUrl: '', apiKey: '' },
+  challengeLatencyThreshold: 5000,
 };
 
 const VALID_BACKENDS = new Set<string>(['brave', 'searxng', 'exa', 'duckduckgo', 'ollama-search']);
@@ -251,6 +253,7 @@ type EnvConfig = Omit<
   | 'duckduckgo'
   | 'ollamaSearch'
 > & {
+  challengeLatencyThreshold?: number;
   reddit?: Partial<RedditConfig>;
   crawl4ai?: Partial<Crawl4aiConfig>;
   github?: Partial<GitHubConfig>;
@@ -350,11 +353,20 @@ function loadFromEnv(): EnvConfig {
     cfg.crawl4ai = crawl4aiCfg;
   }
 
-  const embeddingProvider = (process.env.EMBEDDING_PROVIDER?.toLowerCase().trim() || 'sidecar') as EmbeddingSidecarConfig['provider'];
   const embeddingSidecarUrl = process.env.EMBEDDING_SIDECAR_BASE_URL;
   const embeddingSidecarToken = process.env.EMBEDDING_SIDECAR_API_TOKEN;
   const embeddingDimensions = process.env.EMBEDDING_DIMENSIONS;
   const embeddingCodeModel = process.env.EMBEDDING_CODE_MODEL;
+
+  const rawProvider = process.env.EMBEDDING_PROVIDER?.toLowerCase().trim();
+  const allowedProviders = ['sidecar', 'ollama', 'transformers', 'openai'] as const;
+  let embeddingProvider: (typeof allowedProviders)[number] = 'sidecar';
+  if (rawProvider && allowedProviders.includes(rawProvider as (typeof allowedProviders)[number])) {
+    embeddingProvider = rawProvider as (typeof allowedProviders)[number];
+  } else if (rawProvider) {
+    logger.error({ rawProvider }, 'Invalid EMBEDDING_PROVIDER specified; defaulting to sidecar');
+  }
+
   if (
     embeddingProvider !== 'sidecar' ||
     embeddingSidecarUrl !== undefined ||
@@ -470,6 +482,12 @@ function loadFromEnv(): EnvConfig {
     if (ollamaSearchUrl !== undefined) osc.baseUrl = ollamaSearchUrl;
     if (ollamaSearchKey !== undefined) osc.apiKey = ollamaSearchKey;
     cfg.ollamaSearch = osc;
+  }
+
+  const challengeLatencyThreshold = process.env.CHALLENGE_LATENCY_THRESHOLD;
+  if (challengeLatencyThreshold !== undefined) {
+    const n = Number(challengeLatencyThreshold);
+    if (!isNaN(n)) cfg.challengeLatencyThreshold = n;
   }
 
   return cfg;
@@ -670,6 +688,10 @@ export function loadConfig(): SearchConfig {
         DEFAULTS.ollamaSearch.apiKey ??
         '',
     },
+    challengeLatencyThreshold:
+      fileConfig.challengeLatencyThreshold ??
+      envConfig.challengeLatencyThreshold ??
+      DEFAULTS.challengeLatencyThreshold,
     rescoreWeights: DEFAULT_RESCORE_WEIGHTS,
   };
 
