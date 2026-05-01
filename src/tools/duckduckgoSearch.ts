@@ -121,8 +121,14 @@ export async function duckduckgoSearch(
   config: DuckDuckGoConfig,
 ): Promise<SearchResult[]> {
   // Resolve safesearch: explicit arg trumps config, config trumps default
-  const effectiveSafeSearch = safeSearch !== 'moderate' ? safeSearch : (config.safeSearch as 'strict' | 'moderate' | 'off' | undefined) ?? 'moderate';
-  logger.info({ limit, safeSearch: effectiveSafeSearch, region: config.region }, 'Running DuckDuckGo search (experimental)');
+  const effectiveSafeSearch =
+    safeSearch !== 'moderate'
+      ? safeSearch
+      : ((config.safeSearch as 'strict' | 'moderate' | 'off' | undefined) ?? 'moderate');
+  logger.info(
+    { limit, safeSearch: effectiveSafeSearch, region: config.region },
+    'Running DuckDuckGo search (experimental)',
+  );
 
   const key = cacheKey('duckduckgo', query, String(limit), effectiveSafeSearch, config.region);
   const cached = cache.get(key);

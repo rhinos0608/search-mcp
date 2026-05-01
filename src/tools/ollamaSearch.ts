@@ -22,7 +22,7 @@ const cache = new ToolCache<SearchResult[]>({ maxSize: 200, ttlMs: 60 * 60 * 100
 
 interface OllamaSearchConfig {
   baseUrl: string;
-  apiKey: string;
+  apiKey?: string;
 }
 
 interface OllamaSearchResponse {
@@ -61,7 +61,7 @@ export async function ollamaSearch(
     Accept: 'application/json',
   };
 
-  if (config.apiKey.length > 0) {
+  if (config.apiKey?.length) {
     headers.Authorization = `Bearer ${config.apiKey}`;
   }
 

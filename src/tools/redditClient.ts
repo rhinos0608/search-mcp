@@ -209,10 +209,13 @@ export function mergeRedditClientOptions(overrides: RedditClientOptions): Reddit
   }
   const merged: RedditClientOptions = { ...overrides };
   if (overrides.auth === undefined && cfg.reddit.oauthEnabled) {
-    merged.auth = { clientId: cfg.reddit.clientId, clientSecret: cfg.reddit.clientSecret };
+    merged.auth = {
+      clientId: cfg.reddit.clientId ?? '',
+      clientSecret: cfg.reddit.clientSecret ?? '',
+    };
   }
   if (overrides.userAgent === undefined && cfg.reddit.userAgent !== '') {
-    merged.userAgent = cfg.reddit.userAgent;
+    merged.userAgent = cfg.reddit.userAgent ?? '';
   }
   return merged;
 }

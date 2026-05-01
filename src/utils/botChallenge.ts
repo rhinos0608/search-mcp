@@ -157,8 +157,8 @@ export function recordChallenge(backend: string): void {
   // Trip circuit if threshold reached
   if (circuit.consecutiveChallenges >= TRIP_THRESHOLD) {
     circuit.state = 'open';
-    // Apply jitter to the current delay
-    circuit.currentDelay = applyJitter(circuit.currentDelay);
+    // Apply jitter, but never exceed the configured max delay
+    circuit.currentDelay = Math.min(applyJitter(circuit.currentDelay), MAX_DELAY_MS);
     circuit.openUntil = now + circuit.currentDelay;
   }
 }
@@ -197,7 +197,10 @@ export function isCircuitTripped(backend: string): boolean {
   // Check auto-recovery: if backoff period has elapsed, transition to half-open
   if (Date.now() >= circuit.openUntil) {
     circuit.state = 'half-open';
-    logger.info({ backend, circuitState: 'half-open' }, 'Circuit breaker auto-recovered to half-open');
+    logger.info(
+      { backend, circuitState: 'half-open' },
+      'Circuit breaker auto-recovered to half-open',
+    );
     return false;
   }
 

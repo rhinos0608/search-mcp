@@ -37,11 +37,11 @@ function backendAvailable(backend: SearchBackend): boolean {
 
   switch (backend) {
     case 'brave':
-      return cfg.brave.apiKey.length > 0;
+      return (cfg.brave.apiKey ?? '').length > 0;
     case 'searxng':
       return cfg.searxng.baseUrl.length > 0;
     case 'exa':
-      return cfg.exa.apiKey.length > 0;
+      return (cfg.exa.apiKey ?? '').length > 0;
     case 'duckduckgo':
       // Zero-key backend — always available unless circuit-tripped or degraded (checked above)
       return true;
@@ -62,13 +62,13 @@ async function runBackend(
     let results: SearchResult[];
     switch (backend) {
       case 'brave':
-        results = await deps.braveSearch(query, cfg.brave.apiKey, limit, safeSearch);
+        results = await deps.braveSearch(query, cfg.brave.apiKey ?? '', limit, safeSearch);
         break;
       case 'searxng':
         results = await deps.searxngSearch(query, cfg.searxng.baseUrl, limit, safeSearch);
         break;
       case 'exa':
-        results = await deps.exaSearch(query, cfg.exa.apiKey, limit, safeSearch);
+        results = await deps.exaSearch(query, cfg.exa.apiKey ?? '', limit, safeSearch);
         break;
       case 'duckduckgo': {
         const { duckduckgoSearch } = await import('./duckduckgoSearch.js');

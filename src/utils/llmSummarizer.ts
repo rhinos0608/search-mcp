@@ -154,6 +154,11 @@ async function callLlm(
   maxTokens: number,
   temperature: number,
 ): Promise<string> {
+  // Caller (summarizeText) already guards apiToken — narrow for TS
+  if (!config.apiToken) {
+    throw new Error('llmSummarizer: apiToken required but not provided');
+  }
+  const apiToken: string = config.apiToken;
   const endpoint = config.baseUrl.replace(/\/$/, '') + '/v1/chat/completions';
 
   const body = {
@@ -174,7 +179,7 @@ async function callLlm(
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      Authorization: `Bearer ${config.apiToken}`,
+      Authorization: `Bearer ${apiToken}`,
     },
     body: JSON.stringify(body),
   });
