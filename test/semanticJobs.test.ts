@@ -102,6 +102,7 @@ test('semanticJobs returns ranked results for a happy-path query', async () => {
       embeddingDimensions: 4,
       maxPages: 5,
       topK: 5,
+      useJobSpy: false,
     },
     {
       search: async () =>
@@ -140,6 +141,7 @@ test('semanticJobs returns empty results when search finds no URLs', async () =>
       query: 'no results query',
       embeddingBaseUrl: 'http://sidecar.local',
       embeddingDimensions: 4,
+      useJobSpy: false,
     },
     {
       search: async () => [],
@@ -166,6 +168,7 @@ test('semanticJobs records crawl failures in warnings', async () => {
       query: 'failure query',
       embeddingBaseUrl: 'http://sidecar.local',
       embeddingDimensions: 4,
+      useJobSpy: false,
     },
     {
       search: async () =>
@@ -208,6 +211,7 @@ test('semanticJobs removes duplicate listings', async () => {
       query: 'duplicate query',
       embeddingBaseUrl: 'http://sidecar.local',
       embeddingDimensions: 4,
+      useJobSpy: false,
     },
     {
       search: async () =>
