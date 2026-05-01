@@ -3,6 +3,7 @@ import { loadConfig, type SearchBackend } from '../config.js';
 import { braveSearch } from './braveSearch.js';
 import { searxngSearch } from './searxngSearch.js';
 import { exaSearch } from './exaSearch.js';
+import { tavilySearch } from './tavilySearch.js';
 import { normalizeUrl, rrfMerge } from '../utils/fusion.js';
 import { multiSignalRescore, extractWebSearchSignals } from '../utils/rescore.js';
 import { expandQuery, type QueryVariation } from './queryExpansion.js';
@@ -18,7 +19,7 @@ import type { SearchResult } from '../types.js';
  *
  * Zero-key providers first (cheapest path), then key-backed providers.
  */
-const FALLBACK_ORDER: SearchBackend[] = ['duckduckgo', 'searxng', 'brave', 'exa', 'ollama-search'];
+const FALLBACK_ORDER: SearchBackend[] = ['duckduckgo', 'searxng', 'brave', 'exa', 'tavily', 'ollama-search'];
 
 function backendAvailable(backend: SearchBackend, allCandidates?: SearchBackend[]): boolean {
   const cfg = loadConfig();
@@ -38,6 +39,8 @@ function backendAvailable(backend: SearchBackend, allCandidates?: SearchBackend[
         return cfg.searxng.baseUrl.length > 0;
       case 'exa':
         return (cfg.exa.apiKey ?? '').length > 0;
+      case 'tavily':
+        return (cfg.tavily.apiKey ?? '').length > 0;
       case 'duckduckgo':
         return true;
       case 'ollama-search':
@@ -91,6 +94,9 @@ async function runBackend(
         break;
       case 'exa':
         results = await deps.exaSearch(query, cfg.exa.apiKey ?? '', limit, safeSearch);
+        break;
+      case 'tavily':
+        results = await deps.tavilySearch(query, cfg.tavily.apiKey ?? '', limit, safeSearch);
         break;
       case 'duckduckgo': {
         const { duckduckgoSearch } = await import('./duckduckgoSearch.js');
@@ -148,6 +154,7 @@ export interface WebSearchDeps {
   braveSearch: typeof import('./braveSearch.js').braveSearch;
   searxngSearch: typeof import('./searxngSearch.js').searxngSearch;
   exaSearch: typeof import('./exaSearch.js').exaSearch;
+  tavilySearch: typeof import('./tavilySearch.js').tavilySearch;
 }
 
 // ── Core search with fusion ──────────────────────────────────────────────────
@@ -259,7 +266,7 @@ export async function searchWithBackends(
   const allItems = seenEntries.map((e) => e.item);
   if (allItems.length === 0) {
     throw new Error(
-      `All search backends failed across all query variations. Ensure at least one backend is configured (DuckDuckGo is zero-key and always available; EXA_API_KEY, BRAVE_API_KEY, or SEARXNG_BASE_URL for key-backed backends).\n${errors.join('\n')}`,
+      `All search backends failed across all query variations. Ensure at least one backend is configured (DuckDuckGo is zero-key and always available; EXA_API_KEY, BRAVE_API_KEY, TAVILY_API_KEY, or SEARXNG_BASE_URL for key-backed backends).\n${errors.join('\n')}`,
     );
   }
 
@@ -298,6 +305,7 @@ export async function webSearch(
       braveSearch,
       searxngSearch,
       exaSearch,
+      tavilySearch,
     },
     undefined,
     expandQueryOpt,

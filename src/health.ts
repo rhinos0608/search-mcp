@@ -99,9 +99,10 @@ const OPTIONAL_CONFIG: Record<string, OptionalRule> = {
     check: (cfg) =>
       (cfg.exa.apiKey ?? '').length > 0 ||
       (cfg.brave.apiKey ?? '').length > 0 ||
-      cfg.searxng.baseUrl.length > 0,
+      cfg.searxng.baseUrl.length > 0 ||
+      (cfg.tavily.apiKey ?? '').length > 0,
     degradedMessage: 'No search backend configured — web_search calls will fail.',
-    remediation: 'Set EXA_API_KEY, BRAVE_API_KEY, or SEARXNG_BASE_URL environment variable.',
+    remediation: 'Set EXA_API_KEY, BRAVE_API_KEY, SEARXNG_BASE_URL, or TAVILY_API_KEY environment variable.',
   },
   stackoverflow_search: {
     check: (cfg) => (cfg.stackexchange.apiKey ?? '').length > 0,
@@ -460,7 +461,7 @@ function sidecarStatusMessage(label: string, body: SidecarHealthBody): string {
   return `${label} running`;
 }
 
-const SIDECAR_LABELS = new Set(['crawl4ai', 'embedding-sidecar']);
+const SIDECAR_LABELS = new Set(['embedding-sidecar']);
 
 interface NetworkProbe {
   label: string;
@@ -493,14 +494,6 @@ export function getNetworkProbes(cfg: SearchConfig): NetworkProbe[] {
       label: 'searxng',
       url: `${cfg.searxng.baseUrl.replace(/\/+$/, '')}/healthz`,
       tools: ['web_search'],
-    });
-  }
-
-  if (cfg.crawl4ai.baseUrl.length > 0) {
-    probes.push({
-      label: 'crawl4ai',
-      url: `${cfg.crawl4ai.baseUrl.replace(/\/+$/, '')}/health`,
-      tools: ['web_crawl', 'semantic_crawl'],
     });
   }
 
@@ -558,7 +551,9 @@ export async function runHealthProbes(cfg: SearchConfig): Promise<HealthReport> 
   }
 
   // Layer 3: network probes for free APIs (parallel, 5s timeout each)
-  // Sidecar probes (crawl4ai, embedding-sidecar) parse the /health JSON body for richer status.
+  // Sidecar probes (embedding-sidecar) parse the /health JSON body for richer status.
+  // Crawl4AI is probed separately via probeExtractionSupport against /crawl, since
+  // it does not expose a /health endpoint.
   const probes = getNetworkProbes(cfg);
   const probeResults = await Promise.allSettled(
     probes.map(async (probe) => {
@@ -657,12 +652,6 @@ export async function runHealthProbes(cfg: SearchConfig): Promise<HealthReport> 
 export async function probeConfiguredSidecars(cfg: SearchConfig): Promise<void> {
   const probes: { label: string; url: string }[] = [];
 
-  if (cfg.crawl4ai.baseUrl.length > 0) {
-    probes.push({
-      label: 'crawl4ai',
-      url: `${cfg.crawl4ai.baseUrl.replace(/\/+$/, '')}/health`,
-    });
-  }
   if (cfg.embeddingSidecar.baseUrl.length > 0) {
     probes.push({
       label: 'embedding-sidecar',

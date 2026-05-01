@@ -10,6 +10,10 @@
     "exa": {
         "apiKey": ""
     },
+    "tavily": {
+        "//": "Tavily search API (V3.4). API key free at tavily.com. Uses TAVILY_API_KEY env var.",
+        "apiKey": ""
+    },
     "nitter": {
         "baseUrl": ""
     },

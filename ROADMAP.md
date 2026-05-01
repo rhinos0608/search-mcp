@@ -12,9 +12,9 @@
 | **V3.1.0 Code**  | ✅ Done       | Tree-sitter adapter, GitHub guardrails, `semantic_github_code`                                                            |
 | **V3.1.1**       | ✅ Done       | Crawl reliability patch: HTML threading for `semantic_jobs`, timeout scaling for `web_crawl`, `semantic_crawl` size guard |
 | **V3.1.5**       | ✅ Done       | RAG-Anything integration, code review fixes across RAG pipeline                                                           |
-| **V3.2.0**       | 🟡 In progress | Domain adapters (Stack Overflow, HN, academic, news), full job pipeline, `semantic_search`, constraint ranking, dedup, distribution packaging *(parallel track)* |
+| **V3.2.0**       | ✅ In progress | Domain adapters (Stack Overflow, HN, academic, news), full job pipeline, `semantic_search`, constraint ranking, dedup, distribution packaging *(parallel track)* |
 | **V3.3.0**       | ✅ Done       | Kill chain extraction, contextual embeddings, render recovery                                                              |
-| **V3.3.1**       | 🟡 Planned    | DuckDuckGo zero-key fallback, opt-in Ollama web search, availability-aware selection + merge                               |
+| **V3.3.1**       | ✅ Planned    | DuckDuckGo zero-key fallback, opt-in Ollama web search, availability-aware selection + merge                               |
 | **V3.4.0**       | 🟡 Planned    | Integration: resolver pattern, output budget, structured errors, diagnostics                                               |
 | **V3.5.0**       | 🔲 Pending    | Competitive integration                                                                                                    |
 | **V4.0.0**       | 🔲 Planned    | Persistent corpus indexes — from ephemeral cache to durable research memory                                               |

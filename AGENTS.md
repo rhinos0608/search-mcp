@@ -147,7 +147,8 @@ Detects fenced code blocks >=300 chars during chunking, attaches language and of
 EXA_API_KEY
 BRAVE_API_KEY
 SEARXNG_BASE_URL
-SEARCH_BACKEND            # 'brave' | 'searxng' | 'exa'
+SEARCH_BACKEND            # 'brave' | 'searxng' | 'exa' | 'tavily'
+TAVILY_API_KEY
 
 # Social/video
 NITTER_BASE_URL

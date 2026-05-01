@@ -51,7 +51,7 @@ function loadDotEnv(pkgRoot: string): void {
 /** Directory containing this file (dist/ or src/). Go up one level to reach project root. */
 const PKG_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 
-export type SearchBackend = 'brave' | 'searxng' | 'exa' | 'duckduckgo' | 'ollama-search';
+export type SearchBackend = 'brave' | 'searxng' | 'exa' | 'duckduckgo' | 'ollama-search' | 'tavily';
 
 export interface RescoreWeights {
   rrfAnchor: number;
@@ -174,6 +174,7 @@ export interface SearchConfig {
   brave: { apiKey?: string };
   searxng: { baseUrl: string };
   exa: ExaConfig;
+  tavily: { apiKey?: string };
   nitter: { baseUrl: string };
   listennotes: { apiKey?: string };
   producthunt: { apiToken?: string };
@@ -200,6 +201,7 @@ const DEFAULTS: Omit<SearchConfig, 'rescoreWeights'> = {
   brave: { apiKey: '' },
   searxng: { baseUrl: '' },
   exa: { apiKey: '' },
+  tavily: { apiKey: '' },
   nitter: { baseUrl: '' },
   listennotes: { apiKey: '' },
   producthunt: { apiToken: '' },
@@ -246,7 +248,7 @@ const DEFAULTS: Omit<SearchConfig, 'rescoreWeights'> = {
   challengeLatencyThreshold: 5000,
 };
 
-const VALID_BACKENDS = new Set<string>(['brave', 'searxng', 'exa', 'duckduckgo', 'ollama-search']);
+const VALID_BACKENDS = new Set<string>(['brave', 'searxng', 'exa', 'duckduckgo', 'ollama-search', 'tavily']);
 
 /**
  * Decrypt config.enc using AES-256-GCM.
@@ -292,6 +294,7 @@ type EnvConfig = Omit<
   crawl4ai?: Partial<Crawl4aiConfig>;
   github?: Partial<GitHubConfig>;
   exa?: Partial<ExaConfig>;
+  tavily?: Partial<{ apiKey: string }>;
   embeddingSidecar?: Partial<EmbeddingSidecarConfig>;
   semanticCrawl?: Partial<SemanticCrawlConfig>;
   domainTrust?: Partial<DomainTrustConfig>;
@@ -326,6 +329,12 @@ function loadFromEnv(): EnvConfig {
   if (exaKey) {
     cfg.exa = { apiKey: exaKey };
     cfg.searchBackend ??= 'exa';
+  }
+
+  const tavilyKey = process.env.TAVILY_API_KEY;
+  if (tavilyKey) {
+    cfg.tavily = { apiKey: tavilyKey };
+    cfg.searchBackend ??= 'tavily';
   }
 
   const nitterUrl = process.env.NITTER_BASE_URL;
@@ -590,6 +599,9 @@ export function loadConfig(): SearchConfig {
     },
     exa: {
       apiKey: fileConfig.exa?.apiKey ?? envConfig.exa?.apiKey ?? DEFAULTS.exa.apiKey ?? '',
+    },
+    tavily: {
+      apiKey: fileConfig.tavily?.apiKey ?? envConfig.tavily?.apiKey ?? DEFAULTS.tavily.apiKey ?? '',
     },
     nitter: {
       baseUrl: fileConfig.nitter?.baseUrl ?? envConfig.nitter?.baseUrl ?? DEFAULTS.nitter.baseUrl,

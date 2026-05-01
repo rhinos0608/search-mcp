@@ -6,7 +6,7 @@
 
 ## `web_search`
 
-Perform a web search using Brave or SearXNG and return a ranked list of results.
+Perform a web search using Brave, SearXNG, Exa, Tavily, or DuckDuckGo and return a ranked list of results.
 
 ### Inputs
 
@@ -32,12 +32,12 @@ Array<{
 
 ### Underlying approach
 
-Uses a multi-backend search strategy with Brave as the primary backend and SearXNG as the fallback. The configured primary backend is tried first; if it fails, the remaining backend is attempted. Brave requires a `BRAVE_API_KEY`; SearXNG requires a `SEARXNG_BASE_URL` pointing to a running instance.
+Uses a multi-backend search strategy with the configured primary backend (default SearXNG) and a fallback chain: DuckDuckGo (zero-key), SearXNG, Brave, Exa, Tavily, Ollama Search. The configured primary backend is tried first; if it fails, the next configured backend in the fallback chain is attempted. Brave requires a `BRAVE_API_KEY`; SearXNG requires a `SEARXNG_BASE_URL` pointing to a running instance; Exa requires `EXA_API_KEY`; Tavily requires `TAVILY_API_KEY`.
 
 **V3.3.0 enhancements (enabled by default):**
 
 - **Query expansion** (`expandQuery: true`): Generates 2-4 query variations using rule-based strategies — concept/synonym expansion (e.g. "llm" → "large language model"), question form conversion, scope adjustment (broader/narrower), and opposition pairs. Each variation is searched independently, then all results are deduplicated by normalized URL, keeping the best snippet per URL. No LLM calls needed.
-- **Cross-backend merging** (`mergeSearchBackends: true`): When both Brave and SearXNG are configured, queries both backends in parallel instead of sequential fallback. Results are deduplicated and scored by: engine agreement (40%), domain authority (30%), and position rank (30%). Each result includes an `engines` field showing which backends returned it.
+- **Cross-backend merging** (`mergeSearchBackends: true`): When multiple search backends are configured, queries all backends in parallel instead of sequential fallback. Results are deduplicated and scored by: engine agreement (40%), domain authority (30%), and position rank (30%). Each result includes an `engines` field showing which backends returned it.
 
 Both features default to `true`.
 
