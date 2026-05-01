@@ -10,6 +10,7 @@ import type { SearchConfig } from './config.js';
 import { getTracker, type RateLimitedBackend } from './rateLimit.js';
 import { safeResponseText, safeResponseJson } from './httpGuards.js';
 import { logger } from './logger.js';
+import { jobSpyHealth } from './utils/jobspyClient.js';
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -175,6 +176,17 @@ export function configHealth(cfg: SearchConfig): Record<string, ToolHealth> {
   report.raga_bridge = ragaBridgeHealth(cfg);
 
   return report;
+}
+
+async function jobSpyProbe(): Promise<ToolHealth> {
+  const ok = await jobSpyHealth();
+  return ok
+    ? { status: 'healthy', message: 'JobSpy library functional and reachable.' }
+    : {
+        status: 'degraded',
+        message: 'JobSpy health probe failed.',
+        remediation: 'Check network connectivity or if job boards are blocking requests.',
+      };
 }
 
 function redditOAuthHealth(cfg: SearchConfig): ToolHealth {
@@ -598,6 +610,9 @@ export async function runHealthProbes(cfg: SearchConfig): Promise<HealthReport> 
     tools.web_crawl_extraction = extractionHealth;
     tools.semantic_crawl_extraction = extractionHealth;
   }
+
+  // JobSpy synthesized probe
+  tools.jobspy = await jobSpyProbe();
 
   // Compute overall status keyed on web_search as primary
   const webSearchStatus = tools.web_search?.status ?? 'unconfigured';
