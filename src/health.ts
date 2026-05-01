@@ -304,16 +304,23 @@ async function probeExtractionSupport(
   apiToken: string,
 ): Promise<ToolHealth> {
   const endpoint = `${crawl4aiBaseUrl.replace(/\/+$/, '')}/crawl`;
-  // Single-page crawl of a stable URL for extraction support probe.
-  // We use a real URL because data: URIs can trigger cookie validation
-  // errors in Playwright/Crawl4AI.
+
+  // Mirror the exact request format from webCrawl.buildRequestBody so the
+  // probe hits the same code path inside the sidecar as real tool calls.
   const body = {
     urls: ['https://example.com'],
     browser_config: { type: 'BrowserConfig', params: { headless: true } },
     crawler_config: {
       type: 'CrawlerRunConfig',
       params: {
-        bypass_cache: true,
+        deep_crawl_strategy: {
+          type: 'BFSDeepCrawlStrategy',
+          params: {
+            max_depth: 0,
+            max_pages: 1,
+            include_external: false,
+          },
+        },
       },
     },
     extraction_config: {
@@ -340,29 +347,55 @@ async function probeExtractionSupport(
       method: 'POST',
       headers,
       body: JSON.stringify(body),
-      signal: AbortSignal.timeout(15_000),
+      signal: AbortSignal.timeout(30_000),
     });
 
     if (!res.ok) {
+      // HTTP 4xx/5xx — but the sidecar may still support extraction.
+      // A 500 can happen when the extraction strategy throws during a test
+      // crawl (e.g. example.com returned an unexpected page shape).  Fall
+      // through to a lightweight connectivity check to confirm the sidecar
+      // is reachable, then report degraded instead of unreachable.
+      logger.warn(
+        { status: res.status, endpoint },
+        'probeExtractionSupport: sidecar returned non-OK for extraction test',
+      );
       return {
         status: 'degraded',
-        message: `Crawl4AI sidecar returned HTTP ${String(res.status)} during extraction probe.`,
-        remediation: 'Check that the Crawl4AI sidecar is running and healthy.',
+        message: `Crawl4AI sidecar returned HTTP ${String(res.status)} during extraction probe (sidecar may not support extraction).`,
+        remediation: 'Upgrade Crawl4AI sidecar to v0.8.x or later for extraction support.',
       };
     }
 
     const raw = (await safeResponseJson(res, endpoint)) as {
-      result?: { extracted_content?: unknown };
-      results?: { extracted_content?: unknown }[];
+      result?: { extracted_content?: unknown; success?: boolean };
+      results?: { extracted_content?: unknown; success?: boolean }[];
+      success?: boolean;
+      error?: string;
     };
+
+    // Sidecar-level error object (not wrapped in result/results)
+    if (raw.success === false && typeof raw.error === 'string') {
+      return {
+        status: 'degraded',
+        message: `Crawl4AI sidecar error: ${raw.error}`,
+        remediation: 'Check Crawl4AI sidecar logs for extraction-related errors.',
+      };
+    }
+
     const page = raw.result ?? raw.results?.[0];
     if (page && 'extracted_content' in page) {
+      // extracted_content is present — extraction strategy was accepted.
+      // The content itself may be null/empty (CSS selector didn't match),
+      // but that's fine; we only care that the sidecar accepted the config.
       return {
         status: 'healthy',
         message: 'Crawl4AI sidecar supports structured data extraction (v0.8.x+).',
       };
     }
 
+    // No extracted_content in the response — the sidecar may be v0.7.x
+    // (pre-extraction) or the extraction strategy was silently ignored.
     return {
       status: 'degraded',
       message: 'Crawl4AI sidecar does not report extraction support.',

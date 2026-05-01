@@ -964,16 +964,93 @@ export async function crawlSeeds(
   };
 }
 
+/** Known consent/tracking domains that 404 pages commonly redirect to. */
+const CONSENT_WALL_DOMAINS = [
+  'consent.google.com',
+  'consent.youtube.com',
+  'consent.google.co.uk',
+  'consent.google.de',
+  'consent.google.fr',
+  'consent.google.ca',
+  'consent.google.com.au',
+  'privacy.google.com',
+  'policies.google.com',
+  'accounts.google.com',
+  'login.microsoftonline.com',
+  'login.live.com',
+  'www.facebook.com/cookie',
+];
+
+/**
+ * Detect pages that redirected to a consent wall (e.g. 404 → cookie consent).
+ * This catches the pattern where a dead URL redirects to a consent/tracking page
+ * whose content would otherwise produce boilerplate chunks that lexically match queries.
+ */
+function isConsentWallRedirect(pageUrl: string, markdown: string): boolean {
+  try {
+    const hostname = new URL(pageUrl).hostname.toLowerCase();
+    const isConsentDomain = CONSENT_WALL_DOMAINS.some(
+      (d) => hostname === d || hostname.endsWith('.' + d),
+    );
+    if (isConsentDomain) return true;
+  } catch {
+    // malformed URL — skip check
+  }
+
+  // Check for consent-wall page titles (common after 404→consent redirects)
+  const titleMatch = /^#\s+(.+)$/m.exec(markdown);
+  if (titleMatch?.[1]) {
+    const title = titleMatch[1].toLowerCase();
+    if (
+      /before you continue/i.test(title) ||
+      /cookie.*choice/i.test(title) ||
+      /privacy.*check/i.test(title) ||
+      /your.*privacy/i.test(title) ||
+      /verify.*human/i.test(title)
+    ) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
 export function pagesToCorpus(pages: CrawlPageResult[], scrub?: boolean): CorpusChunk[] {
   const cfg = scrub ?? loadConfig().scrubContent;
   const chunks: CorpusChunk[] = [];
   let pagesWithContent = 0;
   let droppedBannerPages = 0;
+  let droppedErrorPages = 0;
   let scrubbedCount = 0;
   let threatDetections = 0;
 
   for (const page of pages) {
     if (!page.success || !page.markdown) continue;
+
+    // Drop pages with 4xx status codes — these are error pages, not content.
+    // The crawler follows redirects, so a 404 that redirects to a consent wall
+    // will have the consent wall's content but still report the 4xx status.
+    if (page.statusCode !== null && page.statusCode >= 400 && page.statusCode < 500) {
+      droppedErrorPages++;
+      logger.debug(
+        { url: page.url, statusCode: page.statusCode },
+        'Dropping page with 4xx status code',
+      );
+      continue;
+    }
+
+    // Detect consent-wall redirects: a page whose URL was redirected to a
+    // known consent/analytics/tracking domain. These produce boilerplate
+    // chunks that lexically match many queries.
+    if (isConsentWallRedirect(page.url, page.markdown)) {
+      droppedBannerPages++;
+      logger.debug(
+        { url: page.url },
+        'Dropping page that redirected to consent wall',
+      );
+      continue;
+    }
+
     if (isCookieBannerPage(page.markdown)) {
       droppedBannerPages++;
       continue;
@@ -1003,10 +1080,10 @@ export function pagesToCorpus(pages: CrawlPageResult[], scrub?: boolean): Corpus
       })),
     );
   }
-  if (droppedBannerPages > 0) {
+  if (droppedBannerPages > 0 || droppedErrorPages > 0) {
     logger.warn(
-      { droppedBannerPages, totalPages: pages.length },
-      'Dropped cookie-banner pages before chunking',
+      { droppedBannerPages, droppedErrorPages, totalPages: pages.length },
+      'Dropped cookie-banner and error pages before chunking',
     );
   }
   if (scrubbedCount > 0) {
@@ -1015,11 +1092,11 @@ export function pagesToCorpus(pages: CrawlPageResult[], scrub?: boolean): Corpus
       'Content scrubbing redacted threats in pages before chunking',
     );
   }
-  if (pagesWithContent < pages.filter((p) => p.success).length - droppedBannerPages) {
+  if (pagesWithContent < pages.filter((p) => p.success).length - droppedBannerPages - droppedErrorPages) {
     logger.info(
       {
         pagesWithContent,
-        successfulPages: pages.filter((p) => p.success).length - droppedBannerPages,
+        successfulPages: pages.filter((p) => p.success).length - droppedBannerPages - droppedErrorPages,
       },
       'Some successfully crawled pages produced no meaningful chunks (likely boilerplate or empty)',
     );

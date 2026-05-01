@@ -14,6 +14,7 @@ import { loadConfig } from '../config.js';
 import { extractJobListingsFromHtml,
   extractJobLinksFromHtml,
   documentsFromJobListings,
+  calculateJobConfidence,
 } from './adapters/job.js';
 import crypto from 'node:crypto';
 import { dedupJobListings } from './jobDedup.js';
@@ -24,8 +25,53 @@ import { prepareCorpus, retrieveCorpus } from './pipeline.js';
 import {
   applySemanticByteBudget,
 } from '../semanticLimits.js';
-import type { JobListingMvp, JobSearchConstraints, JobSource } from './types/job.js';
+import type { JobListingMvp, JobSearchConstraints, JobSource, WorkMode } from './types/job.js';
 import type { GraphJobPosting, GraphCompany, GraphLocation } from './types/jobGraph.js';
+
+// ── Bot-challenge / anti-scraping page detection ─────────────────────────────
+
+/**
+ * Patterns that indicate a page is a bot-challenge, CAPTCHA, or anti-scraping
+ * interstitial rather than a real job listing. Matches against title and description.
+ */
+const BOT_CHALLENGE_PATTERNS: RegExp[] = [
+  /help\s+us\s+protect/i,
+  /verify\s+you\s+are\s+(?:a\s+)?human/i,
+  /unusual\s+traffic/i,
+  /access\s+(?:denied|blocked)/i,
+  /captcha/i,
+  /are\s+you\s+a\s+robot/i,
+  /please\s+verify/i,
+  /security\s+check/i,
+  /blocked\s+(?:because|due)/i,
+  /too\s+many\s+requests/i,
+  /rate\s+limit/i,
+  /cloudflare/i,
+  /incapsula/i,
+  /perimeterx/i,
+  /datadome/i,
+  /akamai/i,
+  /distil\s+networks/i,
+];
+
+/**
+ * Detect whether a job record is likely a bot-challenge or anti-scraping page
+ * rather than a real job listing. Checks the title and description for known
+ * bot-challenge patterns.
+ */
+function isBotChallengePage(record: RawJobRecord): boolean {
+  const text = [record.title, record.description ?? '']
+    .filter((s): s is string => s !== undefined)
+    .join(' ');
+  if (BOT_CHALLENGE_PATTERNS.some((p) => p.test(text))) return true;
+
+  // Short title with no description is suspicious from known adversarial sources
+  if (record.site === 'glassdoor' && record.title.length < 30 && !record.description) {
+    return true;
+  }
+
+  return false;
+}
 
 export interface RawJobRecord {
   id?: string;
@@ -152,7 +198,16 @@ export class JobPipeline {
   normalize(records: RawJobRecord[], _query: string): PipelineJobRecord[] {
     logger.info({ tool: 'job_pipeline', stage: 'normalization', inputCount: records.length, query: _query }, 'Starting normalization');
 
-    const mvpListings = records.map(r => this.mapPipelineToMvp(this.mapMvpToPipeline(this.mapRawToMvp(r))));
+    // Filter bot-challenge / anti-scraping pages before any processing
+    const cleanRecords = records.filter((r) => !isBotChallengePage(r));
+    if (cleanRecords.length < records.length) {
+      logger.info(
+        { tool: 'job_pipeline', stage: 'normalization', filtered: records.length - cleanRecords.length },
+        'Filtered bot-challenge / anti-scraping pages',
+      );
+    }
+
+    const mvpListings = cleanRecords.map(r => this.mapPipelineToMvp(this.mapMvpToPipeline(this.mapRawToMvp(r))));
     const dedupedMvp = dedupJobListings(mvpListings);
 
     const pipelineRecords = dedupedMvp.map(mvp => {
@@ -480,20 +535,28 @@ export class JobPipeline {
   }
 
   private mapRawToMvp(r: RawJobRecord): JobListingMvp {
+    const workMode: WorkMode = r.isRemote ? 'remote' : 'unknown';
+    const salaryRaw = r.salaryMin !== undefined && r.salaryMax !== undefined
+      ? `${String(r.salaryMin)} - ${String(r.salaryMax)} ${r.salaryCurrency ?? ''}`
+      : undefined;
+    const confidence = calculateJobConfidence({
+      title: r.title,
+      location: r.location,
+      workMode,
+      salaryRaw,
+    });
     const mvp: JobListingMvp = {
       title: r.title,
-      workMode: r.isRemote ? 'remote' : 'unknown',
+      workMode,
       source: (r.site as JobSource | undefined) ?? 'other',
       extractedText: r.description ?? '',
-      confidence: { title: 1, location: 0.5, workMode: 0.5, salary: 0.5, overall: 0.5 },
+      confidence,
       verificationStatus: 'aggregator_result',
       caveats: [],
     };
     if (r.company !== undefined) mvp.company = r.company;
     if (r.location !== undefined) mvp.location = r.location;
-    if (r.salaryMin !== undefined && r.salaryMax !== undefined) {
-      mvp.salaryRaw = `${String(r.salaryMin)} - ${String(r.salaryMax)} ${r.salaryCurrency ?? ''}`;
-    }
+    if (salaryRaw) mvp.salaryRaw = salaryRaw;
     mvp.sourceUrl = r.jobUrl;
     if (r.id !== undefined) mvp.jobId = r.id;
     if (r.datePosted !== undefined) mvp.postedRaw = r.datePosted;
@@ -524,20 +587,27 @@ export class JobPipeline {
   }
 
   private mapPipelineToMvp(p: PipelineJobRecord): JobListingMvp {
+    const salaryRaw = p.salaryMin !== undefined && p.salaryMax !== undefined
+      ? `${String(p.salaryMin)} - ${String(p.salaryMax)} ${p.salaryCurrency ?? ''}`
+      : undefined;
+    const confidence = calculateJobConfidence({
+      title: p.title,
+      location: p.location,
+      workMode: p.workMode,
+      salaryRaw,
+    });
     const mvp: JobListingMvp = {
       title: p.title,
       workMode: p.workMode,
       source: (p.site as JobSource | undefined) ?? 'other',
       extractedText: p.description ?? '',
-      confidence: { title: 1, location: 0.5, workMode: 0.5, salary: 0.5, overall: p.confidence },
+      confidence,
       verificationStatus: 'aggregator_result',
       caveats: p.caveats,
     };
     if (p.company !== undefined) mvp.company = p.company;
     if (p.location !== undefined) mvp.location = p.location;
-    if (p.salaryMin !== undefined && p.salaryMax !== undefined) {
-      mvp.salaryRaw = `${String(p.salaryMin)} - ${String(p.salaryMax)} ${p.salaryCurrency ?? ''}`;
-    }
+    if (salaryRaw) mvp.salaryRaw = salaryRaw;
     mvp.sourceUrl = p.jobUrl;
     if (p.id !== undefined) mvp.jobId = p.id;
     if (p.datePosted !== undefined) mvp.postedRaw = p.datePosted;
