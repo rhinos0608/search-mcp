@@ -70,47 +70,66 @@ export function detectChallenge(
   _headers: Record<string, string>,
   body?: string,
   latencyMs?: number,
+  latencyThreshold = 5000,
 ): ChallengeResult {
-  // Status-code-based detection
+  let score = 0;
+  let type: ChallengeResult['type'];
+  let detail: string | undefined;
+
+  // Status-code-based detection (Strong signal)
   if (statusCode === 403) {
-    return { isChallenge: true, type: 'status', detail: 'HTTP 403 Forbidden' };
-  }
-  if (statusCode === 429) {
-    return { isChallenge: true, type: 'status', detail: 'HTTP 429 Too Many Requests' };
-  }
-
-  // Latency-based detection (unusually fast response with challenge status is suspicious)
-  if (latencyMs !== undefined && latencyMs > 5000) {
-    return {
-      isChallenge: true,
-      type: 'latency',
-      detail: `Response latency ${String(latencyMs)}ms exceeds 5000ms threshold`,
-    };
+    score += 10;
+    type = 'status';
+    detail = 'HTTP 403 Forbidden';
+  } else if (statusCode === 429) {
+    score += 10;
+    type = 'status';
+    detail = 'HTTP 429 Too Many Requests';
   }
 
-  // HTML-fingerprint-based detection (check specific patterns before general domain check)
-  if (body !== undefined && body.length > 0) {
-    // 1. CAPTCHA iframe — most specific
+  // Latency-based detection (Weak signal)
+  // Unusually slow response can be an indicator when paired with other signals.
+  if (latencyMs !== undefined && latencyMs > latencyThreshold) {
+    score += 2;
+    if (!type) {
+      type = 'latency';
+      detail = `Response latency ${String(latencyMs)}ms exceeds ${String(latencyThreshold)}ms threshold`;
+    }
+  }
+
+  // HTML-fingerprint-based detection
+  if (body !== undefined) {
+    // 1. Empty or very short body (Suspicious/Strong signal depending on context)
+    if (body.length < 200) {
+      score += 5; // Weak signal on its own
+    }
+
+    // 2. CAPTCHA iframe — most specific (Strong signal)
     if (CAPTCHA_IFRAME.test(body)) {
-      return { isChallenge: true, type: 'captcha', detail: 'CAPTCHA iframe detected in HTML' };
+      score += 10;
+      type = 'captcha';
+      detail = 'CAPTCHA iframe detected in HTML';
     }
 
-    // 2. Challenge script tags
+    // 3. Challenge script tags (Strong signal)
     if (CHALLENGE_SCRIPT.test(body)) {
-      return { isChallenge: true, type: 'script', detail: 'Challenge script tag detected in HTML' };
+      score += 10;
+      type ??= 'script';
+      detail ??= 'Challenge script tag detected in HTML';
     }
 
-    // 3. Generic challenge domain redirect (short body suggests redirect page)
-    if (CHALLENGE_DOMAINS.test(body) && body.length < 5000) {
-      return {
-        isChallenge: true,
-        type: 'redirect',
-        detail: 'Challenge domain detected in response',
-      };
+    // 4. Generic challenge domain (Strong signal if body is short/suspicious)
+    if (CHALLENGE_DOMAINS.test(body)) {
+      score += body.length < 5000 ? 10 : 5;
+      type ??= 'redirect';
+      detail ??= 'Challenge domain detected in response';
     }
   }
 
-  return { isChallenge: false };
+  return {
+    isChallenge: score >= 10,
+    ...(score >= 10 ? { type, detail } : {}),
+  } as ChallengeResult;
 }
 
 // ── Backoff ─────────────────────────────────────────────────────────────────

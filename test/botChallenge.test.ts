@@ -74,10 +74,17 @@ test('detectChallenge: challenge domain in short body', () => {
   assert.equal(result.type, 'redirect');
 });
 
-test('detectChallenge: high latency triggers detection', () => {
+test('detectChallenge: high latency alone does not trigger detection', () => {
   const result = detectChallenge(200, {}, '<html>slow page</html>', 6000);
+  assert.equal(result.isChallenge, false);
+});
+
+test('detectChallenge: high latency + challenge fingerprint triggers detection', () => {
+  const body = '<html>slow page with <iframe src="captcha"></html>';
+  const result = detectChallenge(200, {}, body, 6000);
+  // Latency (2) + Fingerprint (10) = 12.
   assert.equal(result.isChallenge, true);
-  assert.equal(result.type, 'latency');
+  assert.equal(result.type, 'captcha'); // fingerprint dominates latency
 });
 
 test('detectChallenge: normal latency does not trigger', () => {
