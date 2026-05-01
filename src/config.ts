@@ -79,13 +79,13 @@ const DEFAULT_RESCORE_WEIGHTS: RescoreConfig = {
 };
 
 export interface GitHubConfig {
-  token: string;
+  token?: string;
 }
 
 export interface RedditConfig {
-  clientId: string;
-  clientSecret: string;
-  userAgent: string;
+  clientId?: string;
+  clientSecret?: string;
+  userAgent?: string;
   /** True iff both clientId and clientSecret are present. */
   oauthEnabled: boolean;
   /** False iff exactly one of clientId/clientSecret is present (partial config). */
@@ -93,17 +93,18 @@ export interface RedditConfig {
 }
 
 export interface ExaConfig {
-  apiKey: string;
+  apiKey?: string;
 }
 
 export interface Crawl4aiConfig {
   baseUrl: string;
-  apiToken: string;
+  apiToken?: string;
 }
 
 export interface EmbeddingSidecarConfig {
+  provider: 'sidecar' | 'ollama' | 'transformers' | 'openai';
   baseUrl: string;
-  apiToken: string;
+  apiToken?: string;
   dimensions: number;
   codeModel: string;
 }
@@ -121,7 +122,7 @@ export interface DomainTrustConfig {
 
 export interface LlmConfig {
   provider: string;
-  apiToken: string;
+  apiToken?: string;
   baseUrl: string;
 }
 
@@ -136,15 +137,15 @@ export interface RAGAConfig {
 
 export interface SearchConfig {
   searchBackend: SearchBackend;
-  brave: { apiKey: string };
+  brave: { apiKey?: string };
   searxng: { baseUrl: string };
   exa: ExaConfig;
   nitter: { baseUrl: string };
-  listennotes: { apiKey: string };
-  producthunt: { apiToken: string };
-  patentsview: { apiKey: string };
-  youtube: { apiKey: string };
-  stackexchange: { apiKey: string };
+  listennotes: { apiKey?: string };
+  producthunt: { apiToken?: string };
+  patentsview: { apiKey?: string };
+  youtube: { apiKey?: string };
+  stackexchange: { apiKey?: string };
   github: GitHubConfig;
   reddit: RedditConfig;
   crawl4ai: Crawl4aiConfig;
@@ -155,7 +156,7 @@ export interface SearchConfig {
   llm: LlmConfig;
   raga: RAGAConfig;
   duckduckgo: { region: string; safeSearch: string };
-  ollamaSearch: { baseUrl: string; apiKey: string };
+  ollamaSearch: { baseUrl: string; apiKey?: string };
   rescoreWeights: RescoreConfig;
 }
 
@@ -180,6 +181,7 @@ const DEFAULTS: Omit<SearchConfig, 'rescoreWeights'> = {
   },
   crawl4ai: { baseUrl: '', apiToken: '' },
   embeddingSidecar: {
+    provider: 'sidecar',
     baseUrl: '',
     apiToken: '',
     dimensions: 768,
@@ -348,17 +350,20 @@ function loadFromEnv(): EnvConfig {
     cfg.crawl4ai = crawl4aiCfg;
   }
 
+  const embeddingProvider = (process.env.EMBEDDING_PROVIDER?.toLowerCase().trim() || 'sidecar') as EmbeddingSidecarConfig['provider'];
   const embeddingSidecarUrl = process.env.EMBEDDING_SIDECAR_BASE_URL;
   const embeddingSidecarToken = process.env.EMBEDDING_SIDECAR_API_TOKEN;
   const embeddingDimensions = process.env.EMBEDDING_DIMENSIONS;
   const embeddingCodeModel = process.env.EMBEDDING_CODE_MODEL;
   if (
+    embeddingProvider !== 'sidecar' ||
     embeddingSidecarUrl !== undefined ||
     embeddingSidecarToken !== undefined ||
     embeddingDimensions !== undefined ||
     embeddingCodeModel !== undefined
   ) {
     const esc: Partial<EmbeddingSidecarConfig> = {};
+    if (embeddingProvider !== 'sidecar') esc.provider = embeddingProvider;
     if (embeddingSidecarUrl !== undefined) esc.baseUrl = embeddingSidecarUrl;
     if (embeddingSidecarToken !== undefined) esc.apiToken = embeddingSidecarToken;
     if (embeddingDimensions !== undefined) {
@@ -476,26 +481,45 @@ export function loadConfig(): SearchConfig {
   if (cached) return cached;
 
   let fileConfig: EnvConfig = {};
-
   const encPath = join(PKG_ROOT, 'config.enc');
+  const jsonPath = join(PKG_ROOT, 'config.json');
   const configKey = process.env.SEARCH_MCP_CONFIG_KEY;
+
+  if (existsSync(jsonPath)) {
+    try {
+      fileConfig = JSON.parse(readFileSync(jsonPath, 'utf8')) as EnvConfig;
+      logger.info('Loaded base config from config.json');
+    } catch (err) {
+      logger.warn({ err }, 'Failed to parse config.json');
+    }
+  }
 
   if (existsSync(encPath) && configKey) {
     try {
-      fileConfig = decryptConfigFile(encPath, configKey);
+      const encryptedConfig = decryptConfigFile(encPath, configKey);
+      // Deep merge encrypted config over JSON config with safety checks
+      fileConfig = {
+        ...fileConfig,
+        ...encryptedConfig,
+        github: { 
+          ...(fileConfig.github || {}), 
+          ...(encryptedConfig.github || {}) 
+        },
+        reddit: { 
+          ...(fileConfig.reddit || {}), 
+          ...(encryptedConfig.reddit || {}) 
+        },
+        embeddingSidecar: { 
+          ...(fileConfig.embeddingSidecar || {}), 
+          ...(encryptedConfig.embeddingSidecar || {}) 
+        },
+      };
       logger.info(
-        { hasToken: fileConfig.github?.token ? true : false },
-        'Loaded encrypted config from config.enc',
+        { hasToken: !!encryptedConfig.github?.token },
+        'Merged encrypted config from config.enc',
       );
     } catch (err) {
-      logger.warn({ err }, 'Failed to decrypt config.enc — falling back to env vars');
-    }
-  } else {
-    if (!existsSync(encPath)) {
-      logger.debug('No config.enc found');
-    }
-    if (!configKey) {
-      logger.debug('No SEARCH_MCP_CONFIG_KEY env var set');
+      logger.warn({ err }, 'Failed to decrypt config.enc — falling back to base config');
     }
   }
 
@@ -504,14 +528,14 @@ export function loadConfig(): SearchConfig {
   cached = {
     searchBackend: fileConfig.searchBackend ?? envConfig.searchBackend ?? DEFAULTS.searchBackend,
     brave: {
-      apiKey: fileConfig.brave?.apiKey ?? envConfig.brave?.apiKey ?? DEFAULTS.brave.apiKey,
+      apiKey: fileConfig.brave?.apiKey ?? envConfig.brave?.apiKey ?? DEFAULTS.brave.apiKey ?? '',
     },
     searxng: {
       baseUrl:
         fileConfig.searxng?.baseUrl ?? envConfig.searxng?.baseUrl ?? DEFAULTS.searxng.baseUrl,
     },
     exa: {
-      apiKey: fileConfig.exa?.apiKey ?? envConfig.exa?.apiKey ?? DEFAULTS.exa.apiKey,
+      apiKey: fileConfig.exa?.apiKey ?? envConfig.exa?.apiKey ?? DEFAULTS.exa.apiKey ?? '',
     },
     nitter: {
       baseUrl: fileConfig.nitter?.baseUrl ?? envConfig.nitter?.baseUrl ?? DEFAULTS.nitter.baseUrl,
@@ -520,40 +544,52 @@ export function loadConfig(): SearchConfig {
       apiKey:
         fileConfig.listennotes?.apiKey ??
         envConfig.listennotes?.apiKey ??
-        DEFAULTS.listennotes.apiKey,
+        DEFAULTS.listennotes.apiKey ??
+        '',
     },
     producthunt: {
       apiToken:
         fileConfig.producthunt?.apiToken ??
         envConfig.producthunt?.apiToken ??
-        DEFAULTS.producthunt.apiToken,
+        DEFAULTS.producthunt.apiToken ??
+        '',
     },
     patentsview: {
       apiKey:
         fileConfig.patentsview?.apiKey ??
         envConfig.patentsview?.apiKey ??
-        DEFAULTS.patentsview.apiKey,
+        DEFAULTS.patentsview.apiKey ??
+        '',
     },
     youtube: {
-      apiKey: fileConfig.youtube?.apiKey ?? envConfig.youtube?.apiKey ?? DEFAULTS.youtube.apiKey,
+      apiKey:
+        fileConfig.youtube?.apiKey ?? envConfig.youtube?.apiKey ?? DEFAULTS.youtube.apiKey ?? '',
     },
     stackexchange: {
       apiKey:
         fileConfig.stackexchange?.apiKey ??
         envConfig.stackexchange?.apiKey ??
-        DEFAULTS.stackexchange.apiKey,
+        DEFAULTS.stackexchange.apiKey ??
+        '',
     },
     github: {
-      token: fileConfig.github?.token ?? envConfig.github?.token ?? DEFAULTS.github.token,
+      token: fileConfig.github?.token ?? envConfig.github?.token ?? DEFAULTS.github.token ?? '',
     },
     reddit: resolveRedditConfig(fileConfig.reddit, envConfig.reddit),
     crawl4ai: {
       baseUrl:
         fileConfig.crawl4ai?.baseUrl ?? envConfig.crawl4ai?.baseUrl ?? DEFAULTS.crawl4ai.baseUrl,
       apiToken:
-        fileConfig.crawl4ai?.apiToken ?? envConfig.crawl4ai?.apiToken ?? DEFAULTS.crawl4ai.apiToken,
+        fileConfig.crawl4ai?.apiToken ??
+        envConfig.crawl4ai?.apiToken ??
+        DEFAULTS.crawl4ai.apiToken ??
+        '',
     },
     embeddingSidecar: {
+      provider:
+        fileConfig.embeddingSidecar?.provider ??
+        envConfig.embeddingSidecar?.provider ??
+        DEFAULTS.embeddingSidecar.provider,
       baseUrl:
         fileConfig.embeddingSidecar?.baseUrl ??
         envConfig.embeddingSidecar?.baseUrl ??
@@ -561,7 +597,8 @@ export function loadConfig(): SearchConfig {
       apiToken:
         fileConfig.embeddingSidecar?.apiToken ??
         envConfig.embeddingSidecar?.apiToken ??
-        DEFAULTS.embeddingSidecar.apiToken,
+        DEFAULTS.embeddingSidecar.apiToken ??
+        '',
       dimensions:
         fileConfig.embeddingSidecar?.dimensions ??
         envConfig.embeddingSidecar?.dimensions ??
@@ -598,7 +635,7 @@ export function loadConfig(): SearchConfig {
     scrubContent: fileConfig.scrubContent ?? envConfig.scrubContent ?? DEFAULTS.scrubContent,
     llm: {
       provider: fileConfig.llm?.provider ?? envConfig.llm?.provider ?? DEFAULTS.llm.provider,
-      apiToken: fileConfig.llm?.apiToken ?? envConfig.llm?.apiToken ?? DEFAULTS.llm.apiToken,
+      apiToken: fileConfig.llm?.apiToken ?? envConfig.llm?.apiToken ?? DEFAULTS.llm.apiToken ?? '',
       baseUrl: fileConfig.llm?.baseUrl ?? envConfig.llm?.baseUrl ?? DEFAULTS.llm.baseUrl,
     },
     raga: {
@@ -630,7 +667,8 @@ export function loadConfig(): SearchConfig {
       apiKey:
         fileConfig.ollamaSearch?.apiKey ??
         envConfig.ollamaSearch?.apiKey ??
-        DEFAULTS.ollamaSearch.apiKey,
+        DEFAULTS.ollamaSearch.apiKey ??
+        '',
     },
     rescoreWeights: DEFAULT_RESCORE_WEIGHTS,
   };
@@ -671,16 +709,23 @@ function resolveRedditConfig(
 ): RedditConfig {
   // Trim whitespace so values like `REDDIT_CLIENT_ID=' '` (common with
   // misquoted .env lines) are treated as unset rather than partial config.
-  const clientId = (fileReddit?.clientId ?? envReddit?.clientId ?? DEFAULTS.reddit.clientId).trim();
+  const clientId = (
+    fileReddit?.clientId ??
+    envReddit?.clientId ??
+    DEFAULTS.reddit.clientId ??
+    ''
+  ).trim();
   const clientSecret = (
     fileReddit?.clientSecret ??
     envReddit?.clientSecret ??
-    DEFAULTS.reddit.clientSecret
+    DEFAULTS.reddit.clientSecret ??
+    ''
   ).trim();
   const userAgent = (
     fileReddit?.userAgent ??
     envReddit?.userAgent ??
-    DEFAULTS.reddit.userAgent
+    DEFAULTS.reddit.userAgent ??
+    ''
   ).trim();
 
   const hasId = clientId !== '';

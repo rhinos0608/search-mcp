@@ -39,19 +39,19 @@ const GATED_TOOLS: Record<string, GateRule> = {
     remediation: 'Set NITTER_BASE_URL environment variable pointing to a Nitter instance.',
   },
   youtube_search: {
-    check: (cfg) => cfg.youtube.apiKey.length > 0,
+    check: (cfg) => (cfg.youtube.apiKey ?? '').length > 0,
     remediation: 'Set YOUTUBE_API_KEY environment variable (Google Cloud Console).',
   },
   producthunt_search: {
-    check: (cfg) => cfg.producthunt.apiToken.length > 0,
+    check: (cfg) => (cfg.producthunt.apiToken ?? '').length > 0,
     remediation: 'Set PRODUCTHUNT_API_TOKEN environment variable.',
   },
   patent_search: {
-    check: (cfg) => cfg.patentsview.apiKey.length > 0,
+    check: (cfg) => (cfg.patentsview.apiKey ?? '').length > 0,
     remediation: 'Set PATENTSVIEW_API_KEY environment variable (free at patentsview.org).',
   },
   podcast_search: {
-    check: (cfg) => cfg.listennotes.apiKey.length > 0,
+    check: (cfg) => (cfg.listennotes.apiKey ?? '').length > 0,
     remediation: 'Set LISTENNOTES_API_KEY environment variable.',
   },
   web_crawl: {
@@ -65,7 +65,8 @@ const GATED_TOOLS: Record<string, GateRule> = {
       'Set CRAWL4AI_BASE_URL and EMBEDDING_SIDECAR_BASE_URL. The embedding sidecar requires a running crawl4ai sidecar.',
   },
   semantic_youtube: {
-    check: (cfg) => cfg.youtube.apiKey.length > 0 && cfg.embeddingSidecar.baseUrl.length > 0,
+    check: (cfg) =>
+      (cfg.youtube.apiKey ?? '').length > 0 && cfg.embeddingSidecar.baseUrl.length > 0,
     remediation:
       'Set YOUTUBE_API_KEY (Google Cloud Console) and EMBEDDING_SIDECAR_BASE_URL to use semantic_youtube.',
   },
@@ -76,7 +77,9 @@ const GATED_TOOLS: Record<string, GateRule> = {
   semantic_jobs: {
     check: (cfg) =>
       cfg.embeddingSidecar.baseUrl.length > 0 &&
-      (cfg.exa.apiKey.length > 0 || cfg.brave.apiKey.length > 0 || cfg.searxng.baseUrl.length > 0),
+      ((cfg.exa.apiKey ?? '').length > 0 ||
+        (cfg.brave.apiKey ?? '').length > 0 ||
+        cfg.searxng.baseUrl.length > 0),
     remediation:
       'Set EMBEDDING_SIDECAR_BASE_URL and a search backend (EXA_API_KEY, BRAVE_API_KEY, or SEARXNG_BASE_URL) to use semantic_jobs.',
   },
@@ -93,12 +96,14 @@ interface OptionalRule {
 const OPTIONAL_CONFIG: Record<string, OptionalRule> = {
   web_search: {
     check: (cfg) =>
-      cfg.exa.apiKey.length > 0 || cfg.brave.apiKey.length > 0 || cfg.searxng.baseUrl.length > 0,
+      (cfg.exa.apiKey ?? '').length > 0 ||
+      (cfg.brave.apiKey ?? '').length > 0 ||
+      cfg.searxng.baseUrl.length > 0,
     degradedMessage: 'No search backend configured — web_search calls will fail.',
     remediation: 'Set EXA_API_KEY, BRAVE_API_KEY, or SEARXNG_BASE_URL environment variable.',
   },
   stackoverflow_search: {
-    check: (cfg) => cfg.stackexchange.apiKey.length > 0,
+    check: (cfg) => (cfg.stackexchange.apiKey ?? '').length > 0,
     degradedMessage: 'No API key — limited to 300 requests/day (shared IP quota).',
     remediation: 'Set STACKEXCHANGE_API_KEY for 10,000 requests/day (free at stackapps.com).',
   },
@@ -166,11 +171,14 @@ export function configHealth(cfg: SearchConfig): Record<string, ToolHealth> {
   // OAuth posture without inferring from reddit_search / reddit_comments.
   report.reddit_oauth = redditOAuthHealth(cfg);
 
+  // Synthesized RAG-Anything bridge indicator.
+  report.raga_bridge = ragaBridgeHealth(cfg);
+
   return report;
 }
 
 function redditOAuthHealth(cfg: SearchConfig): ToolHealth {
-  const hasId = cfg.reddit.clientId !== '';
+  const hasId = (cfg.reddit.clientId ?? '') !== '';
 
   if (!cfg.reddit.oauthConfigValid) {
     // Partial config: exactly one of clientId / clientSecret is present.
@@ -196,6 +204,32 @@ function redditOAuthHealth(cfg: SearchConfig): ToolHealth {
       'Reddit OAuth not configured (using public Reddit JSON API, ~10 QPM unauthenticated quota).',
     remediation:
       'Set REDDIT_CLIENT_ID and REDDIT_CLIENT_SECRET to enable OAuth and raise the quota to 100 QPM.',
+  };
+}
+
+function ragaBridgeHealth(cfg: SearchConfig): ToolHealth {
+  if (!cfg.raga.enabled) {
+    return {
+      status: 'unconfigured',
+      message:
+        'RAG-Anything bridge is disabled. Set RAGA_ENABLED=true to enable multimodal document extraction (PDF, Office, OCR).',
+      remediation:
+        'Set RAGA_ENABLED=true and RAGA_BRIDGE_URL to point at a running rag-anything-bridge service.',
+    };
+  }
+
+  if (!cfg.raga.baseUrl || cfg.raga.baseUrl.length === 0) {
+    return {
+      status: 'degraded',
+      message: 'RAG-Anything bridge is enabled but RAGA_BRIDGE_URL is not set.',
+      remediation:
+        'Set RAGA_BRIDGE_URL to point at the rag-anything-bridge service (e.g. http://localhost:8002).',
+    };
+  }
+
+  return {
+    status: 'healthy',
+    message: `RAG-Anything bridge configured at ${cfg.raga.baseUrl} (parser: ${cfg.raga.defaultParser}).`,
   };
 }
 
@@ -247,16 +281,16 @@ async function probeExtractionSupport(
   apiToken: string,
 ): Promise<ToolHealth> {
   const endpoint = `${crawl4aiBaseUrl.replace(/\/+$/, '')}/crawl`;
+  // Single-page crawl of a stable URL for extraction support probe.
+  // We use a real URL because data: URIs can trigger cookie validation
+  // errors in Playwright/Crawl4AI.
   const body = {
-    urls: ['data:text/html,<html><body><div class="item">Test</div></body></html>'],
+    urls: ['https://example.com'],
     browser_config: { type: 'BrowserConfig', params: { headless: true } },
     crawler_config: {
       type: 'CrawlerRunConfig',
       params: {
-        deep_crawl_strategy: {
-          type: 'BFSDeepCrawlStrategy',
-          params: { max_depth: 1, max_pages: 1, include_external: false },
-        },
+        bypass_cache: true,
       },
     },
     extraction_config: {
@@ -264,8 +298,8 @@ async function probeExtractionSupport(
       params: {
         schema: {
           name: 'Health Probe',
-          baseSelector: '.item',
-          fields: [{ name: 'text', selector: '.item', type: 'text' }],
+          baseSelector: 'h1',
+          fields: [{ name: 'text', selector: 'h1', type: 'text' }],
         },
       },
     },
@@ -394,6 +428,15 @@ export function getNetworkProbes(cfg: SearchConfig): NetworkProbe[] {
     });
   }
 
+  // RAG-Anything bridge (multimodal document extraction)
+  if (cfg.raga.enabled && cfg.raga.baseUrl.length > 0) {
+    probes.push({
+      label: 'raga-bridge',
+      url: `${cfg.raga.baseUrl.replace(/\/+$/, '')}/health`,
+      tools: ['web_read', 'raga_bridge'],
+    });
+  }
+
   return probes;
 }
 
@@ -458,11 +501,21 @@ export async function runHealthProbes(cfg: SearchConfig): Promise<HealthReport> 
       for (const tool of probe.tools) {
         const existing = tools[tool];
         if (existing === undefined || existing.status === 'unconfigured') continue;
-        tools[tool] = {
-          status: 'unreachable',
-          message: `${probe.label} probe failed: ${msg}`,
-          remediation: 'Check network connectivity or upstream API status.',
-        };
+        // web_read always works via Readability fallback; other backends
+        // (crawl4ai, raga) are enhancements — degrade instead of unreachable.
+        if (tool === 'web_read') {
+          tools[tool] = {
+            status: 'degraded',
+            message: `${probe.label} probe failed: ${msg} (Readability fallback still available).`,
+            remediation: `Check the ${probe.label} service. Readability-based extraction will be used as fallback.`,
+          };
+        } else {
+          tools[tool] = {
+            status: 'unreachable',
+            message: `${probe.label} probe failed: ${msg}`,
+            remediation: 'Check network connectivity or upstream API status.',
+          };
+        }
       }
     }
   }
@@ -471,7 +524,7 @@ export async function runHealthProbes(cfg: SearchConfig): Promise<HealthReport> 
   if (cfg.crawl4ai.baseUrl.length > 0) {
     const extractionHealth = await probeExtractionSupport(
       cfg.crawl4ai.baseUrl,
-      cfg.crawl4ai.apiToken,
+      cfg.crawl4ai.apiToken ?? '',
     );
     tools.web_crawl_extraction = extractionHealth;
     tools.semantic_crawl_extraction = extractionHealth;

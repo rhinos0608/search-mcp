@@ -114,7 +114,7 @@ function buildLlmFallback(
   if (extractionConfig?.type !== 'llm') return undefined;
   return {
     provider: extractionConfig.llmProvider ?? llm.provider,
-    apiToken: llm.apiToken,
+    apiToken: llm.apiToken ?? '',
     ...(llm.baseUrl ? { baseUrl: llm.baseUrl } : {}),
   };
 }
@@ -341,8 +341,9 @@ export function createServer(): McpServer {
       logger.info({ tool: 'web_read' }, 'Tool invoked');
       const start = Date.now();
       try {
-        if (extractionConfig) {
-          validateExtractionConfig(extractionConfig, cfg.llm);
+        if (extractionConfig && cfg.llm.apiToken) {
+          const { apiToken, ...rest } = cfg.llm;
+          validateExtractionConfig(extractionConfig, { apiToken, ...rest });
         }
 
         let data: import('./types.js').WebCrawlResult;
@@ -376,7 +377,7 @@ export function createServer(): McpServer {
           );
         } else if (cfg.crawl4ai.baseUrl) {
           const llmFallback = buildLlmFallback(extractionConfig, cfg.llm);
-          data = await webCrawl(url, cfg.crawl4ai.baseUrl, cfg.crawl4ai.apiToken, {
+          data = await webCrawl(url, cfg.crawl4ai.baseUrl, cfg.crawl4ai.apiToken ?? '', {
             strategy,
             maxDepth,
             maxPages,
@@ -1021,7 +1022,7 @@ export function createServer(): McpServer {
         logger.info({ tool: 'producthunt_search', sort, limit }, 'Tool invoked');
         const start = Date.now();
         try {
-          const data = await producthuntSearch(query, cfg.producthunt.apiToken, sort, limit);
+          const data = await producthuntSearch(query, cfg.producthunt.apiToken ?? '', sort, limit);
           const result = makeResult('producthunt_search', data, Date.now() - start);
           return successResponse(result);
         } catch (err: unknown) {
@@ -1061,7 +1062,7 @@ export function createServer(): McpServer {
         logger.info({ tool: 'patent_search', assignee, limit }, 'Tool invoked');
         const start = Date.now();
         try {
-          const data = await patentSearch(query, cfg.patentsview.apiKey, assignee, limit);
+          const data = await patentSearch(query, cfg.patentsview.apiKey ?? '', assignee, limit);
           const result = makeResult('patent_search', data, Date.now() - start);
           return successResponse(result);
         } catch (err: unknown) {
@@ -1099,7 +1100,7 @@ export function createServer(): McpServer {
         logger.info({ tool: 'podcast_search', sort, limit }, 'Tool invoked');
         const start = Date.now();
         try {
-          const data = await podcastSearch(query, cfg.listennotes.apiKey, sort, limit);
+          const data = await podcastSearch(query, cfg.listennotes.apiKey ?? '', sort, limit);
           const result = makeResult('podcast_search', data, Date.now() - start);
           return successResponse(result);
         } catch (err: unknown) {
@@ -1243,7 +1244,7 @@ export function createServer(): McpServer {
         logger.info({ tool: 'youtube_search', order, limit }, 'Tool invoked');
         const start = Date.now();
         try {
-          const data = await youtubeSearch(query, cfg.youtube.apiKey, order, limit);
+          const data = await youtubeSearch(query, cfg.youtube.apiKey ?? '', order, limit);
           const result = makeResult('youtube_search', data, Date.now() - start);
           return successResponse(result);
         } catch (err: unknown) {
@@ -1317,9 +1318,9 @@ export function createServer(): McpServer {
         try {
           const data = await semanticYoutube({
             query,
-            apiKey: cfg.youtube.apiKey,
+            apiKey: cfg.youtube.apiKey ?? '',
             embeddingBaseUrl: cfg.embeddingSidecar.baseUrl,
-            embeddingApiToken: cfg.embeddingSidecar.apiToken || undefined,
+            embeddingApiToken: cfg.embeddingSidecar.apiToken ?? undefined,
             embeddingDimensions: cfg.embeddingSidecar.dimensions,
             maxVideos,
             channel: channel !== '' ? channel : undefined,
@@ -1434,7 +1435,7 @@ export function createServer(): McpServer {
             maxPosts,
             commentLimit,
             embeddingBaseUrl: cfg.embeddingSidecar.baseUrl,
-            embeddingApiToken: cfg.embeddingSidecar.apiToken || undefined,
+            embeddingApiToken: cfg.embeddingSidecar.apiToken ?? undefined,
             embeddingDimensions: cfg.embeddingSidecar.dimensions,
             profile,
             topK,
@@ -1697,7 +1698,7 @@ export function createServer(): McpServer {
       try {
         const data = await stackoverflowSearch(
           query,
-          cfg.stackexchange.apiKey,
+          cfg.stackexchange.apiKey ?? '',
           sort,
           tagged,
           accepted,
@@ -1871,13 +1872,14 @@ export function createServer(): McpServer {
         logger.info({ tool: 'web_crawl', url, strategy, maxDepth, maxPages }, 'Tool invoked');
         const start = Date.now();
         try {
-          if (extractionConfig) {
-            validateExtractionConfig(extractionConfig, cfg.llm);
+          if (extractionConfig && cfg.llm.apiToken) {
+            const { apiToken, ...rest } = cfg.llm;
+            validateExtractionConfig(extractionConfig, { apiToken, ...rest });
           }
 
           const llmFallback = buildLlmFallback(extractionConfig, cfg.llm);
 
-          const data = await webCrawl(url, cfg.crawl4ai.baseUrl, cfg.crawl4ai.apiToken, {
+          const data = await webCrawl(url, cfg.crawl4ai.baseUrl, cfg.crawl4ai.apiToken ?? '', {
             strategy,
             maxDepth,
             maxPages,
@@ -2086,8 +2088,9 @@ export function createServer(): McpServer {
         );
         const start = Date.now();
         try {
-          if (extractionConfig) {
-            validateExtractionConfig(extractionConfig, cfg.llm);
+          if (extractionConfig && cfg.llm.apiToken) {
+            const { apiToken, ...rest } = cfg.llm;
+            validateExtractionConfig(extractionConfig, { apiToken, ...rest });
           }
 
           const warnings: string[] = [];
@@ -2125,7 +2128,7 @@ export function createServer(): McpServer {
             },
             cfg.crawl4ai,
             cfg.embeddingSidecar.baseUrl,
-            cfg.embeddingSidecar.apiToken,
+            cfg.embeddingSidecar.apiToken ?? '',
             cfg.embeddingSidecar.dimensions,
           );
           const result = makeResult('semantic_crawl', data, Date.now() - start, {
