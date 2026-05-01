@@ -28,8 +28,6 @@ import { logger } from '../logger.js';
 
 // ── Constants ─────────────────────────────────────────────────────────────
 
-const SCHEMA_VERSION = 1;
-
 const DEFAULT_CACHE_DIR =
   process.env.SEMANTIC_CRAWL_CACHE_DIR ??
   path.join(os.homedir(), '.cache', 'search-mcp', 'semantic-crawl');
@@ -47,94 +45,203 @@ function resolveDatabasePath(): string {
 
 // ── Schema ────────────────────────────────────────────────────────────────
 
+const SCHEMA_VERSION = 2; // Incremented for new graph tables
+
+const MIGRATIONS: Record<
+  number,
+  { up: (db: BetterSqliteDatabase) => void; down: (db: BetterSqliteDatabase) => void }
+> = {
+  1: {
+    up: (db) => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS graph_job_postings (
+          job_id               TEXT PRIMARY KEY,
+          title                TEXT NOT NULL,
+          company_id           TEXT,
+          location_id          TEXT,
+          source_site          TEXT NOT NULL,
+          source_url           TEXT NOT NULL,
+          verification_status  TEXT NOT NULL DEFAULT 'pending',
+          confidence           REAL NOT NULL DEFAULT 0,
+          caveats              TEXT NOT NULL DEFAULT '[]'
+        );
+      `);
+    },
+    down: (db) => {
+      db.exec('DROP TABLE IF EXISTS graph_job_postings');
+    },
+  },
+  2: {
+    up: (db) => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS graph_companies (
+          company_id       TEXT PRIMARY KEY,
+          name            TEXT NOT NULL,
+          domain          TEXT,
+          industry        TEXT,
+          careers_page_url TEXT,
+          logo_url        TEXT,
+          first_seen_at   INTEGER NOT NULL,
+          last_seen_at    INTEGER NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS graph_locations (
+          location_id  TEXT PRIMARY KEY,
+          city         TEXT,
+          state        TEXT,
+          country      TEXT,
+          display_name TEXT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS graph_duplicate_clusters (
+          cluster_id       TEXT PRIMARY KEY,
+          canonical_job_id TEXT NOT NULL,
+          member_job_ids   TEXT NOT NULL DEFAULT '[]',
+          member_sites     TEXT NOT NULL DEFAULT '[]',
+          cluster_size    INTEGER NOT NULL DEFAULT 1,
+          first_seen_at   INTEGER NOT NULL,
+          last_seen_at    INTEGER NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS graph_job_skills (
+          job_id    TEXT NOT NULL,
+          skill_id  TEXT NOT NULL,
+          PRIMARY KEY (job_id, skill_id)
+        );
+
+        CREATE TABLE IF NOT EXISTS graph_skills (
+          skill_id  TEXT PRIMARY KEY,
+          name      TEXT NOT NULL,
+          category  TEXT
+        );
+      `);
+
+      // Add new columns to graph_job_postings if they don't exist
+      try {
+        db.exec(`
+          ALTER TABLE graph_job_postings ADD COLUMN salary_min REAL;
+          ALTER TABLE graph_job_postings ADD COLUMN salary_max REAL;
+          ALTER TABLE graph_job_postings ADD COLUMN salary_currency TEXT;
+          ALTER TABLE graph_job_postings ADD COLUMN salary_interval TEXT;
+          ALTER TABLE graph_job_postings ADD COLUMN work_mode TEXT;
+          ALTER TABLE graph_job_postings ADD COLUMN job_type TEXT;
+          ALTER TABLE graph_job_postings ADD COLUMN seniority TEXT;
+          ALTER TABLE graph_job_postings ADD COLUMN posted_at TEXT;
+          ALTER TABLE graph_job_postings ADD COLUMN description TEXT;
+          ALTER TABLE graph_job_postings ADD COLUMN extracted_text TEXT;
+        `);
+      } catch (err) {
+        // columns might already exist from half-failed initSchema in older version
+        logger.debug({ err }, 'jobGraphDb: migration v2 ALTER TABLE failed (likely columns exist)');
+      }
+    },
+    down: (db) => {
+      db.exec(`
+        DROP TABLE IF EXISTS graph_companies;
+        DROP TABLE IF EXISTS graph_locations;
+        DROP TABLE IF EXISTS graph_duplicate_clusters;
+        DROP TABLE IF EXISTS graph_job_skills;
+        DROP TABLE IF EXISTS graph_skills;
+      `);
+      // Note: SQLite doesn't support DROP COLUMN easily before 3.35.0
+    },
+  },
+};
+
+/**
+ * Migration Runner: Applies all pending migrations in a transaction.
+ */
+function runMigrations(db: BetterSqliteDatabase, currentVersion: number): void {
+  for (let v = currentVersion + 1; v <= SCHEMA_VERSION; v++) {
+    const migration = MIGRATIONS[v];
+    if (!migration) continue;
+
+    logger.info({ version: v }, 'jobGraphDb: applying migration');
+    try {
+      db.transaction(() => {
+        migration.up(db);
+        db.prepare('UPDATE schema_version SET value = ? WHERE key = ?').run(
+          String(v),
+          'schemaVersion',
+        );
+      })();
+    } catch (err) {
+      logger.error({ err, version: v }, 'jobGraphDb: migration failed; aborting');
+      throw err; // Fail-fast on migration failure
+    }
+  }
+}
+
+/**
+ * Rollback Handler: Executes down migrations for specified versions.
+ */
+export function rollbackMigrations(db: BetterSqliteDatabase, toVersion: number): void {
+  const row = db.prepare('SELECT value FROM schema_version WHERE key = ?').get('schemaVersion') as
+    | { value: string }
+    | undefined;
+  const currentVersion = row ? Number(row.value) : 0;
+
+  for (let v = currentVersion; v > toVersion; v--) {
+    const migration = MIGRATIONS[v];
+    if (!migration) continue;
+
+    logger.info({ version: v }, 'jobGraphDb: rolling back migration');
+    db.transaction(() => {
+      migration.down(db);
+      db.prepare('UPDATE schema_version SET value = ? WHERE key = ?').run(
+        String(v - 1),
+        'schemaVersion',
+      );
+    })();
+  }
+}
+
+/**
+ * Backfill Job Data: Maps existing JobPosting rows to new graph entities.
+ */
+export function backfillJobData(db: BetterSqliteDatabase): void {
+  logger.info('jobGraphDb: starting data backfill');
+  const postings = db.prepare('SELECT * FROM graph_job_postings').all() as JobPostingRow[];
+
+  db.transaction(() => {
+    for (const p of postings) {
+      if (p.company_id) {
+        // Heuristic: create company if missing
+        db.prepare(`
+          INSERT OR IGNORE INTO graph_companies (company_id, name, first_seen_at, last_seen_at)
+          VALUES (?, ?, ?, ?)
+        `).run(p.company_id, p.company_id, Date.now(), Date.now());
+      }
+    }
+  })();
+  logger.info({ count: postings.length }, 'jobGraphDb: backfill complete');
+}
+
+/**
+ * Unified schema initialization with migration support.
+ */
 function initSchema(db: BetterSqliteDatabase): void {
   db.exec(`
-    CREATE TABLE IF NOT EXISTS cache_meta (
+    CREATE TABLE IF NOT EXISTS schema_version (
       key   TEXT PRIMARY KEY,
       value TEXT NOT NULL
     );
-
-    CREATE TABLE IF NOT EXISTS graph_job_postings (
-      job_id               TEXT PRIMARY KEY,
-      title                TEXT NOT NULL,
-      company_id           TEXT,
-      location_id          TEXT,
-      source_site          TEXT NOT NULL,
-      source_url           TEXT NOT NULL,
-      salary_min           REAL,
-      salary_max           REAL,
-      salary_currency      TEXT,
-      salary_interval      TEXT,
-      work_mode            TEXT,
-      job_type             TEXT,
-      seniority            TEXT,
-      posted_at            TEXT,
-      description          TEXT,
-      extracted_text       TEXT,
-      verification_status  TEXT NOT NULL DEFAULT 'pending',
-      confidence           REAL NOT NULL DEFAULT 0,
-      caveats              TEXT NOT NULL DEFAULT '[]'
-    );
-
-    CREATE TABLE IF NOT EXISTS graph_companies (
-      company_id       TEXT PRIMARY KEY,
-      name            TEXT NOT NULL,
-      domain          TEXT,
-      industry        TEXT,
-      careers_page_url TEXT,
-      logo_url        TEXT,
-      first_seen_at   INTEGER NOT NULL,
-      last_seen_at    INTEGER NOT NULL
-    );
-
-    CREATE TABLE IF NOT EXISTS graph_locations (
-      location_id  TEXT PRIMARY KEY,
-      city         TEXT,
-      state        TEXT,
-      country      TEXT,
-      display_name TEXT NOT NULL
-    );
-
-    CREATE TABLE IF NOT EXISTS graph_duplicate_clusters (
-      cluster_id       TEXT PRIMARY KEY,
-      canonical_job_id TEXT NOT NULL,
-      member_job_ids   TEXT NOT NULL DEFAULT '[]',
-      member_sites     TEXT NOT NULL DEFAULT '[]',
-      cluster_size    INTEGER NOT NULL DEFAULT 1,
-      first_seen_at   INTEGER NOT NULL,
-      last_seen_at    INTEGER NOT NULL
-    );
-
-    CREATE TABLE IF NOT EXISTS graph_job_skills (
-      job_id    TEXT NOT NULL,
-      skill_id  TEXT NOT NULL,
-      PRIMARY KEY (job_id, skill_id)
-    );
-
-    CREATE TABLE IF NOT EXISTS graph_skills (
-      skill_id  TEXT PRIMARY KEY,
-      name      TEXT NOT NULL,
-      category  TEXT
-    );
   `);
 
-  const row = db.prepare('SELECT value FROM cache_meta WHERE key = ?').get('schemaVersion') as
+  const row = db.prepare('SELECT value FROM schema_version WHERE key = ?').get('schemaVersion') as
     | { value: string }
     | undefined;
+
   if (row === undefined) {
-    db.prepare('INSERT INTO cache_meta (key, value) VALUES (?, ?)').run(
-      'schemaVersion',
-      String(SCHEMA_VERSION),
-    );
-  } else if (Number(row.value) !== SCHEMA_VERSION) {
-    logger.warn(
-      { found: row.value, expected: SCHEMA_VERSION },
-      'jobGraphDb: schema version mismatch; existing compatible tables will be reused',
-    );
-    db.prepare('UPDATE cache_meta SET value = ? WHERE key = ?').run(
-      String(SCHEMA_VERSION),
-      'schemaVersion',
-    );
+    db.prepare('INSERT INTO schema_version (key, value) VALUES (?, ?)').run('schemaVersion', '0');
+  }
+
+  const currentVersion = row ? Number(row.value) : 0;
+  if (currentVersion < SCHEMA_VERSION) {
+    runMigrations(db, currentVersion);
+    if (currentVersion === 0) {
+      backfillJobData(db);
+    }
   }
 }
 
@@ -200,9 +307,9 @@ function parseJsonArray(value: string): string[] {
 export function insertJobPosting(
   p: GraphJobPosting,
   db?: BetterSqliteDatabase,
-): void {
+): boolean {
   const handle = db ?? getJobGraphDb();
-  if (handle === null) return;
+  if (handle === null) return false;
 
   try {
     handle.prepare(`
@@ -257,22 +364,24 @@ export function insertJobPosting(
       confidence: p.confidence,
       caveats: JSON.stringify(p.caveats),
     });
+    return true;
   } catch (err) {
     logger.error({ err, jobId: p.jobId }, 'jobGraphDb: insertJobPosting failed');
+    return false;
   }
 }
 
 /**
  * Upsert a GraphCompany record.
  *
- * On error, logs and returns without throwing.
+ * Returns true on success, false on error.
  */
 export function insertCompany(
   c: GraphCompany,
   db?: BetterSqliteDatabase,
-): void {
+): boolean {
   const handle = db ?? getJobGraphDb();
-  if (handle === null) return;
+  if (handle === null) return false;
 
   try {
     handle.prepare(`
@@ -300,8 +409,10 @@ export function insertCompany(
       first_seen_at: c.firstSeenAt,
       last_seen_at: c.lastSeenAt,
     });
+    return true;
   } catch (err) {
     logger.error({ err, companyId: c.companyId }, 'jobGraphDb: insertCompany failed');
+    return false;
   }
 }
 
@@ -503,20 +614,21 @@ export function findDuplicatesByTitleCompany(
       'SELECT job_id FROM graph_job_postings ' +
         'WHERE LOWER(title) = ? AND company_id IN (' +
         '  SELECT company_id FROM graph_companies WHERE LOWER(name) = ?' +
-        ')'
+        ')',
     );
+
+    const matchingJobs = matchingStmt.all(normalizedTitle, normalizedCompany) as {
+      job_id: string;
+    }[];
+    const matchingJobIds = new Set(matchingJobs.map((mj) => mj.job_id));
 
     const rows = handle
       .prepare('SELECT * FROM graph_duplicate_clusters')
       .all() as DuplicateClusterRow[];
 
-    return rows
-      .map(rowToDuplicateCluster)
-      .filter((cluster) => {
-        const matchingJobs = matchingStmt.all(normalizedTitle, normalizedCompany) as { job_id: string }[];
-
-        return matchingJobs.some((mj) => cluster.memberJobIds.includes(mj.job_id));
-      });
+    return rows.map(rowToDuplicateCluster).filter((cluster) => {
+      return cluster.memberJobIds.some((id) => matchingJobIds.has(id));
+    });
   } catch (err) {
     logger.error({ err, company, title }, 'jobGraphDb: findDuplicatesByTitleCompany failed');
     return [];
@@ -566,21 +678,17 @@ export function insertJobPostingsBatch(
 
   let inserted = 0;
   try {
-    const tx = handle.transaction(() => {
+    handle.transaction(() => {
       for (const p of postings) {
-        try {
-          insertJobPosting(p, handle);
+        if (insertJobPosting(p, handle)) {
           inserted++;
-        } catch {
-          // individual errors already logged in insertJobPosting
         }
       }
-    });
-    tx();
+    })();
     return { inserted, errors: postings.length - inserted };
   } catch (err) {
     logger.error({ err }, 'jobGraphDb: insertJobPostingsBatch transaction failed');
-    return { inserted, errors: postings.length };
+    return { inserted, errors: postings.length - inserted };
   }
 }
 
@@ -595,20 +703,16 @@ export function insertCompaniesBatch(
 
   let inserted = 0;
   try {
-    const tx = handle.transaction(() => {
+    handle.transaction(() => {
       for (const c of companies) {
-        try {
-          insertCompany(c, handle);
+        if (insertCompany(c, handle)) {
           inserted++;
-        } catch {
-          // individual errors already logged
         }
       }
-    });
-    tx();
+    })();
     return { inserted, errors: companies.length - inserted };
   } catch (err) {
     logger.error({ err }, 'jobGraphDb: insertCompaniesBatch transaction failed');
-    return { inserted, errors: companies.length };
+    return { inserted, errors: companies.length - inserted };
   }
 }
