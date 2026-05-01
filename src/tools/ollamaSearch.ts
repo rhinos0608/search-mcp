@@ -1,0 +1,143 @@
+/**
+ * Ollama web-search provider.
+ *
+ * Queries an Ollama-hosted web-search API to retrieve search results.
+ * Requires explicit configuration (SEARCH_OLLAMA_BASE_URL + optional
+ * SEARCH_OLLAMA_API_KEY) and is disabled by default.
+ *
+ * The API contract follows the standard pattern:
+ *   POST {baseUrl}/v1/search
+ *   Authorization: Bearer {apiKey}
+ *   Body: { "query": "...", "limit": N, "safeSearch": "..." }
+ *   Response: { "results": [{ "title": "...", "url": "...", "description": "...", ... }] }
+ */
+
+import { logger } from '../logger.js';
+import { ToolCache, cacheKey } from '../cache.js';
+import { retryWithBackoff } from '../retry.js';
+import { unavailableError, parseError } from '../errors.js';
+import type { SearchResult } from '../types.js';
+
+const cache = new ToolCache<SearchResult[]>({ maxSize: 200, ttlMs: 60 * 60 * 1000 });
+
+interface OllamaSearchConfig {
+  baseUrl: string;
+  apiKey: string;
+}
+
+interface OllamaSearchResponse {
+  results?: OllamaResultItem[];
+}
+
+interface OllamaResultItem {
+  title?: string;
+  url?: string;
+  description?: string;
+  age?: string;
+  snippet?: string;
+  domain?: string;
+}
+
+export async function ollamaSearch(
+  query: string,
+  limit = 10,
+  safeSearch: 'strict' | 'moderate' | 'off' = 'moderate',
+  config: OllamaSearchConfig,
+): Promise<SearchResult[]> {
+  logger.info({ baseUrl: config.baseUrl, limit, safeSearch }, 'Running Ollama web search');
+
+  const key = cacheKey('ollama', config.baseUrl, query, String(limit), safeSearch);
+  const cached = cache.get(key);
+  if (cached !== null) {
+    logger.debug({ cacheHit: true }, 'Ollama search cache hit');
+    return cached;
+  }
+
+  const baseUrl = config.baseUrl.replace(/\/+$/, '');
+  const searchUrl = `${baseUrl}/v1/search`;
+
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    Accept: 'application/json',
+  };
+
+  if (config.apiKey.length > 0) {
+    headers.Authorization = `Bearer ${config.apiKey}`;
+  }
+
+  const body = JSON.stringify({
+    query,
+    limit,
+    safe_screen: safeSearch,
+  });
+
+  const response = await retryWithBackoff(
+    async () => {
+      let res: Response;
+      try {
+        res = await fetch(searchUrl, {
+          method: 'POST',
+          headers,
+          body,
+          signal: AbortSignal.timeout(15_000),
+        });
+      } catch (err) {
+        // Network error — host unreachable, DNS failure, etc.
+        throw unavailableError(
+          `Ollama search host unreachable at ${baseUrl}: ${err instanceof Error ? err.message : String(err)}`,
+          { backend: 'ollama-search', retryable: true },
+        );
+      }
+
+      if (!res.ok) {
+        throw unavailableError(`Ollama search returned ${String(res.status)}: ${res.statusText}`, {
+          statusCode: res.status,
+          backend: 'ollama-search',
+        });
+      }
+
+      return res;
+    },
+    { label: 'ollama-search', maxAttempts: 2, initialDelayMs: 2000 },
+  );
+
+  let data: OllamaSearchResponse;
+  try {
+    data = (await response.json()) as OllamaSearchResponse;
+  } catch (err) {
+    throw parseError(
+      `Ollama search returned invalid JSON: ${err instanceof Error ? err.message : String(err)}`,
+      { backend: 'ollama-search' },
+    );
+  }
+
+  const results = data.results ?? [];
+  if (results.length === 0) {
+    logger.debug({ query }, 'Ollama search returned no results');
+  }
+
+  const mapped: SearchResult[] = results.slice(0, limit).map((r, i) => {
+    let domain = '';
+    try {
+      domain = r.domain ?? new URL(r.url ?? '').hostname;
+    } catch {
+      /* invalid URL — leave domain empty */
+    }
+
+    return {
+      title: r.title ?? '',
+      url: r.url ?? '',
+      description: r.snippet ?? r.description ?? '',
+      position: i + 1,
+      domain,
+      source: 'ollama-search' as const,
+      age: r.age ?? null,
+      extraSnippet: null,
+      deepLinks: null,
+    };
+  });
+
+  cache.set(key, mapped);
+  logger.info({ count: mapped.length, backend: 'ollama-search' }, 'Ollama search complete');
+  return mapped;
+}
