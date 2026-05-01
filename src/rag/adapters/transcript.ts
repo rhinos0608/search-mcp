@@ -21,6 +21,8 @@ function transcriptUrl(input: TranscriptInput): string {
 const MAX_TRANSCRIPT_CHUNK_CHARS = 1_200;
 const MAX_TRANSCRIPT_CHUNK_DURATION = 60;
 const MAX_TRANSCRIPT_CHUNK_SEGMENTS = 12;
+/** Minimum segments per chunk — groups below this are backward-merged to avoid ultra-short fragments. */
+const MIN_TRANSCRIPT_CHUNK_SEGMENTS = 3;
 
 function buildTranscriptChunk(
   input: TranscriptInput,
@@ -107,6 +109,32 @@ export function chunksFromTranscript(input: TranscriptInput): RagChunk[] {
 
   if (current.length > 0) {
     groups.push(current);
+  }
+
+  // Backward-merge pass: YouTube transcripts often end with a solitary
+  // ultra-short utterance (e.g. "retrieval quality." — 18 chars). Without
+  // a floor, that lone segment becomes its own chunk, producing unreadable
+  // fragments in retrieval results. Merge any sub-floor group into the
+  // previous group, but never merge the only group (it stands alone).
+  if (groups.length > 1) {
+    const merged: TranscriptSegmentInput[][] = [];
+    for (const group of groups) {
+      if (group.length < MIN_TRANSCRIPT_CHUNK_SEGMENTS && merged.length > 0) {
+        // Merge backward into the previous group — the combined chunk may
+        // exceed MAX_TRANSCRIPT_CHUNK_CHARS/SEGMENTS, which is acceptable
+        // (those are soft targets for grouping, not hard splits).
+        const prev = merged[merged.length - 1];
+        if (prev) {
+          merged[merged.length - 1] = prev.concat(group);
+        } else {
+          merged.push(group);
+        }
+      } else {
+        merged.push(group);
+      }
+    }
+    groups.length = 0;
+    groups.push(...merged);
   }
 
   return groups.map((segments, index, allSegments) => ({
