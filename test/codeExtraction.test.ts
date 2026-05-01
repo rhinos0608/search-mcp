@@ -15,7 +15,7 @@ from typing import Optional, List
 class Fibonacci:
     """Memoized Fibonacci sequence generator."""
     max_n: int
-    _cache: dict = None
+    _cache: Optional[dict] = None
 
     def __post_init__(self):
         if self._cache is None:

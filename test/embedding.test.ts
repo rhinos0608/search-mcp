@@ -81,7 +81,7 @@ test('normalizeEmbeddingResponse: throws on missing both schemas', () => {
       return (
         err.message.includes('did not match sidecar or OpenAI-compatible schema') &&
         err.message.includes('keys=[foo,baz]') &&
-        err.message.includes('hasDataArray=false')
+        err.message.includes('dataIsArray=false')
       );
     },
   );

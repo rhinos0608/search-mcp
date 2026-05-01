@@ -157,7 +157,7 @@ test('handles missing fields gracefully', async () => {
   globalThis.fetch = async () => {
     return new Response(
       JSON.stringify({
-        results: [{}],
+        results: [{ url: 'https://example.com' }],
       }),
       { status: 200, headers: { 'content-type': 'application/json' } },
     );
@@ -167,7 +167,7 @@ test('handles missing fields gracefully', async () => {
 
   assert.equal(results.length, 1);
   assert.equal(results[0]!.title, '');
-  assert.equal(results[0]!.url, '');
+  assert.equal(results[0]!.url, 'https://example.com');
   assert.equal(results[0]!.description, '');
   assert.equal(results[0]!.age, null);
 });
@@ -203,6 +203,10 @@ test('handles invalid URL in domain extraction gracefully', async () => {
             url: 'not-a-valid-url',
             description: 'Invalid URL',
           },
+          {
+            title: 'Good URL',
+            url: 'https://ok.com',
+          },
         ],
       }),
       { status: 200, headers: { 'content-type': 'application/json' } },
@@ -212,8 +216,8 @@ test('handles invalid URL in domain extraction gracefully', async () => {
   const results = await ollamaSearch('bad-url', 10, 'moderate', DEFAULT_CONFIG);
 
   assert.equal(results.length, 1);
-  assert.equal(results[0]!.title, 'Bad URL');
-  assert.equal(results[0]!.domain, '');
+  assert.equal(results[0]!.title, 'Good URL');
+  assert.equal(results[0]!.domain, 'ok.com');
 });
 
 // ── Error Handling ───────────────────────────────────────────────────────────
@@ -262,7 +266,12 @@ test('sends Authorization header when apiKey is provided', async () => {
   let authHeader: string | null = null;
 
   globalThis.fetch = async (_input: RequestInfo | URL, init?: RequestInit) => {
-    authHeader = (init?.headers as Record<string, string> | undefined)?.Authorization ?? null;
+    const headers = init?.headers;
+    if (headers instanceof Headers) {
+      authHeader = headers.get('Authorization');
+    } else {
+      authHeader = (headers as Record<string, string> | undefined)?.Authorization ?? null;
+    }
     return new Response(JSON.stringify({ results: [] }), {
       status: 200,
       headers: { 'content-type': 'application/json' },
@@ -281,7 +290,12 @@ test('does not send Authorization header when apiKey is empty', async () => {
   let authHeader: string | null = null;
 
   globalThis.fetch = async (_input: RequestInfo | URL, init?: RequestInit) => {
-    authHeader = (init?.headers as Record<string, string> | undefined)?.Authorization ?? null;
+    const headers = init?.headers;
+    if (headers instanceof Headers) {
+      authHeader = headers.get('Authorization');
+    } else {
+      authHeader = (headers as Record<string, string> | undefined)?.Authorization ?? null;
+    }
     return new Response(JSON.stringify({ results: [] }), {
       status: 200,
       headers: { 'content-type': 'application/json' },

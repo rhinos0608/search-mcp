@@ -76,9 +76,9 @@ test('JobPipeline: scoreMetadata ranks items', () => {
   ];
 
   const scored = pipeline.scoreMetadata(records, { workMode: ['remote'] });
-  assert.ok(scored.length > 0);
-  const topScore = scored[0];
-  assert.ok(topScore !== undefined);
+  assert.equal(scored.length, 2);
+  assert.equal(scored[0]?.jobUrl, 'url2', 'Remote job should be ranked first');
+  assert.ok(scored[0]!.score > scored[1]!.score, 'Remote score should be higher than onsite');
 });
 
 test('JobPipeline: verifyHealth does not throw', async () => {

@@ -137,23 +137,17 @@ test('backoff delay increases with each challenge', () => {
   assert.equal(delay1, 0); // not tripped, no delay
 
   recordChallenge('brave');
-  // After 1st challenge: initial delay ~10s with jitter
+  // After 1st challenge: initial delay exactly 10s (no jitter until tripped)
   const delayAfterFirst = getBackoffDelay('brave');
-  assert.ok(
-    delayAfterFirst >= 8000 && delayAfterFirst <= 12000,
-    `Expected ~10000ms jittered, got ${delayAfterFirst}ms`,
-  );
+  assert.equal(delayAfterFirst, 10000);
 
   recordChallenge('brave');
-  // After 2nd challenge: ~20s with jitter
+  // After 2nd challenge: exactly 20s
   const delayAfterSecond = getBackoffDelay('brave');
-  assert.ok(
-    delayAfterSecond >= 16000 && delayAfterSecond <= 24000,
-    `Expected ~20000ms jittered, got ${delayAfterSecond}ms`,
-  );
+  assert.equal(delayAfterSecond, 20000);
 
   recordChallenge('brave');
-  // After 3rd challenge: ~40s with jitter
+  // After 3rd challenge: ~40s with jitter (tripped)
   const delayAfterThird = getBackoffDelay('brave');
   assert.ok(
     delayAfterThird >= 32000 && delayAfterThird <= 48000,
@@ -219,8 +213,8 @@ test('ten rapid challenges should trip with capped backoff', () => {
   assert.equal(isCircuitTripped('ollama'), true);
   // Backoff should be capped at 300s
   const delay = getBackoffDelay('ollama');
-  assert.ok(delay <= 305000, `Expected backoff capped at ~300000ms, got ${delay}ms`);
-  // Should be at least 80s (10 * 2^6 would be 640s, capped at 300s)
+  assert.ok(delay <= 300000, `Expected backoff capped at 300000ms, got ${delay}ms`);
+  // Minimum jittered backoff at max cap (300k - 20%)
   assert.ok(delay >= 240000, `Expected backoff >= 240000ms for 10 challenges, got ${delay}ms`);
 });
 

@@ -109,8 +109,10 @@ test('reset clears all backends', () => {
   recordOutcome('brave', 'error');
   // 1/1 = 100% error rate > 20% → degraded
   assert.equal(isDegraded('duckduckgo'), true);
+  assert.equal(isDegraded('brave'), true);
   reset();
   assert.equal(isDegraded('duckduckgo'), false);
+  assert.equal(isDegraded('brave'), false);
 });
 
 test('reset clears single backend', () => {
