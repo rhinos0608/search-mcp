@@ -52,7 +52,9 @@ function pruneWindow(state: BackendState, windowSize: number): void {
   // Time-based pruning: remove entries older than WINDOW_AGE_MS
   const cutoff = now - WINDOW_AGE_MS;
   const firstRecent = state.outcomes.findIndex((e) => e.timestamp >= cutoff);
-  if (firstRecent > 0) {
+  if (firstRecent === -1) {
+    state.outcomes.splice(0, state.outcomes.length);
+  } else if (firstRecent > 0) {
     state.outcomes.splice(0, firstRecent);
   }
 

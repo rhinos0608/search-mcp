@@ -55,10 +55,16 @@ test('recovery hysteresis: 21% degraded, then drops to 10% but does NOT recover 
   for (let i = 0; i < 11; i++) recordOutcome('exa', 'error');
   assert.equal(isDegraded('exa'), true);
 
-  // Slide window: add more successes, keeping 5 errors out of 50 = 10% → still degraded
-  for (let i = 0; i < 6; i++) recordOutcome('exa', 'success');
-  // Now we have 5 errors out of 50 = 10% — still degraded (hysteresis)
+  // Slide window: add more successes, pushing out leading errors.
+  // We have 11 errors in 50 slots. To get to exactly 5/50 (10%),
+  // we need to add 45 successes to slide out the initial 39 successes AND 6 errors.
+  for (let i = 0; i < 45; i++) recordOutcome('exa', 'success');
+  // Now we have 5 errors out of 50 = 10% — still degraded (hysteresis requires <10%)
   assert.equal(isDegraded('exa'), true);
+
+  // Add one more success to reach 4/50 < 10%
+  recordOutcome('exa', 'success');
+  assert.equal(isDegraded('exa'), false);
 });
 
 test('recovery: after dropping below 10% errors, recovers to healthy', () => {
