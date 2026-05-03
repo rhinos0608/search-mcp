@@ -1,10 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import {
-  detectMonorepoFromEntries,
-  buildMonorepoOverview,
-} from '../src/utils/monorepoDetector.js';
+import { detectMonorepoFromEntries, buildMonorepoOverview } from '../src/utils/monorepoDetector.js';
 import type { GitHubTreeEntry, MonorepoDetectResult } from '../src/types.js';
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -32,11 +29,7 @@ test('detectMonorepoFromEntries returns not detected for empty entries', () => {
 });
 
 test('detectMonorepoFromEntries returns not detected for simple repo', () => {
-  const entries = [
-    entry('README.md', 'file'),
-    entry('src', 'dir'),
-    entry('package.json', 'file'),
-  ];
+  const entries = [entry('README.md', 'file'), entry('src', 'dir'), entry('package.json', 'file')];
   const result = detectMonorepoFromEntries(entries);
   assert.equal(result.detected, false);
   assert.equal(result.type, 'unknown');
@@ -82,11 +75,7 @@ test('detectMonorepoFromEntries detects turborepo', () => {
 });
 
 test('detectMonorepoFromEntries detects Nx monorepo', () => {
-  const entries = [
-    entry('nx.json', 'file'),
-    entry('package.json', 'file'),
-    entry('libs', 'dir'),
-  ];
+  const entries = [entry('nx.json', 'file'), entry('package.json', 'file'), entry('libs', 'dir')];
   const result = detectMonorepoFromEntries(entries);
   assert.equal(result.detected, true);
   assert.equal(result.type, 'nx');
@@ -108,11 +97,7 @@ test('detectMonorepoFromEntries detects monorepo from workspace dirs alone', () 
 });
 
 test('detectMonorepoFromEntries detects monorepo from modules and servers dirs', () => {
-  const entries = [
-    entry('modules', 'dir'),
-    entry('servers', 'dir'),
-    entry('clients', 'dir'),
-  ];
+  const entries = [entry('modules', 'dir'), entry('servers', 'dir'), entry('clients', 'dir')];
   const result = detectMonorepoFromEntries(entries);
   assert.equal(result.detected, true);
   assert.ok(result.workspacePatterns.includes('modules/*'));
@@ -195,9 +180,7 @@ test('buildMonorepoOverview handles packages with minimal info', () => {
     packageManager: 'pnpm_or_yarn',
     configFiles: ['turbo.json'],
     workspacePatterns: ['packages/*'],
-    packages: [
-      { name: 'pkg-a', path: 'packages/a', description: null, version: null },
-    ],
+    packages: [{ name: 'pkg-a', path: 'packages/a', description: null, version: null }],
     hasPackageJsonRoot: true,
   };
 
@@ -259,11 +242,12 @@ test('getGitHubRepoTree returns monorepo info for root with pnpm markers', async
     },
   ];
 
-  globalThis.fetch = async () => new Response(JSON.stringify(mockContents), {
-    status: 200,
-    statusText: 'OK',
-    headers: { 'content-type': 'application/json' },
-  });
+  globalThis.fetch = async () =>
+    new Response(JSON.stringify(mockContents), {
+      status: 200,
+      statusText: 'OK',
+      headers: { 'content-type': 'application/json' },
+    });
 
   const result = await getGitHubRepoTree('o', 'r', undefined, 'main', false, 100);
 
@@ -304,11 +288,12 @@ test('getGitHubRepoTree does not include monorepo when includeMonorepo=false', a
     },
   ];
 
-  globalThis.fetch = async () => new Response(JSON.stringify(mockContents), {
-    status: 200,
-    statusText: 'OK',
-    headers: { 'content-type': 'application/json' },
-  });
+  globalThis.fetch = async () =>
+    new Response(JSON.stringify(mockContents), {
+      status: 200,
+      statusText: 'OK',
+      headers: { 'content-type': 'application/json' },
+    });
 
   const result = await getGitHubRepoTree('o', 'r', undefined, 'main', false, 100, false);
   assert.equal(result.monorepo, undefined, 'Expected no monorepo field when includeMonorepo=false');
@@ -329,11 +314,12 @@ test('getGitHubRepoTree does not detect monorepo for non-root paths', async () =
     },
   ];
 
-  globalThis.fetch = async () => new Response(JSON.stringify(mockContents), {
-    status: 200,
-    statusText: 'OK',
-    headers: { 'content-type': 'application/json' },
-  });
+  globalThis.fetch = async () =>
+    new Response(JSON.stringify(mockContents), {
+      status: 200,
+      statusText: 'OK',
+      headers: { 'content-type': 'application/json' },
+    });
 
   const result = await getGitHubRepoTree('o', 'r', 'src', 'main', false, 100);
   assert.equal(result.monorepo, undefined, 'Expected no monorepo for subdirectory path');
@@ -347,18 +333,33 @@ test('getGitHubRepoTree recursive with monorepo detection at root', async () => 
       { path: 'pnpm-workspace.yaml', type: 'blob', mode: '100644', sha: 's1', size: 50, url: 'u1' },
       { path: 'package.json', type: 'blob', mode: '100644', sha: 's2', size: 200, url: 'u2' },
       { path: 'packages', type: 'tree', mode: '040000', sha: 's3', url: 'u3' },
-      { path: 'packages/foo/index.ts', type: 'blob', mode: '100644', sha: 's4', size: 100, url: 'u4' },
-      { path: 'packages/bar/index.ts', type: 'blob', mode: '100644', sha: 's5', size: 200, url: 'u5' },
+      {
+        path: 'packages/foo/index.ts',
+        type: 'blob',
+        mode: '100644',
+        sha: 's4',
+        size: 100,
+        url: 'u4',
+      },
+      {
+        path: 'packages/bar/index.ts',
+        type: 'blob',
+        mode: '100644',
+        sha: 's5',
+        size: 200,
+        url: 'u5',
+      },
       { path: 'turbo.json', type: 'blob', mode: '100644', sha: 's6', size: 100, url: 'u6' },
     ],
     truncated: false,
   };
 
-  globalThis.fetch = async () => new Response(JSON.stringify(mockTree), {
-    status: 200,
-    statusText: 'OK',
-    headers: { 'content-type': 'application/json' },
-  });
+  globalThis.fetch = async () =>
+    new Response(JSON.stringify(mockTree), {
+      status: 200,
+      statusText: 'OK',
+      headers: { 'content-type': 'application/json' },
+    });
 
   const result = await getGitHubRepoTree('o', 'r', undefined, 'main', true, 100);
 

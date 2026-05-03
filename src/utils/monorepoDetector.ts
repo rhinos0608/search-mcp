@@ -37,7 +37,15 @@ const MONOREPO_CONFIG_FILES = new Set([
 ]);
 
 /** Directory names commonly used for monorepo workspaces. */
-const WORKSPACE_DIR_NAMES = new Set(['packages', 'apps', 'libs', 'modules', 'services', 'servers', 'clients']);
+const WORKSPACE_DIR_NAMES = new Set([
+  'packages',
+  'apps',
+  'libs',
+  'modules',
+  'services',
+  'servers',
+  'clients',
+]);
 
 /** Max workspace packages to fetch details for (avoids excessive API calls). */
 const MAX_FETCH_PACKAGES = 20;
@@ -188,9 +196,7 @@ export function detectMonorepoFromEntries(entries: GitHubTreeEntry[]): MonorepoD
 /**
  * Parse workspace patterns from a root package.json content.
  */
-function extractWorkspacesFromPackageJson(
-  content: Record<string, unknown>,
-): string[] {
+function extractWorkspacesFromPackageJson(content: Record<string, unknown>): string[] {
   const workspaces = content.workspaces;
   if (Array.isArray(workspaces)) {
     return workspaces.filter((w): w is string => typeof w === 'string');
@@ -271,7 +277,10 @@ async function fetchContentsJson(
   const encoding = getString(body, 'encoding');
   const content = getString(body, 'content');
   if (encoding !== 'base64' || content.length === 0) {
-    logger.warn({ path, encoding, owner, repo }, 'fetchContentsJson: unexpected encoding or empty content');
+    logger.warn(
+      { path, encoding, owner, repo },
+      'fetchContentsJson: unexpected encoding or empty content',
+    );
     return null;
   }
 
@@ -302,23 +311,20 @@ async function fetchWorkspacePackages(
   const nested = await Promise.all(
     dirs.map(async (dir): Promise<MonorepoPackage[]> => {
       // For each workspace dir, try to fetch its package.json
-      const packageJson = await fetchContentsJson(
-        owner,
-        repo,
-        `${dir.path}/package.json`,
-        branch,
-      );
+      const packageJson = await fetchContentsJson(owner, repo, `${dir.path}/package.json`, branch);
 
       if (packageJson) {
         const name = getStringOrNull(packageJson, 'name');
         const description = getStringOrNull(packageJson, 'description');
         const version = getStringOrNull(packageJson, 'version');
-        return [{
-          name: name ?? dir.name,
-          path: dir.path,
-          description,
-          version,
-        }];
+        return [
+          {
+            name: name ?? dir.name,
+            path: dir.path,
+            description,
+            version,
+          },
+        ];
       }
 
       // No package.json at dir root — it might contain sub-packages
@@ -351,27 +357,34 @@ async function fetchWorkspaceSubPackages(
 
   if (!response.ok || !Array.isArray(body)) {
     // If we can't list the dir, try it as a package name
-    return [{
-      name: dir.name,
-      path: dir.path,
-      description: null,
-      version: null,
-    }];
+    return [
+      {
+        name: dir.name,
+        path: dir.path,
+        description: null,
+        version: null,
+      },
+    ];
   }
 
   // For each sub-entry that is a directory, try to fetch its package.json
   const subDirs = body
-    .filter((item): item is Record<string, unknown> => isRecord(item) && getString(item, 'type') === 'dir')
+    .filter(
+      (item): item is Record<string, unknown> =>
+        isRecord(item) && getString(item, 'type') === 'dir',
+    )
     .map((item) => getString(item, 'path'));
 
   if (subDirs.length === 0) {
     // No sub-dirs — the dir itself might be the package
-    return [{
-      name: dir.name,
-      path: dir.path,
-      description: null,
-      version: null,
-    }];
+    return [
+      {
+        name: dir.name,
+        path: dir.path,
+        description: null,
+        version: null,
+      },
+    ];
   }
 
   // Fetch package.json for each sub-directory (limit to 20)
@@ -450,7 +463,10 @@ export async function getMonorepoInfo(
       const packages = await fetchWorkspacePackages(owner, repo, workspaceDirs, branch);
       result.packages = packages;
     } catch (err) {
-      logger.warn({ err, owner, repo }, 'getMonorepoInfo: failed to fetch workspace package details');
+      logger.warn(
+        { err, owner, repo },
+        'getMonorepoInfo: failed to fetch workspace package details',
+      );
       // Fallback: use directory names as package names
       result.packages = workspaceDirs.map((dir) => ({
         name: dir.name,
@@ -488,7 +504,9 @@ export function resolvePackagePath(
   if (direct) return direct.path;
 
   // Partial match on path (e.g. "packages/foo" matches packages/foo)
-  const pathMatch = monorepo.packages.find((p) => p.path.endsWith(`/${reference}`) || p.path === reference);
+  const pathMatch = monorepo.packages.find(
+    (p) => p.path.endsWith(`/${reference}`) || p.path === reference,
+  );
   if (pathMatch) return pathMatch.path;
 
   return null;
