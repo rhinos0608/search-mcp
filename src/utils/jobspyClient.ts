@@ -15,6 +15,13 @@
 import { scrapeJobs } from 'jobspy-js';
 import { logger } from '../logger.js';
 
+export const DEFAULT_JOBSPY_SITES = [
+  'linkedin',
+  'indeed',
+  'glassdoor',
+  'zip_recruiter',
+] as const;
+
 // ── FlatJobRecord ──────────────────────────────────────────────────────────
 
 /**
@@ -89,9 +96,9 @@ export interface JobSpyAcquisitionParams {
 type ScrapeJobs = (options: Record<string, unknown>) => Promise<{ jobs: FlatJobRecord[] }>;
 
 /** Map our typed params to the jobspy-js ScrapeJobsParams shape. */
-function toJobspyParams(p: JobSpyAcquisitionParams): Record<string, unknown> {
+export function buildJobSpyParams(p: JobSpyAcquisitionParams): Record<string, unknown> {
   return {
-    site_name: p.sites,
+    site_name: p.sites ?? [...DEFAULT_JOBSPY_SITES],
     search_term: p.query,
     location: p.location ?? '',
     is_remote: p.isRemote ?? false,
@@ -104,6 +111,29 @@ function toJobspyParams(p: JobSpyAcquisitionParams): Record<string, unknown> {
     // Request markdown descriptions — our chunking pipeline expects it
     description_format: 'markdown',
   };
+}
+
+export function normalizeFlatJobRecord(record: FlatJobRecord): FlatJobRecord {
+  const jobUrl = normalizeUrlCandidate(record.job_url);
+  const directUrl = normalizeUrlCandidate(record.job_url_direct);
+
+  const normalized: FlatJobRecord = {
+    ...record,
+    job_url: jobUrl ?? directUrl ?? record.job_url,
+  };
+  if (directUrl !== undefined) {
+    normalized.job_url_direct = directUrl;
+  }
+  return normalized;
+}
+
+function normalizeUrlCandidate(value: string | undefined): string | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+
+  const normalized = value.trim();
+  return normalized.length > 0 ? normalized : undefined;
 }
 
 // ── Public API ────────────────────────────────────────────────────────────
@@ -119,7 +149,7 @@ function toJobspyParams(p: JobSpyAcquisitionParams): Record<string, unknown> {
 export async function searchJobSpy(
   params: JobSpyAcquisitionParams,
 ): Promise<FlatJobRecord[]> {
-  const opts = toJobspyParams(params);
+  const opts = buildJobSpyParams(params);
 
   logger.info(
     {
@@ -134,7 +164,7 @@ export async function searchJobSpy(
 
   try {
     const result = await (scrapeJobs as unknown as ScrapeJobs)(opts);
-    const records = result.jobs;
+    const records = result.jobs.map(normalizeFlatJobRecord);
 
     logger.info(
       { tool: 'jobspy', sites: opts.site_name, recordsReturned: records.length },

@@ -29,7 +29,7 @@ const MAX_TOP_K = 50;
 /**
  * Maximum concurrent crawl requests per domain to avoid rate limiting.
  */
-const CRAWL_CONCURRENCY = 3;
+const CRAWL_CONCURRENCY = 8;
 
 /**
  * Retry settings for failed crawls.
@@ -101,6 +101,10 @@ export async function semanticJobs(
       }
       acquisitionParams.location = opts.location[0];
     }
+    const inferredCountry = inferJobSpyCountry(opts.query, opts.location);
+    if (inferredCountry !== undefined) {
+      acquisitionParams.country = inferredCountry;
+    }
     if (opts.workMode?.includes('remote')) acquisitionParams.isRemote = true;
 
     const maxPages = Math.min(opts.maxPages ?? DEFAULT_MAX_PAGES, MAX_PAGES);
@@ -126,9 +130,10 @@ export async function semanticJobs(
     const normalized = pipeline.normalize(discovery, opts.query);
     const constraints = buildConstraints(opts);
     const scored = pipeline.scoreMetadata(normalized, constraints);
+    const scoreFilteredCount = normalized.length - scored.length;
 
-    let finalRecords: EnrichedRecord[] = scored.map(s => ({ ...s }));
-    if ((opts.maxPages ?? DEFAULT_MAX_PAGES) > 0) {
+    let finalRecords: EnrichedRecord[] = scored.map((s) => ({ ...s }));
+    if (maxPages > 0) {
       finalRecords = await pipeline.enrich(scored);
     }
 
@@ -145,8 +150,15 @@ export async function semanticJobs(
     if (opts.topK !== undefined) embedOpts.topK = opts.topK;
     if (opts.maxBytes !== undefined) embedOpts.maxBytes = opts.maxBytes;
 
-    const enforceConstraints = opts.enforceConstraints ?? false;
-    const results = await pipeline.embedAndRank(finalRecords, opts.query, embedOpts, constraints, enforceConstraints);
+    // Default to true: enforce constraints by default for better filtering
+    const enforceConstraints = opts.enforceConstraints ?? true;
+    let results = await pipeline.embedAndRank(finalRecords, opts.query, embedOpts, constraints, false);
+    let strictFilteredCount = 0;
+    if (enforceConstraints) {
+      const beforeCount = results.length;
+      results = filterEnforcedJobScores(results, constraints);
+      strictFilteredCount = beforeCount - results.length;
+    }
 
     return {
       results,
@@ -156,7 +168,7 @@ export async function semanticJobs(
         failed: 0,
         extracted: discovery.length,
         deduplicated: discovery.length - normalized.length,
-        filtered: normalized.length - scored.length,
+        filtered: scoreFilteredCount + strictFilteredCount,
       },
       warnings: [],
     };
@@ -376,6 +388,105 @@ function buildConstraints(opts: SemanticJobsOptions): JobSearchConstraints {
   };
 }
 
+const AUSTRALIAN_LOCATION_HINTS: RegExp[] = [
+  /\baustralia\b/i,
+  /\baustralian\b/i,
+  // Multi-letter state codes only — wa, sa, nt removed (too ambiguous standalone)
+  /\b(?:nsw|vic|qld|tas|act)\b/i,
+  /\b(?:sydney|melbourne|brisbane|perth|adelaide|canberra|hobart|darwin)\b/i,
+  /\b(?:gold\s+coast|sunshine\s+coast|newcastle|wollongong|geelong|ballarat|bendigo|townsville|cairns|toowoomba)\b/i,
+];
+
+export function inferJobSpyCountry(query: string, locations: string[] | undefined): string | undefined {
+  const candidates = [query, ...(locations ?? [])];
+  for (const candidate of candidates) {
+    if (AUSTRALIAN_LOCATION_HINTS.some((pattern) => pattern.test(candidate))) {
+      return 'australia';
+    }
+  }
+  return undefined;
+}
+
+export function filterEnforcedJobScores(
+  results: JobScore[],
+  constraints: JobSearchConstraints,
+): JobScore[] {
+  return results.filter((score) => matchesStrictConstraints(score.listing, constraints));
+}
+
+function matchesStrictConstraints(listing: JobListingMvp, constraints: JobSearchConstraints): boolean {
+  if (constraints.location !== undefined && constraints.location.length > 0) {
+    if (listing.location === undefined) {
+      return false;
+    }
+    const location = listing.location.toLowerCase();
+    const locationMatch = constraints.location.some((constraint) => {
+      const normalizedConstraint = constraint.trim().toLowerCase();
+      return normalizedConstraint.length > 0 && location.includes(normalizedConstraint);
+    });
+    if (!locationMatch) {
+      return false;
+    }
+  }
+
+  if (constraints.workMode !== undefined && constraints.workMode.length > 0) {
+    if (listing.workMode === 'unknown') {
+      return false;
+    }
+    if (!constraints.workMode.includes(listing.workMode)) {
+      return false;
+    }
+  }
+
+  if (constraints.maxSalary !== undefined) {
+    const salaryMax = parseSalaryMax(listing.salaryRaw);
+    // Unknown salary passes through; only reject known excess
+    if (salaryMax !== undefined && salaryMax > constraints.maxSalary) {
+      return false;
+    }
+  }
+
+  if (constraints.excludeTitles !== undefined && constraints.excludeTitles.length > 0) {
+    const title = listing.title.toLowerCase();
+    const excluded = constraints.excludeTitles.some((keyword) => {
+      const normalizedKeyword = keyword.trim().toLowerCase();
+      return normalizedKeyword.length > 0 && title.includes(normalizedKeyword);
+    });
+    if (excluded) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+function parseSalaryMax(salaryRaw: string | undefined): number | undefined {
+  if (salaryRaw === undefined) {
+    return undefined;
+  }
+
+  const matches = salaryRaw.match(/\d[\d,]*(?:\.\d+)?\s*k?/gi);
+  if (matches === null || matches.length === 0) {
+    return undefined;
+  }
+
+  const values = matches
+    .map((match) => {
+      const normalized = match.replace(/,/g, '').trim().toLowerCase();
+      const multiplier = normalized.endsWith('k') ? 1000 : 1;
+      const numericPart = normalized.endsWith('k') ? normalized.slice(0, -1) : normalized;
+      const value = Number.parseFloat(numericPart);
+      return Number.isFinite(value) ? value * multiplier : undefined;
+    })
+    .filter((value): value is number => value !== undefined);
+
+  if (values.length === 0) {
+    return undefined;
+  }
+
+  return Math.max(...values);
+}
+
 function buildSearchQuery(
   query: string,
   constraints: JobSearchConstraints,
@@ -416,27 +527,35 @@ async function defaultSearch(query: string, limit: number): Promise<SearchResult
 }
 
 /**
- * Concurrency-limited map: process items in batches, at most `concurrency` at a time.
+ * Task-pool map: processes items with at most `concurrency` workers running at once
+ * in a firehose pattern — as soon as one task finishes, the next starts immediately.
+ * Failures are logged but do not abort remaining items.
  */
 async function concurrencyLimitedMap<T, R>(
   items: T[],
   concurrency: number,
   fn: (item: T) => Promise<R>,
 ): Promise<R[]> {
-  const results: R[] = [];
-  for (let index = 0; index < items.length; index += concurrency) {
-    const batch = items.slice(index, index + concurrency);
-    const batchResults = await Promise.allSettled(batch.map(fn));
-    for (const r of batchResults) {
-      if (r.status === 'fulfilled') {
-        results.push(r.value);
-      } else {
-        const reason = r.reason instanceof Error ? r.reason.message : String(r.reason);
-        throw new Error(`Concurrent crawl failed: ${reason}`);
+  const results = new Array<R>(items.length);
+  let nextIndex = 0;
+
+  async function worker(): Promise<void> {
+    for (;;) {
+      const index = nextIndex;
+      if (index >= items.length) break;
+      nextIndex = index + 1;
+      try {
+        results[index] = await fn(items[index] as T);
+      } catch (err: unknown) {
+        const reason = err instanceof Error ? err.message : String(err);
+        logger.warn({ err: reason, index }, 'concurrencyLimitedMap: item failed');
       }
     }
   }
-  return results;
+
+  const workers = Array.from({ length: Math.min(concurrency, items.length) }, () => worker());
+  await Promise.allSettled(workers);
+  return results.filter((r): r is R => r !== undefined);
 }
 
 /**
@@ -457,6 +576,7 @@ async function crawlWithRetry(
         maxDepth: 1,
         maxPages: 1,
         includeExternalLinks,
+        pageTimeout: 15000,
       });
       return { url, page: result.pages[0] };
     } catch (err) {

@@ -278,7 +278,9 @@ function normalizeCrawlResponse(data: Crawl4aiResponse, opts: WebCrawlOptions): 
 }
 
 export function computeCrawlTimeout(maxPages: number): number {
-  return Math.min(30_000 + maxPages * 15_000, 300_000);
+  // 60s base + 20s per maxPage, capped at 5 minutes.
+  // Increased from 30s + 15s/page to reduce timeouts on JS-heavy or multi-page crawls.
+  return Math.min(60_000 + maxPages * 20_000, 300_000);
 }
 
 async function crawlOnce(

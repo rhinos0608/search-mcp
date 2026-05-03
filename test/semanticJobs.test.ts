@@ -1,6 +1,12 @@
 import test, { afterEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { semanticJobs, processJobSearchResults } from '../src/tools/semanticJobs.js';
+import {
+  semanticJobs,
+  processJobSearchResults,
+  filterEnforcedJobScores,
+  inferJobSpyCountry,
+} from '../src/tools/semanticJobs.js';
+import type { JobScore } from '../src/rag/jobRanking.js';
 import type { JobSearchConstraints } from '../src/rag/types/job.js';
 
 const originalFetch = globalThis.fetch;
@@ -31,14 +37,29 @@ function installEmbeddingStub(): void {
     const url = String(
       input instanceof URL ? input.href : input instanceof Request ? input.url : input,
     );
-    if (!url.includes('/embed')) {
+    if (!url.includes('/embed') && !url.includes('/embeddings')) {
       return new Response('not found', { status: 404 });
     }
 
     const rawBody = init?.body !== null && init?.body !== undefined ? String(init.body) : '{}';
-    const body = JSON.parse(rawBody) as { texts?: string[]; dimensions?: number };
-    const texts = body.texts ?? [];
+    const body = JSON.parse(rawBody) as { texts?: string[]; input?: string[]; dimensions?: number };
+    const texts = body.texts ?? body.input ?? [];
     const dim = body.dimensions ?? 4;
+
+    if (url.includes('/embeddings')) {
+      return Response.json({
+        data: texts.map((text, i) => {
+          const normalized = text.toLowerCase();
+          const matchScore = normalized.includes('sydney') || normalized.includes('alpha') ? 1 : 0;
+          return {
+            embedding: Array.from({ length: dim }, (_, index) => (index === 0 ? matchScore : 1 - matchScore)),
+            index: i,
+          };
+        }),
+        model: 'test-model',
+      });
+    }
+
     return Response.json(makeEmbedResponse(texts, dim));
   };
 }
@@ -273,6 +294,86 @@ test('processJobSearchResults applies hard constraints', async () => {
     result.results.map((r) => r.listing.title),
     ['Sydney Developer'],
   );
+});
+
+test('filterEnforcedJobScores removes listings missing required constraint values', () => {
+  const makeScore = (listing: {
+    title: string;
+    location?: string;
+    workMode: 'remote' | 'hybrid' | 'onsite' | 'unknown';
+    sourceUrl: string;
+  }): JobScore => {
+    const scoreListing: JobScore['listing'] = {
+      title: listing.title,
+      workMode: listing.workMode,
+      source: 'seek',
+      sourceUrl: listing.sourceUrl,
+      extractedText: listing.title,
+      confidence: {
+        title: 1,
+        location: 1,
+        workMode: 1,
+        salary: 0,
+        overall: 1,
+      },
+      verificationStatus: 'listing_page_fetched',
+      caveats: [],
+    };
+    if (listing.location !== undefined) {
+      scoreListing.location = listing.location;
+    }
+
+    return {
+      listing: scoreListing,
+      overallScore: 1,
+      matchedConstraints: [],
+      caveats: [],
+      componentScores: {
+        semantic: 1,
+        location: 1,
+        workMode: 1,
+        recency: 0,
+        completeness: 1,
+        sourceReliability: 0,
+        duplicateDensity: 0,
+        companyReliability: 0,
+      },
+    };
+  };
+
+  const results = [
+    makeScore({
+      title: 'Sydney Developer',
+      location: 'Sydney NSW',
+      workMode: 'remote',
+      sourceUrl: 'https://example.com/sydney',
+    }),
+    makeScore({
+      title: 'Unknown Location Developer',
+      workMode: 'remote',
+      sourceUrl: 'https://example.com/unknown',
+    }),
+    makeScore({
+      title: 'Melbourne Developer',
+      location: 'Melbourne VIC',
+      workMode: 'remote',
+      sourceUrl: 'https://example.com/melbourne',
+    }),
+  ];
+
+  const filtered = filterEnforcedJobScores(results, { location: ['Sydney'] });
+  assert.deepEqual(
+    filtered.map((result) => result.listing.title),
+    ['Sydney Developer'],
+  );
+});
+
+test('inferJobSpyCountry detects Australia from query or location', () => {
+  assert.equal(inferJobSpyCountry('react developer australia', undefined), 'australia');
+  assert.equal(inferJobSpyCountry('react developer', ['Sydney, Australia']), 'australia');
+  assert.equal(inferJobSpyCountry('react developer', ['Sydney NSW']), 'australia');
+  assert.equal(inferJobSpyCountry('react developer', ['Melbourne VIC']), 'australia');
+  assert.equal(inferJobSpyCountry('react developer', ['New York NY']), undefined);
 });
 
 test('processJobSearchResults uses html field when present over markdown', async () => {

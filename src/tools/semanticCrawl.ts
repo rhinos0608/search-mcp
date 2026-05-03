@@ -38,8 +38,6 @@ import {
   isLikelyJsHeavySite,
 } from '../utils/crawlBudget.js';
 
-
-
 // ── Semantic Coherence Filter ────────────────────────────────────────────
 
 interface ChunkWithEmbedding {
@@ -689,6 +687,46 @@ function divideBudget(total: number, seeds: number): number {
   return Math.max(1, Math.ceil(total / seeds));
 }
 
+/**
+ * Run async functions with a concurrency limit.
+ * Results are returned in input order; rejections are surfaced immediately.
+ */
+async function concurrentMap<T, R>(
+  items: T[],
+  fn: (item: T, index: number) => Promise<R>,
+  concurrency: number,
+): Promise<R[]> {
+  const results = new Array<R>(items.length);
+  const queue = items.map((item, i) => ({ item, i }));
+
+  const worker = async () => {
+    while (queue.length > 0) {
+      const entry = queue.shift();
+      if (entry === undefined) break;
+      results[entry.i] = await fn(entry.item, entry.i);
+    }
+  };
+
+  const workerCount = Math.min(concurrency, items.length);
+  const workers = Array.from({ length: workerCount }, () => worker());
+  await Promise.all(workers);
+  return results;
+}
+
+/** Format an unknown error value into a human-readable string. */
+function formatUnknownError(err: unknown): string {
+  if (err instanceof Error) return err.message;
+  if (typeof err === 'object' && err !== null) {
+    try {
+      return JSON.stringify(err);
+    } catch {
+      return '[unserializable error]';
+    }
+  }
+  // Primitive fallback: number, boolean, symbol, null, undefined
+  return typeof err === 'string' ? err : String(err);
+}
+
 export function isDirectChild(pagePath: string, seedPath: string): boolean {
   const seedParts = seedPath.split('/').filter(Boolean);
   const pageParts = pagePath.split('/').filter(Boolean);
@@ -825,66 +863,81 @@ export async function crawlSeeds(
     );
   }
 
-  // ── Sequential crawl with global budget tracking ─────────────────────────
-  let remainingPages = resolvedMaxPages;
-  let remainingBytes = opts.maxBytes ?? Infinity;
+  // ── Concurrent crawl with pre-divided budget ────────────────────────────
+  const numSeeds = seedUrls.length;
+  const perSeedPages = divideBudget(resolvedMaxPages, numSeeds);
+  const perSeedBytes =
+    opts.maxBytes !== undefined ? divideBudget(opts.maxBytes, numSeeds) : undefined;
+
+  // Run all seed crawls concurrently (up to 4 in parallel) to avoid sequential
+  // timeouts compounding when many seeds are provided.
+  const crawlResults = await concurrentMap(
+    seedUrls,
+    async (seedUrl: string) => {
+      const crawlOpts: WebCrawlOptions = {
+        strategy: opts.strategy,
+        maxDepth: opts.maxDepth,
+        maxPages: perSeedPages,
+        includeExternalLinks: opts.includeExternalLinks,
+        ...(perSeedBytes !== undefined ? { maxBytes: perSeedBytes } : {}),
+        ...(opts.waitFor !== undefined ? { waitFor: opts.waitFor } : {}),
+        ...(opts.delayBeforeReturnHtml !== undefined
+          ? { delayBeforeReturnHtml: opts.delayBeforeReturnHtml }
+          : {}),
+        ...(opts.pageTimeout !== undefined ? { pageTimeout: opts.pageTimeout } : {}),
+        ...(opts.jsCode !== undefined ? { jsCode: opts.jsCode } : {}),
+        ...(opts.extractionConfig !== undefined ? { extractionConfig: opts.extractionConfig } : {}),
+        ...(opts.llmFallback !== undefined ? { llmFallback: opts.llmFallback } : {}),
+      };
+      try {
+        const result = await webCrawl(
+          seedUrl,
+          crawl4aiCfg.baseUrl,
+          crawl4aiCfg.apiToken ?? '',
+          crawlOpts,
+        );
+        return { seedUrl, result, error: undefined as unknown };
+      } catch (err: unknown) {
+        logger.warn({ err, seedUrl }, 'semantic_crawl: seed crawl failed');
+        return { seedUrl, result: undefined, error: err };
+      }
+    },
+    Math.min(numSeeds, 4),
+  );
+
+  // Post-process results (seed order preserved)
   let accumulatedBytes = 0;
   let sizeLimitReached = false;
 
-  for (let i = 0; i < seedUrls.length; i++) {
-    const seedUrl = seedUrls[i];
-    if (seedUrl === undefined) continue;
-    if (remainingPages <= 0) break;
+  for (const entry of crawlResults) {
+    if (entry.error !== undefined) {
+      const errMsg = formatUnknownError(entry.error);
+      warnings.push(`semantic_crawl: seed crawl failed for ${entry.seedUrl}: ${errMsg}`);
+      continue;
+    }
 
-    const remainingSeeds = seedUrls.length - i;
-    const perSeedPages = divideBudget(remainingPages, remainingSeeds);
-    const perSeedBytes =
-      remainingBytes !== Infinity ? divideBudget(remainingBytes, remainingSeeds) : undefined;
-
-    const crawlOpts: WebCrawlOptions = {
-      strategy: opts.strategy,
-      maxDepth: opts.maxDepth,
-      maxPages: perSeedPages,
-      includeExternalLinks: opts.includeExternalLinks,
-      ...(perSeedBytes !== undefined ? { maxBytes: perSeedBytes } : {}),
-      ...(opts.waitFor !== undefined ? { waitFor: opts.waitFor } : {}),
-      ...(opts.delayBeforeReturnHtml !== undefined
-        ? { delayBeforeReturnHtml: opts.delayBeforeReturnHtml }
-        : {}),
-      ...(opts.pageTimeout !== undefined ? { pageTimeout: opts.pageTimeout } : {}),
-      ...(opts.jsCode !== undefined ? { jsCode: opts.jsCode } : {}),
-      ...(opts.extractionConfig !== undefined ? { extractionConfig: opts.extractionConfig } : {}),
-      ...(opts.llmFallback !== undefined ? { llmFallback: opts.llmFallback } : {}),
-    };
-
-    const result = await webCrawl(
-      seedUrl,
-      crawl4aiCfg.baseUrl,
-      crawl4aiCfg.apiToken ?? '',
-      crawlOpts,
-    );
+    const result = entry.result;
+    if (result === undefined) continue;
     warnings.push(...(result.warnings ?? []));
 
     // Path focus filter
-    let pages = filterByPathPrefix(result.pages, seedUrl, opts.allowPathDrift ?? false);
+    let pages = filterByPathPrefix(result.pages, entry.seedUrl, opts.allowPathDrift ?? false);
 
     // maxPages client-side enforcement (guarantee seed-first, then truncate)
-    const seedIndex = pages.findIndex((p) => p.url === seedUrl);
-    if (seedIndex > 0) {
-      const [seedPage] = pages.splice(seedIndex, 1);
+    const seedIdx = pages.findIndex((p) => p.url === entry.seedUrl);
+    if (seedIdx > 0) {
+      const [seedPage] = pages.splice(seedIdx, 1);
       if (seedPage) pages.unshift(seedPage);
     }
     if (pages.length > perSeedPages) {
       logger.warn(
-        { requested: perSeedPages, received: pages.length, seedUrl },
+        { requested: perSeedPages, received: pages.length, seedUrl: entry.seedUrl },
         'semantic_crawl: crawl4ai returned more pages than requested; truncating client-side',
       );
       pages = pages.slice(0, perSeedPages);
     }
 
-    let keptPages = 0;
-
-    // In-flight byte accumulator
+    // In-flight byte accumulator (applied post-hoc since crawls ran concurrently)
     for (const page of pages) {
       if (sizeLimitReached) {
         omittedPages.push({
@@ -923,25 +976,14 @@ export async function crawlSeeds(
           },
           'semantic_crawl: in-flight size limit reached; stopping accumulation',
         );
-        remainingPages = 0;
         continue;
       }
 
       allPages.push(page);
       accumulatedBytes += pageBytes;
-      keptPages++;
     }
 
     totalPagesFromCrawler += result.totalPages;
-
-    remainingPages -= keptPages;
-    // maxBytes here is a global response-accumulation budget. perSeedBytes is
-    // a hint given to each crawler invocation; remainingBytes is decremented
-    // by the actual bytes of pages we kept across seeds.
-    if (perSeedBytes !== undefined) {
-      const bytesUsed = pages.reduce((sum, p) => sum + p.markdown.length, 0);
-      remainingBytes -= bytesUsed;
-    }
   }
 
   // Deduplicate by URL across all seeds
@@ -1044,10 +1086,7 @@ export function pagesToCorpus(pages: CrawlPageResult[], scrub?: boolean): Corpus
     // chunks that lexically match many queries.
     if (isConsentWallRedirect(page.url, page.markdown)) {
       droppedBannerPages++;
-      logger.debug(
-        { url: page.url },
-        'Dropping page that redirected to consent wall',
-      );
+      logger.debug({ url: page.url }, 'Dropping page that redirected to consent wall');
       continue;
     }
 
@@ -1092,11 +1131,15 @@ export function pagesToCorpus(pages: CrawlPageResult[], scrub?: boolean): Corpus
       'Content scrubbing redacted threats in pages before chunking',
     );
   }
-  if (pagesWithContent < pages.filter((p) => p.success).length - droppedBannerPages - droppedErrorPages) {
+  if (
+    pagesWithContent <
+    pages.filter((p) => p.success).length - droppedBannerPages - droppedErrorPages
+  ) {
     logger.info(
       {
         pagesWithContent,
-        successfulPages: pages.filter((p) => p.success).length - droppedBannerPages - droppedErrorPages,
+        successfulPages:
+          pages.filter((p) => p.success).length - droppedBannerPages - droppedErrorPages,
       },
       'Some successfully crawled pages produced no meaningful chunks (likely boilerplate or empty)',
     );

@@ -58,6 +58,7 @@ test('searchWithBackends defaults to expanded, merged results', async () => {
     searxngSearch: async (query: string) =>
       query === 'rest graphql' ? [{ ...result, source: 'searxng' as const }] : [],
     exaSearch: async () => [],
+    tavilySearch: async () => [],
   };
 
   const results = await searchWithBackends('api', 1, 'moderate', deps, ['brave', 'searxng']);
@@ -85,6 +86,9 @@ test('skips unconfigured backends when overrideBackends is omitted', async () =>
       exaSearch: async () => {
         throw new Error('should not be called');
       },
+      tavilySearch: async () => {
+        throw new Error('should not be called');
+      },
     };
 
     const results = await searchWithBackends('query', 1, 'moderate', deps);
@@ -109,6 +113,7 @@ test('merges and dedupes results from both backends', async () => {
     braveSearch: async () => [a, b],
     searxngSearch: async () => [c, { ...b, source: 'searxng' as const }],
     exaSearch: async () => [],
+    tavilySearch: async () => [],
   };
 
   const results = await searchWithBackends('query', 2, 'moderate', deps, ['brave', 'searxng']);
@@ -132,6 +137,9 @@ test('returns surviving results when one backend fails', async () => {
     exaSearch: async () => {
       throw new Error('exa down');
     },
+    tavilySearch: async () => {
+      throw new Error('tavily down');
+    },
   };
 
   const results = await searchWithBackends('query', 2, 'moderate', deps, ['brave', 'searxng']);
@@ -151,6 +159,9 @@ test('throws when all backends fail', async () => {
     },
     exaSearch: async () => {
       throw new Error('exa down');
+    },
+    tavilySearch: async () => {
+      throw new Error('tavily down');
     },
   };
 
@@ -172,6 +183,7 @@ test('limits results to requested count', async () => {
     braveSearch: async () => [r1, r2, r3],
     searxngSearch: async () => [r4, r5, r6],
     exaSearch: async () => [],
+    tavilySearch: async () => [],
   };
 
   const results = await searchWithBackends('query', 2, 'moderate', deps, ['brave', 'searxng']);
@@ -202,6 +214,7 @@ test('searchWithBackends with rescoring: fresher results bubble up', async () =>
       braveSearch: async () => braveResults,
       searxngSearch: async () => searxResults,
       exaSearch: async () => [],
+      tavilySearch: async () => [],
     },
     ['brave', 'searxng'],
   );
@@ -224,18 +237,27 @@ test('uses Exa as configured primary backend and marks source as exa', async () 
     resetConfig();
 
     let exaCalled = false;
-    const results = await searchWithBackends('neural query', 1, 'moderate', {
-      braveSearch: async () => {
-        throw new Error('should not call brave');
+    const results = await searchWithBackends(
+      'neural query',
+      1,
+      'moderate',
+      {
+        braveSearch: async () => {
+          throw new Error('should not call brave');
+        },
+        searxngSearch: async () => {
+          throw new Error('should not call searxng');
+        },
+        exaSearch: async () => {
+          exaCalled = true;
+          return [{ ...makeResult('https://exa.example/result', 1), source: 'exa' as const }];
+        },
+        tavilySearch: async () => {
+          throw new Error('should not call tavily');
+        },
       },
-      searxngSearch: async () => {
-        throw new Error('should not call searxng');
-      },
-      exaSearch: async () => {
-        exaCalled = true;
-        return [{ ...makeResult('https://exa.example/result', 1), source: 'exa' as const }];
-      },
-    });
+      ['exa'],
+    );
 
     assert.equal(exaCalled, true);
     assert.equal(results[0]!.source, 'exa');

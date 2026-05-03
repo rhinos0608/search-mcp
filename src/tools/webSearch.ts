@@ -172,7 +172,7 @@ export async function searchWithBackends(
 
   // ── Query expansion ──────────────────────────────────────────────────
   const queries: QueryVariation[] =
-    expandQueryOpt === true ? expandQuery(query) : [{ query, strategy: 'original' as const }];
+    expandQueryOpt ? expandQuery(query) : [{ query, strategy: 'original' as const }];
 
   if (queries.length > 1) {
     logger.info(
@@ -197,7 +197,7 @@ export async function searchWithBackends(
         return true;
       });
 
-  const useMerge = mergeBackends === true && available.length > 1;
+  const useMerge = mergeBackends && available.length > 1;
 
   // Run each query variation across all backends, collecting per-query results
   const queryPromises = queries.map(async (qv) => {
