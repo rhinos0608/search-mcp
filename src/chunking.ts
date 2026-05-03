@@ -38,8 +38,140 @@ interface SectionNode extends Section {
   tokens: number;
 }
 
-export function chunkMarkdown(markdown: string, url: string): MarkdownChunk[] {
+/**
+ * Navigation / boilerplate patterns stripped from markdown before chunking.
+ * These are site-level chrome that crawl4ai renders as markdown text.
+ * We remove them at the page level so they don't pollute sections or chunks.
+ */
+const NAV_STRIP_PATTERNS: RegExp[] = [
+  // "Skip to content" / "Skip to navigation" accessibility links
+  /^\[skip to (?:content|navigation|main|text)\]\([^)]*\)/i,
+
+  // "Back to top" links
+  /^\[back to top\]?\([^)]*\)/i,
+
+  // Inline navigation bar: "[About] [Products] [Services] [Contact]"
+  // Inline social share: "[Twitter] [Facebook] [LinkedIn]"
+  // This pattern matches a line that is purely short inline markdown links
+  /^(?:\[[^\]]{1,40}\]\([^)]+\)\s*){3,}$/,
+
+  // Pure link rows: multiple markdown links separated by | • · * / -
+  /^(?:\[[^\]]+\]\([^)]+\)\s*[|•·*/-]\s*)+\[[^\]]+\]\([^)]+\)/,
+
+  // Social share prefixes: "Share:" "Follow us:" "Share this:"
+  /^\s*(?:share|follow\s+us|share\s+this|connect|social|more\s+from)\s*:.*/i,
+
+  // Short lines where >80% is markdown links = pure nav (2-3 links inline)
+  // Handles: "[About](/)  [Products](/p)  [Blog](/blog)"
+];
+
+/**
+ * Strip navigation and boilerplate content from raw markdown before chunking.
+ * Removes lines that match known navigational patterns (nav bars, footers,
+ * social sharing, metadata, etc.). Preserves code blocks and tables.
+ */
+export function stripNavigationMarkdown(markdown: string): string {
+  if (!markdown) return '';
+
   const lines = markdown.split('\n');
+  const result: string[] = [];
+  let inCodeFence = false;
+
+  for (const line of lines) {
+    // Track code fences — never strip inside code blocks
+    if (line.trimStart().startsWith('```')) {
+      inCodeFence = !inCodeFence;
+      result.push(line);
+      continue;
+    }
+    // Never strip table rows or code fences
+    if (inCodeFence || line.trimStart().startsWith('|') || line.trimStart().startsWith('> ')) {
+      result.push(line);
+      continue;
+    }
+
+    const trimmed = line.trim();
+    if (trimmed.length === 0) {
+      result.push(line);
+      continue;
+    }
+
+    // Check line-level patterns
+    let matchedPattern = false;
+    for (const pattern of NAV_STRIP_PATTERNS) {
+      if (pattern.test(trimmed)) {
+        matchedPattern = true;
+        break;
+      }
+    }
+
+    if (matchedPattern) {
+      continue; // Skip this line entirely
+    }
+
+    // Pure link line: >70% of line is markdown link syntax [text](url)
+    // Skip check for structured content markers: list items, blockquotes, headings
+    if (
+      !(/^\s*[-*+]\s/.test(trimmed) && /\[[^\]]+\]/.test(trimmed)) &&
+      !/^\s*>\s/.test(trimmed) &&
+      !trimmed.startsWith('#')
+    ) {
+      const linkParts = trimmed.match(/\[[^\]]+\]\([^)]+\)/g);
+      if (linkParts) {
+        const linkChars = linkParts.reduce((sum, m) => sum + m.length, 0);
+        if (linkChars / trimmed.length > 0.7) {
+          continue;
+        }
+      }
+    }
+
+    // Footer boilerplate: copyright, privacy, terms lines
+    if (
+      /^\s*(?:©|copyright|all rights reserved|privacy policy|terms of service|terms of use|cookie policy|sitemap|powered by|built with)\b/i.test(
+        trimmed,
+      )
+    ) {
+      continue;
+    }
+
+    // Page metadata: "Posted on...", "Published...", "By author"
+    if (
+      /^\s*(?:posted|published|updated|modified|written|authored)\s+(?:on|by|at)\b/i.test(
+        trimmed,
+      ) &&
+      trimmed.length < 120
+    ) {
+      continue;
+    }
+
+    // "Last updated:" / "Last modified:"
+    if (/^\s*last\s+(?:updated|modified|edited)\s*:/i.test(trimmed)) {
+      continue;
+    }
+
+    // Pure breadcrumb line: "Home > Category > Subcategory > Page"
+    const breadcrumbParts = trimmed.match(/\b[a-z][a-z\s]+\s*>/gi);
+    if (breadcrumbParts) {
+      const breadcrumbChars = breadcrumbParts.reduce((sum, m) => sum + m.length, 0);
+      if (breadcrumbChars / trimmed.length > 0.5) {
+        continue;
+      }
+    }
+
+    result.push(line);
+  }
+
+  // Also strip leading/trailing blank lines and consecutive blank runs
+  return result
+    .join('\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
+export function chunkMarkdown(markdown: string, url: string): MarkdownChunk[] {
+  // Strip navigation / boilerplate before parsing sections.
+  const cleaned = stripNavigationMarkdown(markdown);
+  const lines = cleaned.split('\n');
   const { sections, pageTitle } = parseSections(lines);
 
   // Build section nodes with chains
@@ -278,8 +410,8 @@ function isBoilerplate(content: string): boolean {
   const linkChars = linkMatches ? linkMatches.reduce((sum, m) => sum + m.length, 0) : 0;
   const linkDensity = trimmed.length > 0 ? linkChars / trimmed.length : 0;
 
-  // Very high link density = nav/footer
-  if (linkDensity > 0.5) return true;
+  // Lowered threshold: link density > 40% = nav/footer (was 50%)
+  if (linkDensity > 0.4) return true;
 
   const lines = trimmed.split('\n');
   const nonEmptyLines = lines.filter((l) => l.trim().length > 0);
@@ -288,18 +420,35 @@ function isBoilerplate(content: string): boolean {
   // List-item density and short-line density
   const listItemLines = nonEmptyLines.filter((l) => /^\s*[-*+]\s/.test(l) || /^\s*\d+\.\s/.test(l));
   const listDensity = nonEmptyLines.length > 0 ? listItemLines.length / nonEmptyLines.length : 0;
-  const shortLineCount = nonEmptyLines.filter((l) => l.length < 40).length;
+  const shortLineCount = nonEmptyLines.filter((l) => l.length < 50).length;
   const shortLineDensity = shortLineCount / nonEmptyLines.length;
 
-  // Nav menus: mostly short list items with moderate-to-high link density
-  if (listDensity > 0.6 && shortLineDensity > 0.7 && linkDensity > 0.2) return true;
+  // Nav menus: mostly short list items with low-to-moderate link density
+  // Lowered thresholds: listDensity > 0.5, shortLineDensity > 0.6 (was 0.6/0.7)
+  if (listDensity > 0.5 && shortLineDensity > 0.6 && linkDensity > 0.15) return true;
 
   // Plain-text nav/footer lists (no markdown links but very short items)
-  if (listDensity > 0.7 && shortLineDensity > 0.8) {
+  if (listDensity > 0.6 && shortLineDensity > 0.7) {
+    const avgWordsPerLine =
+      nonEmptyLines.reduce((sum, l) => sum + l.trim().split(/\s+/).length, 0) /
+      nonEmptyLines.length;
+    if (avgWordsPerLine < 4) return true;
+  }
+
+  // Tag cloud / category list: one or two short words per line, all links
+  // e.g. "[react](/tag/react)", "[typescript](/tag/typescript)"
+  if (linkDensity > 0.2 && shortLineDensity > 0.7) {
     const avgWordsPerLine =
       nonEmptyLines.reduce((sum, l) => sum + l.trim().split(/\s+/).length, 0) /
       nonEmptyLines.length;
     if (avgWordsPerLine < 3) return true;
+  }
+
+  // Inline nav paragraph: a single non-list line where >60% of words are links
+  if (nonEmptyLines.length <= 3 && listDensity === 0) {
+    const allWords = nonEmptyLines.flatMap((l) => l.trim().split(/\s+/));
+    const linkWords = allWords.filter((w) => /^\[[^\]]+\]\(/.test(w));
+    if (allWords.length > 0 && linkWords.length / allWords.length > 0.6) return true;
   }
 
   return false;

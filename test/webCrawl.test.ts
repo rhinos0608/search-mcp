@@ -372,12 +372,12 @@ test('webCrawl sets html to undefined when no HTML fields present', async () => 
 
 // ── Timeout formula ───────────────────────────────────────────────────────────
 
-test('computeCrawlTimeout: 1 page → 45s', () => {
-  assert.equal(computeCrawlTimeout(1), 45_000);
+test('computeCrawlTimeout: 1 page → 80s (60s base + 20s/page)', () => {
+  assert.equal(computeCrawlTimeout(1), 80_000);
 });
 
-test('computeCrawlTimeout: 10 pages → 180s', () => {
-  assert.equal(computeCrawlTimeout(10), 180_000);
+test('computeCrawlTimeout: 10 pages → 260s (60s base + 20s/page)', () => {
+  assert.equal(computeCrawlTimeout(10), 260_000);
 });
 
 test('computeCrawlTimeout: 25 pages → capped at 300s', () => {

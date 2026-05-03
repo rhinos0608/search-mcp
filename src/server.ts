@@ -504,7 +504,7 @@ export function createServer(): McpServer {
     'github_repo_tree',
     {
       description:
-        'List the directory structure of a GitHub repository. Supports recursive tree listing and path-based browsing.',
+        'List the directory structure of a GitHub repository. Supports recursive tree listing and path-based browsing. When path is root (empty), automatically detects monorepo structure and returns a compact overview of workspace packages.',
       inputSchema: {
         owner: z
           .string()
@@ -525,13 +525,19 @@ export function createServer(): McpServer {
           .optional()
           .default(100)
           .describe('Max items to return (1–500)'),
+        includeMonorepo: z
+          .boolean()
+          .optional()
+          .describe(
+            'Auto-detect monorepo structure and return compact overview. Defaults to true when path is empty (root).',
+          ),
       },
     },
-    async ({ owner, repo, path, branch, recursive, limit }) => {
+    async ({ owner, repo, path, branch, recursive, limit, includeMonorepo }) => {
       logger.info({ tool: 'github_repo_tree', owner, repo, path, recursive }, 'Tool invoked');
       const start = Date.now();
       try {
-        const data = await getGitHubRepoTree(owner, repo, path, branch, recursive, limit);
+        const data = await getGitHubRepoTree(owner, repo, path, branch, recursive, limit, includeMonorepo);
         const opts = data.warnings && data.warnings.length > 0 ? { warnings: data.warnings } : {};
         const result = makeResult('github_repo_tree', data, Date.now() - start, opts);
         return successResponse(result);

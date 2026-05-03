@@ -14,6 +14,7 @@ import { retryWithBackoff } from '../retry.js';
 import { assertRateLimitOk, getTracker } from '../rateLimit.js';
 import { rateLimitError, notFoundError, unavailableError, timeoutError } from '../errors.js';
 import type { GitHubTreeEntry, GitHubTreeResult } from '../types.js';
+import { getMonorepoInfo, buildMonorepoOverview } from '../utils/monorepoDetector.js';
 
 const GITHUB_API = 'https://api.github.com';
 
@@ -215,6 +216,7 @@ export async function getGitHubRepoTree(
   branch?: string,
   recursive?: boolean,
   limit = 100,
+  includeMonorepo?: boolean,
 ): Promise<GitHubTreeResult> {
   logger.info({ owner, repo, path, branch, recursive, limit }, 'getGitHubRepoTree');
 
@@ -239,7 +241,7 @@ export async function getGitHubRepoTree(
       if (response.status === 404) {
         logger.debug('Tree API 404 — falling back to non-recursive contents API');
         // Fall back to non-recursive contents API
-        return getGitHubRepoTree(owner, repo, path, branch, false, limit);
+        return getGitHubRepoTree(owner, repo, path, branch, false, limit, includeMonorepo);
       }
       handleGitHubError(response.status, response.statusText, `${owner}/${repo} tree at ${ref}`);
     }
@@ -268,7 +270,25 @@ export async function getGitHubRepoTree(
       entries.length > limit
         ? [`Result truncated from ${String(entries.length)} to ${String(limit)} entries.`]
         : undefined;
-    return { entries: sliced, truncated, ...(warnings ? { warnings } : {}) };
+
+    const result: GitHubTreeResult = { entries: sliced, truncated, ...(warnings ? { warnings } : {}) };
+
+    // ── Monorepo detection (root path only) ──
+    if (!path && includeMonorepo !== false) {
+      try {
+        // Extract root-level entries from the recursive tree
+        const rootEntries = entries.filter((e) => !e.path.includes('/'));
+        const monorepo = await getMonorepoInfo(owner, repo, rootEntries, branch, true);
+        if (monorepo.detected && monorepo.packages.length > 0) {
+          monorepo.packageOverview = buildMonorepoOverview(monorepo);
+        }
+        result.monorepo = monorepo;
+      } catch (err) {
+        logger.warn({ err, owner, repo }, 'Monorepo detection failed — skipping');
+      }
+    }
+
+    return result;
   }
 
   // ── Non-recursive path: /repos/{owner}/{repo}/contents/{path}?ref={branch} ─
@@ -302,5 +322,21 @@ export async function getGitHubRepoTree(
     .filter((e): e is GitHubTreeEntry => e !== null);
 
   const sliced = limit > 0 ? entries.slice(0, limit) : entries;
-  return { entries: sliced, truncated };
+
+  // ── Monorepo detection (root path only) ─────────────────────────────────
+  const result: GitHubTreeResult = { entries: sliced, truncated };
+
+  if (!path && includeMonorepo !== false) {
+    try {
+      const monorepo = await getMonorepoInfo(owner, repo, entries, branch, true);
+      if (monorepo.detected && monorepo.packages.length > 0) {
+        monorepo.packageOverview = buildMonorepoOverview(monorepo);
+      }
+      result.monorepo = monorepo;
+    } catch (err) {
+      logger.warn({ err, owner, repo }, 'Monorepo detection failed — skipping');
+    }
+  }
+
+  return result;
 }

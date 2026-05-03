@@ -363,10 +363,42 @@ export interface GitHubTreeEntry {
   apiUrl: string;
 }
 
+export interface MonorepoPackage {
+  /** Package name (from package.json `name` field, or directory name as fallback). */
+  name: string;
+  /** Relative path from repo root to the package directory. */
+  path: string;
+  /** Description from package.json, if available. */
+  description: string | null;
+  /** Version from package.json, if available. */
+  version: string | null;
+}
+
+export interface MonorepoDetectResult {
+  /** Whether monorepo markers were found. */
+  detected: boolean;
+  /** Inferred monorepo tool/type. */
+  type: 'pnpm' | 'npm' | 'yarn' | 'lerna' | 'turborepo' | 'nx' | 'unknown';
+  /** Best-guess package manager. */
+  packageManager: string | null;
+  /** Monorepo config files found at root (e.g. pnpm-workspace.yaml, lerna.json). */
+  configFiles: string[];
+  /** Workspace patterns (e.g. ["packages/*", "apps/*"]) resolved from config. */
+  workspacePatterns: string[];
+  /** Workspace packages (populated when fetchDetails is true). */
+  packages: MonorepoPackage[];
+  /** Whether package.json exists at repo root. */
+  hasPackageJsonRoot: boolean;
+  /** Compact textual overview of the monorepo structure. */
+  packageOverview?: string;
+}
+
 export interface GitHubTreeResult {
   entries: GitHubTreeEntry[];
   truncated: boolean;
   warnings?: string[];
+  /** Monorepo detection result, present when scanning root of a monorepo. */
+  monorepo?: MonorepoDetectResult;
 }
 
 export interface GitHubFileResult extends StructuredContent {

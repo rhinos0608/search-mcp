@@ -33,10 +33,23 @@ const CAVEAT_PATTERNS: { caveat: string; pattern: RegExp }[] = [
 ];
 
 const SALARY_PATTERNS: RegExp[] = [
-  /\$\d+(?:,\d{3})*(?:\.\d+)?\s*[–-]\s*\$?\d+(?:,\d{3})*(?:\.\d+)?\s*\/\s*hr/i,
-  /\$\d+(?:,\d{3})*(?:\.\d+)?\s*[–-]\s*\$?\d+(?:,\d{3})*(?:\.\d+)?\s*a\s*year/i,
-  /\$\d{1,3}(?:\.\d+)?k\s*[–-]\s*\$?\d{1,3}(?:\.\d+)?k/i,
-  /\$\d{1,3}(?:\.\d+)?k\s*\+\s*super/i,
+  // Multi-currency range with unit: "A$80,000 - $100,000/yr", "€50-70/hr"
+  /(?:[A-Z]{1,3}\$|€|£|¥|₹|₩)?\$?\d+(?:,\d{3})*(?:\.\d+)?\s*[–-]\s*\$?(?:[A-Z]{1,3}\$|€|£|¥|₹|₩)?\d+(?:,\d{3})*(?:\.\d+)?\s*\/\s*(?:hr|hour|day|week|month|year|annum|pa|p\.a\.)/i,
+
+  // Multi-currency range annual: similar but "a year" / "per annum"
+  /(?:[A-Z]{1,3}\$|€|£|¥|₹|₩)?\$?\d+(?:,\d{3})*(?:\.\d+)?\s*[–-]\s*\$?(?:[A-Z]{1,3}\$|€|£|¥|₹|₩)?\d+(?:,\d{3})*(?:\.\d+)?\s+(?:a\s+year|per\s+annum|annually|p\.?\s*a\.?)/i,
+
+  // Short k-range: "$80k - $120k", "€50k-€70k", "80k-120k"
+  /(?:[A-Z]{1,3}\$|€|£|¥|₹|₩)?\$?\d{1,3}(?:\.\d+)?k?\s*[–-]\s*\$?(?:[A-Z]{1,3}\$|€|£|¥|₹|₩)?\d{1,3}(?:\.\d+)?k/i,
+
+  // k-range with super: "$80k+ super"
+  /(?:[A-Z]{1,3}\$|€|£|¥|₹|₩)?\$?\d{1,3}(?:\.\d+)?k\s*\+\s*super/i,
+
+  // Single value with + : "$80,000+", "€50k+", "80k+"
+  /(?:[A-Z]{1,3}\$|€|£|¥|₹|₩)?\$?\d+(?:,\d{3})*(?:\.\d+)?k?\s*\+/i,
+
+  // From / Up to patterns: "From $80,000", "Up to $100,000", "Salary: $80,000"
+  /(?:from|up\s+to|salary|minimum|maximum|base)\s*(?:of\s*)?:?\s*(?:[A-Z]{1,3}\$|€|£|¥|₹|₩)?\$?\d+(?:,\d{3})*(?:\.\d+)?k?(?:\s*[–-]\s*\$?(?:[A-Z]{1,3}\$|€|£|¥|₹|₩)?\d+(?:,\d{3})*(?:\.\d+)?k?)?/i,
 ];
 
 export function extractJobListingsFromHtml(html: string, url: string): JobListingMvp[] {
@@ -653,23 +666,36 @@ const SALARY_SELECTORS = [
 
 /** CSS selectors for anchor elements containing job links within a listing card. */
 const LINK_SELECTORS = [
+  'h1 a[href]',
   'h2 a[href]',
   'h3 a[href]',
   'h4 a[href]',
   'a[class*=title][href]',
   'a[class*=job-title][href]',
   'a[data-automation*=job-title][href]',
+  'a[data-automation*=apply-][href]',
+  'a[data-automation*=job-link][href]',
+  'a[data-testid*=job][href]',
+  'a[data-testid*=job-title][href]',
   'a[href*=/job/]',
   'a[href*=/jobs/]',
   'a[href*=/viewjob]',
   'a[href*=/job-detail]',
   'a[href*=/job-openings]',
+  'a[href*=/job-posting]',
   'a[href*=/position/]',
   'a[href*=/positions/]',
   'a[href*=/career/]',
   'a[href*=/careers/]',
   'a[href*=/opening/]',
   'a[href*=/vacancy/]',
+  'a[href*=/vacancies/]',
+  'a[href*=/apply/]',
+  'a[href*=/apply-]',
+  'a[href*=/role/]',
+  'a[href*=/roles/]',
+  'a[href*=/opportunity/]',
+  'a[href*=/opportunities/]',
 ];
 
 /**
@@ -766,13 +792,22 @@ function extractListingFromCard(
     }
   }
 
-  // Extract salary
+  // Extract salary — try CSS selectors first, then fall back to text-based patterns
   let salaryRaw: string | undefined;
   for (const selector of SALARY_SELECTORS) {
     const text = normalizeText($card.find(selector).first().text());
     if (text) {
       salaryRaw = text;
       break;
+    }
+  }
+  if (!salaryRaw) {
+    for (const pattern of SALARY_PATTERNS) {
+      const match = cardText.match(pattern);
+      if (match?.[0]) {
+        salaryRaw = normalizeText(match[0]);
+        break;
+      }
     }
   }
 
@@ -932,7 +967,11 @@ function isLikelyJobUrl(url: URL, anchorText: string | undefined): boolean {
       url.searchParams.has('jobid') ||
       url.searchParams.has('job_id') ||
       url.searchParams.has('jid') ||
-      url.searchParams.has('vacancy_id');
+      url.searchParams.has('vacancy_id') ||
+      url.searchParams.has('listing_id') ||
+      url.searchParams.has('position_id') ||
+      url.searchParams.has('gh_jid') ||
+      url.searchParams.has('apply');
     if (!hasJobParam) return false;
   }
 
@@ -1029,6 +1068,26 @@ export function extractJobLinksFromHtml(html: string, baseUrl: string): string[]
       }
     }
   });
+
+  // Strategy 5: if no HTML links found, try markdown link syntax [text](url) fallback.
+  // This handles pages served as markdown-only from crawl4ai.
+  if (links.size === 0) {
+    const text = $.root().text();
+    const mdLinkPattern = /\[([^\]]+)\]\((https?:\/\/[^)]+)\)/gi;
+    for (const match of text.matchAll(mdLinkPattern)) {
+      const rawUrl = match[2]?.trim();
+      if (!rawUrl) continue;
+      try {
+        const resolved = new URL(rawUrl, base);
+        const anchorText = match[1]?.trim() ?? '';
+        if (isLikelyJobUrl(resolved, anchorText)) {
+          links.add(resolved.href);
+        }
+      } catch {
+        // malformed URL — skip
+      }
+    }
+  }
 
   return [...links];
 }
