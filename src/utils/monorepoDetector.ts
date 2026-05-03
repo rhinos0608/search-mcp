@@ -224,7 +224,7 @@ function resolveWorkspaceDirs(
     if (!firstSegment) continue;
 
     const entry = rootEntriesMap.get(firstSegment);
-    if (entry && entry.type === 'dir' && !seen.has(firstSegment)) {
+    if (entry?.type === 'dir' && !seen.has(firstSegment)) {
       matched.push(entry);
       seen.add(firstSegment);
     }
@@ -512,7 +512,7 @@ export function buildMonorepoOverview(monorepo: MonorepoDetectResult): string {
   }
 
   if (monorepo.packages.length > 0) {
-    lines.push(`   Packages (${monorepo.packages.length}):`);
+    lines.push(`   Packages (${String(monorepo.packages.length)}):`);
     for (const pkg of monorepo.packages) {
       const desc = pkg.description ? ` — ${pkg.description}` : '';
       const ver = pkg.version ? ` v${pkg.version}` : '';
