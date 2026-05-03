@@ -1,12 +1,12 @@
 # AGENTS.md
 
-> **Version: 3.3.0** — Search MCP server. Keep stdout JSON-RPC only; log to stderr.
+> **Version: 3.4.0** — Search MCP server. Keep stdout JSON-RPC only; log to stderr.
 
 Guidance for AI coding agents working in this repository.
 
 ## Purpose
 
-MCP server over stdio exposing web search/read/extract/crawl, semantic RAG, GitHub, YouTube, Reddit, Twitter/X, Product Hunt, patents, podcasts, academic research, Hacker News, Stack Overflow, npm, PyPI, jobs, and news tools.
+MCP server over stdio exposing web search/read/extract/crawl, semantic RAG, GitHub, YouTube, Reddit, Twitter/X, Product Hunt, patents, podcasts, academic research, Hacker News, Stack Overflow, npm, PyPI, and jobs.
 
 Core RAG flow: corpus ingestion → chunking → embeddings → BM25+ → RRF fusion → top-K retrieval. Shared modules live in `src/rag/`.
 
@@ -29,13 +29,16 @@ npm run config:decrypt   # config.enc -> config.json
 
 ## Architecture
 
-- `src/server.ts` registers 28 tools inline with Zod schemas via `server.registerTool()` and delegates to `src/tools/*`.
+- `src/server.ts` is the composition root: loads config, registers tools (via family modules), starts server. No inline schemas or handlers.
+- `src/tools/registry.ts` provides `registerFamily()` for registering a single MCP tool with a discriminated-union `action` field. Each action has its own schema, handler, and optional config check.
+- `src/tools/families/` contain consolidated tool families: e.g. `youtube.ts` with actions `search | transcript | semantic`. Family tools are always registered; unavailable actions return actionable errors at runtime. Health reporting surfaces per-action availability.
+- `src/tools/response.ts` provides shared `makeResult`, `errorResponse`, `successResponse` helpers.
 - `src/index.ts` Entry point. Creates `McpServer`, attaches `StdioServerTransport`, calls `server.connect()`.
 - `src/logger.ts` routes pino logs to stderr. Never write non-JSON-RPC output to stdout.
 - `src/config.ts` resolves config in this order: encrypted config → env vars → defaults, then caches it.
 - Tool handlers return `ToolResult<T>` as JSON text content. Errors are sanitized and returned with `isError: true`.
 
-## Main Tools (28 total)
+## Main Tools (15 total)
 
 ### Search/Read/Crawl
 - `web_search`: Exa, Brave, or SearXNG with fallback chain, optional query expansion and cross-backend merging.
@@ -44,22 +47,42 @@ npm run config:decrypt   # config.enc -> config.json
 - `semantic_crawl`: primary crawl RAG entry point. Supports `url`, `sitemap`, `search`, `github`, and `cached` sources. Supports contextual chunk embeddings, content scrubbing, domain trust filtering, and self-improvement extraction stats.
 
 ### Semantic/RAG
-- `semantic_youtube`: YouTube search + transcripts + RAG.
-- `semantic_reddit`: Reddit search/comments + RAG; filters deleted/removed comments.
 - `semantic_jobs`: job search/extraction for SEEK, Indeed, Jora with dedup, constraints, and weighted ranking.
-- `semantic_github_code`: AST-aware GitHub code search using lazy-loaded tree-sitter WASM grammars; defaults to `lexical-heavy`.
 
 ### GitHub
-- `github_repo`, `github_repo_file`, `github_repo_search`, `github_repo_tree`, `github_trending`.
+- `github` (family tool with `action` discriminator):
+  - `repo` — repository metadata + README
+  - `file` — read a file, supports line/byte ranges
+  - `tree` — directory listing with monorepo detection
+  - `search` — GitHub code search API
+  - `trending` — trending repos (cheerio scrape, no auth needed)
+  - `code_search` — AST-aware semantic code search via RAG
 
 ### Video/Social
-- `youtube_search`, `youtube_transcript`, `reddit_search`, `reddit_comments`, `twitter_search`.
+- `youtube` (family tool with `action` discriminator):
+  - `search` — search videos by keyword
+  - `transcript` — fetch captions, works without API key
+  - `semantic` — search + transcript + RAG ranking
+- `reddit` (family tool with `action` discriminator):
+  - `search` — search posts by keyword, free API
+  - `comments` — fetch comment tree with nested post locator (`url | permalink | id`)
+  - `semantic` — search + comments + RAG ranking
+- `twitter_search` (Nitter-based, requires `NITTER_BASE_URL`)
 
 ### Research/Discovery
-- `academic_search`, `arxiv_search`, `hackernews_search`, `stackoverflow_search`.
+- `research` (family tool with `action` discriminator):
+  - `academic` — ArXiv + Semantic Scholar with automatic cross-backend fallback
+  - `arxiv` — direct ArXiv search with category/date filtering
+  - `hackernews` — Algolia HN search
+  - `stackoverflow` — Stack Exchange API (degraded without `STACKEXCHANGE_API_KEY`)
 
 ### Packages/Products
-- `npm_search`, `pypi_search`, `producthunt_search`, `patent_search`, `podcast_search`.
+- `packages` (family tool with `action` discriminator):
+  - `npm` — search npm registry
+  - `pypi` — search Python Package Index
+- `producthunt_search` (requires `PRODUCTHUNT_API_TOKEN`)
+- `patent_search` (requires `PATENTSVIEW_API_KEY`)
+- `podcast_search` (requires `LISTENNOTES_API_KEY`)
 
 ### System
 - `health_check`: verify server status, config health, backend connectivity.

@@ -271,7 +271,11 @@ export async function getGitHubRepoTree(
         ? [`Result truncated from ${String(entries.length)} to ${String(limit)} entries.`]
         : undefined;
 
-    const result: GitHubTreeResult = { entries: sliced, truncated, ...(warnings ? { warnings } : {}) };
+    const result: GitHubTreeResult = {
+      entries: sliced,
+      truncated,
+      ...(warnings ? { warnings } : {}),
+    };
 
     // ── Monorepo detection (root path only) ──
     if (!path && includeMonorepo !== false) {

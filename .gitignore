@@ -21,3 +21,4 @@ __pycache__/
 docs/superpowers/plans/
 
 .pi-smartread.tags.cache/
+.pi-smartread.embeddings.cache/50c2ebcb18c63fb1.json

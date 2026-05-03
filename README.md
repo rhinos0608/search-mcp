@@ -5,19 +5,20 @@
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.8-blue)](https://www.typescriptlang.org/)
 [![MCP Compatible](https://img.shields.io/badge/MCP-Compatible-green)](https://modelcontextprotocol.io)
 
-> **28 tools** for web search, semantic RAG, code analysis, job search, academic research, and social media — all in one MCP server.
+> **15 tools** (consolidated from 28) for web search, semantic RAG, code analysis, job search, academic research, and social media — all in one MCP server.
 
 ## Features at a Glance
 
 | Category | Tools |
 |---|---|
 | **Web** | Search (Exa/Brave/SearXNG), Read, Crawl |
-| **Semantic RAG** | Text/YouTube/Reddit/GitHub/Jobs with BM25+embedding+RRF |
-| **Search** | GitHub, YouTube, Reddit, Hacker News, Twitter/X, Product Hunt (requires `PRODUCTHUNT_API_TOKEN`) |
-| **Research** | Academic (ArXiv + Semantic Scholar), Patents, Stack Overflow |
-| **Packages** | npm, PyPI |
+| **Semantic RAG** | Crawl, YouTube, Reddit, Jobs, GitHub code with BM25+embedding+RRF |
+| **GitHub** | Family: `repo`, `file`, `tree`, `search`, `trending`, `code_search` |
+| **Video/Social** | `youtube` (search/transcript/semantic), `reddit` (search/comments/semantic), Twitter/X |
+| **Research** | `research` (academic/arxiv/hackernews/stackoverflow), Patents |
+| **Packages** | `packages` (npm/pypi) |
 | **Jobs** | SEEK, Indeed, Jora with structured extraction |
-| **Specialist** | Podcasts (requires `LISTENNOTES_API_KEY`), Stack Exchange Q&A, GitHub trending |
+| **Specialist** | Podcasts, Product Hunt, Health check |
 
 ## Quick Start
 
@@ -96,7 +97,7 @@ See [docs/comparison.md](docs/comparison.md) for a full feature comparison with 
 
 ## Documentation
 
-- [Full Tool Reference](docs/tools.md) — Detailed docs for all 28 tools
+- [Full Tool Reference](docs/tools.md) — Detailed docs for all 15 consolidated tools
 - [Architecture Overview](docs/architecture.md) — System architecture and data flow
 - [Quick Start Guide](docs/quickstart.md) — Getting started with examples
 - [Feature Comparison](docs/comparison.md) — search-mcp vs. alternatives

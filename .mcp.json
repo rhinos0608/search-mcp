@@ -11,18 +11,13 @@
       "directTools": [
         "web_search",
         "web_read",
-        "github_repo",
-        "github_trending",
-        "github_repo_tree",
-        "github_repo_file",
-        "github_repo_search",
-        "youtube_transcript",
-        "reddit_search",
-        "reddit_comments",
-        "producthunt_search",
-        "academic_search",
         "web_crawl",
-        "semantic_crawl"
+        "semantic_crawl",
+        "youtube",
+        "reddit",
+        "github",
+        "packages",
+        "research"
       ]
     }
   }

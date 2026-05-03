@@ -11,6 +11,11 @@ import { getTracker, type RateLimitedBackend } from './rateLimit.js';
 import { safeResponseText, safeResponseJson } from './httpGuards.js';
 import { logger } from './logger.js';
 import { jobSpyHealth } from './utils/jobspyClient.js';
+import { youtubeCapabilities } from './tools/families/youtube.js';
+import { redditCapabilities } from './tools/families/reddit.js';
+import { gitHubCapabilities } from './tools/families/github.js';
+import { packagesCapabilities } from './tools/families/packages.js';
+import { researchCapabilities } from './tools/families/research.js';
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -39,10 +44,6 @@ const GATED_TOOLS: Record<string, GateRule> = {
     check: (cfg) => cfg.nitter.baseUrl.length > 0,
     remediation: 'Set NITTER_BASE_URL environment variable pointing to a Nitter instance.',
   },
-  youtube_search: {
-    check: (cfg) => (cfg.youtube.apiKey ?? '').length > 0,
-    remediation: 'Set YOUTUBE_API_KEY environment variable (Google Cloud Console).',
-  },
   producthunt_search: {
     check: (cfg) => (cfg.producthunt.apiToken ?? '').length > 0,
     remediation: 'Set PRODUCTHUNT_API_TOKEN environment variable.',
@@ -64,16 +65,6 @@ const GATED_TOOLS: Record<string, GateRule> = {
     check: (cfg) => cfg.crawl4ai.baseUrl.length > 0 && cfg.embeddingSidecar.baseUrl.length > 0,
     remediation:
       'Set CRAWL4AI_BASE_URL and EMBEDDING_SIDECAR_BASE_URL. The embedding sidecar requires a running crawl4ai sidecar.',
-  },
-  semantic_youtube: {
-    check: (cfg) =>
-      (cfg.youtube.apiKey ?? '').length > 0 && cfg.embeddingSidecar.baseUrl.length > 0,
-    remediation:
-      'Set YOUTUBE_API_KEY (Google Cloud Console) and EMBEDDING_SIDECAR_BASE_URL to use semantic_youtube.',
-  },
-  semantic_reddit: {
-    check: (cfg) => cfg.embeddingSidecar.baseUrl.length > 0,
-    remediation: 'Set EMBEDDING_SIDECAR_BASE_URL to use semantic_reddit.',
   },
   semantic_jobs: {
     check: (cfg) =>
@@ -104,29 +95,13 @@ const OPTIONAL_CONFIG: Record<string, OptionalRule> = {
     degradedMessage: 'No search backend configured — web_search calls will fail.',
     remediation: 'Set EXA_API_KEY, BRAVE_API_KEY, SEARXNG_BASE_URL, or TAVILY_API_KEY environment variable.',
   },
-  stackoverflow_search: {
-    check: (cfg) => (cfg.stackexchange.apiKey ?? '').length > 0,
-    degradedMessage: 'No API key — limited to 300 requests/day (shared IP quota).',
-    remediation: 'Set STACKEXCHANGE_API_KEY for 10,000 requests/day (free at stackapps.com).',
-  },
 };
+
+// (stackoverflow_search moved to research family — see researchCapabilities)
 
 // Free tools — no config required
 export const FREE_TOOLS = [
   'web_read',
-  'github_repo',
-  'github_repo_tree',
-  'github_repo_file',
-  'github_repo_search',
-  'github_trending',
-  'youtube_transcript',
-  'reddit_search',
-  'reddit_comments',
-  'academic_search',
-  'hackernews_search',
-  'arxiv_search',
-  'npm_search',
-  'pypi_search',
 ] as const;
 
 // ── configHealth (sync, startup) ────────────────────────────────────────────
@@ -170,11 +145,61 @@ export function configHealth(cfg: SearchConfig): Record<string, ToolHealth> {
 
   // Synthesized Reddit OAuth config-layer indicator.
   // Surfaced as its own tool entry so health_check callers can see the
-  // OAuth posture without inferring from reddit_search / reddit_comments.
+  // OAuth posture without having to parse the reddit family entries.
   report.reddit_oauth = redditOAuthHealth(cfg);
 
   // Synthesized RAG-Anything bridge indicator.
   report.raga_bridge = ragaBridgeHealth(cfg);
+
+  // Family tool capabilities (per-action breakdown).
+  for (const cap of youtubeCapabilities(cfg)) {
+    report[cap.name] = cap.available
+      ? { status: 'healthy' as const, message: 'Configured.' }
+      : {
+          status: 'unconfigured' as const,
+          message: 'Missing required configuration.',
+          remediation: cap.issue ?? undefined,
+        };
+  }
+
+  for (const cap of redditCapabilities(cfg)) {
+    report[cap.name] = cap.available
+      ? { status: 'healthy' as const, message: 'Configured.' }
+      : {
+          status: 'unconfigured' as const,
+          message: 'Missing required configuration.',
+          remediation: cap.issue ?? undefined,
+        };
+  }
+
+  for (const cap of gitHubCapabilities(cfg)) {
+    report[cap.name] = cap.available
+      ? { status: 'healthy' as const, message: 'Configured.' }
+      : {
+          status: 'unconfigured' as const,
+          message: 'Missing required configuration.',
+          remediation: cap.issue ?? undefined,
+        };
+  }
+
+  for (const cap of packagesCapabilities(cfg)) {
+    report[cap.name] = cap.available
+      ? { status: 'healthy' as const, message: 'Configured.' }
+      : {
+          status: 'unconfigured' as const,
+          message: 'Missing required configuration.',
+        };
+  }
+
+  for (const cap of researchCapabilities(cfg)) {
+    report[cap.name] = cap.available
+      ? { status: 'healthy' as const, message: 'Configured.' }
+      : {
+          status: 'unconfigured' as const,
+          message: 'Missing required configuration.',
+          ...(cap.issue ? { remediation: cap.issue } : {}),
+        };
+  }
 
   return report;
 }
@@ -305,8 +330,6 @@ async function probeExtractionSupport(
 ): Promise<ToolHealth> {
   const endpoint = `${crawl4aiBaseUrl.replace(/\/+$/, '')}/crawl`;
 
-  // Mirror the exact request format from webCrawl.buildRequestBody so the
-  // probe hits the same code path inside the sidecar as real tool calls.
   const body = {
     urls: ['https://example.com'],
     browser_config: { type: 'BrowserConfig', params: { headless: true } },
@@ -342,7 +365,6 @@ async function probeExtractionSupport(
   if (apiToken) headers.Authorization = `Bearer ${apiToken}`;
 
   try {
-    // crawl4ai URL is operator-configured, not user input — skip SSRF guard.
     const res = await fetch(endpoint, {
       method: 'POST',
       headers,
@@ -351,11 +373,6 @@ async function probeExtractionSupport(
     });
 
     if (!res.ok) {
-      // HTTP 4xx/5xx — but the sidecar may still support extraction.
-      // A 500 can happen when the extraction strategy throws during a test
-      // crawl (e.g. example.com returned an unexpected page shape).  Fall
-      // through to a lightweight connectivity check to confirm the sidecar
-      // is reachable, then report degraded instead of unreachable.
       logger.warn(
         { status: res.status, endpoint },
         'probeExtractionSupport: sidecar returned non-OK for extraction test',
@@ -374,7 +391,6 @@ async function probeExtractionSupport(
       error?: string;
     };
 
-    // Sidecar-level error object (not wrapped in result/results)
     if (raw.success === false && typeof raw.error === 'string') {
       return {
         status: 'degraded',
@@ -385,17 +401,12 @@ async function probeExtractionSupport(
 
     const page = raw.result ?? raw.results?.[0];
     if (page && 'extracted_content' in page) {
-      // extracted_content is present — extraction strategy was accepted.
-      // The content itself may be null/empty (CSS selector didn't match),
-      // but that's fine; we only care that the sidecar accepted the config.
       return {
         status: 'healthy',
         message: 'Crawl4AI sidecar supports structured data extraction (v0.8.x+).',
       };
     }
 
-    // No extracted_content in the response — the sidecar may be v0.7.x
-    // (pre-extraction) or the extraction strategy was silently ignored.
     return {
       status: 'degraded',
       message: 'Crawl4AI sidecar does not report extraction support.',
@@ -419,14 +430,11 @@ async function probeUrl(url: string): Promise<number> {
   }, PROBE_TIMEOUT_MS);
 
   try {
-    // Sidecar URLs (crawl4ai, embedding, searxng) are operator-configured,
-    // not user input — skip SSRF guard for health probes.
     const res = await fetch(url, {
       headers: { 'User-Agent': 'search-mcp/1.0 health-check' },
       signal: controller.signal,
     });
     if (!res.ok) throw new Error(`HTTP ${String(res.status)}`);
-    // Consume a small amount to confirm the body is valid
     await safeResponseText(res, url);
     return Date.now() - start;
   } finally {
@@ -439,9 +447,9 @@ async function probeUrl(url: string): Promise<number> {
 interface SidecarHealthBody {
   modelLoaded?: boolean | undefined;
   model?: string | undefined;
-  upstream?: string | undefined;   // openai-embedding-proxy: upstream LM Studio URL
-  torchDtype?: string | undefined; // torch sidecar: 'bfloat16' | 'float32'
-  detail?: string | undefined;     // FastAPI error detail on 4xx/5xx
+  upstream?: string | undefined;
+  torchDtype?: string | undefined;
+  detail?: string | undefined;
 }
 
 async function probeSidecarUrl(
@@ -507,21 +515,20 @@ export function getNetworkProbes(cfg: SearchConfig): NetworkProbe[] {
     {
       label: 'github',
       url: 'https://api.github.com/rate_limit',
-      tools: ['github_repo', 'github_repo_tree', 'github_repo_file', 'github_repo_search'],
+      tools: ['github.repo', 'github.tree', 'github.file', 'github.search'],
     },
     {
       label: 'hackernews',
       url: 'https://hn.algolia.com/api/v1/search?query=test&hitsPerPage=1',
-      tools: ['hackernews_search'],
+      tools: ['research.hackernews'],
     },
     {
       label: 'npm',
       url: 'https://registry.npmjs.org/-/v1/search?text=test&size=1',
-      tools: ['npm_search'],
+      tools: ['packages.npm'],
     },
   ];
 
-  // SearXNG is self-hosted so probing it costs nothing
   if (cfg.searxng.baseUrl.length > 0) {
     probes.push({
       label: 'searxng',
@@ -538,7 +545,6 @@ export function getNetworkProbes(cfg: SearchConfig): NetworkProbe[] {
     });
   }
 
-  // RAG-Anything bridge (multimodal document extraction)
   if (cfg.raga.enabled && cfg.raga.baseUrl.length > 0) {
     probes.push({
       label: 'raga-bridge',
@@ -554,21 +560,17 @@ export function getNetworkProbes(cfg: SearchConfig): NetworkProbe[] {
 
 export const RATE_LIMIT_TOOL_MAP: [string, RateLimitedBackend][] = [
   ['web_search', 'brave'],
-  ['reddit_search', 'reddit'],
-  ['reddit_comments', 'reddit'],
-  ['github_repo', 'github'],
-  ['github_repo_tree', 'github'],
-  ['github_repo_file', 'github'],
-  ['github_repo_search', 'github_search'],
-  ['academic_search', 'semantic_scholar'],
+  ['reddit.search', 'reddit'],
+  ['reddit.comments', 'reddit'],
+  ['github.repo', 'github'],
+  ['github.tree', 'github'],
+  ['github.file', 'github'],
+  ['github.search', 'github_search'],
+  ['research.academic', 'semantic_scholar'],
 ];
 
 // ── runHealthProbes (async, on demand) ──────────────────────────────────────
 
-/**
- * Full health report combining config checks, rate limit tracker state,
- * and selective network probes for free APIs. No caching — always live.
- */
 export async function runHealthProbes(cfg: SearchConfig): Promise<HealthReport> {
   const tools = configHealth(cfg);
 
@@ -584,9 +586,6 @@ export async function runHealthProbes(cfg: SearchConfig): Promise<HealthReport> 
   }
 
   // Layer 3: network probes for free APIs (parallel, 5s timeout each)
-  // Sidecar probes (embedding-sidecar) parse the /health JSON body for richer status.
-  // Crawl4AI is probed separately via probeExtractionSupport against /crawl, since
-  // it does not expose a /health endpoint.
   const probes = getNetworkProbes(cfg);
   const probeResults = await Promise.allSettled(
     probes.map(async (probe) => {
@@ -605,7 +604,6 @@ export async function runHealthProbes(cfg: SearchConfig): Promise<HealthReport> 
       for (const tool of probe.tools) {
         const existing = tools[tool];
         if (existing === undefined || existing.status === 'unconfigured') continue;
-        // Enrich with latency if healthy, don't downgrade rate_limited/degraded
         if (existing.status === 'healthy') {
           const message =
             sidecarBody !== null ? sidecarStatusMessage(probe.label, sidecarBody) : 'Configured.';
@@ -620,8 +618,6 @@ export async function runHealthProbes(cfg: SearchConfig): Promise<HealthReport> 
       for (const tool of probe.tools) {
         const existing = tools[tool];
         if (existing === undefined || existing.status === 'unconfigured') continue;
-        // web_read always works via Readability fallback; other backends
-        // (crawl4ai, raga) are enhancements — degrade instead of unreachable.
         if (tool === 'web_read') {
           tools[tool] = {
             status: 'degraded',
@@ -665,7 +661,6 @@ export async function runHealthProbes(cfg: SearchConfig): Promise<HealthReport> 
   } else if (webSearchStatus === 'degraded' || webSearchStatus === 'rate_limited') {
     overall = 'degraded';
   } else {
-    // unconfigured or unreachable
     overall = 'unhealthy';
   }
 
@@ -676,12 +671,6 @@ export async function runHealthProbes(cfg: SearchConfig): Promise<HealthReport> 
   };
 }
 
-// ── Startup sidecar probe ────────────────────────────────────────────────────
-
-/**
- * Non-blocking probe of configured sidecars (crawl4ai, embedding sidecar).
- * Called at server startup to surface early warnings without blocking the stdio transport.
- */
 export async function probeConfiguredSidecars(cfg: SearchConfig): Promise<void> {
   const probes: { label: string; url: string }[] = [];
 
