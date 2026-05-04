@@ -29,6 +29,29 @@ const BOILERPLATE_PATTERNS = [
   /^\s*sponsored\s*(content|links)?\s*/i,
   /^\s*promoted\s*/i,
   /^\s*ad\s*choices\s*/i,
+
+  // Job board navigation patterns
+  /^\s*community\s*/i,
+  /^\s*for\s+employers?\s*/i,
+  /^\s*search\s+(?:jobs?|companies?|salaries)\s*/i,
+  /^\s*notifications?\s*/i,
+  /^\s*messages?\s*/i,
+  /^\s*profile\s*/i,
+  /^\s*dashboard\s*/i,
+  /^\s*settings\s*/i,
+  /^\s*sign\s+out\s*/i,
+  /^\s*log\s+out\s*/i,
+  /^\s*upload\s+(?:your\s+)?(?:cv|resume)\s*/i,
+  /^\s*create\s+job\s+alert\s*/i,
+  /^\s*save\s+this\s+job\s*/i,
+  /^\s*discover\s+more\s*/i,
+  /^\s*related\s+(?:jobs?|searches?|companies?|salaries?)\s*/i,
+  /^\s*similar\s+(?:jobs?|roles?|positions?)\s*/i,
+  /^\s*people\s+also\s+(?:viewed|searched|applied)\s*/i,
+  /^\s*loading\s*/i,
+  /^\s*skip\s+to\s+content\s*/i,
+  /^\s*cookie\s+(?:policy|settings|preferences)\s*/i,
+  /^\s*accessibility\s*/i,
 ];
 
 // Social media and sharing patterns

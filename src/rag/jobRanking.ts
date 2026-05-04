@@ -59,30 +59,55 @@ export function rankJobListings(
     const workMode = calculateWorkModeScore(listing, constraints?.workMode);
     const recency = calculateFreshnessScore(listing.postedRaw);
     const completeness = calculateCompletenessScore(listing);
+    const sourceReliability = calculateSourceReliability(listing.source);
 
     let overallScore: number;
-    let sourceReliability = 0;
     let duplicateDensity = 0;
     let companyReliability = 0;
 
     if (graphScoring) {
-      sourceReliability = calculateSourceReliability(listing.source);
       if (listing.company) {
         duplicateDensity = calculateDuplicateScore(listing.company, listing.title);
         companyReliability = calculateCompanyReliability(listing.company);
       }
       overallScore =
         semantic * 0.35 +
-        location * 0.15 +
-        workMode * 0.10 +
+        location * 0.20 +
+        workMode * 0.08 +
         recency * 0.10 +
-        completeness * 0.10 +
-        sourceReliability * 0.10 +
+        completeness * 0.12 +
+        sourceReliability * 0.05 +
         duplicateDensity * 0.05 +
         companyReliability * 0.05;
     } else {
       overallScore =
-        semantic * 0.45 + location * 0.2 + workMode * 0.15 + recency * 0.1 + completeness * 0.1;
+        semantic * 0.40 +
+        location * 0.25 +
+        workMode * 0.08 +
+        recency * 0.10 +
+        completeness * 0.12 +
+        sourceReliability * 0.05;
+    }
+
+    // Semantic gate: when no semantic score is available (embedding not configured
+    // or listing was not in the corpus), penalise listings that don't match
+    // explicit constraints. RRF-fused scores are always < 0.05, so we check
+    // for complete absence of a semantic score instead of a threshold.
+    if (semanticScores !== undefined && semantic === 0) {
+      // Listing had no semantic score — either not embedded or not returned by retrieval
+      const hasLocationMatch = constraints?.location !== undefined &&
+        constraints.location.length > 0 &&
+        listing.location !== undefined &&
+        constraints.location.some((lc) => listing.location?.toLowerCase().includes(lc.toLowerCase()));
+      const hasWorkModeMatch = constraints?.workMode !== undefined &&
+        constraints.workMode.length > 0 &&
+        listing.workMode !== 'unknown' &&
+        constraints.workMode.includes(listing.workMode);
+
+      if (!hasLocationMatch && !hasWorkModeMatch) {
+        // No semantic score + no constraint match = likely irrelevant
+        overallScore = overallScore * 0.4;
+      }
     }
 
     return {
@@ -297,17 +322,30 @@ export function calculateRecencyScore(postedRaw: string | undefined): number {
 }
 
 export function calculateSourceReliability(source: JobSource): number {
+  // Reliability is based on structured data quality and locale coverage.
+  // SEEK is the dominant Australian job board with high-quality structured data.
+  // Indeed and LinkedIn are strong globally but their data quality varies.
   switch (source) {
-    case 'linkedin':
-    case 'indeed':
-      return 1.0;
-    case 'glassdoor':
-    case 'ziprecruiter':
-      return 0.9;
     case 'seek':
+      return 1.0;
+    case 'linkedin':
+      return 0.95;
+    case 'indeed':
+      return 0.9;
+    case 'glassdoor':
+      return 0.85;
+    case 'jora':
+      return 0.8;
+    case 'ziprecruiter':
+      return 0.75;
     case 'monster':
       return 0.7;
-    case 'jora':
+    case 'adzuna':
+      return 0.65;
+    case 'workable':
+    case 'lever':
+    case 'greenhouse':
+      return 0.6;
     case 'jooble':
     case 'other':
       return 0.5;

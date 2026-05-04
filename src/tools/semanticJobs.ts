@@ -20,6 +20,9 @@ import { JobPipeline, type EnrichedRecord } from '../rag/jobPipeline.js';
 import { type JobSpyAcquisitionParams } from '../utils/jobspyClient.js';
 import type { JobListingMvp, JobSearchConstraints } from '../rag/types/job.js';
 import type { SearchResult } from '../types.js';
+import { QualityGate } from '../rag/quality/qualityGate.js';
+import { checkSerpQuality } from '../rag/quality/serpGuard.js';
+import { canonicalizeJobUrl } from '../utils/url.js';
 
 const DEFAULT_MAX_PAGES = 20;
 const MAX_PAGES = 50;
@@ -107,6 +110,9 @@ export async function semanticJobs(
     }
     if (opts.workMode?.includes('remote')) acquisitionParams.isRemote = true;
 
+    // Freshness: fetch jobs posted within the last 72 hours
+    acquisitionParams.hoursOld = 72;
+
     const maxPages = Math.min(opts.maxPages ?? DEFAULT_MAX_PAGES, MAX_PAGES);
     acquisitionParams.resultsWanted = maxPages * 5;
 
@@ -150,8 +156,9 @@ export async function semanticJobs(
     if (opts.topK !== undefined) embedOpts.topK = opts.topK;
     if (opts.maxBytes !== undefined) embedOpts.maxBytes = opts.maxBytes;
 
-    // Default to true: enforce constraints by default for better filtering
-    const enforceConstraints = opts.enforceConstraints ?? true;
+    // Default to false: constraints influence ranking by default;
+    // set enforceConstraints: true for strict post-filtering only when precise control is needed.
+    const enforceConstraints = opts.enforceConstraints ?? false;
     let results = await pipeline.embedAndRank(finalRecords, opts.query, embedOpts, constraints, false);
     let strictFilteredCount = 0;
     if (enforceConstraints) {
@@ -185,8 +192,35 @@ export async function semanticJobs(
   const searchFn = deps.search ?? defaultSearch;
   const crawlFn = deps.crawl ?? defaultCrawl;
 
-  const searchResults = await searchFn(query, maxPages);
-  const seedUrls = dedupUrls(searchResults.map((result) => result.url));
+  // Try the full query first; if it returns no results, retry with a looser query
+  // dropping constraints that may be too specific for web search.
+  let searchResults = await searchFn(query, maxPages);
+
+  // SERP quality guard: check if search results are relevant before crawling
+  if (searchResults.length > 0) {
+    const serpQuality = checkSerpQuality(searchResults, query, 3, 10);
+    if (!serpQuality.passed && serpQuality.constrainedQuery) {
+      logger.warn(
+        { tool: 'semantic_jobs', originalQuery: query, constrained: serpQuality.constrainedQuery, reasons: serpQuality.reasons },
+        'SERP quality check failed; retrying with constrained query',
+      );
+      searchResults = await searchFn(serpQuality.constrainedQuery, maxPages);
+    }
+  }
+
+  if (searchResults.length === 0 && constraints.location !== undefined) {
+    const looseQuery = buildSearchQuery(opts.query, {}, addJobSuffix);
+    logger.info(
+      { tool: 'semantic_jobs', originalQuery: query, looseQuery },
+      'Zero results with constrained query; retrying with location-agnostic query',
+    );
+    searchResults = await searchFn(looseQuery, maxPages);
+  }
+
+  // Canonicalize job URLs before crawling to remove tracking sludge
+  const seedUrls = dedupUrls(
+    searchResults.map((result) => canonicalizeJobUrl(result.url)),
+  );
 
   if (seedUrls.length === 0) {
     return {
@@ -249,15 +283,43 @@ export async function processJobSearchResults(
     }
   }
 
+  // Page-level intent check: skip pages that are clearly not job listings
   const extractedListings: JobListingMvp[] = [];
+  let pageIntentSkipped = 0;
   for (const page of successfulPages) {
-    extractedListings.push(...extractJobListingsFromHtml(page.html ?? '', page.url));
+    const pageHtml = page.html ?? '';
+    // Quick page-level check: short pages lacking job keywords are likely
+    // login, loading, boilerplate, or non-listing content
+    const pageText = pageHtml
+      .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
+      .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
+      .replace(/<[^>]+>/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+    const isJobPage = pageText.length >= 100 || /job|career|position|vacancy|hiring|apply/i.test(pageHtml);
+    if (!isJobPage) {
+      pageIntentSkipped++;
+      logger.debug({ url: page.url, textLen: pageText.length }, 'Skipped non-job page before extraction');
+      continue;
+    }
+    extractedListings.push(...extractJobListingsFromHtml(pageHtml, page.url));
   }
 
   const dedupedListings = dedupJobListings(extractedListings);
   const deduplicatedCount = extractedListings.length - dedupedListings.length;
-  const filteredListings = applyHardFilters(dedupedListings, constraints);
-  const filteredCount = dedupedListings.length - filteredListings.length;
+
+  // Quality gate: filter listings by country, occupation, entry-level, and boilerplate
+  const qualityGate = new QualityGate();
+  const qualityResult = qualityGate.filter(dedupedListings);
+  if (qualityResult.rejected.length > 0) {
+    logger.info(
+      { tool: 'semantic_jobs', passed: qualityResult.passed.length, rejected: qualityResult.rejected.length, stats: qualityResult.stats },
+      'Quality gate filtered listings',
+    );
+  }
+
+  const filteredListings = applyHardFilters(qualityResult.passed, constraints);
+  const filteredCount = qualityResult.passed.length - filteredListings.length;
 
   const corpusStatus = {
     requested: crawledPages.length,
@@ -417,7 +479,7 @@ export function filterEnforcedJobScores(
 function matchesStrictConstraints(listing: JobListingMvp, constraints: JobSearchConstraints): boolean {
   if (constraints.location !== undefined && constraints.location.length > 0) {
     if (listing.location === undefined) {
-      return false;
+      return true; // Unknown location passes through (consistent with applyHardFilters)
     }
     const location = listing.location.toLowerCase();
     const locationMatch = constraints.location.some((constraint) => {
@@ -431,7 +493,7 @@ function matchesStrictConstraints(listing: JobListingMvp, constraints: JobSearch
 
   if (constraints.workMode !== undefined && constraints.workMode.length > 0) {
     if (listing.workMode === 'unknown') {
-      return false;
+      return true; // Unknown work mode passes through (consistent with applyHardFilters)
     }
     if (!constraints.workMode.includes(listing.workMode)) {
       return false;
@@ -498,11 +560,9 @@ function buildSearchQuery(
       ...constraints.location.map((term) => term.trim()).filter((term) => term.length > 0),
     );
   }
-  if (constraints.workMode !== undefined) {
-    parts.push(
-      ...constraints.workMode.map((mode) => mode.trim()).filter((term) => term.length > 0),
-    );
-  }
+  // NOTE: workMode is intentionally NOT added to the search query.
+  // Keywords like "remote" / "hybrid" pollute web search and harm recall.
+  // Work-mode filtering is handled at the ranking/filtering stage.
   if (addJobSuffix) {
     parts.push('jobs');
   }

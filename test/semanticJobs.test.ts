@@ -361,10 +361,12 @@ test('filterEnforcedJobScores removes listings missing required constraint value
     }),
   ];
 
+  // Unknown location now passes through (consistent with applyHardFilters).
+  // Only Melbourne (mismatched location) is filtered.
   const filtered = filterEnforcedJobScores(results, { location: ['Sydney'] });
   assert.deepEqual(
     filtered.map((result) => result.listing.title),
-    ['Sydney Developer'],
+    ['Sydney Developer', 'Unknown Location Developer'],
   );
 });
 

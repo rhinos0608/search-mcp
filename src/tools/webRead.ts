@@ -7,6 +7,7 @@ import { ToolCache, cacheKey } from '../cache.js';
 import { retryWithBackoff } from '../retry.js';
 import type { ArticleResult } from '../types.js';
 import { safeStructuredFromHtml } from '../utils/elementHelpers.js';
+import { cleanTextContent } from '../utils/contentCleanup.js';
 
 const cache = new ToolCache<ArticleResult>({
   maxSize: 100,
@@ -139,7 +140,7 @@ export async function webRead(url: string): Promise<ArticleResult> {
       const rawContent = article.content ?? '';
       const rawTextContent = article.textContent ?? '';
       let content = rawContent;
-      let textContent = rawTextContent;
+      let textContent = cleanTextContent(rawTextContent);
 
       if (content.length > MAX_CONTENT_LENGTH) {
         content = content.slice(0, MAX_CONTENT_LENGTH) + TRUNCATED_MARKER;
@@ -177,7 +178,7 @@ export async function webRead(url: string): Promise<ArticleResult> {
         }
 
         let content = fb.content;
-        let textContent = fb.textContent;
+        let textContent = cleanTextContent(fb.textContent);
 
         if (content.length > MAX_CONTENT_LENGTH) {
           content = content.slice(0, MAX_CONTENT_LENGTH) + TRUNCATED_MARKER;

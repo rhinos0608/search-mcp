@@ -29,6 +29,7 @@ import { fetchJobDetails } from 'jobspy-js';
 import { embedTexts, embedTextsBatched } from './embedding.js';
 import { prepareCorpus, retrieveCorpus } from './pipeline.js';
 import { applySemanticByteBudget } from '../semanticLimits.js';
+import { QualityGate } from './quality/qualityGate.js';
 import type { JobListingMvp, JobSearchConstraints, JobSource, WorkMode } from './types/job.js';
 import type { GraphJobPosting, GraphCompany, GraphLocation } from './types/jobGraph.js';
 
@@ -141,7 +142,7 @@ const ENRICH_CONCURRENCY = 10;
 /**
  * Maximum number of records to enrich.
  */
-const MAX_ENRICH_RECORDS = 15;
+const MAX_ENRICH_RECORDS = 50;
 
 /**
  * Format salary fields into a human-readable string.
@@ -292,7 +293,27 @@ export class JobPipeline {
     const mvpListings = cleanRecords.map((r) => this.mapRawToMvp(r));
     const dedupedMvp = dedupJobListings(mvpListings);
 
-    const pipelineRecords = dedupedMvp.map((mvp) => {
+    // Quality gate: filter out non-job pages, wrong country, IT admin, etc.
+    const qualityGate = new QualityGate();
+    const qualityResult = qualityGate.filter(dedupedMvp);
+    if (qualityResult.rejected.length > 0) {
+      logger.info(
+        {
+          tool: 'job_pipeline',
+          stage: 'normalization',
+          passed: qualityResult.passed.length,
+          rejected: qualityResult.rejected.length,
+          byPageIntent: qualityResult.stats.rejectedByPageIntent,
+          byCountry: qualityResult.stats.rejectedByCountry,
+          byOccupation: qualityResult.stats.rejectedByOccupation,
+          byBoilerplate: qualityResult.stats.rejectedByBoilerplate,
+          byEntryLevel: qualityResult.stats.rejectedByEntryLevel,
+        },
+        'Quality gate filtered listings',
+      );
+    }
+
+    const pipelineRecords = qualityResult.passed.map((mvp) => {
       const raw = records.find((r) => r.jobUrl === mvp.sourceUrl);
       return this.mapMvpToPipeline(mvp, raw);
     });

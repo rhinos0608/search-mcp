@@ -595,6 +595,12 @@ const LISTING_CARD_SELECTORS = [
   'article[class*=listing]',
   // 'article' is a broad catch-all used by many modern job boards.
   // extractListingFromCard performs keyword validation on these elements to reduce false positives.
+  // Modern CSS-module job boards using data attributes (e.g. SEEK)
+  'article[data-job-id]',
+  'div[data-job-id]',
+  "[data-automation='premiumJob']",
+  "[data-automation='job']",
+  "[data-testid='job-card']",
   'article',
   'li[class*=job]',
   'li[class*=position]',
@@ -606,7 +612,6 @@ const LISTING_CARD_SELECTORS = [
   'div[class*=search-result]',
   'div[class*=jobRow]',
   'div[data-jobid]',
-  'div[data-job-id]',
   'div[itemtype*="JobPosting"]', // schema.org microdata
   'div[itemtype*="jobposting"]',
   'tr[class*=job]',
@@ -760,6 +765,19 @@ function extractListingFromCard(
     }
   }
 
+  // Fallback: construct URL from data-job-id for SEEK and similar boards using href-less anchors
+  if (!jobUrl) {
+    const dataJobId = $card.attr('data-job-id') ?? $card.find('[data-job-id]').first().attr('data-job-id');
+    if (dataJobId) {
+      try {
+        const parsed = new URL(pageUrl);
+        jobUrl = `https://${parsed.hostname}/job/${dataJobId}`;
+      } catch {
+        // Ignore if pageUrl is malformed.
+      }
+    }
+  }
+
   // Extract title
   let title: string | undefined;
   for (const selector of TITLE_SELECTORS) {
@@ -818,7 +836,14 @@ function extractListingFromCard(
   else if (/\bonsite\b|\bon[- ]site\b|\bin[- ]office\b/i.test(cardText)) workMode = 'onsite';
 
   // Extract job ID from URL
-  const jobId = jobUrl ? extractJobIdFromUrl(jobUrl) : undefined;
+  // Extract job ID from URL or fallback to data-job-id attribute
+  let jobId: string | undefined;
+  if (jobUrl) {
+    jobId = extractJobIdFromUrl(jobUrl);
+  }
+  if (!jobId) {
+    jobId = normalizeText($card.attr('data-job-id') ?? $card.find('[data-job-id]').first().attr('data-job-id'));
+  }
 
   const confidence = calculateJobConfidence({ title, location, workMode, salaryRaw });
 

@@ -16,6 +16,11 @@ interface ExaResult {
   publishedDate?: string | null;
   author?: string | null;
   score?: number;
+  highlights?: string[];
+  highlightScores?: number[];
+  summary?: string;
+  image?: string | null;
+  favicon?: string | null;
 }
 
 interface ExaSearchResponse {
@@ -36,7 +41,7 @@ export async function exaSearch(
   limit = 10,
   safeSearch: 'strict' | 'moderate' | 'off' = 'moderate',
 ): Promise<SearchResult[]> {
-  logger.info({ limit, safeSearch }, 'Running Exa neural search');
+  logger.info({ limit, safeSearch }, 'Running Exa search');
 
   const key = cacheKey('exa', query, String(limit), safeSearch);
   const cached = cache.get(key);
@@ -54,10 +59,12 @@ export async function exaSearch(
   const body = {
     query,
     numResults: limit,
-    type: 'neural',
+    type: 'auto',
     useAutoprompt: true,
     contents: {
       text: true,
+      highlights: true,
+      summary: true,
     },
   };
 
@@ -98,6 +105,12 @@ export async function exaSearch(
   const data = (await safeResponseJson(response, EXA_API_URL)) as ExaSearchResponse;
   const mapped = (data.results ?? []).slice(0, limit).map((result, index): SearchResult => {
     const url = result.url ?? '';
+    const snippetParts: string[] = [];
+    if (result.author) snippetParts.push(`Author: ${result.author}`);
+    if (result.summary) snippetParts.push(`Summary: ${result.summary}`);
+    if (result.highlights?.length) {
+      snippetParts.push('Highlights:\n' + result.highlights.map((h) => `- ${h}`).join('\n'));
+    }
     return {
       title: result.title ?? '',
       url,
@@ -106,7 +119,7 @@ export async function exaSearch(
       domain: safeDomain(url),
       source: 'exa',
       age: result.publishedDate ?? null,
-      extraSnippet: result.author ?? null,
+      extraSnippet: snippetParts.length > 0 ? snippetParts.join('\n\n') : null,
       deepLinks: null,
     };
   });

@@ -11,7 +11,8 @@ import {
   StatsRecorderMiddleware,
 } from '../crawl/middlewares.js';
 import { unavailableError } from '../errors.js';
-import type { WebCrawlResult } from '../types.js';
+import { cleanMarkdownContent } from '../utils/contentCleanup.js';
+import type { WebCrawlResult, CrawlPageResult } from '../types.js';
 import type { DomainTrustConfig } from '../config.js';
 import type { ExtractionConfig } from '../utils/extractionConfig.js';
 import type { CrawlOptions } from '../crawl/types.js';
@@ -30,6 +31,16 @@ export interface WebCrawlOptions {
   extractionConfig?: ExtractionConfig;
   llmFallback?: { provider: string; apiToken: string; baseUrl?: string };
   domainTrust?: DomainTrustConfig | undefined;
+}
+
+/**
+ * Clean noise from a single crawl page's markdown.
+ */
+function cleanPageMarkdown(page: CrawlPageResult): CrawlPageResult {
+  return {
+    ...page,
+    markdown: cleanMarkdownContent(page.markdown),
+  };
 }
 
 // Re-export for backward compatibility
@@ -104,5 +115,12 @@ export async function webCrawl(
     clientMw.crawl(req),
   );
 
-  return response.result;
+  // Clean up noise in markdown output: literal \n sequences,
+  // navigation boilerplate, excessive whitespace
+  const cleanedPages: CrawlPageResult[] = response.result.pages.map(cleanPageMarkdown);
+
+  return {
+    ...response.result,
+    pages: cleanedPages,
+  };
 }

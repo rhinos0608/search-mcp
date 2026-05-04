@@ -18,6 +18,22 @@ export const TRACKING_PARAMS = new Set([
   'source',
   'mc_cid',
   'mc_eid',
+  // Job board tracking / redirect params
+  'guid',
+  'jrtk',
+  'cb',
+  'cpc',
+  'ao',
+  'src',
+  'pos',
+  'jrt',
+  'trk',
+  'trkd',
+  '_gl',
+  '_ga',
+  'wt_mc',
+  'wt_zmc',
+  'wt_zs',
 ]);
 
 /** Normalize a URL for dedup: lowercase hostname, strip default ports,
@@ -115,3 +131,88 @@ export function dedupPagesByContent(pages: CrawlPageResult[]): CrawlPageResult[]
   }
   return out;
 }
+
+// ── Job-URL canonicalization ─────────────────────────────────────────────────
+
+/**
+ * Known glassdoor partner URL pattern for extracting job ID.
+ */
+const GLASSDOOR_PARTNER_RE = /\/partner\/jobListing\.htm/i;
+const GLASSDOOR_JOBID_RE = /[?&]jobListingId=(\d+)/i;
+const INDEED_JK_RE = /[?&]jk=([^&]+)/i;
+
+/**
+ * Additional tracking / redirect parameters specific to job board URLs.
+ */
+const JOB_TRACKING_PARAMS = new Set([
+  'guid',
+  'jrtk',
+  'cb',
+  'cpc',
+  'ao',
+  'src',
+  'pos',
+  'jrt',
+  'trk',
+  'trkd',
+  'adid',
+  'siteid',
+  'cfp',
+  'v4p',
+  'vs',
+  'vsk',
+  'exp',
+]);
+
+/**
+ * Canonicalize a job listing URL by stripping tracking parameters
+ * and reconstructing stable URLs from known partner/redirect patterns.
+ *
+ * Handles:
+ * - Glassdoor partner/jobListing.htm tracker URLs
+ * - Indeed redirect URLs with ?jk= key
+ * - Generic tracking param stripping
+ */
+export function canonicalizeJobUrl(raw: string): string {
+  if (!raw) return '';
+
+  let u: URL;
+  try {
+    u = new URL(raw);
+  } catch {
+    return raw;
+  }
+
+  const hostname = u.hostname.toLowerCase();
+
+  // Glassdoor partner URL — extract jobListingId, reconstruct stable URL
+  if (GLASSDOOR_PARTNER_RE.test(u.pathname)) {
+    const jobIdMatch = raw.match(GLASSDOOR_JOBID_RE);
+    if (jobIdMatch?.[1]) {
+      return `https://www.glassdoor.com/job-listing/${jobIdMatch[1]}`;
+    }
+  }
+
+  // Indeed URL — extract jk param, reconstruct clean URL
+  if (hostname.includes('indeed.com')) {
+    const jkMatch = raw.match(INDEED_JK_RE);
+    if (jkMatch?.[1]) {
+      const jk = encodeURIComponent(jkMatch[1]);
+      return `https://www.indeed.com/viewjob?jk=${jk}`;
+    }
+  }
+
+  // Generic tracking param stripping
+  const toDelete: string[] = [];
+  u.searchParams.forEach((_val, key) => {
+    if (JOB_TRACKING_PARAMS.has(key.toLowerCase())) {
+      toDelete.push(key);
+    }
+  });
+  for (const key of toDelete) {
+    u.searchParams.delete(key);
+  }
+
+  return u.toString();
+}
+

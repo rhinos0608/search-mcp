@@ -18,7 +18,31 @@ __pycache__/
 *.pyc
 *.pyo
 
+# Graphify artifacts
+graphify-out/
+.graphify_detect.json
+.graphify_ast.json
+.graphify_semantic.json
+.graphify_analysis.json
+.graphify_labels.json
+.graphify_cached.json
+.graphify_uncached.txt
+.graphify_semantic_new.json
+.graphify_incremental.json
+.graphify_old.json
+.graphify_python
+
+# Pi-smartread artifacts
+.pi-smartread/
+
 docs/superpowers/plans/
 
 .pi-smartread.tags.cache/
 .pi-smartread.embeddings.cache/50c2ebcb18c63fb1.json
+.understand-anything/.understandignore
+.understand-anything/batch-meta.json
+.understand-anything/knowledge-graph.json
+.understand-anything/meta.json
+.pi-smartread.embeddings.cache/2ea202838bafa16c.json
+.pi-smartread.embeddings.cache/a64b274ee0e13add.json
+.pi-smartread.embeddings.cache/c0b90861666600c2.json

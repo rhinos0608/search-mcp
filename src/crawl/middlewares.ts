@@ -9,6 +9,7 @@ import { logger } from '../logger.js';
 import { assertSafeUrl } from '../httpGuards.js';
 import { retryWithBackoff } from '../retry.js';
 import { assessMarkdownBatchQuality } from '../utils/renderRecovery.js';
+import { safeStructuredFromMarkdown } from '../utils/elementHelpers.js';
 import { attemptExternalRecovery } from '../utils/externalRecovery.js';
 import { recordOutcome } from '../utils/extractionStats.js';
 import { statsCollector } from './stats.js';
@@ -78,6 +79,7 @@ function normalizePage(page: Crawl4aiRawPage): CrawlPageResult {
   const extractedData = parseExtractedData(page.extracted_content);
   const markdown = extractMarkdown(page.markdown);
   const success = page.success ?? markdown.trim().length > 0;
+  const structured = safeStructuredFromMarkdown(markdown);
 
   const html = [page.fit_html, page.cleaned_html, page.html]
     .map((s) => s?.trim())
@@ -87,6 +89,7 @@ function normalizePage(page: Crawl4aiRawPage): CrawlPageResult {
     url: page.url ?? '',
     success,
     markdown,
+    ...structured,
     ...(html !== undefined ? { html } : {}),
     title: page.metadata?.title ?? null,
     description: page.metadata?.description ?? null,
@@ -386,7 +389,7 @@ export class Crawl4aiClientMiddleware implements CrawlMiddleware {
 
 export class ResponseQualityMiddleware implements CrawlMiddleware {
   readonly name = 'response-quality';
-  readonly priority = 600;
+  readonly priority = 800;
 
   async processResponse(resp: CrawlResponse): Promise<CrawlResponse | null> {
     if (resp.result.pages.length === 0) return resp;
@@ -423,9 +426,13 @@ export class AggressiveRenderMiddleware implements CrawlMiddleware {
     // Only trigger if the initial response has no or very low-quality content
     if (resp.result.pages.length === 0) return resp;
     if (resp.result.successfulPages > 0) {
-      // Check if content is meaningful
-      const totalChars = resp.result.pages.reduce((sum, p) => sum + p.markdown.length, 0);
-      if (totalChars > 200) return resp; // Content looks reasonable
+      // Use same quality assessment as ResponseQualityMiddleware
+      const quality = assessMarkdownBatchQuality(resp.result.pages.map((p) => p.markdown));
+      if (quality.meaningful) return resp; // Content looks reasonable
+    }
+    // Don't override user's explicit dynamic-content settings
+    if (ctx.request.opts.waitFor || ctx.request.opts.jsCode || ctx.request.opts.jsCodeBeforeWait) {
+      return resp;
     }
 
     logger.info({ url: ctx.request.url }, 'aggressive-render: retrying with aggressive settings');
@@ -498,13 +505,13 @@ export class AggressiveRenderMiddleware implements CrawlMiddleware {
 
 export class ExternalRecoveryMiddleware implements CrawlMiddleware {
   readonly name = 'external-recovery';
-  readonly priority = 800;
+  readonly priority = 600;
 
   async processResponse(resp: CrawlResponse, ctx: CrawlContext): Promise<CrawlResponse | null> {
-    // Only attempt if the response has no pages or very short content
+    // Only attempt if response quality assessment says content is not meaningful
     if (resp.result.pages.length > 0) {
-      const totalChars = resp.result.pages.reduce((sum, p) => sum + p.markdown.length, 0);
-      if (totalChars > 300) return resp;
+      const quality = assessMarkdownBatchQuality(resp.result.pages.map((p) => p.markdown));
+      if (quality.meaningful) return resp;
     }
 
     logger.info(

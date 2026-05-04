@@ -76,8 +76,8 @@ export async function tavilySearch(
     query,
     max_results: clampedLimit,
     search_depth: 'basic',
-    include_answer: false,
-    include_raw_content: false,
+    include_answer: 'basic',
+    include_raw_content: 'markdown',
     include_images: false,
     topic: effectiveTopic,
   };
@@ -130,6 +130,11 @@ export async function tavilySearch(
 
   const mapped: SearchResult[] = results.slice(0, limit).map((r, i) => {
     const url = r.url ?? '';
+    const snippetParts: string[] = [];
+    // Include Tavily's LLM-generated answer on the first result
+    if (i === 0 && data.answer) snippetParts.push(`[Answer] ${data.answer}`);
+    if (r.score !== undefined) snippetParts.push(`relevance: ${String(r.score)}`);
+    if (r.raw_content) snippetParts.push(`[Full Content]\n${r.raw_content}`);
     return {
       title: r.title ?? '',
       url,
@@ -138,7 +143,7 @@ export async function tavilySearch(
       domain: safeDomain(url),
       source: 'tavily' as const,
       age: null,
-      extraSnippet: r.score !== undefined ? `relevance: ${String(r.score)}` : null,
+      extraSnippet: snippetParts.length > 0 ? snippetParts.join('\n\n') : null,
       deepLinks: null,
     };
   });

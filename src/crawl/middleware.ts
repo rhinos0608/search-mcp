@@ -165,11 +165,11 @@ export class CrawlMiddlewareChain {
       };
     }
 
-    // Attach accumulated warnings (clone to avoid mutation)
-    const clonedResult = {
-      ...currentResp.result,
-      warnings: [...(currentResp.result.warnings ?? []), ...ctx.warnings],
-    };
+    // Attach accumulated warnings only when non-empty (clone to avoid mutation)
+    const allWarnings = [...(currentResp.result.warnings ?? []), ...ctx.warnings];
+    const clonedResult = allWarnings.length > 0
+      ? { ...currentResp.result, warnings: allWarnings }
+      : { ...currentResp.result };
 
     // Record chain-level stats
     const chainDuration = Date.now() - chainStartTime;
