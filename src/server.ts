@@ -157,7 +157,7 @@ async function extractWithRAGA(
       (progress: number, message: string) => {
          // Bridge progress is 0-100; pipe through to MCP progress notifications.
          // Fire-and-forget — progress visibility is best-effort.
-         sendProgress(Math.round(progress), message).catch(() => { });
+         sendProgress(Math.round(progress), message).catch(() => { /* no-op */ });
       },
    );
 
@@ -166,7 +166,7 @@ async function extractWithRAGA(
 
    const elapsed = Date.now() - startTime;
    logger.info(
-      { tool: 'extractWithRAGA', url, timeoutMs: raga.timeoutMs, elapsedMs: elapsed, markdownLen: result.markdown?.length },
+      { tool: 'extractWithRAGA', url, timeoutMs: raga.timeoutMs, elapsedMs: elapsed, markdownLen: result.markdown.length },
       'RAGA extraction completed',
    );
 
@@ -192,7 +192,7 @@ async function extractWithRAGA(
       }
 
       markdown = markdown.slice(0, MAX_RAGA_MARKDOWN_BYTES) + TRUNCATED_MARKER;
-      warnings.push(`Result was truncated to ${MAX_RAGA_MARKDOWN_BYTES / 1024}KB. Full content saved to ${filePath}`);
+      warnings.push(`Result was truncated to ${String(MAX_RAGA_MARKDOWN_BYTES / 1024)}KB. Full content saved to ${filePath}`);
    }
 
    return { markdown, warnings };
@@ -705,7 +705,9 @@ export function createServer(): McpServer {
                         image: null,
                      };
                      const data = readabilityFallbackResult(url, article, strategy, maxDepth, maxPages);
-                     data.pages[0]!.success = true;
+                     if (data.pages[0]) {
+                        data.pages[0].success = true;
+                     }
                      const result = makeResult('web_crawl', data, Date.now() - start, { warnings: [] });
                      return successResponse(result);
                   } catch (ragaErr) {
@@ -861,6 +863,17 @@ export function createServer(): McpServer {
                   .optional()
                   .default(false)
                   .describe('Use LLM-generated context for embedding corpus chunks (default false)'),
+               maxChunkTokens: z
+                  .number()
+                  .int()
+                  .min(100)
+                  .max(8000)
+                  .optional()
+                  .describe(
+                     'Override max tokens per chunk (100–8000, default 400). ' +
+                     'Larger values produce fewer chunks, reducing LLM calls when useContextualEmbeddings is enabled. ' +
+                     'Auto-scaled to 1200 when useContextualEmbeddings is on and this is not set.',
+                  ),
                allowPathDrift: z
                   .boolean()
                   .optional()
@@ -913,6 +926,7 @@ export function createServer(): McpServer {
             maxBytes,
             useReranker,
             useContextualEmbeddings,
+            maxChunkTokens,
             allowPathDrift,
             extractionConfig,
             waitFor,
@@ -998,6 +1012,7 @@ export function createServer(): McpServer {
                      includeExternalLinks,
                      maxBytes: effectiveMaxBytes,
                      useReranker,
+                     maxChunkTokens,
                      allowPathDrift,
                      waitFor,
                      delayBeforeReturnHtml,
