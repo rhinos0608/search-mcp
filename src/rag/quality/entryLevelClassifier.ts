@@ -133,7 +133,7 @@ function extractMaxAnnualSalary(salaryRaw: string | undefined): number | undefin
  */
 export function classifyEntryLevel(listing: JobListingMvp): EntryLevelResult {
   const title = listing.title;
-  const description = listing.extractedText ?? '';
+  const description = listing.extractedText;
   const combined = `${title} ${description}`;
 
   // ── Count signals ─────────────────────────────────────────────────────

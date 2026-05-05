@@ -304,6 +304,31 @@ This document indexes all implementation plans for the Search MCP roadmap.
 
 ---
 
+## V4.1.0 — Agent-Enhanced Deep Research Engine
+
+**Status**: Sprint 0 substrate complete · Sprints 1-5 planned · **Priority**: High  
+**Depends On**: V4.0.0 (existing deep research pipeline)
+
+**Summary**: Transform the rigid phase pipeline into an agent-guided research engine with typed gap lifecycle (Agenda), budget-aware action gating, LLM-powered query rewriting, failure analysis with retry limits, unified trace events, prose synthesis with inline citations, citation chasing, and SERP clustering.
+
+| Document | Path |
+| -------- | ---- |
+| Full Spec | `docs/plans/v4.1.0/SPEC.md` |
+| Implementation Plan | `docs/plans/v4.1.0/IMPLEMENTATION.md` |
+
+### Sprint Breakdown
+
+| Sprint | Deliverable | Status |
+|--------|-------------|--------|
+| 0 | Substrate: 5 modules (Agenda, ActionGates, Trace, Knowledge, SourceRanking) + prose synthesis + new types | ✅ Complete |
+| 1 | Working loop with gates + agenda (wire into orchestrator) | 📋 Planned |
+| 2 | LLM-powered query rewriting + dual-score ranking | 📋 Planned |
+| 3 | Failure analysis + gap completion (retry limits, abandonment) | 📋 Planned |
+| 4 | Unified knowledge + trace + prose synthesis | 📋 Planned |
+| 5 | SERP clustering + language detection | 📋 Planned |
+
+---
+
 ## Summary Table
 
 | Version | Focus                    | Key Deliverables                                                                                     | Est. Scope |
@@ -318,6 +343,7 @@ This document indexes all implementation plans for the Search MCP roadmap.
 | V3.3.1  | Search Backend Expansion | DuckDuckGo zero-key fallback, opt-in Ollama web search, availability-aware selection + merge         | ~900 LOC   |
 | V3.4.0  | Integration              | Resolver pattern, output budget, structured errors, diagnostics                                      | ~800 LOC   |
 | V4.0.0  | Deep Research            | LLM control loop, 3D confidence, multi-backend discovery, gap analysis, audit, synthesis             | ~5,600 LOC |
+| V4.1.0  | Agent Enhancement         | Typed agenda, budget-aware gates, query rewriting, failure analysis, prose synthesis, trace          | ~1,500 LOC |
 
 **Total V3 Series**: ~11,740 LOC new code  
 **V4.0.0**: ~5,600 LOC new code (LLM orchestration + rule-based foundation)

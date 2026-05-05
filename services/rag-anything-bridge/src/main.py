@@ -471,13 +471,14 @@ async def extraction_status(document_id: str):
         job = async_jobs.get(document_id)
         if job:
             return JobStatus(
-                document_id=document_id,
-                status=job.get("status", "not_found"),
-                progress=job.get("progress"),
-                message=job.get("message"),
-                created_at=job.get("created_at", datetime.utcnow().isoformat()),
-                updated_at=job.get("updated_at", datetime.utcnow().isoformat()),
-                completed_at=job.get("completed_at"),
+               document_id=document_id,
+               status=job.get("status", "not_found"),
+               progress=job.get("progress"),
+               message=job.get("message"),
+               result=job.get("result"),
+               created_at=job.get("created_at", datetime.utcnow().isoformat()),
+               updated_at=job.get("updated_at", datetime.utcnow().isoformat()),
+               completed_at=job.get("completed_at"),
             )
 
     # Fall back to cache (completed extractions)
