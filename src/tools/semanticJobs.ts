@@ -159,7 +159,13 @@ export async function semanticJobs(
     // Default to false: constraints influence ranking by default;
     // set enforceConstraints: true for strict post-filtering only when precise control is needed.
     const enforceConstraints = opts.enforceConstraints ?? false;
-    let results = await pipeline.embedAndRank(finalRecords, opts.query, embedOpts, constraints, false);
+    let results = await pipeline.embedAndRank(
+      finalRecords,
+      opts.query,
+      embedOpts,
+      constraints,
+      false,
+    );
     let strictFilteredCount = 0;
     if (enforceConstraints) {
       const beforeCount = results.length;
@@ -201,7 +207,12 @@ export async function semanticJobs(
     const serpQuality = checkSerpQuality(searchResults, query, 3, 10);
     if (!serpQuality.passed && serpQuality.constrainedQuery) {
       logger.warn(
-        { tool: 'semantic_jobs', originalQuery: query, constrained: serpQuality.constrainedQuery, reasons: serpQuality.reasons },
+        {
+          tool: 'semantic_jobs',
+          originalQuery: query,
+          constrained: serpQuality.constrainedQuery,
+          reasons: serpQuality.reasons,
+        },
         'SERP quality check failed; retrying with constrained query',
       );
       searchResults = await searchFn(serpQuality.constrainedQuery, maxPages);
@@ -218,9 +229,7 @@ export async function semanticJobs(
   }
 
   // Canonicalize job URLs before crawling to remove tracking sludge
-  const seedUrls = dedupUrls(
-    searchResults.map((result) => canonicalizeJobUrl(result.url)),
-  );
+  const seedUrls = dedupUrls(searchResults.map((result) => canonicalizeJobUrl(result.url)));
 
   if (seedUrls.length === 0) {
     return {
@@ -285,7 +294,7 @@ export async function processJobSearchResults(
 
   // Page-level intent check: skip pages that are clearly not job listings
   const extractedListings: JobListingMvp[] = [];
-  let pageIntentSkipped = 0;
+  let _pageIntentSkipped = 0;
   for (const page of successfulPages) {
     const pageHtml = page.html ?? '';
     // Quick page-level check: short pages lacking job keywords are likely
@@ -296,10 +305,14 @@ export async function processJobSearchResults(
       .replace(/<[^>]+>/g, ' ')
       .replace(/\s+/g, ' ')
       .trim();
-    const isJobPage = pageText.length >= 100 || /job|career|position|vacancy|hiring|apply/i.test(pageHtml);
+    const isJobPage =
+      pageText.length >= 100 || /job|career|position|vacancy|hiring|apply/i.test(pageText);
     if (!isJobPage) {
-      pageIntentSkipped++;
-      logger.debug({ url: page.url, textLen: pageText.length }, 'Skipped non-job page before extraction');
+      _pageIntentSkipped++;
+      logger.debug(
+        { url: page.url, textLen: pageText.length },
+        'Skipped non-job page before extraction',
+      );
       continue;
     }
     extractedListings.push(...extractJobListingsFromHtml(pageHtml, page.url));
@@ -313,7 +326,12 @@ export async function processJobSearchResults(
   const qualityResult = qualityGate.filter(dedupedListings);
   if (qualityResult.rejected.length > 0) {
     logger.info(
-      { tool: 'semantic_jobs', passed: qualityResult.passed.length, rejected: qualityResult.rejected.length, stats: qualityResult.stats },
+      {
+        tool: 'semantic_jobs',
+        passed: qualityResult.passed.length,
+        rejected: qualityResult.rejected.length,
+        stats: qualityResult.stats,
+      },
       'Quality gate filtered listings',
     );
   }
@@ -459,7 +477,10 @@ const AUSTRALIAN_LOCATION_HINTS: RegExp[] = [
   /\b(?:gold\s+coast|sunshine\s+coast|newcastle|wollongong|geelong|ballarat|bendigo|townsville|cairns|toowoomba)\b/i,
 ];
 
-export function inferJobSpyCountry(query: string, locations: string[] | undefined): string | undefined {
+export function inferJobSpyCountry(
+  query: string,
+  locations: string[] | undefined,
+): string | undefined {
   const candidates = [query, ...(locations ?? [])];
   for (const candidate of candidates) {
     if (AUSTRALIAN_LOCATION_HINTS.some((pattern) => pattern.test(candidate))) {
@@ -476,7 +497,10 @@ export function filterEnforcedJobScores(
   return results.filter((score) => matchesStrictConstraints(score.listing, constraints));
 }
 
-function matchesStrictConstraints(listing: JobListingMvp, constraints: JobSearchConstraints): boolean {
+function matchesStrictConstraints(
+  listing: JobListingMvp,
+  constraints: JobSearchConstraints,
+): boolean {
   if (constraints.location !== undefined && constraints.location.length > 0) {
     if (listing.location === undefined) {
       return true; // Unknown location passes through (consistent with applyHardFilters)

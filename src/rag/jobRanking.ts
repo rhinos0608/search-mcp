@@ -72,19 +72,19 @@ export function rankJobListings(
       }
       overallScore =
         semantic * 0.35 +
-        location * 0.20 +
+        location * 0.2 +
         workMode * 0.08 +
-        recency * 0.10 +
+        recency * 0.1 +
         completeness * 0.12 +
         sourceReliability * 0.05 +
         duplicateDensity * 0.05 +
         companyReliability * 0.05;
     } else {
       overallScore =
-        semantic * 0.40 +
+        semantic * 0.4 +
         location * 0.25 +
         workMode * 0.08 +
-        recency * 0.10 +
+        recency * 0.1 +
         completeness * 0.12 +
         sourceReliability * 0.05;
     }
@@ -95,11 +95,15 @@ export function rankJobListings(
     // for complete absence of a semantic score instead of a threshold.
     if (semanticScores !== undefined && semantic === 0) {
       // Listing had no semantic score — either not embedded or not returned by retrieval
-      const hasLocationMatch = constraints?.location !== undefined &&
+      const hasLocationMatch =
+        constraints?.location !== undefined &&
         constraints.location.length > 0 &&
         listing.location !== undefined &&
-        constraints.location.some((lc) => listing.location?.toLowerCase().includes(lc.toLowerCase()));
-      const hasWorkModeMatch = constraints?.workMode !== undefined &&
+        constraints.location.some((lc) =>
+          listing.location?.toLowerCase().includes(lc.toLowerCase()),
+        );
+      const hasWorkModeMatch =
+        constraints?.workMode !== undefined &&
         constraints.workMode.length > 0 &&
         listing.workMode !== 'unknown' &&
         constraints.workMode.includes(listing.workMode);
@@ -443,17 +447,6 @@ function collectMatchedConstraints(
     const parsedSalaryMax = parseSalaryMax(listing.salaryRaw);
     if (parsedSalaryMax !== undefined && parsedSalaryMax <= constraints.maxSalary) {
       matchedConstraints.push('salary within budget');
-    }
-  }
-
-  if (constraints.excludeTitles !== undefined && constraints.excludeTitles.length > 0) {
-    const title = listing.title.toLowerCase();
-    const matchedExclude = constraints.excludeTitles.find((keyword) => {
-      const normalizedKeyword = keyword.trim().toLowerCase();
-      return normalizedKeyword.length > 0 && title.includes(normalizedKeyword);
-    });
-    if (matchedExclude !== undefined) {
-      matchedConstraints.push(`excluded keyword: ${matchedExclude}`);
     }
   }
 

@@ -15,12 +15,7 @@
 import { scrapeJobs } from 'jobspy-js';
 import { logger } from '../logger.js';
 
-export const DEFAULT_JOBSPY_SITES = [
-  'linkedin',
-  'indeed',
-  'glassdoor',
-  'zip_recruiter',
-] as const;
+export const DEFAULT_JOBSPY_SITES = ['linkedin', 'indeed', 'glassdoor', 'zip_recruiter'] as const;
 
 // ── FlatJobRecord ──────────────────────────────────────────────────────────
 
@@ -107,7 +102,9 @@ export function buildJobSpyParams(p: JobSpyAcquisitionParams): Record<string, un
     ...(p.country !== undefined ? { country_indeed: p.country } : {}),
     ...(p.proxies !== undefined ? { proxies: p.proxies } : {}),
     ...(p.hoursOld !== undefined ? { hours_old: p.hoursOld } : {}),
-    ...(p.enforceAnnualSalary !== undefined ? { enforce_annual_salary: p.enforceAnnualSalary } : {}),
+    ...(p.enforceAnnualSalary !== undefined
+      ? { enforce_annual_salary: p.enforceAnnualSalary }
+      : {}),
     // Request markdown descriptions — our chunking pipeline expects it
     description_format: 'markdown',
   };
@@ -146,9 +143,7 @@ function normalizeUrlCandidate(value: string | undefined): string | undefined {
  * empty array is returned when no records could be acquired, so callers
  * can proceed with fallback mechanisms (web search, etc.).
  */
-export async function searchJobSpy(
-  params: JobSpyAcquisitionParams,
-): Promise<FlatJobRecord[]> {
+export async function searchJobSpy(params: JobSpyAcquisitionParams): Promise<FlatJobRecord[]> {
   const opts = buildJobSpyParams(params);
 
   logger.info(

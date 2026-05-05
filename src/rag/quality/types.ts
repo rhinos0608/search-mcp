@@ -23,21 +23,12 @@ export type PageIntent =
 // ── Occupation classification ────────────────────────────────────────────────
 
 /** High-level occupation category derived from title + description analysis. */
-export type OccupationClass =
-  | 'clerical_admin'
-  | 'it_admin'
-  | 'other_admin'
-  | 'unrelated';
+export type OccupationClass = 'clerical_admin' | 'it_admin' | 'other_admin' | 'unrelated';
 
 // ── Entry-level classification ───────────────────────────────────────────────
 
 /** How compatible a listing is with entry-level expectations. */
-export type EntryLevelClass =
-  | 'entry'
-  | 'mid'
-  | 'senior'
-  | 'overqualified'
-  | 'uncertain';
+export type EntryLevelClass = 'entry' | 'mid' | 'senior' | 'overqualified' | 'uncertain';
 
 // ── Per-gate results ─────────────────────────────────────────────────────────
 
@@ -57,12 +48,7 @@ export interface CountryResult extends GateResult {
 }
 
 export interface CountrySignal {
-  type:
-    | 'location_text'
-    | 'currency'
-    | 'state_abbreviation'
-    | 'domain_tld'
-    | 'remote_eligibility';
+  type: 'location_text' | 'currency' | 'state_abbreviation' | 'domain_tld' | 'remote_eligibility';
   value: string;
   positive: boolean; // true = supports target country
 }

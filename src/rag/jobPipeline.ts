@@ -73,7 +73,7 @@ export function isBotChallengeText(text: string): boolean {
  * bot-challenge patterns.
  */
 export function isBotChallengeRecord(record: RawJobRecord): boolean {
-  const text = [record.title, record.description ?? '']
+  const text = [record.title, record.description]
     .filter((s): s is string => s !== undefined)
     .join(' ');
   if (isBotChallengeText(text)) return true;
@@ -506,7 +506,7 @@ export class JobPipeline {
     );
 
     logger.info(
-      { tool: 'job_pipeline', stage: 'enrichment', enrichedCount: results.length },
+      { tool: 'job_pipeline', stage: 'enrichment', enrichedCount: String(results.length) },
       'Enrichment complete',
     );
     return results;
@@ -537,9 +537,7 @@ export class JobPipeline {
       }
     }
 
-    const workers = Array.from({ length: Math.min(concurrency, items.length) }, () =>
-      worker(),
-    );
+    const workers = Array.from({ length: Math.min(concurrency, items.length) }, () => worker());
     await Promise.allSettled(workers);
     return results.filter((r): r is R => r !== undefined);
   }
@@ -804,8 +802,7 @@ export class JobPipeline {
       caveats: p.caveats,
     };
     if (p.company != null) g.companyId = p.company.trim().toLowerCase();
-    if (p.location != null)
-      g.locationId = p.location.trim().toLowerCase().replace(/\s+/g, '-');
+    if (p.location != null) g.locationId = p.location.trim().toLowerCase().replace(/\s+/g, '-');
     if (p.salaryMin !== undefined) g.salaryMin = p.salaryMin;
     if (p.salaryMax !== undefined) g.salaryMax = p.salaryMax;
     if (p.salaryCurrency !== undefined) g.salaryCurrency = p.salaryCurrency;

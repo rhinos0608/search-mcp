@@ -18,31 +18,89 @@ import type { SearchResult } from '../../types.js';
 
 /** Keywords suggesting a result is job-related. */
 const JOB_KEYWORDS: readonly string[] = [
-  'job', 'jobs', 'career', 'careers', 'position', 'positions',
-  'vacancy', 'vacancies', 'opening', 'openings', 'employment',
-  'hiring', 'recruit', 'recruitment', 'opportunity', 'opportunities',
-  'work', 'role', 'roles', 'listing', 'listings',
+  'job',
+  'jobs',
+  'career',
+  'careers',
+  'position',
+  'positions',
+  'vacancy',
+  'vacancies',
+  'opening',
+  'openings',
+  'employment',
+  'hiring',
+  'recruit',
+  'recruitment',
+  'opportunity',
+  'opportunities',
+  'work',
+  'role',
+  'roles',
+  'listing',
+  'listings',
 ];
 
 /** Keywords suggesting a result is geographically relevant to AU/NZ. */
 const AU_LOCATION_KEYWORDS: readonly string[] = [
-  'sydney', 'nsw', 'australia', 'australian', 'au',
-  'melbourne', 'vic', 'brisbane', 'qld', 'perth', 'wa',
-  'adelaide', 'sa', 'canberra', 'act', 'hobart', 'tas',
-  'darwin', 'nt', 'gold coast', 'sunshine coast',
-  'newcastle', 'wollongong', 'geelong',
-  'seek.com.au', 'au.indeed', 'au.seek',
+  'sydney',
+  'nsw',
+  'australia',
+  'australian',
+  'au',
+  'melbourne',
+  'vic',
+  'brisbane',
+  'qld',
+  'perth',
+  'wa',
+  'adelaide',
+  'sa',
+  'canberra',
+  'act',
+  'hobart',
+  'tas',
+  'darwin',
+  'nt',
+  'gold coast',
+  'sunshine coast',
+  'newcastle',
+  'wollongong',
+  'geelong',
+  'seek.com.au',
+  'au.indeed',
+  'au.seek',
   '.com.au',
 ];
 
 /** Keywords suggesting the result is NOT a job listing. */
 const NON_JOB_KEYWORDS: readonly string[] = [
-  'sign in', 'login', 'gmail', 'outlook',
-  'youtube', 'cnn', 'facebook', 'twitter', 'instagram',
-  'how to', 'what is', 'guide', 'tutorial', 'article',
-  'salary', 'pay', 'review', 'rating',
-  'webroot', 'ncsbn', 'classlink', 'seesaw', 'ruca',
-  'device wipe', 'cert pdf', 'ice machine',
+  'sign in',
+  'login',
+  'gmail',
+  'outlook',
+  'youtube',
+  'cnn',
+  'facebook',
+  'twitter',
+  'instagram',
+  'how to',
+  'what is',
+  'guide',
+  'tutorial',
+  'article',
+  'salary',
+  'pay',
+  'review',
+  'rating',
+  'webroot',
+  'ncsbn',
+  'classlink',
+  'seesaw',
+  'ruca',
+  'device wipe',
+  'cert pdf',
+  'ice machine',
 ];
 
 // ── Result-level check ───────────────────────────────────────────────────────
@@ -63,7 +121,8 @@ function isResultRelevant(result: SearchResult, locationTerms: string[]): boolea
   if (!hasJobKeyword) return false;
 
   // Must contain at least one location keyword OR be from an AU domain
-  const hasLocationKeyword = locationTerms.some((term) => haystack.includes(term)) ||
+  const hasLocationKeyword =
+    locationTerms.some((term) => haystack.includes(term)) ||
     AU_LOCATION_KEYWORDS.some((kw) => haystack.includes(kw));
   if (!hasLocationKeyword) return false;
 
@@ -130,18 +189,21 @@ export function checkSerpQuality(
 
     // Identify what kinds of bad results we got
     const nonJobCount = toInspect.filter(
-      (r) => !JOB_KEYWORDS.some((kw) =>
-        `${r.title} ${r.url} ${r.description}`.toLowerCase().includes(kw),
-      ),
+      (r) =>
+        !JOB_KEYWORDS.some((kw) =>
+          `${r.title} ${r.url} ${r.description}`.toLowerCase().includes(kw),
+        ),
     ).length;
     const nonLocationCount = toInspect.filter(
-      (r) => !AU_LOCATION_KEYWORDS.some((kw) =>
-        `${r.title} ${r.url} ${r.description}`.toLowerCase().includes(kw),
-      ),
+      (r) =>
+        !AU_LOCATION_KEYWORDS.some((kw) =>
+          `${r.title} ${r.url} ${r.description}`.toLowerCase().includes(kw),
+        ),
     ).length;
 
     if (nonJobCount > 0) reasons.push(`${String(nonJobCount)} result(s) lack job-related keywords`);
-    if (nonLocationCount > 0) reasons.push(`${String(nonLocationCount)} result(s) lack AU location keywords`);
+    if (nonLocationCount > 0)
+      reasons.push(`${String(nonLocationCount)} result(s) lack AU location keywords`);
   }
 
   // Generate a constrained query for retry
@@ -167,8 +229,15 @@ function extractLocationTerms(query: string): string[] {
 
   // Known Australian cities
   const cities = [
-    'sydney', 'melbourne', 'brisbane', 'perth', 'adelaide',
-    'canberra', 'hobart', 'darwin', 'gold coast',
+    'sydney',
+    'melbourne',
+    'brisbane',
+    'perth',
+    'adelaide',
+    'canberra',
+    'hobart',
+    'darwin',
+    'gold coast',
   ];
   for (const city of cities) {
     if (lower.includes(city)) terms.push(city);

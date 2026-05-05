@@ -80,9 +80,7 @@ export class QualityGate {
     const url = listing.sourceUrl ?? '';
 
     // ── Page Intent ────────────────────────────────────────────────────
-    const pageIntent = rawHtml
-      ? classifyPageIntent(url, listing.title, rawHtml)
-      : 'job_listing'; // If no raw HTML, assume already extracted → job listing
+    const pageIntent = rawHtml ? classifyPageIntent(url, listing.title, rawHtml) : 'job_listing'; // If no raw HTML, assume already extracted → job listing
     const pageIntentResult = evaluatePageIntent(pageIntent, this.config.requireJobListingIntent);
 
     // ── Remaining gates ────────────────────────────────────────────────
@@ -99,7 +97,14 @@ export class QualityGate {
     results: QualityGateResult[];
     stats: QualityGateStats;
   } {
-    const results = listings.map((l) => this.evaluateRemaining(l, { passed: true, confidence: 1, reasons: ['Page intent already checked at page level'], intent: 'job_listing' as const }));
+    const results = listings.map((l) =>
+      this.evaluateRemaining(l, {
+        passed: true,
+        confidence: 1,
+        reasons: ['Page intent already checked at page level'],
+        intent: 'job_listing' as const,
+      }),
+    );
     return this.separateResults(results);
   }
 
@@ -107,7 +112,10 @@ export class QualityGate {
    * Evaluate a listing against country, occupation, entry-level, and boilerplate gates,
    * with a provided page intent result (either checked or assumed).
    */
-  private evaluateRemaining(listing: JobListingMvp, pageIntentResult: PageIntentResult): QualityGateResult {
+  private evaluateRemaining(
+    listing: JobListingMvp,
+    pageIntentResult: PageIntentResult,
+  ): QualityGateResult {
     const countryResult = assessCountryEligibility(listing, this.config);
     const occupationResult = classifyOccupation(listing);
     const entryLevelResult = classifyEntryLevel(listing);
@@ -176,8 +184,12 @@ export class QualityGate {
 
     // Compute overall confidence as weighted average of applicable gates
     const confidences: number[] = [];
-    confidences.push(gates.pageIntent.passed ? gates.pageIntent.reasons.length > 0 ? 0.9 : 0.5 : 0);
-    confidences.push(gates.country.passed ? Math.max(gates.country.reasons.length > 0 ? 0.7 : 0.3, 0.3) : 0);
+    confidences.push(
+      gates.pageIntent.passed ? (gates.pageIntent.reasons.length > 0 ? 0.9 : 0.5) : 0,
+    );
+    confidences.push(
+      gates.country.passed ? Math.max(gates.country.reasons.length > 0 ? 0.7 : 0.3, 0.3) : 0,
+    );
     confidences.push(gates.occupation.passed ? 0.8 : 0);
     confidences.push(gates.entryLevel.passed ? 0.7 : 0);
     confidences.push(gates.boilerplate.passed ? 0.8 : 0);
@@ -244,7 +256,10 @@ export class QualityGate {
         else if (this.config.rejectItAdmin && result.occupation.classification === 'it_admin') {
           stats.rejectedByOccupation++;
         } else if (!result.boilerplate.passed) stats.rejectedByBoilerplate++;
-        else if (this.config.rejectOverqualified && result.entryLevel.classification === 'overqualified') {
+        else if (
+          this.config.rejectOverqualified &&
+          result.entryLevel.classification === 'overqualified'
+        ) {
           stats.rejectedByEntryLevel++;
         }
       }

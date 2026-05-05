@@ -14,26 +14,32 @@ import type { PageIntent, PageIntentResult } from './types.js';
 /** JSON-LD type check — does the page contain a JobPosting schema? */
 const JSONLD_JOB_POSTING_RE = /"@type"\s*:\s*"JobPosting"/i;
 
-
 /** Page title patterns that indicate a search results page. */
-const SEARCH_RESULTS_TITLE_RE = /\b(?:job\s+search|search\s+results|\d+\s+(?:job|result)s?\s+found|jobs?\s+in\b|find\s+your\s+next)\b/i;
+const SEARCH_RESULTS_TITLE_RE =
+  /\b(?:job\s+search|search\s+results|\d+\s+(?:job|result)s?\s+found|jobs?\s+in\b|find\s+your\s+next)\b/i;
 
 /** Page title patterns that indicate career advice / article content. */
-const CAREER_ADVICE_TITLE_RE = /\b(?:how\s+to\s+(?:become|get|find|land)|career\s+(?:path|advice|guide|tips)|what\s+(?:is|does)\s+(?:a|an)\s+\w+\s+(?:do|mean)|salary\s+(?:guide|range|survey))\b/i;
+const CAREER_ADVICE_TITLE_RE =
+  /\b(?:how\s+to\s+(?:become|get|find|land)|career\s+(?:path|advice|guide|tips)|what\s+(?:is|does)\s+(?:a|an)\s+\w+\s+(?:do|mean)|salary\s+(?:guide|range|survey))\b/i;
 
 /** Page title patterns that indicate salary information pages. */
-const SALARY_INFO_TITLE_RE = /\b(?:average\s+salary|pay\s+(?:rate|scale|guide)|salary\s+(?:guide|range|survey|data)|compensation)\b/i;
+const SALARY_INFO_TITLE_RE =
+  /\b(?:average\s+salary|pay\s+(?:rate|scale|guide)|salary\s+(?:guide|range|survey|data)|compensation)\b/i;
 
 /** Page title patterns that indicate a login / authentication page. */
-const LOGIN_TITLE_RE = /\b(?:sign\s+(?:in|up)|log\s+in|login|register|create\s+(?:an\s+)?account|forgot\s+password|reset\s+password)\b/i;
+const LOGIN_TITLE_RE =
+  /\b(?:sign\s+(?:in|up)|log\s+in|login|register|create\s+(?:an\s+)?account|forgot\s+password|reset\s+password)\b/i;
 
 /** Page title patterns that indicate a company profile / about page. */
-const COMPANY_PROFILE_TITLE_RE = /\b(?:about\s+us|company\s+(?:profile|overview|info)|working\s+(?:at|for)|our\s+(?:team|culture|story))\b/i;
+const COMPANY_PROFILE_TITLE_RE =
+  /\b(?:about\s+us|company\s+(?:profile|overview|info)|working\s+(?:at|for)|our\s+(?:team|culture|story))\b/i;
 
 /** HTML structural signals for a job listing page. */
 function hasJobListingStructure(html: string): boolean {
   // Presence of "Apply" button + company name heading
-  const hasApplyButton = /\b(?:apply\s+(?:now|for\s+this\s+job)?|submit\s+application)\b/i.test(html);
+  const hasApplyButton = /\b(?:apply\s+(?:now|for\s+this\s+job)?|submit\s+application)\b/i.test(
+    html,
+  );
   const hasCompanyName = /(?:company|hiringOrganization|employer)\s*[:]/i.test(html);
   const hasJobSchema = JSONLD_JOB_POSTING_RE.test(html);
   return hasJobSchema || (hasApplyButton && hasCompanyName);
@@ -42,16 +48,27 @@ function hasJobListingStructure(html: string): boolean {
 /** HTML structural signals for a job search results page. */
 function hasSearchResultsStructure(html: string, title?: string): boolean {
   // Multiple listing cards or pagination
-  const hasPagination = /(?:page\s+\d+\s+of\s+\d+|next\s+page|prev|\d+\s+–\s+\d+\s+of\s+\d+)/i.test(html);
-  const hasFilterControls = /(?:filter|sort\s+by|job\s+type|salary\s+range|location\s+filter)/i.test(html);
-  const hasResultCount = /(?:\d[\d,]*\s+(?:job|result|position)s?\s+(?:found|showing|of))/i.test(html);
-  return (hasPagination || hasResultCount) || (hasFilterControls && (title ? SEARCH_RESULTS_TITLE_RE.test(title) : false));
+  const hasPagination = /(?:page\s+\d+\s+of\s+\d+|next\s+page|prev|\d+\s+–\s+\d+\s+of\s+\d+)/i.test(
+    html,
+  );
+  const hasFilterControls =
+    /(?:filter|sort\s+by|job\s+type|salary\s+range|location\s+filter)/i.test(html);
+  const hasResultCount = /(?:\d[\d,]*\s+(?:job|result|position)s?\s+(?:found|showing|of))/i.test(
+    html,
+  );
+  return (
+    hasPagination ||
+    hasResultCount ||
+    (hasFilterControls && (title ? SEARCH_RESULTS_TITLE_RE.test(title) : false))
+  );
 }
 
 /** HTML structural signals for a login page. */
 function hasLoginStructure(html: string): boolean {
   const hasPasswordField = /<input[^>]*type\s*=\s*["']password["'][^>]*>/i.test(html);
-  const hasLoginForm = /<form[^>]*>[\s\S]*?(?:sign[- ]?in|log[- ]?in|login)[\s\S]*?<\/form>/i.test(html);
+  const hasLoginForm = /<form[^>]*>[\s\S]*?(?:sign[- ]?in|log[- ]?in|login)[\s\S]*?<\/form>/i.test(
+    html,
+  );
   return hasPasswordField || hasLoginForm;
 }
 
@@ -59,7 +76,10 @@ function hasLoginStructure(html: string): boolean {
 function hasArticleStructure(html: string): boolean {
   // Article-like: long prose, no job schema, no listing cards, single heading
   const hasArticleTag = /<article[^>]*>/i.test(html);
-  const hasLongProse = (html.match(/\b(?:step\s+\d+|tip|guide|advice|learn\s+how|essential\s+skills|qualifications)\b/gi)?.length ?? 0) > 3;
+  const hasLongProse =
+    (html.match(
+      /\b(?:step\s+\d+|tip|guide|advice|learn\s+how|essential\s+skills|qualifications)\b/gi,
+    )?.length ?? 0) > 3;
   return hasArticleTag || hasLongProse;
 }
 
@@ -133,7 +153,10 @@ export function classifyPageIntent(
   }
 
   // 9. Generic content with article-like patterns
-  if (pageText.length > 500 && /\b(?:read\s+more|related\s+(?:articles|posts)|published|updated)\b/i.test(pageText)) {
+  if (
+    pageText.length > 500 &&
+    /\b(?:read\s+more|related\s+(?:articles|posts)|published|updated)\b/i.test(pageText)
+  ) {
     return 'generic_article';
   }
 
@@ -192,7 +215,9 @@ export function evaluatePageIntent(
   }
 
   if (!passed) {
-    reasons.push(`Intent "${intent}" rejected by quality gate (requireJobListing=${String(requireJobListing)})`);
+    reasons.push(
+      `Intent "${intent}" rejected by quality gate (requireJobListing=${String(requireJobListing)})`,
+    );
   }
 
   return {

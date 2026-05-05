@@ -33,14 +33,9 @@ const DEFAULT_CACHE_DIR =
   path.join(os.homedir(), '.cache', 'search-mcp', 'semantic-crawl');
 
 function resolveDatabasePath(): string {
-  const cacheDir =
-    process.env.SEMANTIC_CRAWL_CACHE_DIR ??
-    DEFAULT_CACHE_DIR;
-  const graphDir =
-    process.env.JOB_GRAPH_DATABASE_DIR ??
-    cacheDir;
-  return process.env.JOB_GRAPH_DATABASE_PATH ??
-    path.join(graphDir, 'job-graph.sqlite');
+  const cacheDir = process.env.SEMANTIC_CRAWL_CACHE_DIR ?? DEFAULT_CACHE_DIR;
+  const graphDir = process.env.JOB_GRAPH_DATABASE_DIR ?? cacheDir;
+  return process.env.JOB_GRAPH_DATABASE_PATH ?? path.join(graphDir, 'job-graph.sqlite');
 }
 
 // ── Schema ────────────────────────────────────────────────────────────────
@@ -207,10 +202,12 @@ export function backfillJobData(db: BetterSqliteDatabase): void {
     for (const p of postings) {
       if (p.company_id) {
         // Heuristic: create company if missing
-        db.prepare(`
+        db.prepare(
+          `
           INSERT OR IGNORE INTO graph_companies (company_id, name, first_seen_at, last_seen_at)
           VALUES (?, ?, ?, ?)
-        `).run(p.company_id, p.company_id, Date.now(), Date.now());
+        `,
+        ).run(p.company_id, p.company_id, Date.now(), Date.now());
       }
     }
   })();
@@ -304,15 +301,14 @@ function parseJsonArray(value: string): string[] {
  *
  * On error, logs and returns without throwing.
  */
-export function insertJobPosting(
-  p: GraphJobPosting,
-  db?: BetterSqliteDatabase,
-): boolean {
+export function insertJobPosting(p: GraphJobPosting, db?: BetterSqliteDatabase): boolean {
   const handle = db ?? getJobGraphDb();
   if (handle === null) return false;
 
   try {
-    handle.prepare(`
+    handle
+      .prepare(
+        `
       INSERT INTO graph_job_postings (
         job_id, title, company_id, location_id, source_site, source_url,
         salary_min, salary_max, salary_currency, salary_interval,
@@ -343,27 +339,29 @@ export function insertJobPosting(
         verification_status = excluded.verification_status,
         confidence         = excluded.confidence,
         caveats            = excluded.caveats
-    `).run({
-      job_id: p.jobId,
-      title: p.title,
-      company_id: p.companyId ?? null,
-      location_id: p.locationId ?? null,
-      source_site: p.sourceSite,
-      source_url: p.sourceUrl,
-      salary_min: p.salaryMin ?? null,
-      salary_max: p.salaryMax ?? null,
-      salary_currency: p.salaryCurrency ?? null,
-      salary_interval: p.salaryInterval ?? null,
-      work_mode: p.workMode ?? null,
-      job_type: p.jobType ?? null,
-      seniority: p.seniority ?? null,
-      posted_at: p.postedAt ?? null,
-      description: p.description ?? null,
-      extracted_text: p.extractedText ?? null,
-      verification_status: p.verificationStatus,
-      confidence: p.confidence,
-      caveats: JSON.stringify(p.caveats),
-    });
+    `,
+      )
+      .run({
+        job_id: p.jobId,
+        title: p.title,
+        company_id: p.companyId ?? null,
+        location_id: p.locationId ?? null,
+        source_site: p.sourceSite,
+        source_url: p.sourceUrl,
+        salary_min: p.salaryMin ?? null,
+        salary_max: p.salaryMax ?? null,
+        salary_currency: p.salaryCurrency ?? null,
+        salary_interval: p.salaryInterval ?? null,
+        work_mode: p.workMode ?? null,
+        job_type: p.jobType ?? null,
+        seniority: p.seniority ?? null,
+        posted_at: p.postedAt ?? null,
+        description: p.description ?? null,
+        extracted_text: p.extractedText ?? null,
+        verification_status: p.verificationStatus,
+        confidence: p.confidence,
+        caveats: JSON.stringify(p.caveats),
+      });
     return true;
   } catch (err) {
     logger.error({ err, jobId: p.jobId }, 'jobGraphDb: insertJobPosting failed');
@@ -376,15 +374,14 @@ export function insertJobPosting(
  *
  * Returns true on success, false on error.
  */
-export function insertCompany(
-  c: GraphCompany,
-  db?: BetterSqliteDatabase,
-): boolean {
+export function insertCompany(c: GraphCompany, db?: BetterSqliteDatabase): boolean {
   const handle = db ?? getJobGraphDb();
   if (handle === null) return false;
 
   try {
-    handle.prepare(`
+    handle
+      .prepare(
+        `
       INSERT INTO graph_companies (
         company_id, name, domain, industry, careers_page_url, logo_url,
         first_seen_at, last_seen_at
@@ -399,16 +396,18 @@ export function insertCompany(
         careers_page_url  = excluded.careers_page_url,
         logo_url          = excluded.logo_url,
         last_seen_at      = excluded.last_seen_at
-    `).run({
-      company_id: c.companyId,
-      name: c.name,
-      domain: c.domain ?? null,
-      industry: c.industry ?? null,
-      careers_page_url: c.careersPageUrl ?? null,
-      logo_url: c.logoUrl ?? null,
-      first_seen_at: c.firstSeenAt,
-      last_seen_at: c.lastSeenAt,
-    });
+    `,
+      )
+      .run({
+        company_id: c.companyId,
+        name: c.name,
+        domain: c.domain ?? null,
+        industry: c.industry ?? null,
+        careers_page_url: c.careersPageUrl ?? null,
+        logo_url: c.logoUrl ?? null,
+        first_seen_at: c.firstSeenAt,
+        last_seen_at: c.lastSeenAt,
+      });
     return true;
   } catch (err) {
     logger.error({ err, companyId: c.companyId }, 'jobGraphDb: insertCompany failed');
@@ -421,15 +420,14 @@ export function insertCompany(
  *
  * On error, logs and returns without throwing.
  */
-export function insertLocation(
-  l: GraphLocation,
-  db?: BetterSqliteDatabase,
-): void {
+export function insertLocation(l: GraphLocation, db?: BetterSqliteDatabase): void {
   const handle = db ?? getJobGraphDb();
   if (handle === null) return;
 
   try {
-    handle.prepare(`
+    handle
+      .prepare(
+        `
       INSERT INTO graph_locations (location_id, city, state, country, display_name)
       VALUES (@location_id, @city, @state, @country, @display_name)
       ON CONFLICT(location_id) DO UPDATE SET
@@ -437,13 +435,15 @@ export function insertLocation(
         state        = excluded.state,
         country      = excluded.country,
         display_name = excluded.display_name
-    `).run({
-      location_id: l.locationId,
-      city: l.city ?? null,
-      state: l.state ?? null,
-      country: l.country ?? null,
-      display_name: l.displayName,
-    });
+    `,
+      )
+      .run({
+        location_id: l.locationId,
+        city: l.city ?? null,
+        state: l.state ?? null,
+        country: l.country ?? null,
+        display_name: l.displayName,
+      });
   } catch (err) {
     logger.error({ err, locationId: l.locationId }, 'jobGraphDb: insertLocation failed');
   }
@@ -454,15 +454,14 @@ export function insertLocation(
  *
  * On error, logs and returns without throwing.
  */
-export function insertDuplicateCluster(
-  c: GraphDuplicateCluster,
-  db?: BetterSqliteDatabase,
-): void {
+export function insertDuplicateCluster(c: GraphDuplicateCluster, db?: BetterSqliteDatabase): void {
   const handle = db ?? getJobGraphDb();
   if (handle === null) return;
 
   try {
-    handle.prepare(`
+    handle
+      .prepare(
+        `
       INSERT INTO graph_duplicate_clusters (
         cluster_id, canonical_job_id, member_job_ids, member_sites,
         cluster_size, first_seen_at, last_seen_at
@@ -476,15 +475,17 @@ export function insertDuplicateCluster(
         member_sites     = excluded.member_sites,
         cluster_size    = excluded.cluster_size,
         last_seen_at    = excluded.last_seen_at
-    `).run({
-      cluster_id: c.clusterId,
-      canonical_job_id: c.canonicalJobId,
-      member_job_ids: JSON.stringify(c.memberJobIds),
-      member_sites: JSON.stringify(c.memberSites),
-      cluster_size: c.clusterSize,
-      first_seen_at: c.firstSeenAt,
-      last_seen_at: c.lastSeenAt,
-    });
+    `,
+      )
+      .run({
+        cluster_id: c.clusterId,
+        canonical_job_id: c.canonicalJobId,
+        member_job_ids: JSON.stringify(c.memberJobIds),
+        member_sites: JSON.stringify(c.memberSites),
+        cluster_size: c.clusterSize,
+        first_seen_at: c.firstSeenAt,
+        last_seen_at: c.lastSeenAt,
+      });
   } catch (err) {
     logger.error({ err, clusterId: c.clusterId }, 'jobGraphDb: insertDuplicateCluster failed');
   }
@@ -669,9 +670,10 @@ export function graphHealth(): boolean {
  *
  * Commits on success; rolls back on any error.
  */
-export function insertJobPostingsBatch(
-  postings: GraphJobPosting[],
-): { inserted: number; errors: number } {
+export function insertJobPostingsBatch(postings: GraphJobPosting[]): {
+  inserted: number;
+  errors: number;
+} {
   const handle = getJobGraphDb();
   if (handle === null) return { inserted: 0, errors: postings.length };
 
@@ -687,16 +689,17 @@ export function insertJobPostingsBatch(
     return { inserted, errors: postings.length - inserted };
   } catch (err) {
     logger.error({ err }, 'jobGraphDb: insertJobPostingsBatch transaction failed');
-    return { inserted, errors: postings.length - inserted };
+    return { inserted: 0, errors: postings.length };
   }
 }
 
 /**
  * Batch upsert companies inside a transaction.
  */
-export function insertCompaniesBatch(
-  companies: GraphCompany[],
-): { inserted: number; errors: number } {
+export function insertCompaniesBatch(companies: GraphCompany[]): {
+  inserted: number;
+  errors: number;
+} {
   const handle = getJobGraphDb();
   if (handle === null) return { inserted: 0, errors: companies.length };
 
@@ -712,6 +715,6 @@ export function insertCompaniesBatch(
     return { inserted, errors: companies.length - inserted };
   } catch (err) {
     logger.error({ err }, 'jobGraphDb: insertCompaniesBatch transaction failed');
-    return { inserted, errors: companies.length - inserted };
+    return { inserted: 0, errors: companies.length };
   }
 }

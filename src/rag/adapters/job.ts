@@ -546,7 +546,8 @@ function extractJobIdFromUrl(url: string): string | undefined {
       const nextSegment = pathSegments[index + 1];
 
       if (segment.toLowerCase() === 'job' && nextSegment) {
-        return decodeURIComponent(nextSegment);
+        const id: string = nextSegment;
+        return decodeURIComponent(id);
       }
 
       if (segment.toLowerCase() === 'viewjob' && nextSegment) {
@@ -767,7 +768,8 @@ function extractListingFromCard(
 
   // Fallback: construct URL from data-job-id for SEEK and similar boards using href-less anchors
   if (!jobUrl) {
-    const dataJobId = $card.attr('data-job-id') ?? $card.find('[data-job-id]').first().attr('data-job-id');
+    const dataJobId =
+      $card.attr('data-job-id') ?? $card.find('[data-job-id]').first().attr('data-job-id');
     if (dataJobId) {
       try {
         const parsed = new URL(pageUrl);
@@ -841,9 +843,9 @@ function extractListingFromCard(
   if (jobUrl) {
     jobId = extractJobIdFromUrl(jobUrl);
   }
-  if (!jobId) {
-    jobId = normalizeText($card.attr('data-job-id') ?? $card.find('[data-job-id]').first().attr('data-job-id'));
-  }
+  jobId ??= normalizeText(
+    $card.attr('data-job-id') ?? $card.find('[data-job-id]').first().attr('data-job-id'),
+  );
 
   const confidence = calculateJobConfidence({ title, location, workMode, salaryRaw });
 

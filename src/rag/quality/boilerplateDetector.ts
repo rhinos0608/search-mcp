@@ -180,7 +180,7 @@ export function detectBoilerplate(
   listing: JobListingMvp,
   minContentRatio: number,
 ): BoilerplateResult {
-  const text = listing.extractedText ?? '';
+  const text = listing.extractedText;
 
   // Very short or empty text is common for JobSpy / search-result records
   // that haven't been enriched yet. Pass through with low confidence
@@ -196,9 +196,7 @@ export function detectBoilerplate(
 
   const analysis = analyseLines(text);
   const contentRatio =
-    analysis.totalLineCount > 0
-      ? analysis.meaningfulLineCount / analysis.totalLineCount
-      : 0;
+    analysis.totalLineCount > 0 ? analysis.meaningfulLineCount / analysis.totalLineCount : 0;
 
   // Collect detected categories
   const categories = new Set<string>();
@@ -219,15 +217,13 @@ export function detectBoilerplate(
   const passed = contentRatio >= minContentRatio;
 
   if (!passed) {
-    reasons.push(`Content ratio ${String(Math.round(contentRatio * 100))}% below minimum ${String(Math.round(minContentRatio * 100))}%`);
+    reasons.push(
+      `Content ratio ${String(Math.round(contentRatio * 100))}% below minimum ${String(Math.round(minContentRatio * 100))}%`,
+    );
   }
 
   // Confidence depends on total line count (more lines = more reliable)
-  const confidence = clamp(
-    Math.min(analysis.totalLineCount / 100, 1) * 0.8 + 0.2,
-    0,
-    1,
-  );
+  const confidence = clamp(Math.min(analysis.totalLineCount / 100, 1) * 0.8 + 0.2, 0, 1);
 
   return {
     passed,

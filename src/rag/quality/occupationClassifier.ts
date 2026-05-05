@@ -156,7 +156,6 @@ function hasAnyToken(title: string, tokens: readonly string[]): boolean {
   return tokens.some((token) => lower.includes(token));
 }
 
-
 // ── Main classifier ──────────────────────────────────────────────────────────
 
 /**
@@ -169,11 +168,9 @@ function hasAnyToken(title: string, tokens: readonly string[]): boolean {
  * 3. If title is ambiguous, scan the extracted description text for signals.
  * 4. "Administrator" alone without context is treated as uncertain.
  */
-export function classifyOccupation(
-  listing: JobListingMvp,
-): OccupationResult {
+export function classifyOccupation(listing: JobListingMvp): OccupationResult {
   const title = listing.title;
-  const description = listing.extractedText ?? '';
+  const description = listing.extractedText || '';
 
   // ── Phase 1: Title scan ────────────────────────────────────────────────
   const titleLower = title.toLowerCase();
@@ -262,7 +259,17 @@ export function classifyOccupation(
 
   // ── Phase 4: Non-admin title but might still be relevant ────────────────
   // Roles like "Office Junior", "Data Entry Clerk" are clerical despite no "admin" in title.
-  if (hasAnyToken(title, ['office junior', 'data entry', 'reception', 'secretary', 'front desk', 'clerical', 'mail room'])) {
+  if (
+    hasAnyToken(title, [
+      'office junior',
+      'data entry',
+      'reception',
+      'secretary',
+      'front desk',
+      'clerical',
+      'mail room',
+    ])
+  ) {
     return {
       passed: true,
       classification: 'clerical_admin',

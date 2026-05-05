@@ -140,7 +140,9 @@ export function classifyEntryLevel(listing: JobListingMvp): EntryLevelResult {
   const positiveCount = ENTRY_LEVEL_KEYWORDS.filter((p) => p.test(combined)).length;
   const negativeSeniorityCount = SENIORITY_KEYWORDS.filter((p) => p.test(combined)).length;
   const negativeQualificationCount = QUALIFICATION_SIGNALS.filter((p) => p.test(combined)).length;
-  const negativeContractorCount = TECHNICAL_CONTRACTOR_SIGNALS.filter((p) => p.test(combined)).length;
+  const negativeContractorCount = TECHNICAL_CONTRACTOR_SIGNALS.filter((p) =>
+    p.test(combined),
+  ).length;
 
   // Salary check
   const maxSalary = extractMaxAnnualSalary(listing.salaryRaw);
@@ -151,7 +153,8 @@ export function classifyEntryLevel(listing: JobListingMvp): EntryLevelResult {
   // Strong senior/experienced signals → reject
   if (negativeSeniorityCount >= 2 || (negativeSeniorityCount >= 1 && salaryTooHigh)) {
     const reasons: string[] = [];
-    if (negativeSeniorityCount >= 2) reasons.push(`Multiple seniority signals (${String(negativeSeniorityCount)})`);
+    if (negativeSeniorityCount >= 2)
+      reasons.push(`Multiple seniority signals (${String(negativeSeniorityCount)})`);
     if (salaryTooHigh) reasons.push(`Salary $${String(maxSalary)} exceeds entry-level threshold`);
     return {
       passed: false,
@@ -162,8 +165,12 @@ export function classifyEntryLevel(listing: JobListingMvp): EntryLevelResult {
   }
 
   // Explicit senior title → reject
-  if (/\b(senior|lead|head\s+of|director|principal|chief|executive|vp|vice\s+president|manager)\b/i.test(title) &&
-      !/\b(assistant\s+manager|office\s+manager)\b/i.test(title)) {
+  if (
+    /\b(senior|lead|head\s+of|director|principal|chief|executive|vp|vice\s+president|manager)\b/i.test(
+      title,
+    ) &&
+    !/\b(assistant\s+manager|office\s+manager)\b/i.test(title)
+  ) {
     return {
       passed: false,
       classification: 'senior',
@@ -175,8 +182,10 @@ export function classifyEntryLevel(listing: JobListingMvp): EntryLevelResult {
   // Contractor / ABN signals → reject
   if (negativeContractorCount >= 1 || negativeQualificationCount >= 2) {
     const reasons: string[] = [];
-    if (negativeContractorCount >= 1) reasons.push('Contractor/ABN/business structure signals detected');
-    if (negativeQualificationCount >= 2) reasons.push(`Multiple qualification requirements (${String(negativeQualificationCount)})`);
+    if (negativeContractorCount >= 1)
+      reasons.push('Contractor/ABN/business structure signals detected');
+    if (negativeQualificationCount >= 2)
+      reasons.push(`Multiple qualification requirements (${String(negativeQualificationCount)})`);
     return {
       passed: false,
       classification: 'overqualified',
@@ -210,7 +219,9 @@ export function classifyEntryLevel(listing: JobListingMvp): EntryLevelResult {
       passed: true,
       classification: 'entry',
       confidence: 0.6,
-      reasons: [`Entry-level signal detected: "${findFirstMatch(title, ENTRY_LEVEL_KEYWORDS) ?? ''}"`],
+      reasons: [
+        `Entry-level signal detected: "${findFirstMatch(title, ENTRY_LEVEL_KEYWORDS) ?? ''}"`,
+      ],
     };
   }
 
