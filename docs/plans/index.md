@@ -1,6 +1,6 @@
 # Search MCP Roadmap — Implementation Plans Index
 
-**Version**: V3.3.0 (Released) → V3.3.1 (Planning) → V3.4.0 (Future)
+**Version**: V3.3.0 (Released) → V3.3.1 (Planning) → V4.0.0 (Implemented ✅)
 
 This document indexes all implementation plans for the Search MCP roadmap.
 
@@ -249,9 +249,58 @@ This document indexes all implementation plans for the Search MCP roadmap.
 5. **Availability-aware selection + merge**
    - Consume health tracker and circuit breaker for intelligent fallback
    - Preserve `mergeSearchBackends`, dedupe, and fusion behavior
-   - Skip degraded or circuit-tripped backends automatically
 
 **Estimated Scope**: ~900 LOC new code
+
+---
+
+## V4.0.0 — Deep Research Orchestration Engine
+
+**Status**: Complete ✅ · **Priority**: High  
+**Depends On**: V3.3.x (existing search/crawl/RAG tools)
+
+**Summary**: Deep multi-phase research orchestration with LLM-driven control loop. Decomposes queries, discovers sources across 6 backends, extracts structured findings via LLM or regex, fills knowledge gaps adaptively, audits integrity, and synthesizes confidence-weighted narrative reports.
+
+| Document            | Path                                  |
+| ------------------- | ------------------------------------- |
+| Full Spec           | `docs/plans/v4.0.0/SPEC.md`           |
+| Implementation Plan | `docs/plans/v4.0.0/IMPLEMENTATION.md` |
+
+### Key Deliverables
+
+1. **LLM Client (`src/research/llm/chat.ts`)**
+   - OpenAI-compatible HTTP client with orchestrator/worker model routing
+   - Token tracking, retry with backoff, JSON structured output parsing
+
+2. **LLM Prompts (`src/research/llm/prompts.ts`)**
+   - 6 system prompts: evaluate, decide, extract, classify, audit, synthesis
+   - All output validated JSON matching TypeScript types
+
+3. **LLM Extraction (`src/research/llm/extractor.ts`)**
+   - Worker-based extraction with semaphore parallelism (3 concurrent)
+   - Falls back to regex-based extraction when LLM unavailable
+
+4. **LLM Synthesis (`src/research/llm/synthesis.ts`)**
+   - Orchestrator-based narrative report generation
+   - Falls back to rule-based ResearchSynthesizer
+
+5. **3D Confidence Model (`src/research/confidence.ts`)**
+   - Evidence confidence (source authority × freshness × corroboration)
+   - Extraction confidence (method reliability × content quality × risk)
+   - Consistency confidence (agreement ratio × contradiction status)
+
+6. **Control Loop Orchestrator (`src/research/orchestrator.ts`)**
+   - `State → Evaluate → Decide → Act → Update State` adaptive loop
+   - Rule-based fallback at every phase when LLM not configured
+   - Budget-aware: multi-point exhaustion checks, partial synthesis
+   - Audit: LLM + rule-based merged with dedup
+
+7. **MCP Tool (`src/tools/families/research.ts`)**
+   - `deep_research` action with `quick`/`standard`/`deep`/`exhaustive` depth profiles
+   - ConfigIssue checks for missing env vars
+   - Progressive rendering via timeline metadata
+
+**Estimated Scope**: ~3,180 + 2,400 LOC LLM orchestration layers
 
 ---
 
@@ -268,8 +317,10 @@ This document indexes all implementation plans for the Search MCP roadmap.
 | V3.3.0  | Resilience               | Contextual embeddings, domain trust, kill chain, query expansion                                     | ~2,500 LOC |
 | V3.3.1  | Search Backend Expansion | DuckDuckGo zero-key fallback, opt-in Ollama web search, availability-aware selection + merge         | ~900 LOC   |
 | V3.4.0  | Integration              | Resolver pattern, output budget, structured errors, diagnostics                                      | ~800 LOC   |
+| V4.0.0  | Deep Research            | LLM control loop, 3D confidence, multi-backend discovery, gap analysis, audit, synthesis             | ~5,600 LOC |
 
-**Total V3 Series**: ~11,740 LOC new code
+**Total V3 Series**: ~11,740 LOC new code  
+**V4.0.0**: ~5,600 LOC new code (LLM orchestration + rule-based foundation)
 
 ---
 
@@ -283,4 +334,4 @@ This document indexes all implementation plans for the Search MCP roadmap.
 
 ---
 
-_Generated: 2026-04-24 · Last updated: 2026-05-01 (V3.3.1 planning)_
+_Generated: 2026-05-04 · Last updated: 2026-05-04 (V4.0.0 Deep Research Orchestration Engine)_

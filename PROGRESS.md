@@ -1,32 +1,34 @@
 # Progress
 
-> Canonical plan status lives in `docs/plans/index.md`.
-
 ## Status
+In Progress
 
-V3.3.1 implementation in progress — DuckDuckGo + Ollama providers, health tracker, circuit breaker, availability-aware merge. All phases through Phase 5 (Availability-Aware Merge) implemented and passing.
+### Completed: prompts.ts `contradiction_scan` action
+- Added `contradiction_scan` to ORCHESTRATOR_DECIDE valid actions list (after `fill_gaps`)
+- Added comment block at top of file noting action naming conventions and internal actions
 
-## V3.3.1 — Search Backend Expansion
+### Completed: confidence.ts fixes
+- Updated `domainTrustScore` JSDoc to clarify it's optional with 0.5 default
+- Added NaN propagation guard in `computeExtractionConfidence` using `typeof === 'number' && isFinite()` clamp
 
-### Status: In Progress
+### Completed: chat.ts assertSafeUrl + budget comment
+- Changed `assertSafeUrl(endpoint)` → `assertSafeUrl(endpoint, true)` at callModel's URL assertion — allows operator-configured local endpoints (Ollama, LM Studio)
 
-| # | Phase | Status | Files Created | Files Modified |
-|---|-------|--------|---------------|----------------|
-| 0 | **Contracts + Config** | ✅ | `duckduckgoSearch.ts` (stub), `ollamaSearch.ts` (stub) | `types.ts`, `config.ts`, `webSearch.ts` |
-| 1 | **DuckDuckGo Provider** | ✅ | `test/duckduckgoSearch.test.ts` | `duckduckgoSearch.ts` (replaced stub) |
-| 2 | **Ollama Web Search Provider** | ✅ | `test/ollamaSearch.test.ts` | `ollamaSearch.ts` (replaced stub) |
-| 3 | **Backend Health Tracker** | ✅ | `src/utils/backendHealth.ts`, `test/backendHealth.test.ts` | — |
-| 4 | **Bot-Challenge Circuit Breaker** | ✅ | `src/utils/botChallenge.ts`, `test/botChallenge.test.ts` | — |
-| 5 | **Availability-Aware Selection + Merge** | ✅ | — | `webSearch.ts` |
-| 6 | **Docs, Examples, Verification** | 🟡 | — | `config.example.json`, `docs/plans/index.md`, `PROGRESS.md` |
+### Completed: synthesis.ts fixes
+- Added `classification` and `depth` type-guard checks in `isResearchReport()`
+- Removed dead `state.budget` ternary in `buildStateSummary()` — budget is always present
+- Added `claimEdgeCount` and `budgetRemaining` to `ResearchStateSummary` interface and builder
+- Added `max*` fields to `BudgetState` to support budget-remaining computation
+- Updated `BudgetTracker` constructor to populate `max*` fields from profile
 
-**923 tests pass** (2 pre-existing failures: `test/semanticCrawl.test.ts` timeout/abort networkError - verified on v3.3.0); typecheck ✅, lint ✅
+- [x] Remove `void await` in 3 extractPendingSources() calls
+- [x] Remove unused startTime param from synthesizePartial + update 3 callers
+- [x] Normalize descriptions in audit dedup + add `passed` field merge
+- [x] Add `toSafeNumber` guard for audit stats Number() calls
+- [x] Run typecheck — passes
+- `src/research/llm/prompts.ts` — added `contradiction_scan` action entry + naming convention comment
+- `src/research/confidence.ts` — updated domainTrustScore JSDoc; added NaN-safe riskScore clamping
+- `src/research/llm/chat.ts` — changed assertSafeUrl to allow local endpoints; added budget comment
+- `src/research/orchestrator.ts` — 5 targeted fixes applied (void await, synthesizePartial param, dedup normalize, passed merge, toSafeNumber guard)
 
-## Verification
-
-Minimum gates:
-
-- `npm run lint` ✅
-- `npm run typecheck` ✅
-- `npm run test` — 923 pass, 2 pre-existing fail (`test/semanticCrawl.test.ts` timeout/abort networkError - verified on v3.3.0)
-- `git diff --check` ✅
+## Notes

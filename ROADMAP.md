@@ -1,6 +1,6 @@
 # Roadmap
 
-## Current State (2026-05-01)
+## Current State (2026-05-04)
 
 > Canonical plan status lives in `docs/plans/index.md`; this file is a legacy high-level summary.
 
@@ -17,10 +17,8 @@
 | **V3.3.1**       | ✅ Planned    | DuckDuckGo zero-key fallback, opt-in Ollama web search, availability-aware selection + merge                               |
 | **V3.4.0**       | 🟡 Planned    | Integration: resolver pattern, output budget, structured errors, diagnostics                                               |
 | **V3.5.0**       | 🔲 Pending    | Competitive integration                                                                                                    |
-| **V4.0.0**       | 🔲 Planned    | Persistent corpus indexes — from ephemeral cache to durable research memory                                               |
-| **V4.1.0**       | 🔲 Planned    | Index refresh, incremental updates, maintenance                                                                           |
-| **V4.2.0**       | 🔲 Planned    | Cloud storage backends, team-ready deployments                                                                            |
-| **V4.3.0**       | 🔲 Planned    | Packaging, opt-in telemetry, monetisation readiness                                                                       |
+| **V4.0.0**       | ✅ Done       | **Deep Research Orchestration Engine** — LLM control loop, 3D confidence, multi-backend discovery, gap analysis, audit, synthesis |
+| **V5.0.0**       | 🔲 Planned    | Persistent corpus indexes (was V4.0.0) — from ephemeral cache to durable research memory                                   |
 
 ## Roadmap Summary
 
@@ -29,7 +27,7 @@
 - **V3.3.1** — search-backend expansion: DuckDuckGo plus opt-in Ollama web search.
 - **V3.4.0** — integration work: resolver pattern, output budget, structured errors, diagnostics.
 - **V3.5.0** — competitive integration.
-- **V4.0.0+** — persistent corpus indexes and longer-term platform work.
+- **V4.0.0** — Deep Research Orchestration Engine (replaces original V4 "persistent corpus indexes" → pushed to V5.0.0).
 
 ## Canonical Docs
 
@@ -38,3 +36,9 @@
 - `docs/plans/v3.3.0/IMPLEMENTATION.md`
 - `docs/plans/v3.3.1/SPEC.md`
 - `docs/plans/v3.3.1/IMPLEMENTATION.md`
+- `docs/plans/v4.0.0/SPEC.md`
+- `docs/plans/v4.0.0/IMPLEMENTATION.md`
+
+---
+
+_Generated: 2026-05-04 · Last updated: 2026-05-04 (V4.0.0 Deep Research Orchestration)_
