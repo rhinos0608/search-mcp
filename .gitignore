@@ -12,6 +12,7 @@ models/
 .pi/
 .pi-lens/
 .cache/semantic-crawl/
+.pi-smartread.embeddings.cache/
 
 # Python
 __pycache__/

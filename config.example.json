@@ -14,18 +14,6 @@
         "//": "Tavily search API (V3.4). API key free at tavily.com. Uses TAVILY_API_KEY env var.",
         "apiKey": ""
     },
-    "nitter": {
-        "baseUrl": ""
-    },
-    "listennotes": {
-        "apiKey": ""
-    },
-    "producthunt": {
-        "apiToken": ""
-    },
-    "patentsview": {
-        "apiKey": ""
-    },
     "youtube": {
         "apiKey": ""
     },
@@ -85,6 +73,19 @@
         "//": "Opt-in Ollama web-search backend (V3.3.1). Uses SEARCH_OLLAMA_* env vars — distinct from EMBEDDING_OLLAMA_*.",
         "baseUrl": "",
         "apiKey": ""
+    },
+    "deepResearch": {
+        "//": "Deep Research Orchestration Engine (V4.0.0). Opt-in, disabled by default.",
+        "enabled": false,
+        "defaultDepth": "standard",
+        "//baseUrl": "OpenAI-compatible base URL for LLM calls. Do NOT include /v1 — it is appended automatically (e.g. http://localhost:11434)",
+        "baseUrl": "",
+        "//apiToken": "Optional API token for authenticated LLM endpoints (e.g. OpenAI API key)",
+        "apiToken": "",
+        "//model": "Orchestrator model — mid-tier for planning, evaluation, audit, synthesis (e.g. gpt-4o, claude-sonnet-4)",
+        "model": "",
+        "//workerModel": "Worker model — cheap for extraction, classification (e.g. gpt-4o-mini, llama-3.1-8b)",
+        "workerModel": ""
     },
     "rescoreWeights": {
         "//": "Per-tool rescoring weights. Tune these to prioritize recency, citations, etc.",

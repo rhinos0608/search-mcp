@@ -40,22 +40,6 @@ interface GateRule {
 }
 
 const GATED_TOOLS: Record<string, GateRule> = {
-  twitter_search: {
-    check: (cfg) => cfg.nitter.baseUrl.length > 0,
-    remediation: 'Set NITTER_BASE_URL environment variable pointing to a Nitter instance.',
-  },
-  producthunt_search: {
-    check: (cfg) => (cfg.producthunt.apiToken ?? '').length > 0,
-    remediation: 'Set PRODUCTHUNT_API_TOKEN environment variable.',
-  },
-  patent_search: {
-    check: (cfg) => (cfg.patentsview.apiKey ?? '').length > 0,
-    remediation: 'Set PATENTSVIEW_API_KEY environment variable (free at patentsview.org).',
-  },
-  podcast_search: {
-    check: (cfg) => (cfg.listennotes.apiKey ?? '').length > 0,
-    remediation: 'Set LISTENNOTES_API_KEY environment variable.',
-  },
   web_crawl: {
     check: (cfg) => cfg.crawl4ai.baseUrl.length > 0,
     remediation:
@@ -75,6 +59,10 @@ const GATED_TOOLS: Record<string, GateRule> = {
     remediation:
       'Set EMBEDDING_SIDECAR_BASE_URL and a search backend (EXA_API_KEY, BRAVE_API_KEY, or SEARXNG_BASE_URL) to use semantic_jobs.',
   },
+  deep_research: {
+    check: (cfg) => cfg.deepResearch.enabled,
+    remediation: 'Set DEEP_RESEARCH_ENABLED=true to enable the deep research orchestration engine.',
+  },
 };
 
 // ── Optional config (works without, degraded) ──────────────────────────────
@@ -93,16 +81,15 @@ const OPTIONAL_CONFIG: Record<string, OptionalRule> = {
       cfg.searxng.baseUrl.length > 0 ||
       (cfg.tavily.apiKey ?? '').length > 0,
     degradedMessage: 'No search backend configured — web_search calls will fail.',
-    remediation: 'Set EXA_API_KEY, BRAVE_API_KEY, SEARXNG_BASE_URL, or TAVILY_API_KEY environment variable.',
+    remediation:
+      'Set EXA_API_KEY, BRAVE_API_KEY, SEARXNG_BASE_URL, or TAVILY_API_KEY environment variable.',
   },
 };
 
 // (stackoverflow_search moved to research family — see researchCapabilities)
 
 // Free tools — no config required
-export const FREE_TOOLS = [
-  'web_read',
-] as const;
+export const FREE_TOOLS = ['web_read'] as const;
 
 // ── configHealth (sync, startup) ────────────────────────────────────────────
 
@@ -477,8 +464,7 @@ async function probeSidecarUrl(
     }
 
     if (!res.ok) {
-      const detail =
-        typeof body.detail === 'string' ? body.detail : `HTTP ${String(res.status)}`;
+      const detail = typeof body.detail === 'string' ? body.detail : `HTTP ${String(res.status)}`;
       throw new Error(detail);
     }
 

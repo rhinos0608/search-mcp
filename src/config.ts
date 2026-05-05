@@ -1,5 +1,4 @@
 /**
- * Encrypted config loader for API keys.
  *
  * Resolution order:
  *   1. Encrypted config file (config.enc) decrypted via SEARCH_MCP_CONFIG_KEY env var
@@ -169,16 +168,31 @@ export interface RAGAConfig {
   defaultParser: 'auto' | 'docling' | 'paddleocr' | 'mineru';
 }
 
+export type ResearchDepth = 'quick' | 'standard' | 'deep' | 'exhaustive';
+
+export interface DeepResearchConfig {
+  enabled: boolean;
+  defaultDepth: ResearchDepth;
+  maxDepth: ResearchDepth;
+  maxToolCalls: number;
+  maxTokens: number;
+  maxTimeMs: number;
+  /** OpenAI-compatible base URL for the LLM used by deep research. */
+  baseUrl: string;
+  /** Main orchestrator model (mid-tier: planning, gap analysis, synthesis). */
+  model: string;
+  /** Worker model (cheap: search, extraction notes, classification). */
+  workerModel: string;
+  /** Optional API token for authenticated LLM endpoints. */
+  apiToken: string;
+}
+
 export interface SearchConfig {
   searchBackend: SearchBackend;
   brave: { apiKey?: string };
   searxng: { baseUrl: string };
   exa: ExaConfig;
   tavily: { apiKey?: string };
-  nitter: { baseUrl: string };
-  listennotes: { apiKey?: string };
-  producthunt: { apiToken?: string };
-  patentsview: { apiKey?: string };
   youtube: { apiKey?: string };
   stackexchange: { apiKey?: string };
   github: GitHubConfig;
@@ -192,6 +206,7 @@ export interface SearchConfig {
   raga: RAGAConfig;
   duckduckgo: { region: string; safeSearch: string };
   ollamaSearch: { baseUrl: string; apiKey?: string };
+  deepResearch: DeepResearchConfig;
   rescoreWeights: RescoreConfig;
   challengeLatencyThreshold: number;
 }
@@ -202,10 +217,6 @@ const DEFAULTS: Omit<SearchConfig, 'rescoreWeights'> = {
   searxng: { baseUrl: '' },
   exa: { apiKey: '' },
   tavily: { apiKey: '' },
-  nitter: { baseUrl: '' },
-  listennotes: { apiKey: '' },
-  producthunt: { apiToken: '' },
-  patentsview: { apiKey: '' },
   youtube: { apiKey: '' },
   stackexchange: { apiKey: '' },
   github: { token: '' },
@@ -245,10 +256,29 @@ const DEFAULTS: Omit<SearchConfig, 'rescoreWeights'> = {
   },
   duckduckgo: { region: 'us-en', safeSearch: 'moderate' },
   ollamaSearch: { baseUrl: '', apiKey: '' },
+  deepResearch: {
+    enabled: false,
+    defaultDepth: 'standard' as const,
+    maxDepth: 'deep' as const,
+    maxToolCalls: 200,
+    maxTokens: 500_000,
+    maxTimeMs: 300_000,
+    baseUrl: '',
+    model: '',
+    workerModel: '',
+    apiToken: '',
+  },
   challengeLatencyThreshold: 5000,
 };
 
-const VALID_BACKENDS = new Set<string>(['brave', 'searxng', 'exa', 'duckduckgo', 'ollama-search', 'tavily']);
+const VALID_BACKENDS = new Set<string>([
+  'brave',
+  'searxng',
+  'exa',
+  'duckduckgo',
+  'ollama-search',
+  'tavily',
+]);
 
 /**
  * Decrypt config.enc using AES-256-GCM.
@@ -290,6 +320,7 @@ type EnvConfig = Omit<
   | 'ollamaSearch'
 > & {
   challengeLatencyThreshold?: number;
+  deepResearch?: Partial<DeepResearchConfig>;
   reddit?: Partial<RedditConfig>;
   crawl4ai?: Partial<Crawl4aiConfig>;
   github?: Partial<GitHubConfig>;
@@ -335,26 +366,6 @@ function loadFromEnv(): EnvConfig {
   if (tavilyKey) {
     cfg.tavily = { apiKey: tavilyKey };
     cfg.searchBackend ??= 'tavily';
-  }
-
-  const nitterUrl = process.env.NITTER_BASE_URL;
-  if (nitterUrl) {
-    cfg.nitter = { baseUrl: nitterUrl };
-  }
-
-  const listennotesKey = process.env.LISTENNOTES_API_KEY;
-  if (listennotesKey) {
-    cfg.listennotes = { apiKey: listennotesKey };
-  }
-
-  const phToken = process.env.PRODUCTHUNT_API_TOKEN;
-  if (phToken) {
-    cfg.producthunt = { apiToken: phToken };
-  }
-
-  const pvKey = process.env.PATENTSVIEW_API_KEY;
-  if (pvKey) {
-    cfg.patentsview = { apiKey: pvKey };
   }
 
   const ytKey = process.env.YOUTUBE_API_KEY;
@@ -527,6 +538,46 @@ function loadFromEnv(): EnvConfig {
     cfg.ollamaSearch = osc;
   }
 
+  // ── Deep Research env vars ────────────────────────────────────────────
+  {
+    const partial: Record<string, unknown> = {};
+    let hasAny = false;
+    const e = process.env.DEEP_RESEARCH_ENABLED;
+    if (e !== undefined) {
+      partial.enabled = e === 'true';
+      hasAny = true;
+    }
+    const u = process.env.DEEP_RESEARCH_BASE_URL;
+    if (u !== undefined) {
+      partial.baseUrl = u;
+      hasAny = true;
+    }
+    const m = process.env.DEEP_RESEARCH_MODEL;
+    if (m !== undefined) {
+      partial.model = m;
+      hasAny = true;
+    }
+    const w = process.env.DEEP_RESEARCH_WORKER_MODEL;
+    if (w !== undefined) {
+      partial.workerModel = w;
+      hasAny = true;
+    }
+    const tok = process.env.DEEP_RESEARCH_API_TOKEN;
+    if (tok !== undefined) {
+      partial.apiToken = tok;
+      hasAny = true;
+    }
+    const d = process.env.DEEP_RESEARCH_DEFAULT_DEPTH;
+    if (d !== undefined && ['quick', 'standard', 'deep', 'exhaustive'].includes(d)) {
+      partial.defaultDepth = d;
+      hasAny = true;
+    }
+    if (hasAny) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-assignment
+      cfg.deepResearch = { ...(cfg.deepResearch ?? {}), ...partial } as any;
+    }
+  }
+
   const challengeLatencyThreshold = process.env.CHALLENGE_LATENCY_THRESHOLD;
   if (challengeLatencyThreshold !== undefined) {
     const n = Number(challengeLatencyThreshold);
@@ -602,30 +653,6 @@ export function loadConfig(): SearchConfig {
     },
     tavily: {
       apiKey: fileConfig.tavily?.apiKey ?? envConfig.tavily?.apiKey ?? DEFAULTS.tavily.apiKey ?? '',
-    },
-    nitter: {
-      baseUrl: fileConfig.nitter?.baseUrl ?? envConfig.nitter?.baseUrl ?? DEFAULTS.nitter.baseUrl,
-    },
-    listennotes: {
-      apiKey:
-        fileConfig.listennotes?.apiKey ??
-        envConfig.listennotes?.apiKey ??
-        DEFAULTS.listennotes.apiKey ??
-        '',
-    },
-    producthunt: {
-      apiToken:
-        fileConfig.producthunt?.apiToken ??
-        envConfig.producthunt?.apiToken ??
-        DEFAULTS.producthunt.apiToken ??
-        '',
-    },
-    patentsview: {
-      apiKey:
-        fileConfig.patentsview?.apiKey ??
-        envConfig.patentsview?.apiKey ??
-        DEFAULTS.patentsview.apiKey ??
-        '',
     },
     youtube: {
       apiKey:
@@ -740,6 +767,48 @@ export function loadConfig(): SearchConfig {
       fileConfig.challengeLatencyThreshold ??
       envConfig.challengeLatencyThreshold ??
       DEFAULTS.challengeLatencyThreshold,
+    deepResearch: {
+      enabled:
+        fileConfig.deepResearch?.enabled ??
+        envConfig.deepResearch?.enabled ??
+        DEFAULTS.deepResearch.enabled,
+      defaultDepth:
+        fileConfig.deepResearch?.defaultDepth ??
+        envConfig.deepResearch?.defaultDepth ??
+        DEFAULTS.deepResearch.defaultDepth,
+      maxDepth:
+        fileConfig.deepResearch?.maxDepth ??
+        envConfig.deepResearch?.maxDepth ??
+        DEFAULTS.deepResearch.maxDepth,
+      maxToolCalls:
+        fileConfig.deepResearch?.maxToolCalls ??
+        envConfig.deepResearch?.maxToolCalls ??
+        DEFAULTS.deepResearch.maxToolCalls,
+      maxTokens:
+        fileConfig.deepResearch?.maxTokens ??
+        envConfig.deepResearch?.maxTokens ??
+        DEFAULTS.deepResearch.maxTokens,
+      maxTimeMs:
+        fileConfig.deepResearch?.maxTimeMs ??
+        envConfig.deepResearch?.maxTimeMs ??
+        DEFAULTS.deepResearch.maxTimeMs,
+      baseUrl:
+        fileConfig.deepResearch?.baseUrl ??
+        envConfig.deepResearch?.baseUrl ??
+        DEFAULTS.deepResearch.baseUrl,
+      model:
+        fileConfig.deepResearch?.model ??
+        envConfig.deepResearch?.model ??
+        DEFAULTS.deepResearch.model,
+      workerModel:
+        fileConfig.deepResearch?.workerModel ??
+        envConfig.deepResearch?.workerModel ??
+        DEFAULTS.deepResearch.workerModel,
+      apiToken:
+        fileConfig.deepResearch?.apiToken ??
+        envConfig.deepResearch?.apiToken ??
+        DEFAULTS.deepResearch.apiToken,
+    },
     rescoreWeights: DEFAULT_RESCORE_WEIGHTS,
   };
 
