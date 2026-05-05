@@ -331,7 +331,7 @@ async def _run_extraction(
 
         # Cache result
         assert cache_manager is not None
-        await cache_manager.set(doc_id, result.dict(), ttl=86400 * 7)  # 7 days
+        await cache_manager.set(doc_id, result.model_dump(), ttl=86400 * 7)  # 7 days
 
         # Store result in job store
         async with async_jobs_lock:
@@ -340,7 +340,7 @@ async def _run_extraction(
                     "status": "completed",
                     "progress": 100.0,
                     "message": "Extraction completed",
-                    "result": result.dict(),
+                    "result": result.model_dump(),
                     "updated_at": datetime.utcnow().isoformat(),
                     "completed_at": datetime.utcnow().isoformat(),
                 })

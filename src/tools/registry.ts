@@ -19,7 +19,12 @@ import { z } from 'zod/v4';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { SearchConfig } from '../config.js';
 import { logger } from '../logger.js';
-import { makeResult, errorResponse, successResponse, type ToolWrappedResponse } from './response.js';
+import {
+  makeResult,
+  errorResponse,
+  successResponse,
+  type ToolWrappedResponse,
+} from './response.js';
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -52,7 +57,11 @@ export interface FamilyAction<TSchema extends z.ZodType> {
    * The args type is inferred from the schema, but the container generic erases
    * it at registry time — each handler knows its own shape via destructuring.
    */
-  handler: (args: Record<string, unknown>, cfg: SearchConfig) => Promise<ActionReturn<unknown>>;
+  handler: (
+    args: Record<string, unknown>,
+    cfg: SearchConfig,
+    extra?: unknown,
+  ) => Promise<ActionReturn<unknown>>;
   /**
    * Optional config check.  Return null if the action is available, or a
    * human-readable remediation string if it isn't (e.g. "Set YOUTUBE_API_KEY").
@@ -101,7 +110,7 @@ export function registerFamily(
     },
     // When inputSchema is a Zod schema (not a shape object), the SDK passes
     // unknown args and expects the handler to do its own type narrowing.
-    async (rawArgs: unknown) => {
+    async (rawArgs: unknown, extra: unknown) => {
       const args = rawArgs as Record<string, unknown>;
       const action = family.actions.find((a) => a.name === args.action);
       if (!action) {
@@ -123,7 +132,7 @@ export function registerFamily(
       logger.info({ tool: family.name, action: action.name }, `${label} invoked`);
 
       try {
-        const result = await action.handler(rawArgs as Record<string, unknown>, cfg);
+        const result = await action.handler(rawArgs as Record<string, unknown>, cfg, extra);
 
         // Unpack branded wrapped response
         const resultObj = result as Record<string, unknown>;
@@ -150,7 +159,10 @@ export function registerFamily(
     },
   );
 
-  logger.info({ tool: family.name, actions: family.actions.map((a) => a.name) }, 'Family tool registered');
+  logger.info(
+    { tool: family.name, actions: family.actions.map((a) => a.name) },
+    'Family tool registered',
+  );
 }
 
 // ── Health / capability helpers ──────────────────────────────────────────────
