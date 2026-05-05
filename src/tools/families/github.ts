@@ -50,61 +50,59 @@ const repoAction = z.object({
     .describe('Fetch and include the raw README content (default true)'),
 });
 
-const fileAction = z.object({
-  action: z.literal('file').describe('Read a file from a repository'),
-  owner: z
-    .string()
-    .regex(/^[a-zA-Z0-9](?:[a-zA-Z0-9._-]*[a-zA-Z0-9])?$/)
-    .describe('GitHub username or organisation'),
-  repo: z
-    .string()
-    .regex(/^[a-zA-Z0-9._-]{1,100}$/)
-    .describe('Repository name'),
-  path: z.string().describe('File path within the repo'),
-  branch: z.string().optional().describe('Git ref (branch, tag, or commit SHA)'),
-  raw: z
-    .boolean()
-    .optional()
-    .default(true)
-    .describe('true = decoded UTF-8 text; false = base64'),
-  offset: z
-    .number()
-    .int()
-    .min(0)
-    .optional()
-    .describe('Line offset (0-based). Requires raw=true.'),
-  limit: z
-    .number()
-    .int()
-    .min(1)
-    .optional()
-    .describe('Maximum lines to return. Requires raw=true.'),
-  byteOffset: z
-    .number()
-    .int()
-    .min(0)
-    .optional()
-    .describe('Byte offset (0-based) via Range header. Requires raw=true.'),
-  byteLimit: z
-    .number()
-    .int()
-    .min(1)
-    .optional()
-    .describe('Maximum bytes via Range header. Requires raw=true.'),
-}).superRefine((params, ctx) => {
-  const hasOffsetRelated =
-    params.offset !== undefined ||
-    params.limit !== undefined ||
-    params.byteOffset !== undefined ||
-    params.byteLimit !== undefined;
-  if (hasOffsetRelated && !params.raw) {
-    ctx.addIssue({
-      code: 'custom',
-      message: 'offset/limit/byteOffset/byteLimit require raw=true',
-      path: ['raw'],
-    });
-  }
-});
+const fileAction = z
+  .object({
+    action: z.literal('file').describe('Read a file from a repository'),
+    owner: z
+      .string()
+      .regex(/^[a-zA-Z0-9](?:[a-zA-Z0-9._-]*[a-zA-Z0-9])?$/)
+      .describe('GitHub username or organisation'),
+    repo: z
+      .string()
+      .regex(/^[a-zA-Z0-9._-]{1,100}$/)
+      .describe('Repository name'),
+    path: z.string().describe('File path within the repo'),
+    branch: z.string().optional().describe('Git ref (branch, tag, or commit SHA)'),
+    raw: z.boolean().optional().default(true).describe('true = decoded UTF-8 text; false = base64'),
+    offset: z
+      .number()
+      .int()
+      .min(0)
+      .optional()
+      .describe('Line offset (0-based). Requires raw=true.'),
+    limit: z
+      .number()
+      .int()
+      .min(1)
+      .optional()
+      .describe('Maximum lines to return. Requires raw=true.'),
+    byteOffset: z
+      .number()
+      .int()
+      .min(0)
+      .optional()
+      .describe('Byte offset (0-based) via Range header. Requires raw=true.'),
+    byteLimit: z
+      .number()
+      .int()
+      .min(1)
+      .optional()
+      .describe('Maximum bytes via Range header. Requires raw=true.'),
+  })
+  .superRefine((params, ctx) => {
+    const hasOffsetRelated =
+      params.offset !== undefined ||
+      params.limit !== undefined ||
+      params.byteOffset !== undefined ||
+      params.byteLimit !== undefined;
+    if (hasOffsetRelated && !params.raw) {
+      ctx.addIssue({
+        code: 'custom',
+        message: 'offset/limit/byteOffset/byteLimit require raw=true',
+        path: ['raw'],
+      });
+    }
+  });
 
 const treeAction = z.object({
   action: z.literal('tree').describe('List directory contents'),
@@ -118,25 +116,12 @@ const treeAction = z.object({
     .describe('Repository name'),
   path: z.string().optional().default('').describe('Directory path within the repo'),
   branch: z.string().optional().describe('Git ref (branch, tag, or commit SHA)'),
-  recursive: z
-    .boolean()
-    .optional()
-    .default(false)
-    .describe('Return full recursive tree'),
-  limit: z
-    .number()
-    .int()
-    .min(1)
-    .max(500)
-    .optional()
-    .default(100)
-    .describe('Max items (1–500)'),
+  recursive: z.boolean().optional().default(false).describe('Return full recursive tree'),
+  limit: z.number().int().min(1).max(500).optional().default(100).describe('Max items (1–500)'),
   includeMonorepo: z
     .boolean()
     .optional()
-    .describe(
-      'Auto-detect monorepo structure. Defaults true when path is empty (root).',
-    ),
+    .describe('Auto-detect monorepo structure. Defaults true when path is empty (root).'),
 });
 
 const searchAction = z.object({
@@ -146,14 +131,7 @@ const searchAction = z.object({
   repo: z.string().optional().describe('Narrow to a specific repo (requires owner)'),
   language: z.string().optional().describe('Filter by language (e.g. "typescript")'),
   path: z.string().optional().describe('Filter to files under this path'),
-  limit: z
-    .number()
-    .int()
-    .min(1)
-    .max(1000)
-    .optional()
-    .default(30)
-    .describe('Max results (1–1000)'),
+  limit: z.number().int().min(1).max(1000).optional().default(30).describe('Max results (1–1000)'),
 });
 
 const trendingAction = z.object({
@@ -162,22 +140,13 @@ const trendingAction = z.object({
     .string()
     .optional()
     .default('')
-    .describe(
-      'Language slug (e.g. "typescript", "python"). Empty for all languages.',
-    ),
+    .describe('Language slug (e.g. "typescript", "python"). Empty for all languages.'),
   since: z
     .enum(['daily', 'weekly', 'monthly'])
     .optional()
     .default('daily')
     .describe('Time window: daily | weekly | monthly'),
-  limit: z
-    .number()
-    .int()
-    .min(1)
-    .max(50)
-    .optional()
-    .default(25)
-    .describe('Max repos (1–50)'),
+  limit: z.number().int().min(1).max(50).optional().default(25).describe('Max repos (1–50)'),
 });
 
 const codeSearchAction = z.object({
@@ -273,17 +242,7 @@ const githubFamily: FamilyDefinition = {
       schema: fileAction,
       handler: async (args, _cfg) => {
         void _cfg;
-        const {
-          owner,
-          repo,
-          path,
-          branch,
-          raw,
-          offset,
-          limit,
-          byteOffset,
-          byteLimit,
-        } = args as {
+        const { owner, repo, path, branch, raw, offset, limit, byteOffset, byteLimit } = args as {
           owner: string;
           repo: string;
           path: string;
@@ -421,7 +380,14 @@ const githubFamily: FamilyDefinition = {
           maxFileBytes,
           ...(fileFilter !== undefined ? { fileFilter } : {}),
           topK,
-          profile: profile as 'balanced' | 'lexical-heavy' | 'semantic-heavy' | 'high-precision' | 'fast' | 'precision' | 'recall',
+          profile: profile as
+            | 'balanced'
+            | 'lexical-heavy'
+            | 'semantic-heavy'
+            | 'high-precision'
+            | 'fast'
+            | 'precision'
+            | 'recall',
           includeContext,
           debug,
         });

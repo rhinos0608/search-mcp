@@ -27,13 +27,8 @@ export interface ToolWrappedResponse<T> {
 }
 
 /** Convenience factory for creating a wrapped response. */
-export function wrapResponse<T>(
-  data: T,
-  warnings?: string[],
-): ToolWrappedResponse<T> {
-  return warnings !== undefined
-    ? { kind: 'wrapped', data, warnings }
-    : { kind: 'wrapped', data };
+export function wrapResponse<T>(data: T, warnings?: string[]): ToolWrappedResponse<T> {
+  return warnings !== undefined ? { kind: 'wrapped', data, warnings } : { kind: 'wrapped', data };
 }
 
 export interface MakeResultOpts {
@@ -108,9 +103,7 @@ export async function handleToolCall<T>(
   tool: string,
   action: string | undefined,
   handler: () => Promise<T>,
-): Promise<
-  { content: { type: 'text'; text: string }[]; isError?: true }
-> {
+): Promise<{ content: { type: 'text'; text: string }[]; isError?: true }> {
   const label = action ? `${tool}.${action}` : tool;
   logger.info({ tool, action }, `${label} invoked`);
   const start = Date.now();

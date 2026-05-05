@@ -41,11 +41,7 @@ export function cleanTextContent(text: string): string {
 
     // Single-word all-caps nav labels ("HOME", "ABOUT", "CONTACT", "SERVICES")
     // Must be at least 3 chars to avoid stripping single-letter or two-letter content.
-    if (
-      /^[A-Z][A-Z\s]+$/.test(trimmed) &&
-      trimmed.length >= 3 &&
-      trimmed.length <= 30
-    ) {
+    if (/^[A-Z][A-Z\s]+$/.test(trimmed) && trimmed.length >= 3 && trimmed.length <= 30) {
       continue;
     }
 

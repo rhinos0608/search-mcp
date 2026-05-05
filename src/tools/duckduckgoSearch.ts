@@ -125,8 +125,7 @@ export async function duckduckgoSearch(
 ): Promise<SearchResult[]> {
   // Resolve safesearch: explicit arg trumps config, config trumps default
   const effectiveSafeSearch =
-    safeSearch ??
-    ((config?.safeSearch as 'strict' | 'moderate' | 'off' | undefined) ?? 'moderate');
+    safeSearch ?? (config?.safeSearch as 'strict' | 'moderate' | 'off' | undefined) ?? 'moderate';
   const effectiveConfig = config ?? { region: 'us-en', safeSearch: 'moderate' };
   logger.info(
     { limit, safeSearch: effectiveSafeSearch, region: effectiveConfig.region },

@@ -41,9 +41,7 @@ const postLocatorSchema = z.discriminatedUnion('type', [
   }),
   z.object({
     type: z.literal('permalink').describe('Identify by relative permalink path'),
-    permalink: z
-      .string()
-      .describe('Relative Reddit path starting with /r/{sub}/comments/{id}'),
+    permalink: z.string().describe('Relative Reddit path starting with /r/{sub}/comments/{id}'),
   }),
   z.object({
     type: z.literal('id').describe('Identify by subreddit + post ID'),
@@ -51,7 +49,10 @@ const postLocatorSchema = z.discriminatedUnion('type', [
       .string()
       .regex(/^[A-Za-z0-9_]{1,21}$/)
       .describe('Subreddit name (without r/ prefix)'),
-    postId: z.string().regex(/^[A-Za-z0-9]+$/).describe('Post ID (without t3_ prefix)'),
+    postId: z
+      .string()
+      .regex(/^[A-Za-z0-9]+$/)
+      .describe('Post ID (without t3_ prefix)'),
   }),
 ]);
 
@@ -97,13 +98,7 @@ const commentsSchema = z.object({
       'Number of parent comments above the focused comment (0–8). Only valid with `comment`.',
     ),
   sort: SORT_COMMENTS.optional().default('confidence').describe('Comment sort order'),
-  depth: z
-    .number()
-    .int()
-    .min(1)
-    .max(10)
-    .optional()
-    .describe('Maximum nesting depth (1–10)'),
+  depth: z.number().int().min(1).max(10).optional().describe('Maximum nesting depth (1–10)'),
   limit: z
     .number()
     .int()
@@ -122,9 +117,7 @@ const commentsSchema = z.object({
 
 const semanticSchema = z.object({
   action: z.literal('semantic').describe('Search + rank comment passages by semantic relevance'),
-  query: z
-    .string()
-    .describe('The semantic search query — what are you looking for in comments?'),
+  query: z.string().describe('The semantic search query — what are you looking for in comments?'),
   subreddit: z
     .string()
     .optional()
@@ -205,7 +198,10 @@ const redditFamily: FamilyDefinition = {
       handler: async (args, _cfg) => {
         void _cfg;
         const { post, comment, context, sort, depth, limit, showMore } = args as {
-          post: { type: 'url'; url: string } | { type: 'permalink'; permalink: string } | { type: 'id'; subreddit: string; postId: string };
+          post:
+            | { type: 'url'; url: string }
+            | { type: 'permalink'; permalink: string }
+            | { type: 'id'; subreddit: string; postId: string };
           comment?: string;
           context?: number;
           sort: 'confidence' | 'top' | 'new' | 'controversial' | 'old' | 'qa';
@@ -246,7 +242,17 @@ const redditFamily: FamilyDefinition = {
         'Search Reddit for posts, fetch comments, and rank passages by relevance to a query',
       schema: semanticSchema,
       handler: async (args, cfg) => {
-        const { query, subreddit, sort, timeframe, maxPosts, commentLimit, profile, topK, maxBytes } = args as {
+        const {
+          query,
+          subreddit,
+          sort,
+          timeframe,
+          maxPosts,
+          commentLimit,
+          profile,
+          topK,
+          maxBytes,
+        } = args as {
           query: string;
           subreddit: string;
           sort: 'relevance' | 'hot' | 'new' | 'top';

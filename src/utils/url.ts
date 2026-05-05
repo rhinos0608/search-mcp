@@ -186,8 +186,8 @@ export function canonicalizeJobUrl(raw: string): string {
   const hostname = u.hostname.toLowerCase();
 
   // Glassdoor partner URL — extract jobListingId, reconstruct stable URL
-  if (GLASSDOOR_PARTNER_RE.test(u.pathname)) {
-    const jobIdMatch = raw.match(GLASSDOOR_JOBID_RE);
+  if (GLASSDOOR_PARTNER_RE.exec(u.pathname)) {
+    const jobIdMatch = GLASSDOOR_JOBID_RE.exec(raw);
     if (jobIdMatch?.[1]) {
       return `https://www.glassdoor.com/job-listing/${jobIdMatch[1]}`;
     }
@@ -195,7 +195,7 @@ export function canonicalizeJobUrl(raw: string): string {
 
   // Indeed URL — extract jk param, reconstruct clean URL
   if (hostname.includes('indeed.com')) {
-    const jkMatch = raw.match(INDEED_JK_RE);
+    const jkMatch = INDEED_JK_RE.exec(raw);
     if (jkMatch?.[1]) {
       const jk = encodeURIComponent(jkMatch[1]);
       return `https://www.indeed.com/viewjob?jk=${jk}`;
@@ -215,4 +215,3 @@ export function canonicalizeJobUrl(raw: string): string {
 
   return u.toString();
 }
-

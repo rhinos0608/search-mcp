@@ -175,11 +175,12 @@ export async function runPipeline(
   statsCollector.recordHistogram('pipeline.duration_ms', duration);
   for (const [reason, count] of result.droppedReasons) {
     // Sanitize reason to ensure stable, valid metric names
-    const safeReason = reason
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, '_')
-      .replace(/^_|_$/g, '')
-      .slice(0, 64) || 'other';
+    const safeReason =
+      reason
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '_')
+        .replace(/^_|_$/g, '')
+        .slice(0, 64) || 'other';
     statsCollector.incCounter(`pipeline.dropped.${safeReason}`, count);
   }
 

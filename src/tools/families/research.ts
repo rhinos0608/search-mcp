@@ -67,14 +67,8 @@ const arxivAction = z.object({
     .optional()
     .default('relevance')
     .describe('Sort order'),
-  dateFrom: z
-    .string()
-    .optional()
-    .describe('Start date (YYYY-MM-DD). Filters by submission date.'),
-  dateTo: z
-    .string()
-    .optional()
-    .describe('End date (YYYY-MM-DD). Filters by submission date.'),
+  dateFrom: z.string().optional().describe('Start date (YYYY-MM-DD). Filters by submission date.'),
+  dateTo: z.string().optional().describe('End date (YYYY-MM-DD). Filters by submission date.'),
   limit: z
     .number()
     .int()
@@ -182,7 +176,14 @@ const researchFamily: FamilyDefinition = {
           dateTo?: string;
           limit: number;
         };
-        return arxivSearch(query, category ?? null, sortBy, dateFrom ?? null, dateTo ?? null, limit);
+        return arxivSearch(
+          query,
+          category ?? null,
+          sortBy,
+          dateFrom ?? null,
+          dateTo ?? null,
+          limit,
+        );
       },
     },
     {
@@ -201,7 +202,10 @@ const researchFamily: FamilyDefinition = {
         };
         const dateRange =
           dateFrom !== undefined || dateTo !== undefined
-            ? { ...(dateFrom !== undefined ? { from: dateFrom } : {}), ...(dateTo !== undefined ? { to: dateTo } : {}) }
+            ? {
+                ...(dateFrom !== undefined ? { from: dateFrom } : {}),
+                ...(dateTo !== undefined ? { to: dateTo } : {}),
+              }
             : null;
         return hackernewsSearch(query, type, sort, dateRange, limit);
       },
@@ -218,7 +222,14 @@ const researchFamily: FamilyDefinition = {
           accepted: boolean;
           limit: number;
         };
-        return stackoverflowSearch(query, cfg.stackexchange.apiKey ?? '', sort, tagged, accepted, limit);
+        return stackoverflowSearch(
+          query,
+          cfg.stackexchange.apiKey ?? '',
+          sort,
+          tagged,
+          accepted,
+          limit,
+        );
       },
       configIssue: (cfg) => {
         if (!cfg.stackexchange.apiKey) {

@@ -19,7 +19,14 @@ import type { SearchResult } from '../types.js';
  *
  * Zero-key providers first (cheapest path), then key-backed providers.
  */
-const FALLBACK_ORDER: SearchBackend[] = ['duckduckgo', 'searxng', 'brave', 'exa', 'tavily', 'ollama-search'];
+const FALLBACK_ORDER: SearchBackend[] = [
+  'duckduckgo',
+  'searxng',
+  'brave',
+  'exa',
+  'tavily',
+  'ollama-search',
+];
 
 function backendAvailable(backend: SearchBackend, allCandidates?: SearchBackend[]): boolean {
   const cfg = loadConfig();
@@ -171,8 +178,9 @@ export async function searchWithBackends(
   const cfg = loadConfig();
 
   // ── Query expansion ──────────────────────────────────────────────────
-  const queries: QueryVariation[] =
-    expandQueryOpt ? expandQuery(query) : [{ query, strategy: 'original' as const }];
+  const queries: QueryVariation[] = expandQueryOpt
+    ? expandQuery(query)
+    : [{ query, strategy: 'original' as const }];
 
   if (queries.length > 1) {
     logger.info(

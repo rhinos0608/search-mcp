@@ -45,9 +45,7 @@ const transcriptSchema = z.object({
   action: z.literal('transcript').describe('Get the transcript/captions for a video'),
   videoId: z
     .string()
-    .describe(
-      'YouTube video ID (the part after ?v=) or a full youtube.com / youtu.be URL',
-    ),
+    .describe('YouTube video ID (the part after ?v=) or a full youtube.com / youtu.be URL'),
   language: z
     .string()
     .optional()
@@ -57,7 +55,9 @@ const transcriptSchema = z.object({
 
 const semanticSchema = z.object({
   action: z.literal('semantic').describe('Search + rank transcript passages by semantic relevance'),
-  query: z.string().describe('The semantic search query — what are you looking for in video content?'),
+  query: z
+    .string()
+    .describe('The semantic search query — what are you looking for in video content?'),
   maxVideos: z
     .number()
     .int()
@@ -69,9 +69,7 @@ const semanticSchema = z.object({
   channel: z
     .string()
     .optional()
-    .describe(
-      'Filter to videos from channels whose name contains this string (case-insensitive)',
-    ),
+    .describe('Filter to videos from channels whose name contains this string (case-insensitive)'),
   sort: z
     .enum(['relevance', 'date', 'viewCount'])
     .optional()
@@ -120,7 +118,11 @@ const youtubeFamily: FamilyDefinition = {
       description: 'Search YouTube for videos matching a query',
       schema: searchSchema,
       handler: async (args, cfg) => {
-        const { query, order, maxResults } = args as { query: string; order: 'relevance' | 'date' | 'viewCount' | 'rating'; maxResults: number };
+        const { query, order, maxResults } = args as {
+          query: string;
+          order: 'relevance' | 'date' | 'viewCount' | 'rating';
+          maxResults: number;
+        };
         return youtubeSearch(query, cfg.youtube.apiKey ?? '', order, maxResults);
       },
       configIssue: (cfg) => {
@@ -146,25 +148,17 @@ const youtubeFamily: FamilyDefinition = {
         'Search YouTube for videos, fetch transcripts, and rank passages by relevance to a query',
       schema: semanticSchema,
       handler: async (args, cfg) => {
-        const {
-          query,
-          maxVideos,
-          channel,
-          sort,
-          transcriptLanguage,
-          profile,
-          topK,
-          maxBytes,
-        } = args as {
-          query: string;
-          maxVideos: number;
-          channel?: string;
-          sort: 'relevance' | 'date' | 'viewCount';
-          transcriptLanguage: string;
-          profile: 'balanced' | 'fast' | 'precision' | 'recall';
-          topK: number;
-          maxBytes: number;
-        };
+        const { query, maxVideos, channel, sort, transcriptLanguage, profile, topK, maxBytes } =
+          args as {
+            query: string;
+            maxVideos: number;
+            channel?: string;
+            sort: 'relevance' | 'date' | 'viewCount';
+            transcriptLanguage: string;
+            profile: 'balanced' | 'fast' | 'precision' | 'recall';
+            topK: number;
+            maxBytes: number;
+          };
 
         const data = await semanticYoutube({
           query,

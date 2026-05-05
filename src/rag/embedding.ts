@@ -183,9 +183,8 @@ export async function embedTexts(request: EmbedRequest): Promise<EmbedResponse> 
     }
 
     case 'transformers': {
-      const { embedWithTransformers, getTransformersConfig } = await import(
-        '../utils/transformersEmbedding.js'
-      );
+      const { embedWithTransformers, getTransformersConfig } =
+        await import('../utils/transformersEmbedding.js');
       const transformersConfig = getTransformersConfig();
       return embedWithTransformers(request.texts, transformersConfig, request.mode);
     }
@@ -201,7 +200,10 @@ export async function embedTexts(request: EmbedRequest): Promise<EmbedResponse> 
 /**
  * Native sidecar embedding implementation.
  */
-async function embedWithSidecar(request: EmbedRequest, configBaseUrl: string): Promise<EmbedResponse> {
+async function embedWithSidecar(
+  request: EmbedRequest,
+  configBaseUrl: string,
+): Promise<EmbedResponse> {
   const baseUrl = request.baseUrl ?? configBaseUrl;
   if (!baseUrl) {
     throw unavailableError('Embedding sidecar is not configured. Set EMBEDDING_SIDECAR_BASE_URL.');
@@ -243,7 +245,7 @@ async function embedWithSidecar(request: EmbedRequest, configBaseUrl: string): P
     if (
       msg.toLowerCase().includes('timeout') ||
       msg.toLowerCase().includes('aborted') ||
-      err instanceof Error && (err.name === 'TimeoutError' || err.name === 'AbortError')
+      (err instanceof Error && (err.name === 'TimeoutError' || err.name === 'AbortError'))
     ) {
       throw timeoutError(`Embedding sidecar request timed out after 60 seconds (Error: ${msg})`, {
         backend: 'sidecar',
@@ -280,7 +282,9 @@ async function embedWithSidecar(request: EmbedRequest, configBaseUrl: string): P
     dimensions: typeof data.dimensions === 'number' ? data.dimensions : request.dimensions,
     mode: typeof data.mode === 'string' ? data.mode : request.mode,
     truncatedIndices: Array.isArray(data.truncatedIndices)
-      ? data.truncatedIndices.filter((x): x is number => typeof x === 'number' && Number.isFinite(x))
+      ? data.truncatedIndices.filter(
+          (x): x is number => typeof x === 'number' && Number.isFinite(x),
+        )
       : [],
   };
 }
@@ -322,7 +326,7 @@ async function embedWithOpenAICompatible(request: EmbedRequest): Promise<EmbedRe
     if (
       msg.toLowerCase().includes('timeout') ||
       msg.toLowerCase().includes('aborted') ||
-      err instanceof Error && (err.name === 'TimeoutError' || err.name === 'AbortError')
+      (err instanceof Error && (err.name === 'TimeoutError' || err.name === 'AbortError'))
     ) {
       throw timeoutError(`OpenAI embedding request timed out after 30 seconds (Error: ${msg})`, {
         backend: 'openai',
