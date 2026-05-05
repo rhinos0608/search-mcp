@@ -15,6 +15,7 @@ from pathlib import Path
 from datetime import datetime, timedelta
 from typing import Optional, List, Dict, Any, Literal, cast
 from contextlib import asynccontextmanager
+from dataclasses import is_dataclass, asdict
 
 from fastapi import FastAPI, HTTPException, BackgroundTasks, File, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
@@ -294,7 +295,14 @@ async def _run_extraction(
 
         # Process and structure content
         assert content_processor is not None
-        content_items = await content_processor.process(parse_result)
+        raw_items = await content_processor.process(parse_result)
+
+        # Convert dataclass ContentItems (from content_processor) to dicts
+        # for Pydantic BaseModel ContentItem (defined in main.py)
+        content_items = [
+            asdict(item) if is_dataclass(item) and not isinstance(item, dict) else item
+            for item in raw_items
+        ]
 
         await set_job("processing", 90.0, "Building result")
 

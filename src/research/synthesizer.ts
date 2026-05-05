@@ -260,7 +260,7 @@ export class ResearchSynthesizer {
     for (const f of findings) {
       dist[f.confidenceLabel] = (dist[f.confidenceLabel] ?? 0) + 1;
     }
-    return dist as Record<ConfidenceLabel, number>;
+    return dist;
   }
 }
 

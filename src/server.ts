@@ -704,7 +704,7 @@ export function createServer(): McpServer {
                         publishedDate: null,
                         image: null,
                      };
-                     let data = readabilityFallbackResult(url, article, strategy, maxDepth, maxPages);
+                     const data = readabilityFallbackResult(url, article, strategy, maxDepth, maxPages);
                      data.pages[0]!.success = true;
                      const result = makeResult('web_crawl', data, Date.now() - start, { warnings: [] });
                      return successResponse(result);

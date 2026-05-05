@@ -16,9 +16,9 @@ import { hackernewsSearch } from '../tools/hackernewsSearch.js';
 import { redditSearch } from '../tools/redditSearch.js';
 import { stackoverflowSearch } from '../tools/stackoverflowSearch.js';
 import { youtubeSearch } from '../tools/youtubeSearch.js';
-import { ResearchStateEngine } from './state.js';
-import type { SubQuestion, SourceCandidate, SourceType, SourceEntry } from './types.js';
-import type { BudgetTracker } from './state.js';
+import type { SubQuestion, SourceCandidate, ScoredCandidate, SourceType, SourceEntry, SearchCluster } from './types.js';
+import { ResearchStateEngine, BudgetTracker } from './state.js';
+import type { DeepResearchLlmClient } from './llm/chat.js';
 
 // ── Configuration ──────────────────────────────────────────────────────────
 
@@ -173,15 +173,18 @@ export class DiscoveryEngine {
    private config: DiscoveryConfig;
    private weights: ScoreWeights;
 
+   private llm: DeepResearchLlmClient | undefined;
    constructor(
       state: ResearchStateEngine,
       budget: BudgetTracker,
       config?: Partial<DiscoveryConfig>,
+      llm?: DeepResearchLlmClient,
    ) {
       this.state = state;
       this.budget = budget;
       this.config = { ...DEFAULT_CONFIG, ...config };
       this.weights = DEFAULT_WEIGHTS;
+      this.llm = llm;
    }
 
    /**
@@ -219,6 +222,12 @@ export class DiscoveryEngine {
       const scored = this.scoreCandidates(allCandidates);
       const deduped = this.deduplicate(scored);
       const ranked = this.rankCandidates(deduped);
+
+      // SERP clustering (P5)
+      const clusters = await this.clusterCandidates(ranked);
+      if (clusters.length > 0) {
+         this.state.addSearchClusters(clusters);
+      }
 
       // Convert to source entries and store in state
       for (const candidate of ranked) {
@@ -287,7 +296,7 @@ export class DiscoveryEngine {
    private async searchWeb(sq: SubQuestion): Promise<SourceCandidate[]> {
       if (!this.budget.recordToolCall()) return [];
 
-      const queries = buildSearchQueries(sq);
+      const queries = await this.rewriteQueries(sq);
       const results: SourceCandidate[] = [];
 
       for (const query of queries) {
@@ -331,6 +340,62 @@ export class DiscoveryEngine {
       return results;
    }
 
+   private async rewriteQueries(sq: SubQuestion): Promise<string[]> {
+      if (!this.llm) return buildSearchQueries(sq);
+      try {
+         const { WORKER_REWRITE_QUERY } = await import('./llm/prompts.js');
+         const result = await this.llm.callJSON<{ queries: { q: string; tbs?: string; location?: string }[] }>({
+            model: 'worker',
+            messages: [
+               { role: 'system', content: WORKER_REWRITE_QUERY },
+               {
+                  role: 'user',
+                  content: `Sub-question: ${sq.text}\nClassification: ${sq.classification}\nFreshness requirement: ${sq.freshnessRequirement}`,
+               },
+            ],
+            temperature: 0.3,
+         });
+         if (result.success && result.data.queries.length > 0) {
+            return result.data.queries.map((q) => q.q).filter((q): q is string => q !== undefined);
+         }
+      } catch {
+         // fall through
+      }
+      return buildSearchQueries(sq);
+   }
+
+   private async clusterCandidates(
+      candidates: {
+         title: string;
+         url: string;
+         snippet: string;
+         subQuestionId: string;
+      }[],
+   ): Promise<SearchCluster[]> {
+      if (!this.llm || candidates.length < 3) return [];
+      try {
+         const { WORKER_CLUSTER } = await import('./llm/prompts.js');
+         const items = candidates
+            .slice(0, 15)
+            .map((c, i) => `[${i}] ${c.title}: ${c.snippet.slice(0, 200)}`)
+            .join('\n');
+         const result = await this.llm.callJSON<{ clusters: SearchCluster[] }>({
+            model: 'worker',
+            messages: [
+               { role: 'system', content: WORKER_CLUSTER },
+               { role: 'user', content: `Search results:\n${items}` },
+            ],
+            temperature: 0.3,
+         });
+         if (result.success && result.data.clusters) {
+            return result.data.clusters;
+         }
+      } catch {
+         // fall through
+      }
+      return [];
+   }
+
    private async searchAcademic(sq: SubQuestion): Promise<SourceCandidate[]> {
       if (!this.budget.recordToolCall()) return [];
 
@@ -345,7 +410,7 @@ export class DiscoveryEngine {
             title: p.title,
             url: p.url,
             snippet: p.abstract ?? '',
-            sourceType: 'academic' as SourceType,
+            sourceType: 'academic',
             estimatedQuality: 0.8,
             estimatedRelevance: 0.6,
             freshness: p.year ? `${String(new Date().getFullYear() - p.year)} years ago` : '',
@@ -365,12 +430,12 @@ export class DiscoveryEngine {
          const query = buildRedditQuery(sq);
          const raw = await redditSearch(query, '', 'relevance', 'year', 10);
          const posts: { title: string; url: string; selftext?: string; created_utc?: number }[] =
-            raw as unknown as { title: string; url: string; selftext?: string; created_utc?: number }[];
+            raw;
          return posts.map((p) => ({
             title: p.title,
             url: p.url,
             snippet: p.selftext ?? p.title,
-            sourceType: 'reddit' as SourceType,
+            sourceType: 'reddit',
             estimatedQuality: 0.4,
             estimatedRelevance: 0.5,
             freshness: p.created_utc
@@ -399,7 +464,7 @@ export class DiscoveryEngine {
             title: r.title ?? '',
             url: r.url ?? '',
             snippet: r.text ?? r.title ?? '',
-            sourceType: 'hackernews' as SourceType,
+            sourceType: 'hackernews',
             estimatedQuality: 0.5,
             estimatedRelevance: 0.5,
             freshness: '',
@@ -427,7 +492,7 @@ export class DiscoveryEngine {
             url?: string;
          }[];
          if (Array.isArray(raw)) {
-            items = raw as unknown as { fullName?: string; htmlUrl?: string; description?: string }[];
+            items = raw;
          } else if (raw && 'items' in raw && Array.isArray((raw as { items: unknown }).items)) {
             items = (raw as { items: { fullName?: string; htmlUrl?: string; description?: string }[] })
                .items;
@@ -439,7 +504,7 @@ export class DiscoveryEngine {
             title: r.fullName ?? r.name ?? '',
             url: r.htmlUrl ?? r.url ?? '',
             snippet: r.description ?? '',
-            sourceType: 'github' as SourceType,
+            sourceType: 'github',
             estimatedQuality: 0.7,
             estimatedRelevance: 0.5,
             freshness: '',
@@ -462,7 +527,7 @@ export class DiscoveryEngine {
             title: v.title,
             url: v.url,
             snippet: v.description,
-            sourceType: 'youtube' as SourceType,
+            sourceType: 'youtube',
             estimatedQuality: 0.4,
             estimatedRelevance: 0.5,
             freshness: v.publishedAt ? `${Math.floor((Date.now() - new Date(v.publishedAt).getTime()) / 86400000)} days ago` : '',
@@ -480,16 +545,12 @@ export class DiscoveryEngine {
 
       try {
          const raw = await stackoverflowSearch(sq.text, '', 'relevance', '', false, 10);
-         const results: { title?: string; url?: string; body?: string }[] = raw as unknown as {
-            title?: string;
-            url?: string;
-            body?: string;
-         }[];
+         const results: { title?: string; url?: string; body?: string }[] = raw;
          return results.map((r) => ({
             title: r.title ?? '',
             url: r.url ?? '',
             snippet: r.body ?? r.title ?? '',
-            sourceType: 'stackoverflow' as SourceType,
+            sourceType: 'stackoverflow',
             estimatedQuality: 0.6,
             estimatedRelevance: 0.5,
             freshness: '',
@@ -504,37 +565,51 @@ export class DiscoveryEngine {
 
    // ── Scoring ────────────────────────────────────────────────────────────
 
-   private scoreCandidates(candidates: SourceCandidate[]): ScoredCandidate[] {
-      return candidates.map((c, _idx, all) => {
-         const relevance = c.estimatedRelevance;
-         const confidence = sourceConfidencePrior(c.sourceType, c.url, c.snippet);
-         const freshness = estimateFreshness(c.freshness);
-         const diversity = this.computeDiversity(c, all);
+   private scoreCandidates(
+      candidates: SourceCandidate[],
+   ): ScoredCandidate[] {
+      // Count URL frequencies for boost
+      const urlCounts = new Map<string, number>();
+      for (const c of candidates) {
+         const normalized = normalizeUrlForDedup(c.url);
+         urlCounts.set(normalized, (urlCounts.get(normalized) ?? 0) + 1);
+      }
 
-         const totalScore =
-            this.weights.relevance * relevance +
-            this.weights.confidence * confidence +
-            this.weights.freshness * freshness +
-            this.weights.diversity * diversity;
+      return candidates.map((c) => {
+         const baseScore =
+            this.weights.relevance * c.estimatedRelevance +
+            this.weights.diversity * c.estimatedQuality +
+            this.weights.freshness * estimateFreshness(c.freshness) +
+            this.weights.confidence * sourceConfidencePrior(c.sourceType, c.url, c.snippet);
 
-         return {
-            ...c,
-            relevanceScore: relevance,
-            diversityScore: diversity,
-            freshnessScore: freshness,
-            confidenceScore: confidence,
-            totalScore,
-         };
+         // Frequency boost: duplicates indicate corroboration
+         const count = urlCounts.get(normalizeUrlForDedup(c.url)) ?? 1;
+         const freqBoost = count > 1 ? 1 + (count - 1) * 0.1 : 1;
+
+         // Authority boost
+         const domain = extractDomain(c.url);
+         const authorityBoost = AUTHORITY_DOMAINS.has(domain) ? 1.15 : 1;
+
+         // Path depth penalty
+         let pathDepth = 0;
+         try {
+            pathDepth = new URL(c.url).pathname.split('/').filter(Boolean).length;
+         } catch { /* ignore */ }
+         const depthPenalty = Math.pow(0.95, pathDepth);
+
+         // Attach scoring metadata
+         const scored = c as unknown as ScoredCandidate;
+         scored.freqBoost = freqBoost;
+         scored.authorityBoost = authorityBoost;
+         scored.diversityScore = depthPenalty;
+         // Override estimatedQuality with boosted score
+         const boostedQuality = Math.min(1, baseScore * freqBoost * authorityBoost * depthPenalty * 2);
+         scored.estimatedQuality = boostedQuality;
+         scored.totalScore = boostedQuality;
+
+         return scored;
       });
    }
-
-   private computeDiversity(candidate: SourceCandidate, all: SourceCandidate[]): number {
-      const domain = extractDomain(candidate.url);
-      const sameDomain = all.filter((c) => extractDomain(c.url) === domain).length;
-      // Penalize domains that already have many candidates
-      return Math.max(0, 1 - (sameDomain - 1) / Math.max(all.length, 1));
-   }
-
    // ── Dedup ───────────────────────────────────────────────────────────────
 
    private deduplicate(candidates: ScoredCandidate[]): ScoredCandidate[] {
@@ -558,22 +633,29 @@ export class DiscoveryEngine {
 
    // ── Ranking ─────────────────────────────────────────────────────────────
 
-   private rankCandidates(candidates: ScoredCandidate[]): SourceCandidate[] {
-      return candidates
-         .sort((a, b) => b.totalScore - a.totalScore)
-         .slice(0, this.config.maxCandidatesPerSubQuestion * 3) // generous slice
-         .map(
-            ({
-               totalScore: _ts,
-               relevanceScore: _rs,
-               diversityScore: _ds,
-               freshnessScore: _fs,
-               confidenceScore: _cs,
-               ...rest
-            }) => rest,
-         );
-   }
+   private rankCandidates(
+      candidates: SourceCandidate[],
+   ): SourceCandidate[] {
+      const sorted = [...candidates].sort((a, b) => {
+         const scoreA = (a as any).estimatedQuality ?? a.estimatedQuality;
+         const scoreB = (b as any).estimatedQuality ?? b.estimatedQuality;
+         return scoreB - scoreA;
+      });
 
+      // Hostname diversity: keep max 2 per domain
+      const hostnameCounts = new Map<string, number>();
+      const result: SourceCandidate[] = [];
+      for (const c of sorted) {
+         const domain = extractDomain(c.url);
+         const count = hostnameCounts.get(domain) ?? 0;
+         if (count < 2) {
+            hostnameCounts.set(domain, count + 1);
+            result.push(c);
+         }
+      }
+
+      return result.slice(0, this.config.maxCandidatesPerSubQuestion);
+   }
    // ── Convert candidate → source entry ───────────────────────────────────
 
    private candidateToSourceEntry(candidate: SourceCandidate): SourceEntry {
@@ -601,10 +683,3 @@ export class DiscoveryEngine {
 
 // ── Internal types ─────────────────────────────────────────────────────────
 
-interface ScoredCandidate extends SourceCandidate {
-   relevanceScore: number;
-   diversityScore: number;
-   freshnessScore: number;
-   confidenceScore: number;
-   totalScore: number;
-}

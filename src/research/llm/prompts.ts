@@ -90,6 +90,8 @@ Valid actions (choose EXACTLY one):
 - "synthesize" — Write the final report. Use when all critical gaps are resolved, contradictions are addressed, and remaining budget is sufficient for synthesis.
 - "complete" — Terminate the research loop. Use when budget is exhausted, all actions have diminishing returns, or the synthesis is complete.
 
+
+ACTIONS MAY BE RESTRICTED. If an action list restriction is provided below, only choose from that restricted set. The available actions will be listed here (if no restriction is provided, all actions above are available).
 Decision criteria (in priority order):
 1. **Budget check** — If budget is nearly exhausted (< 10% remaining in any dimension), prefer "synthesize" or "complete".
 2. **Uninitialised state** — If no sub-questions exist, the only valid action is "decompose".
@@ -133,6 +135,7 @@ You will receive the full research state as JSON:
 - gaps: all identified gaps with status
 - claimGraph: edges connecting findings (supports, contradicts, qualifies, etc.)
 - budget: final budget usage
+- conversationKnowledge: array of user/assistant message pairs representing findings as natural conversation
 
 Write a report that includes:
 
@@ -161,7 +164,7 @@ Output ONLY valid JSON with EXACTLY this structure (no markdown fences, no extra
 {
   "query": "the original research question",
   "classification": "explainer | comparative | technical | applied-practitioner | historical-timeline | market-ecosystem | literature-review | decision-support",
-  "depth": "quick | standard | deep | exhaustive",
+  "depth": "quick | standard | deep | exhaustive | tree",
   "executiveSummary": "A concise 2-4 paragraph summary addressing the research question directly",
   "themes": [
     {
@@ -380,3 +383,134 @@ Output ONLY valid JSON with EXACTLY this structure (no markdown fences, no extra
   },
   "timestamp": "ISO 8601 timestamp"
 }`;
+
+// ── Tree-based Research ───────────────────────────────────────────────────────
+
+/**
+ * System prompt for generating search queries with research goals from a user query.
+ *
+ * Output: `{ queries: [{ query, researchGoal }] }`
+ */
+export const TREE_GENERATE_QUERIES = `You are an expert researcher generating search queries. Given the following prompt, generate {num_queries} unique search queries to research the topic thoroughly. For each query, provide a research goal describing what aspect of the topic this query targets.
+
+Output ONLY valid JSON with EXACTLY this structure (no markdown fences, no extra text):
+{
+  "queries": [
+    {
+      "query": "the search query string",
+      "researchGoal": "what this query aims to discover"
+    }
+  ]
+}`;
+
+/**
+ * System prompt for extracting learnings and follow-up questions from research results.
+ *
+ * Output: `{ learnings: [{ text, sourceUrl }], followUpQuestions: [string] }`
+ */
+export const TREE_PROCESS_RESULTS = `You are an expert researcher analyzing search results. Given the following research results for a query, extract key learnings and suggest follow-up questions. Each learning should reference the source URL if available.
+
+Output ONLY valid JSON with EXACTLY this structure (no markdown fences, no extra text):
+{
+  "learnings": [
+    {
+      "text": "The key insight or finding",
+      "sourceUrl": "URL of the source if available"
+    }
+  ],
+  "followUpQuestions": [
+    "A follow-up question that explores deeper"
+  ]
+}`;
+
+export const WORKER_FAILURE_ANALYSIS = `You are an answer failure analyst. Your role is to analyze why a research answer failed to satisfy the evaluator's criteria.
+
+You will receive:
+1. The original sub-question
+2. The answer that was produced
+3. The evaluator's feedback
+
+Analyze the failure on these dimensions:
+- **Recap**: What was asked and what was produced? (1-2 sentences)
+- **Blame**: What went wrong? Options: insufficient evidence, misinterpretation of sources, hallucination, missing perspective, insufficient source diversity, stale information
+- **Improvement**: What specific action would fix this? Options: search with different keywords, find academic sources, find more recent sources, extract more carefully from existing sources
+
+Output ONLY valid JSON with EXACTLY this structure:
+{
+  "recap": "Concise 1-2 sentence recap of what went wrong",
+  "blame": "The specific cause of failure",
+  "improvement": "The specific next action to fix it"
+}`;
+
+export const WORKER_CLUSTER = `You are a search result clustering assistant. Your role is to group flat search results into orthogonal insight clusters.
+
+You will receive a list of search results with titles and snippets.
+
+Group them into at most 5 clusters, where each cluster represents a distinct insight, topic, or perspective. For each cluster, provide:
+- **insight**: A concise statement of what this cluster reveals (1 sentence)
+- **question**: A follow-up research question this cluster suggests
+- **urls**: The indices (0-based) of results belonging to this cluster
+
+**Critical**: Clusters must be orthogonal — each result should appear in exactly one cluster. If a result doesn't fit any cluster, omit it.
+
+Output ONLY valid JSON with EXACTLY this structure:
+{
+  "clusters": [
+    {
+      "insight": "What this cluster reveals about the topic",
+      "question": "Follow-up research question",
+      "urls": [0, 2, 5]
+    }
+  ]
+}`;
+
+export const WORKER_REWRITE_QUERY = `You are a search query optimizer. Given a research sub-question and context, generate 1-3 optimized search queries.
+
+For each query, optionally include:
+- **tbs**: A Google-style time filter (e.g., "qdr:y" for past year, "qdr:m" for past month) if recency matters
+- **location**: A geographic focus if relevant to the question
+
+Rules:
+- Keep queries concise (under 60 chars preferred)
+- Use keywords over full questions for keyword-based search backends
+- Generate multiple queries when the question has distinct facets
+
+Output ONLY valid JSON with EXACTLY this structure:
+{
+  "queries": [
+    {
+      "q": "optimized search query",
+      "tbs": "qdr:y",
+      "location": "optional location"
+    }
+  ]
+}`;
+
+export const ORCHESTRATOR_DECOMPOSE = `You are a research query decomposer. Given a research query and optional web search context, decompose it into focused sub-questions that can be researched independently.
+
+For each sub-question assign:
+- id: A short unique slug from the question text (lowercase, hyphens)
+- text: The sub-question itself
+      - classification: One of "explainer" | "comparative" | "technical" | "applied-practitioner" | "historical-timeline" | "market-ecosystem" | "literature-review" | "decision-support"
+         - evidenceType: One of "peer-reviewed" | "expert-opinion" | "data-statistics" | "anecdotal-experiential" | "general"
+            - preferredSources: Array from["academic", "web", "github", "reddit", "hackernews", "stackoverflow", "documentation", "news", "patent", "podcast", "producthunt", "youtube"]
+               - freshnessRequirement: e.g. "within 2 years", "any", "within 6 months"
+                  - failureModes: Array of likely failure reasons(strings)
+                     - budgetPriority: Number 1 - 5(1 = highest)
+
+Output ONLY valid JSON with EXACTLY this structure:
+{
+   "classification": "technical",
+      "subQuestions": [
+         {
+            "id": "example-question",
+            "text": "What is the specific aspect to investigate?",
+            "classification": "technical",
+            "evidenceType": "peer-reviewed",
+            "preferredSources": ["academic", "web"],
+            "freshnessRequirement": "within 2 years",
+            "failureModes": ["may require access to proprietary data"],
+            "budgetPriority": 1
+         }
+      ]
+} `;

@@ -119,7 +119,7 @@ async function getSession(): Promise<SessionState> {
         DEFAULT_MAX_LENGTH,
       );
       const smokeScores = await runInference(
-        { session: session as unknown as SessionLike, tokenizer, hasTokenTypeIds, outputName },
+        { session: session, tokenizer, hasTokenTypeIds, outputName },
         smokeBatch,
       );
 

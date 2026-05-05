@@ -65,4 +65,14 @@ export class ProgressTracker {
   researchComplete(): void {
     this.timeline.push({ phase: 'complete' });
   }
+
+  /** Record a step-level action event for streaming progress. */
+  reportAction(actionType: string, detail: string): void {
+    this.timeline.push({
+      phase: 'action' as const,
+      actionType,
+      detail,
+      timestamp: new Date().toISOString(),
+    });
+  }
 }

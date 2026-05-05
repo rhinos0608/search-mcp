@@ -175,7 +175,7 @@ const extractionCache = new Map<string, CacheEntry>();
 function normalizeSource<T>(value: T): T | Record<string, unknown> | unknown[] {
    if (value === null || typeof value !== 'object') return value;
    if (Array.isArray(value))
-      return value.map(normalizeSource) as unknown as T | Record<string, unknown> | unknown[];
+      return value.map(normalizeSource);
    const record = value as Record<string, unknown>;
    const sortedKeys = Object.keys(record).sort();
    const out: Record<string, unknown> = {};
@@ -403,7 +403,7 @@ export class RAGAnythingClient {
       return {
          documentId: (raw.document_id ?? raw.documentId) as string,
          status: raw.status as RAGAJobStatus['status'],
-         progress: (raw.progress != null ? Number(raw.progress) : null) as number | null,
+         progress: (raw.progress != null ? Number(raw.progress) : null),
          message: (raw.message ?? null) as string | null,
          createdAt: (raw.created_at ?? raw.createdAt) as string,
          updatedAt: (raw.updated_at ?? raw.updatedAt) as string,
@@ -415,7 +415,7 @@ export class RAGAnythingClient {
    async pollExtract(
       documentId: string,
       onProgress?: (progress: number, message: string) => void,
-      pollIntervalMs: number = 2000,
+      pollIntervalMs = 2000,
    ): Promise<RAGAJobStatus> {
       for (; ;) {
          const status = await this.getStatus(documentId);

@@ -464,7 +464,7 @@ function collectJobPostings(value: unknown, jobPostings: JobPostingJsonLd[]): vo
 
   const type = readStringProperty(value['@type']);
   if (type?.toLowerCase() === 'jobposting') {
-    jobPostings.push(value as JobPostingJsonLd);
+    jobPostings.push(value);
   }
 
   const graph = value['@graph'];
