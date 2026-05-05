@@ -12,7 +12,7 @@
  */
 
 import { randomUUID } from 'node:crypto';
-import type { GapRecord, GapCategory, SourceType, ConfidenceLabel } from './types.js';
+import type { GapRecord, GapCategory, SourceType, ConfidenceLabel, ContentQualityAssessment, SubQuestionCoverage } from './types.js';
 import { ResearchStateEngine, BudgetTracker, labelToConfidence } from './state.js';
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -37,6 +37,14 @@ function defaultPriority(category: GapCategory): number {
       case 'overrepresented_viewpoint':
          return 3;
       case 'unresolvable_contradiction':
+         return 2;
+      case 'thin_coverage':
+         return 1;
+      case 'single_source_dependency':
+         return 1;
+      case 'low_content_depth':
+         return 2;
+      case 'promotional_bias':
          return 2;
    }
 }
@@ -92,6 +100,30 @@ function suggestActions(
             `Seek additional evidence to resolve contradiction: "${ctx.claim ?? 'disputed claim'}"`,
             'Look for authoritative sources (official docs, meta-analyses, benchmarks)',
          ];
+
+      case 'thin_coverage':
+         return [
+            `Search with broader terms for: "${ctx.subQuestionText ?? 'this topic'}"`,
+            'Try alternative search backends (academic, GitHub, Reddit)',
+         ];
+
+      case 'low_content_depth':
+         return [
+            `Find more substantive sources about: "${ctx.claim ?? 'this topic'}"`,
+            'Prefer long-form articles, documentation, or academic papers',
+         ];
+
+      case 'single_source_dependency':
+         return [
+            `Find independent sources beyond: "${ctx.subQuestionText ?? 'this topic'}"`,
+            'Seek at least 2 more domains with relevant analysis',
+         ];
+
+      case 'promotional_bias':
+         return [
+            `Find independent/non-commercial sources about: "${ctx.subQuestionText ?? 'this topic'}"`,
+            'Look for academic papers, official docs, or community discussions',
+         ];
    }
 }
 
@@ -105,7 +137,10 @@ export class GapAnalyzer {
     * detected deficiency.  Does **not** mutate state — the caller (typically
     * `GapFiller.fillGaps()`) is responsible for persisting.
     */
-   analyze(): GapRecord[] {
+   analyze(
+      coverage?: SubQuestionCoverage[],
+      contentQuality?: Record<string, ContentQualityAssessment>,
+   ): GapRecord[] {
       const gaps: GapRecord[] = [];
 
       gaps.push(...this.unansweredSubQuestions());
@@ -113,6 +148,14 @@ export class GapAnalyzer {
       gaps.push(...this.missingSourceTypes());
       gaps.push(...this.missingRecency());
       gaps.push(...this.overrepresentedViewpoints());
+
+      if (coverage) {
+         gaps.push(...this.thinCoverage(coverage));
+      }
+      if (coverage && contentQuality) {
+         gaps.push(...this.lowContentDepth(coverage, contentQuality));
+         gaps.push(...this.promotionalBias(coverage, contentQuality));
+      }
 
       return gaps;
    }
@@ -276,6 +319,134 @@ export class GapAnalyzer {
 
       return gaps;
    }
+
+   /**
+    * Sub-questions with thin or no coverage that need more sources.
+    * When coverage shows <2 sources or a single domain, flags as thin_coverage
+    * or single_source_dependency respectively.
+    */
+   private thinCoverage(coverage: SubQuestionCoverage[]): GapRecord[] {
+      const gaps: GapRecord[] = [];
+      const dedupKeys = new Set<string>();
+      const state = this.state.getState();
+
+      for (const sq of coverage) {
+         if (sq.status !== 'thin' && sq.status !== 'uncovered') continue;
+
+         // Skip unresolvable sub-questions.
+         const subQuestion = state.subQuestions.find((s) => s.id === sq.subQuestionId);
+         if (subQuestion?.status === 'unresolvable') continue;
+
+         const category =
+            sq.uniqueDomainCount <= 1 ? 'single_source_dependency' : 'thin_coverage';
+         const key = gapKey(category, sq.subQuestionId);
+         if (dedupKeys.has(key)) continue;
+         dedupKeys.add(key);
+
+         gaps.push({
+            id: gapId(),
+            category,
+            description: `Sub-question "${sq.subQuestionText}" has only ${sq.sourceCount} source(s) from ${sq.uniqueDomainCount} domain(s)`,
+            subQuestionId: sq.subQuestionId,
+            status: 'open' as const,
+            suggestedActions: suggestActions(category, {
+               subQuestionText: sq.subQuestionText,
+            }),
+            priority: defaultPriority(category),
+         });
+      }
+
+      return gaps;
+   }
+
+   /**
+    * Sub-questions whose average content depth is below 0.4, indicating
+    * mostly surface-level sources with little analytical substance.
+    */
+   private lowContentDepth(
+      coverage: SubQuestionCoverage[],
+      _contentQuality: Record<string, ContentQualityAssessment>,
+   ): GapRecord[] {
+      const gaps: GapRecord[] = [];
+      const dedupKeys = new Set<string>();
+
+      for (const sq of coverage) {
+         if (sq.averageContentDepth >= 0.4) continue;
+
+         // Only flag if sources are from non-academic types (academic sources
+         // are inherently substantive even if depth appears low).
+         const hasNonAcademic = sq.sourceTypes.some((t) => t !== 'academic');
+         if (!hasNonAcademic) continue;
+
+         const key = gapKey('low_content_depth', sq.subQuestionId);
+         if (dedupKeys.has(key)) continue;
+         dedupKeys.add(key);
+
+         gaps.push({
+            id: gapId(),
+            category: 'low_content_depth' as const,
+            description: `Sub-question "${sq.subQuestionText}" has low average content depth (${sq.averageContentDepth.toFixed(2)})`,
+            subQuestionId: sq.subQuestionId,
+            status: 'open' as const,
+            suggestedActions: suggestActions('low_content_depth', {
+               claim: sq.subQuestionText,
+            }),
+            priority: defaultPriority('low_content_depth'),
+         });
+      }
+
+      return gaps;
+   }
+
+   /**
+    * Sub-questions where more than 30% of sources exhibit promotional
+    * characteristics (marketing content, vendor pages, sponsored posts).
+    */
+   private promotionalBias(
+      coverage: SubQuestionCoverage[],
+      contentQuality: Record<string, ContentQualityAssessment>,
+   ): GapRecord[] {
+      const gaps: GapRecord[] = [];
+      const dedupKeys = new Set<string>();
+      const state = this.state.getState();
+
+      for (const sq of coverage) {
+         if (!sq.hasPromotionalSources) continue;
+
+         // Count promotional sources for this sub-question.
+         const sqSources = state.sources.filter(
+            (s) => s.subQuestionId === sq.subQuestionId,
+         );
+         if (sqSources.length === 0) continue;
+
+         let promoCount = 0;
+         for (const src of sqSources) {
+            const quality = contentQuality[src.url];
+            if (quality?.isPromotional) promoCount++;
+         }
+
+         const ratio = promoCount / sqSources.length;
+         if (ratio <= 0.3) continue;
+
+         const key = gapKey('promotional_bias', sq.subQuestionId);
+         if (dedupKeys.has(key)) continue;
+         dedupKeys.add(key);
+
+         gaps.push({
+            id: gapId(),
+            category: 'promotional_bias' as const,
+            description: `Sub-question "${sq.subQuestionText}" has ${promoCount} promotional source(s) out of ${sqSources.length}`,
+            subQuestionId: sq.subQuestionId,
+            status: 'open' as const,
+            suggestedActions: suggestActions('promotional_bias', {
+               subQuestionText: sq.subQuestionText,
+            }),
+            priority: defaultPriority('promotional_bias'),
+         });
+      }
+
+      return gaps;
+   }
 }
 
 // ── GapFiller ────────────────────────────────────────────────────────────────
@@ -342,6 +513,17 @@ export class GapFiller {
       // 1. Budget exhausted?
       if (this.budget.isExhausted()) return false;
 
+      // Thin-coverage override: if any sub-question has <2 sources from <2 domains,
+      // continue the loop regardless of other stopping conditions.
+      const state = this.state.getState();
+      const hasThinCoverage = state.subQuestions.some((sq) => {
+         const sqSources = state.sources.filter((s) => s.subQuestionId === sq.id);
+         if (sqSources.length === 0) return true;
+         const domains = new Set(sqSources.map((s) => s.domain));
+         return sqSources.length < 2 || domains.size < 2;
+      });
+      if (hasThinCoverage) return true;
+
       // 2. No open gaps?
       const openGaps = this.state.getOpenGaps();
       if (openGaps.length === 0) return false;
@@ -350,7 +532,6 @@ export class GapFiller {
       if (openGaps.every((g) => g.priority > 3)) return false;
 
       // 4. All sub-questions resolved?
-      const state = this.state.getState();
       const allSubQuestionsResolved =
          state.subQuestions.length > 0 &&
          state.subQuestions.every((sq) => sq.status === 'sufficient' || sq.status === 'unresolvable');
@@ -370,70 +551,11 @@ export class GapFiller {
       return true;
    }
 
-   /**
-    * Push new gap target questions to the state engine with dedup.
-    */
-   pushGapTargets(questions: string[]): number {
-      let count = 0;
-      for (const q of questions) {
-         const id = this.state.addGapTarget(q);
-         if (id) count++;
-      }
-      return count;
-   }
-
    // ── private helpers ────────────────────────────────────────────────────
 
    /** Delegate to `state.compress()` and return only the distribution map. */
    private computeConfidenceDistribution(): Record<string, number> {
       return this.state.compress().confidenceDistribution;
-   }
-}
-
-// ── FailureAnalyzer ───────────────────────────────────────────────────────────
-
-/**
- * Analyzes why an answer failed evaluation and produces an improvement plan.
- */
-export class FailureAnalyzer {
-   constructor(
-      private llm?: import('./llm/chat.js').DeepResearchLlmClient,
-   ) { }
-
-   /**
-    * Analyze a failed answer and produce a failure analysis.
-    */
-   async analyzeFailure(
-      question: string,
-      answer: string,
-      evaluationFeedback: string,
-   ): Promise<import('./types.js').FailureAnalysis> {
-      if (this.llm) {
-         try {
-            const { WORKER_FAILURE_ANALYSIS } = await import('./llm/prompts.js');
-            const result = await this.llm.callJSON<import('./types.js').FailureAnalysis>({
-               model: 'worker',
-               messages: [
-                  { role: 'system', content: WORKER_FAILURE_ANALYSIS },
-                  {
-                     role: 'user',
-                     content: `Question: ${question}\nFailed answer: ${answer}\nEvaluation feedback: ${evaluationFeedback}`,
-                  },
-               ],
-               temperature: 0.3,
-            });
-            if (result.success) return result.data;
-         } catch {
-            // fall through to rule-based
-         }
-      }
-
-      // Rule-based fallback
-      return {
-         recap: 'Answer was insufficient given the available evidence',
-         blame: 'Missing or insufficient evidence',
-         improvement: 'Search with different keywords or consult additional source types',
-      };
    }
 }
 

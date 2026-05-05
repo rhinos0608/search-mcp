@@ -28,6 +28,7 @@ export type QueryClassification =
    | 'comparative'
    | 'technical'
    | 'applied-practitioner'
+   | 'current-events'
    | 'historical-timeline'
    | 'market-ecosystem'
    | 'literature-review'
@@ -148,7 +149,11 @@ export type GapCategory =
    | 'unresolvable_contradiction'
    | 'missing_source_type'
    | 'missing_recency'
-   | 'overrepresented_viewpoint';
+   | 'overrepresented_viewpoint'
+   | 'thin_coverage'
+   | 'low_content_depth'
+   | 'single_source_dependency'
+   | 'promotional_bias';
 
 export type GapStatus =
    | 'open'
@@ -185,11 +190,141 @@ export interface SearchCluster {
    urls: string[];
 }
 
+// ── New: FailureMode (operational replacement for old FailureAnalysis) ────────
+
 export interface FailureAnalysis {
    recap: string;
    blame: string;
    improvement: string;
 }
+
+// ── New: GapTarget (typed agenda item with lifecycle) ─────────────────────────-
+
+export type GapTargetStatus =
+   | 'open'
+   | 'active'
+   | 'resolved'
+   | 'abandoned'
+   | 'duplicate';
+
+export type GapTargetSource =
+   | 'decomposition'
+   | 'gap_analysis'
+   | 'failure_analysis'
+   | 'citation_chase';
+
+export interface GapTarget {
+   id: string;
+   question: string;
+   normalizedQuestion: string;
+   parentId?: string;
+   parentQuestion?: string;
+   status: GapTargetStatus;
+   priority: number;
+   attempts: number;
+   createdAtStep: number;
+   lastTriedAtStep?: number;
+   source: GapTargetSource;
+   failureReason?: string;
+   resolution?: {
+      answer: string;
+      evidenceSummary: string;
+      confidence: number;
+   };
+}
+
+
+// ── New: EvaluationResult (canonical evaluation consumed by Agenda, Gates, FailureAnalysis, Synthesis) ─
+
+export interface EvaluationResult {
+   pass: boolean;
+   score: number;
+   missingDimensions: string[];
+   unsupportedClaims: string[];
+   contradictions: string[];
+   requiredNextEvidence: string[];
+   confidence: number;
+   reason: string;
+}
+
+// ── New: Gate / ActionType (computed per iteration) ────────────────────────────
+
+export type ResearchAction =
+   | 'answer'
+   | 'decompose'
+   | 'discover'
+   | 'extract'
+   | 'fill_gaps'
+   | 'generate_queries'
+   | 'contradiction_scan'
+   | 'audit'
+   | 'synthesize'
+   | 'complete';
+
+export interface Gate {
+   action: ResearchAction;
+   allowed: boolean;
+   reason?: string;
+}
+
+// ── New: KnowledgeItem (intermediate between findings and LLM context) ─────────
+
+export type KnowledgeType =
+   | 'finding'
+   | 'gap_resolution'
+   | 'contradiction'
+   | 'serp_hypothesis';
+
+export interface KnowledgeItem {
+   id: string;
+   question: string;
+   answer: string;
+   references: string[];
+   confidence: number;
+   type: KnowledgeType;
+   sourceFindingIds: string[];
+   createdAtStep: number;
+}
+
+// ── New: TraceEvent (unified diary/progress/timeline event) ────────────────────
+
+export type TraceAction =
+   | 'search'
+   | 'visit'
+   | 'extract'
+   | 'evaluate'
+   | 'answer_attempt'
+   | 'gap_added'
+   | 'gap_resolved'
+   | 'audit'
+   | 'warning'
+   | 'synthesize';
+
+export interface TraceEvent {
+   step: number;
+   phase: string;
+   action: TraceAction;
+   targetId?: string;
+   sourceIds?: string[];
+   findingIds?: string[];
+   result?: string;
+   gateChanges?: string[];
+   timestamp: string;
+}
+
+// ── New: SearchAttempt (tracked for adaptive strategy) ─────────────────────────
+
+export interface SearchAttempt {
+   subQuestionId: string;
+   queries: string[];
+   backends: SourceType[];
+   resultCount: number;
+   timestamp: string;
+}
+
+
+
+
 
 export interface LanguageProfile {
    code: string;
@@ -252,6 +387,8 @@ export interface ScoredCandidate extends SourceCandidate {
    authorityBoost: number;
    diversityScore: number;
    totalScore: number;
+   readPriorityScore: number;
+   evidenceWeight: number;
 }
 
 // ── Budget ────────────────────────────────────────────────────────────────────
@@ -339,7 +476,18 @@ export interface ResearchState {
    searchClusters: SearchCluster[];
    diary: string[];
    language?: LanguageProfile;
+   searchAttempts: SearchAttempt[];
+   /** V5.0.0: Worker agent reports keyed by report ID. */
+   workerReports: Record<string, WorkerReport>;
+   /** V5.0.0: Content quality assessments keyed by URL. */
+   contentQuality: Record<string, ContentQualityAssessment>;
+   /** V5.0.0: Per-sub-question coverage metrics. */
+   subQuestionCoverage: SubQuestionCoverage[];
 }
+
+// ── Intent tracking ──────────────────────────────────────────────────────────
+
+
 
 // ── Progress (progressive rendering) ──────────────────────────────────────────
 
@@ -366,7 +514,15 @@ export interface ResearchReport {
    classification: QueryClassification;
    depth: ResearchDepth;
    executiveSummary: string;
-   themes: { title: string; findings: string[]; confidence: ConfidenceLabel }[];
+   /** Full narrative report in markdown — the primary output. */
+   narrativeMarkdown: string;
+   themes: {
+      title: string;
+      narrative: string;
+      findings?: string[];
+      confidence: ConfidenceLabel;
+      sourceCitations?: { id: string; url: string; title: string }[];
+   }[];
    contradictions: Contradiction[];
    uncertainties: string[];
    sourceNotes: string[];
@@ -376,6 +532,8 @@ export interface ResearchReport {
    sourceCount: number;
    findingCount: number;
    confidenceDistribution: Record<ConfidenceLabel, number>;
+   /** Per-sub-question coverage summary for gap detection. */
+   subQuestionCoverage?: SubQuestionCoverage[];
 }
 
 export interface ResearchResult {
@@ -470,4 +628,126 @@ export interface AuditReport {
       taxonomyDrift: boolean;
    };
    timestamp: string;
+}
+
+// ── V5.0.0: Worker Agents & Content Quality ──────────────────────────────────
+
+/** Content quality assessment for a fetched page. */
+export interface ContentQualityAssessment {
+   /** Whether the page has substantive analytical content (not just marketing/nav). */
+   isSubstantive: boolean;
+   /** 0-1 score based on word count, heading structure, data/table presence. */
+   contentDepth: number;
+   /** Detected marketing/promotional content. */
+   isPromotional: boolean;
+   /** Contains tables, code blocks, benchmarks, or structured data. */
+   hasData: boolean;
+   /** Cites other sources (inline links, references section). */
+   hasCitations: boolean;
+   /** Reading depth level. */
+   readingLevel: 'surface' | 'intermediate' | 'deep';
+   /** Human-readable summary of quality assessment. */
+   summary: string;
+   /** Specific signals that triggered promotional detection. */
+   promotionalSignals?: string[];
+}
+
+/** Per-sub-question coverage metrics for gap analysis. */
+export interface SubQuestionCoverage {
+   subQuestionId: string;
+   subQuestionText: string;
+   sourceCount: number;
+   uniqueDomainCount: number;
+   findingCount: number;
+   averageContentDepth: number;
+   hasPromotionalSources: boolean;
+   sourceTypes: SourceType[];
+   status: 'adequate' | 'thin' | 'risky' | 'uncovered';
+}
+
+/** A worker agent's investigation report for one research question. */
+export interface WorkerReport {
+   /** Unique report ID. */
+   id: string;
+   /** The question the worker was assigned. */
+   question: string;
+   /** Parent sub-question ID if this was a follow-up thread. */
+   parentSubQuestionId?: string;
+   /** Structured findings extracted by the worker. */
+   findings: WorkerFinding[];
+   /** Sources the worker visited and analyzed. */
+   sources: WorkerSource[];
+   /** Interesting sub-threads the worker identified for further investigation. */
+   subThreads: SubThread[];
+   /** Quality assessments for each visited source. */
+   contentQuality: Record<string, ContentQualityAssessment>;
+   /** Narrative summary written by the worker. */
+   narrativeSummary: string;
+   /** Overall confidence in the answer (0-1). */
+   confidence: number;
+   /** Search queries the worker used. */
+   searchQueries: string[];
+   /** Total tokens consumed by this worker. */
+   tokensUsed: number;
+   /** Elapsed time in ms. */
+   elapsedMs: number;
+}
+
+/** A single finding from a worker agent. */
+export interface WorkerFinding {
+   /** Unique finding ID. */
+   id: string;
+   /** The claim text. */
+   claim: string;
+   /** Evidence excerpt from the source. */
+   evidence: string;
+   /** Source URLs backing this claim. */
+   sourceUrls: string[];
+   /** 0-1 confidence score. */
+   confidence: number;
+   /** Whether the worker found corroborating evidence. */
+   corroborated: boolean;
+   /** Caveats or limitations the worker noted. */
+   caveats?: string;
+}
+
+/** A source the worker visited and assessed. */
+export interface WorkerSource {
+   /** Source URL. */
+   url: string;
+   /** Page title. */
+   title: string;
+   /** Source type. */
+   sourceType: SourceType;
+   /** Domain. */
+   domain: string;
+   /** Content quality assessment. */
+   quality: ContentQualityAssessment;
+   /** Why the worker chose this source. */
+   relevanceRationale: string;
+   /** Publication date if known. */
+   publishedDate?: string;
+}
+
+/** A sub-thread identified by a worker for further investigation. */
+export interface SubThread {
+   /** The follow-up question the worker suggests. */
+   question: string;
+   /** Why this thread is worth chasing. */
+   rationale: string;
+   /** Priority (1 = highest, 5 = lowest). */
+   priority: number;
+   /** Suggested source types to search. */
+   suggestedSourceTypes: SourceType[];
+}
+
+/** Tool interface exposed to worker agents. */
+export interface ResearchTools {
+   webSearch(query: string, limit?: number): Promise<{ title: string; url: string; description: string; age?: string }[]>;
+   webCrawl(url: string, maxPages?: number): Promise<{ title: string; url: string; markdown: string }[]>;
+   webRead(url: string): Promise<{ title: string; url: string; markdown: string }>;
+   academicSearch(query: string, limit?: number): Promise<{ title: string; url: string; abstract?: string; year?: number }[]>;
+   githubSearch(query: string, limit?: number): Promise<{ fullName: string; htmlUrl: string; description: string }[]>;
+   redditSearch(query: string, limit?: number): Promise<{ title: string; url: string; selftext?: string; created_utc?: number; permalink: string }[]>;
+   hackernewsSearch(query: string, limit?: number): Promise<{ title: string; url: string; text?: string }[]>;
 }

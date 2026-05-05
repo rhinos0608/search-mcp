@@ -59,12 +59,35 @@ function jaccardSimilarity(a: string, b: string): number {
    return union === 0 ? 0 : intersection / union;
 }
 
-/** Map a numeric confidence to a label. */
-export function confidenceToLabel(score: number): ConfidenceLabel {
-   if (score >= 0.85) return 'well-corroborated';
-   if (score >= 0.7) return 'likely';
-   if (score >= 0.5) return 'plausible-but-thin';
-   if (score >= 0.3) return 'speculative';
+/**
+ * Map a numeric confidence to a label, with optional source-count awareness.
+ *
+ * When `sourceCount` is provided, the label is capped to prevent single-source
+ * claims from being labeled "well-corroborated". Corroboration requires
+ * independent sources converging on the same claim.
+ *
+ * Source-count caps:
+ *   1 source  → max "likely" (0.7 effective ceiling)
+ *   2 sources → max "well-corroborated" allowed (but requires score ≥ 0.85)
+ *   1 source with low-authority source type → max "plausible-but-thin"
+ */
+export function confidenceToLabel(score: number, sourceCount?: number): ConfidenceLabel {
+   // Apply source-count ceiling
+   let effectiveScore = score;
+   if (sourceCount !== undefined) {
+      if (sourceCount <= 0) {
+         // No backing sources: can't be above "speculative"
+         effectiveScore = Math.min(effectiveScore, 0.4);
+      } else if (sourceCount === 1) {
+         // Single source: can't be "well-corroborated"; cap at "likely"
+         effectiveScore = Math.min(effectiveScore, 0.78);
+      }
+   }
+
+   if (effectiveScore >= 0.85) return 'well-corroborated';
+   if (effectiveScore >= 0.7) return 'likely';
+   if (effectiveScore >= 0.5) return 'plausible-but-thin';
+   if (effectiveScore >= 0.3) return 'speculative';
    return 'unsupported-or-disputed';
 }
 
@@ -276,6 +299,10 @@ export class ResearchStateEngine {
          resolvedGaps: [],
          searchClusters: [],
          diary: [],
+         searchAttempts: [],
+         workerReports: {},
+         contentQuality: {},
+         subQuestionCoverage: [],
       };
    }
 
@@ -418,7 +445,7 @@ export class ResearchStateEngine {
       const f = this.state.findings.find((f) => f.id === findingId);
       if (!f) return;
       f.confidence = Math.max(0, Math.min(1, f.confidence + delta));
-      f.confidenceLabel = confidenceToLabel(f.confidence);
+      f.confidenceLabel = confidenceToLabel(f.confidence, f.sourceIds.length);
       f.lastUpdated = nowISO();
    }
 
@@ -456,22 +483,6 @@ export class ResearchStateEngine {
       return this.state.findings.length;
    }
 
-   addGapTarget(question: string, _parentQuestion?: string): string {
-      // Dedup: skip if already in allQuestions
-      if (this.state.allQuestions.includes(question)) return '';
-      this.state.allQuestions.push(question);
-      this.state.gapTargets.push(question);
-      return question;
-   }
-
-   popNextGapTarget(): string | undefined {
-      return this.state.gapTargets.shift();
-   }
-
-   hasPendingGapTargets(): boolean {
-      return this.state.gapTargets.length > 0;
-   }
-
    getKnowledgeMessages(): { role: 'user' | 'assistant'; content: string }[] {
       const messages: { role: 'user' | 'assistant'; content: string }[] = [];
       for (const f of this.state.findings) {
@@ -481,22 +492,10 @@ export class ResearchStateEngine {
          });
          messages.push({
             role: 'assistant',
-            content: `Evidence from ${f.sourceIds.length} source(s): ${f.evidenceExcerpt ?? f.evidenceSummary}`,
+            content: `Evidence from ${String(f.sourceIds.length)} source(s): ${f.evidenceExcerpt ?? f.evidenceSummary}`,
          });
       }
       return messages;
-   }
-
-   appendDiary(entry: string): void {
-      this.state.diary.push(entry);
-      // Keep last 50 entries to prevent context bloat
-      if (this.state.diary.length > 50) {
-         this.state.diary = this.state.diary.slice(-50);
-      }
-   }
-
-   getDiary(): string[] {
-      return [...this.state.diary];
    }
 
    setLanguage(profile: { code: string; style: string }): void {
@@ -515,6 +514,103 @@ export class ResearchStateEngine {
       const f = this.state.findings.find((f) => f.id === findingId);
       if (!f) return false;
       return f.corroboratingSourceIds.length >= 1;
+   }
+
+   // ── V5.0.0: Worker reports ───────────────────────────────────────────────
+
+   /** Store a worker agent's investigation report. */
+   addWorkerReport(report: import('./types.js').WorkerReport): void {
+      this.state.workerReports[report.id] = report;
+   }
+
+   /** Get a specific worker report by ID. */
+   getWorkerReport(id: string): import('./types.js').WorkerReport | undefined {
+      return this.state.workerReports[id];
+   }
+
+   /** Get all worker reports. */
+   getAllWorkerReports(): import('./types.js').WorkerReport[] {
+      return Object.values(this.state.workerReports);
+   }
+
+   /** Count worker reports. */
+   workerReportCount(): number {
+      return Object.keys(this.state.workerReports).length;
+   }
+
+   // ── V5.0.0: Content quality ──────────────────────────────────────────────
+
+   /** Store content quality assessment for a URL. */
+   setContentQuality(url: string, quality: import('./types.js').ContentQualityAssessment): void {
+      this.state.contentQuality[url] = quality;
+   }
+
+   /** Get content quality for a URL. */
+   getContentQuality(url: string): import('./types.js').ContentQualityAssessment | undefined {
+      return this.state.contentQuality[url];
+   }
+
+   /** Get all content quality assessments. */
+   getAllContentQuality(): Record<string, import('./types.js').ContentQualityAssessment> {
+      return { ...this.state.contentQuality };
+   }
+
+   // ── V5.0.0: Sub-question coverage ────────────────────────────────────────
+
+   /** Compute and store per-sub-question coverage metrics. */
+   computeSubQuestionCoverage(): import('./types.js').SubQuestionCoverage[] {
+      const coverage: import('./types.js').SubQuestionCoverage[] = [];
+      for (const sq of this.state.subQuestions) {
+         const sqSources = this.state.sources.filter((s) => s.relevantSubQuestions.includes(sq.id));
+         const sqFindings = this.state.findings.filter((f) => f.subQuestionIds.includes(sq.id));
+         const domains = new Set(sqSources.map((s) => s.domain));
+         const contentDepths = sqSources
+            .map((s) => this.state.contentQuality[s.url]?.contentDepth)
+            .filter((d): d is number => d !== undefined);
+         const avgDepth = contentDepths.length > 0
+            ? contentDepths.reduce((a, b) => a + b, 0) / contentDepths.length
+            : 0;
+         const hasPromo = sqSources.some(
+            (s) => this.state.contentQuality[s.url]?.isPromotional === true,
+         );
+         const sourceTypes = [...new Set(sqSources.map((s) => s.sourceType))];
+
+         let status: import('./types.js').SubQuestionCoverage['status'];
+         if (sqFindings.length === 0 && sqSources.length === 0) {
+            status = 'uncovered';
+         } else if (sqSources.length < 2 || domains.size < 2) {
+            status = 'thin';
+         } else if (hasPromo || avgDepth < 0.4) {
+            status = 'risky';
+         } else {
+            status = 'adequate';
+         }
+
+         coverage.push({
+            subQuestionId: sq.id,
+            subQuestionText: sq.text,
+            sourceCount: sqSources.length,
+            uniqueDomainCount: domains.size,
+            findingCount: sqFindings.length,
+            averageContentDepth: avgDepth,
+            hasPromotionalSources: hasPromo,
+            sourceTypes,
+            status,
+         });
+      }
+      this.state.subQuestionCoverage = coverage;
+      return coverage;
+   }
+
+   /** Get current sub-question coverage metrics. */
+   getSubQuestionCoverage(): import('./types.js').SubQuestionCoverage[] {
+      return [...this.state.subQuestionCoverage];
+   }
+
+   /** Check if all sub-questions have adequate coverage. */
+   isCoverageAdequate(): boolean {
+      return this.state.subQuestionCoverage.length > 0 &&
+         this.state.subQuestionCoverage.every((c) => c.status === 'adequate');
    }
 
    // ── Post-processing ─────────────────────────────────────────────────
@@ -585,7 +681,13 @@ export class ResearchStateEngine {
          const backingSources = finding.sourceIds
             .map((id) => sourceMap.get(id))
             .filter((s): s is SourceEntry => s !== undefined);
-         if (backingSources.length === 0) continue;
+         if (backingSources.length === 0) {
+            // No backing sources found — cap confidence at 0.3 (speculative)
+            finding.confidence = Math.min(finding.confidence, 0.3);
+            finding.confidenceLabel = confidenceToLabel(finding.confidence, 0);
+            finding.lastUpdated = new Date().toISOString();
+            continue;
+         }
          // Compute best authority and freshness from all backing sources
          let bestAuthority = 0;
          let bestFreshness = 0;
@@ -599,17 +701,41 @@ export class ResearchStateEngine {
             if (authority.sourceAuthority > bestAuthority) bestAuthority = authority.sourceAuthority;
             if (authority.sourceFreshness > bestFreshness) bestFreshness = authority.sourceFreshness;
          }
-         // Corroboration: each additional independent source adds signal
+
          const corroborationCount = backingSources.length;
+
+         // ── Corroboration-based confidence ceiling ───────────────────────
+         // Single-source findings can never exceed 0.6 (plausible-but-thin)
+         // Two-source findings cap at 0.78 (likely)
+         // Three+ sources: full range available
+         let corroborationCeiling: number;
+         if (corroborationCount <= 1) {
+            corroborationCeiling = 0.6;
+         } else if (corroborationCount === 2) {
+            corroborationCeiling = 0.78;
+         } else {
+            corroborationCeiling = 0.95; // essentially no ceiling from corroboration
+         }
+
          const corroborationScore = Math.min(1, 0.5 + (corroborationCount - 1) * 0.15);
-         // Blend: extraction confidence weighted with cross-source evidence
-         const crossSourceWeight = Math.min(0.5, (corroborationCount - 1) * 0.2);
+
+         // Always apply at least a minimum cross-source weight, even for single-source findings.
+         // Single-source: crossSourceWeight = 0.1 (always some blending)
+         // Multi-source: crossSourceWeight scales with corroboration
+         const crossSourceWeight = Math.min(
+            0.5,
+            Math.max(0.1, (corroborationCount - 1) * 0.2),
+         );
+
          const newConfidence =
             finding.confidence * (1 - crossSourceWeight) +
             (bestAuthority * 0.4 + corroborationScore * 0.4 + bestFreshness * 0.2) * crossSourceWeight;
-         finding.confidence = Math.max(0, Math.min(1, newConfidence));
-         finding.confidenceLabel = confidenceToLabel(finding.confidence);
+
+         // Apply corroboration ceiling
+         finding.confidence = Math.max(0, Math.min(corroborationCeiling, newConfidence));
+         finding.confidenceLabel = confidenceToLabel(finding.confidence, corroborationCount);
          finding.lastUpdated = new Date().toISOString();
+
          // Populate corroboratingSourceIds when multiple sources back this claim
          if (corroborationCount > 1) {
             const otherIds = finding.sourceIds.filter((id) => id !== finding.sourceIds[0]);
@@ -827,6 +953,31 @@ export class ResearchStateEngine {
       this.updateGapStatus(id, 'resolved');
    }
 
+   /** Push a gap target description onto the FIFO queue, deduplicating against allQuestions. */
+   addGapTarget(question: string, _parentQuestion?: string): void {
+      if (this.state.allQuestions.includes(question)) return;
+      this.state.allQuestions.push(question);
+      this.state.gapTargets.push(question);
+   }
+
+   /** Pop the next pending gap target from the FIFO queue (or undefined if empty). */
+   popNextGapTarget(): string | undefined {
+      return this.state.gapTargets.shift();
+   }
+
+   /** Check if any gap targets remain in the queue. */
+   hasPendingGapTargets(): boolean {
+      return this.state.gapTargets.length > 0;
+   }
+
+   /** Append a human-readable diary entry, trimming to last 50 entries. */
+   appendDiary(entry: string): void {
+      this.state.diary.push(entry);
+      if (this.state.diary.length > 50) {
+         this.state.diary = this.state.diary.slice(-50);
+      }
+   }
+
    // ── Open questions ─────────────────────────────────────────────────────
 
    addOpenQuestion(question: string): void {
@@ -897,6 +1048,10 @@ export class ResearchStateEngine {
          resolvedGaps: state.resolvedGaps.map((g) => ({ ...g })),
          searchClusters: state.searchClusters.map((c) => ({ ...c })),
          diary: [...state.diary],
+         searchAttempts: [...state.searchAttempts],
+         workerReports: { ...state.workerReports },
+         contentQuality: { ...state.contentQuality },
+         subQuestionCoverage: state.subQuestionCoverage.map((c) => ({ ...c })),
          ...(state.language ? { language: { ...state.language } } : {}),
       };
    }

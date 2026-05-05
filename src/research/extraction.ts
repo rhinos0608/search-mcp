@@ -1,8 +1,9 @@
 /**
  * ExtractionEngine — deep sequential extraction for the research orchestrator.
  *
- * Phase 3: Selects top-N sources, fetches content (Crawl4AI → Readability fallback),
- * chunks them, applies rule-based claim extraction, and distills into structured
+ * Phase 3: Selects top-N sources, fetches content (Crawl4AI → webRead →
+ * Wayback/Google Cache → semantic_crawl), chunks them, applies rule-based claim
+ * extraction, and distills into structured
  * Finding objects on the state engine.
  *
  * Raw crawl/read output is discarded — only structured findings persist.
@@ -10,6 +11,10 @@
 import { logger } from '../logger.js';
 import { loadConfig } from '../config.js';
 import { isDocumentUrl } from '../utils/documentUtils.js';
+import { attemptExternalRecovery } from '../utils/externalRecovery.js';
+import { Readability } from '@mozilla/readability';
+import { JSDOM } from 'jsdom';
+import { semanticCrawl } from '../tools/semanticCrawl.js';
 
 import { chunkMarkdown } from '../chunking.js';
 import { webCrawl } from '../tools/webCrawl.js';
@@ -17,21 +22,27 @@ import { webRead } from '../tools/webRead.js';
 import { extractWithRAGA } from '../utils/ragAnythingClient.js';
 import { getYouTubeTranscript } from '../tools/youtubeTranscript.js';
 import { chunksFromTranscript } from '../rag/adapters/transcript.js';
+import { redditComments } from '../tools/redditComments.js';
+import { chunksFromConversation } from '../rag/adapters/conversation.js';
+import type { ConversationCommentInput } from '../rag/adapters/conversation.js';
 import { ResearchStateEngine, BudgetTracker, confidenceToLabel } from './state.js';
 import type { Finding, SourceEntry, ClaimType, EvidenceDirectness } from './types.js';
-
+import { extractSentence } from './extractSentence.js';
 
 // ── Extraction configuration ────────────────────────────────────────────────
 
 interface ExtractionConfig {
    /** Whether to attempt Crawl4AI first. */
    useCrawl4ai: boolean;
+   /** Whether to attempt semantic_crawl as a fallback when other methods fail. */
+   useSemanticCrawl: boolean;
    /** Hard ceiling on extractions per source. */
    maxChunkSize: number;
 }
 
 const DEFAULT_CONFIG: ExtractionConfig = {
    useCrawl4ai: true,
+   useSemanticCrawl: true,
    maxChunkSize: 10_000,
 };
 
@@ -153,6 +164,34 @@ function directnessBaseConfidence(d: EvidenceDirectness): number {
    }
 }
 
+/**
+ * Parse HTML through JSDOM + Readability to extract clean text content.
+ * Used by external recovery fallback to convert cached HTML to markdown.
+ * Returns null if Readability cannot parse the content.
+ */
+function parseHtmlToMarkdown(html: string, url: string): string | null {
+   try {
+      const dom = new JSDOM(html, { url });
+      try {
+         const reader = new Readability(dom.window.document);
+         const article = reader.parse();
+         if (article?.textContent && article.textContent.trim().length > 0) {
+            return article.textContent.slice(0, 50_000);
+         }
+         // Fallback: strip tags from body
+         const bodyText = dom.window.document.body.textContent;
+         if (bodyText && bodyText.trim().length > 100) {
+            return bodyText.slice(0, 50_000);
+         }
+         return null;
+      } finally {
+         dom.window.close();
+      }
+   } catch {
+      return null;
+   }
+}
+
 // ── ExtractionEngine ─────────────────────────────────────────────────────────
 
 export class ExtractionEngine {
@@ -200,11 +239,20 @@ export class ExtractionEngine {
             // 1. Fetch content
             // YouTube extraction path — uses transcript API instead of web crawl
             if (source.sourceType === 'youtube') {
-               const transcriptId = await this.extractYoutubeTranscript(source);
-               if (transcriptId) allFindingIds.push(transcriptId);
+               const transcriptIds = await this.extractYoutubeTranscript(source);
+               if (transcriptIds) allFindingIds.push(...transcriptIds);
                continue; // skip the normal fetchAndExtract path
             }
-            const fetchResult = await this.fetchAndExtract(source.url);
+
+            // Reddit extraction path — uses comment API instead of web crawl
+            if (source.sourceType === 'reddit') {
+               const commentIds = await this.extractRedditComments(source);
+               if (commentIds) allFindingIds.push(...commentIds);
+               continue; // skip the normal fetchAndExtract path
+            }
+            // Look up sub-question text for semantic_crawl fallback
+            const subQuestionText = this.getSubQuestionText(source.relevantSubQuestions);
+            const fetchResult = await this.fetchAndExtract(source.url, subQuestionText);
 
             if (!fetchResult.success) {
                logger.warn({ url: source.url, sourceId: source.id }, 'extraction: fetch failed');
@@ -269,19 +317,41 @@ export class ExtractionEngine {
     * Extract findings from a YouTube video via its transcript.
     * Uses getYouTubeTranscript + chunksFromTranscript + existing claim patterns.
     */
-   private async extractYoutubeTranscript(source: SourceEntry): Promise<string | null> {
+   private async extractYoutubeTranscript(source: SourceEntry): Promise<string[] | null> {
       try {
          // 1. Fetch transcript
          const result = await getYouTubeTranscript(source.url);
          if (!result.fullText || result.fullText.length < 20) {
-            logger.warn({ url: source.url, sourceId: source.id }, 'extraction: youtube transcript too short');
+            logger.warn(
+               { url: source.url, sourceId: source.id },
+               'extraction: youtube transcript too short',
+            );
             this.state.markSourceFailed(source.id);
             return null;
          }
 
-         // 2. Build transcript input for chunking
+         // 2. Build transcript input for chunking with robust videoId extraction
+         let videoId: string | null = null;
+         try {
+            const parsedUrl = new URL(source.url);
+            if (parsedUrl.hostname === 'youtu.be') {
+               videoId = parsedUrl.pathname.slice(1);
+            } else {
+               videoId = parsedUrl.searchParams.get('v');
+            }
+         } catch {
+            // ignore URL parse errors, fallback to regex
+         }
+
+         if (!videoId) {
+            const regex =
+               /(?:youtube\.com\/(?:[^/]+\/.+\/|(?:v|e(?:mbed)?)\/|.*[?&]v=)|youtu\.be\/)([^"&?/\s]{11})/i;
+            const match = regex.exec(source.url);
+            videoId = match?.[1] ?? null;
+         }
+
          const transcriptInput = {
-            videoId: source.url.split('?v=').pop() ?? source.url,
+            videoId: videoId ?? source.url,
             segments: result.transcript.map((seg) => ({
                text: seg.text,
                offset: seg.offset,
@@ -294,7 +364,10 @@ export class ExtractionEngine {
          // 3. Chunk transcript
          const chunks = chunksFromTranscript(transcriptInput);
          if (chunks.length === 0) {
-            logger.warn({ url: source.url, sourceId: source.id }, 'extraction: youtube transcript chunking produced no chunks');
+            logger.warn(
+               { url: source.url, sourceId: source.id },
+               'extraction: youtube transcript chunking produced no chunks',
+            );
             this.state.markSourceFailed(source.id);
             return null;
          }
@@ -310,10 +383,10 @@ export class ExtractionEngine {
          );
 
          // 5. Register findings
-         let firstFindingId: string | null = null;
+         const findingIds: string[] = [];
          for (const finding of findings) {
             const id = this.state.addFinding(finding);
-            if (firstFindingId === null) firstFindingId = id;
+            findingIds.push(id);
          }
 
          this.state.markSourceExtracted(source.id);
@@ -323,7 +396,7 @@ export class ExtractionEngine {
             'extraction: youtube source complete',
          );
 
-         return firstFindingId;
+         return findingIds.length > 0 ? findingIds : null;
       } catch (err) {
          logger.error(
             { err, sourceId: source.id, url: source.url },
@@ -334,14 +407,146 @@ export class ExtractionEngine {
       }
    }
 
+   /**
+    * Extract findings from a Reddit post via its comment thread.
+    * Uses redditComments + chunksFromConversation + existing claim patterns.
+    */
+   private async extractRedditComments(source: SourceEntry): Promise<string[] | null> {
+      try {
+         // 1. Fetch comments from Reddit
+         const REDDIT_BASE_URL = 'https://www.reddit.com';
+         // Normalize URL: if it's a permalink path, prepend reddit.com
+         const postUrl = source.url.startsWith('/r/')
+            ? `${REDDIT_BASE_URL}${source.url}`
+            : source.url;
+
+         const result = await redditComments(
+            { url: postUrl },
+            {},
+         );
+
+         // 2. Flatten and convert comments to conversation input
+         function flattenComments(items: (unknown)[]): { body: string; id: string; author: string; permalink: string; parentId: string; score: number; createdUtc: number; depth: number; stickied: boolean }[] {
+            const flat: { body: string; id: string; author: string; permalink: string; parentId: string; score: number; createdUtc: number; depth: number; stickied: boolean }[] = [];
+            for (const item of items) {
+               if (item && typeof item === 'object' && 'body' in item) {
+                  const c = item as { body: string; id: string; author: string; permalink: string; parentId: string; score: number; createdUtc: number; depth: number; stickied: boolean; replies: unknown[] };
+                  flat.push({
+                     body: c.body,
+                     id: c.id,
+                     author: c.author,
+                     permalink: REDDIT_BASE_URL + c.permalink,
+                     parentId: c.parentId,
+                     score: c.score,
+                     createdUtc: c.createdUtc,
+                     depth: c.depth,
+                     stickied: c.stickied,
+                  });
+                  if (Array.isArray(c.replies)) {
+                     flat.push(...flattenComments(c.replies));
+                  }
+               }
+            }
+            return flat;
+         }
+
+         const flatComments = flattenComments(result.comments);
+         if (flatComments.length === 0) {
+            logger.warn(
+               { url: source.url, sourceId: source.id },
+               'extraction: reddit no comments found',
+            );
+            this.state.markSourceFailed(source.id);
+            return null;
+         }
+
+         // Convert to conversation comment input
+         const conversationInputs: ConversationCommentInput[] = flatComments.map((c) => ({
+            id: c.id,
+            body: c.body,
+            author: c.author,
+            permalink: c.permalink,
+            parentId: c.parentId,
+            metadata: {
+               score: c.score,
+               createdUtc: c.createdUtc,
+               depth: c.depth,
+               stickied: c.stickied,
+            },
+         }));
+
+         // 3. Chunk conversation
+         const chunks = chunksFromConversation(conversationInputs, { baseUrl: REDDIT_BASE_URL });
+         if (chunks.length === 0) {
+            logger.warn(
+               { url: source.url, sourceId: source.id },
+               'extraction: reddit comment chunking produced no chunks',
+            );
+            this.state.markSourceFailed(source.id);
+            return null;
+         }
+
+         // 4. Extract claims from chunks using existing claim patterns
+         const chunkTexts = chunks.map((c) => ({ text: c.text, heading: c.section }));
+         const subQuestionIds = source.relevantSubQuestions;
+         const findings = this.extractClaims(
+            chunkTexts,
+            source.id,
+            subQuestionIds,
+            source.sourceConfidencePrior,
+         );
+
+         // 5. Register findings
+         const findingIds: string[] = [];
+         for (const finding of findings) {
+            const id = this.state.addFinding(finding);
+            findingIds.push(id);
+         }
+
+         this.state.markSourceExtracted(source.id);
+
+         logger.info(
+            { sourceId: source.id, url: source.url, comments: flatComments.length, chunks: chunks.length, findings: findings.length },
+            'extraction: reddit source complete',
+         );
+
+         return findingIds.length > 0 ? findingIds : null;
+      } catch (err) {
+         logger.error(
+            { err, sourceId: source.id, url: source.url },
+            'extraction: reddit comment extraction failed',
+         );
+         this.state.markSourceFailed(source.id);
+         return null;
+      }
+   }
+
+   // ── Sub-question text lookup ─────────────────────────────────────────────
+
+   /**
+    * Get the first sub-question text from a list of sub-question IDs.
+    * Used to provide a query for semantic_crawl fallback.
+    */
+   private getSubQuestionText(subQuestionIds: string[]): string | undefined {
+      if (subQuestionIds.length === 0) return undefined;
+      const subQuestions = this.state.getSubQuestions();
+      const sq = subQuestions.find((s) => subQuestionIds.includes(s.id));
+      return sq?.text;
+   }
+
    // ── Content fetching ─────────────────────────────────────────────────────
 
    /**
-    * Fetch a page's content. Tries RAG-Anything for document URLs when enabled,
-    * then Crawl4AI via webCrawl, falling back to webRead on failure.
+    * Fetch a page's content. Tries multiple strategies in order:
+    * 1) RAG-Anything for document URLs when enabled
+    * 2) Crawl4AI via webCrawl (has built-in ExternalRecoveryMiddleware)
+    * 3) webRead (Readability-based)
+    * 4) External recovery via Wayback Machine / Google Cache
+    * 5) semantic_crawl as a last resort (when configured and subQuestionText is available)
     */
    private async fetchAndExtract(
       url: string,
+      subQuestionText?: string,
    ): Promise<{ markdown: string; title: string; success: boolean }> {
       // ── RAG-Anything for document URLs ────────────────────────────────────
       if (isDocumentUrl(url)) {
@@ -421,12 +626,120 @@ export class ExtractionEngine {
                success: true,
             };
          }
+      } catch (readErr) {
+         logger.warn(
+            { url, err: readErr instanceof Error ? readErr.message : String(readErr) },
+            'extraction: webRead failed, trying external recovery',
+         );
+      }
+
+      // ── External recovery (Wayback Machine / Google Cache) ───────────────
+      const recoveryResult = await this.fetchFromExternalRecovery(url);
+      if (recoveryResult.success) {
+         return recoveryResult;
+      }
+
+      // ── Semantic crawl (last resort) ─────────────────────────────────────
+      if (subQuestionText && this.config.useSemanticCrawl) {
+         const semanticResult = await this.fetchFromSemanticCrawl(url, subQuestionText);
+         if (semanticResult.success) {
+            return semanticResult;
+         }
+      }
+
+      // ── All strategies exhausted ─────────────────────────────────────────
+      logger.error({ url }, 'extraction: all fetch strategies failed');
+      return { markdown: '', title: '', success: false };
+   }
+
+   /**
+    * Attempt to recover content from Wayback Machine or Google Cache.
+    * Used as a fallback when direct fetching fails.
+    */
+   private async fetchFromExternalRecovery(
+      url: string,
+   ): Promise<{ markdown: string; title: string; success: boolean }> {
+      try {
+         const result = await attemptExternalRecovery(url);
+         if (result.content !== null && result.source !== null) {
+            const markdown = parseHtmlToMarkdown(result.content, url);
+            if (markdown) {
+               logger.info({ url, source: result.source }, 'extraction: recovered from external source');
+               return { markdown, title: '', success: true };
+            }
+         }
+         return { markdown: '', title: '', success: false };
+      } catch (err) {
+         logger.warn(
+            { url, err: err instanceof Error ? err.message : String(err) },
+            'extraction: external recovery failed',
+         );
+         return { markdown: '', title: '', success: false };
+      }
+   }
+
+   /**
+    * Attempt to retrieve content via semantic_crawl as a last resort.
+    * Crawls the URL and returns ranked chunks relevant to the sub-question.
+    * Requires Crawl4AI and embedding provider to be configured.
+    */
+   private async fetchFromSemanticCrawl(
+      url: string,
+      query: string,
+   ): Promise<{ markdown: string; title: string; success: boolean }> {
+      try {
+         const config = loadConfig();
+         if (!config.crawl4ai.baseUrl || !config.embeddingSidecar.baseUrl) {
+            logger.debug(
+               { url },
+               'extraction: semantic_crawl skipped — crawl4ai or embedding not configured',
+            );
+            return { markdown: '', title: '', success: false };
+         }
+
+         const result = await semanticCrawl(
+            {
+               source: { type: 'url', url },
+               query,
+               topK: 20,
+               strategy: 'bfs',
+               maxDepth: 0,
+               maxPages: 1,
+               includeExternalLinks: false,
+               maxBytes: 5_000_000,
+            },
+            config.crawl4ai,
+            config.embeddingSidecar.baseUrl,
+            config.embeddingSidecar.apiToken ?? '',
+            config.embeddingSidecar.dimensions,
+            config.raga,
+         );
+
+         if (result.chunks.length > 0) {
+            // Concatenate the most relevant chunks into markdown for claim extraction
+            const markdown = result.chunks
+               .slice(0, 10)
+               .map((chunk) => chunk.text)
+               .join('\n\n');
+
+            if (markdown.length > 100) {
+               logger.info(
+                  { url, chunks: result.chunks.length, markdownLen: markdown.length },
+                  'extraction: semantic_crawl succeeded',
+               );
+               return {
+                  markdown,
+                  title: result.seedUrl,
+                  success: true,
+               };
+            }
+         }
 
          return { markdown: '', title: '', success: false };
-      } catch (readErr) {
-         logger.error(
-            { url, err: readErr instanceof Error ? readErr.message : String(readErr) },
-            'extraction: webRead also failed',
+      } catch (err) {
+         logger.warn(
+            { url, err: err instanceof Error ? err.message : String(err) },
+            'extraction: semantic_crawl failed',
          );
          return { markdown: '', title: '', success: false };
       }
@@ -540,81 +853,4 @@ export class ExtractionEngine {
 
       return results;
    }
-}
-
-// ── Sentence extraction helper ──────────────────────────────────────────────
-
-/**
- * Extract the sentence containing a character offset.
- * Walks backward to find the sentence start and forward to find the end.
- */
-function extractSentence(text: string, offset: number): string | null {
-   if (offset < 0 || offset >= text.length) return null;
-
-   // Find sentence start: walk backward to previous period/newline or start
-   let start = offset;
-   while (start > 0) {
-      const ch = text[start - 1];
-      if (ch === '.' || ch === '!' || ch === '?') {
-         // Check for abbreviation (e.g., "Dr.", "etc.") — skip single-word periods
-         const wordStart = start - 1;
-         const wordEnd = start;
-         let wordStartScan = wordStart - 1;
-         while (wordStartScan >= 0 && /\w/.test(text[wordStartScan] ?? '')) {
-            wordStartScan--;
-         }
-         const word = text.slice(wordStartScan + 1, wordEnd).toLowerCase();
-         const abbreviations = new Set([
-            'dr',
-            'mr',
-            'ms',
-            'mrs',
-            'vs',
-            'etc',
-            'inc',
-            'ltd',
-            'co',
-            'dept',
-            'est',
-            'approx',
-            'fig',
-            'al',
-            'e.g',
-            'i.e',
-         ]);
-         if (abbreviations.has(word)) {
-            start = wordStartScan + 1;
-            continue;
-         }
-         break;
-      }
-      if (ch === '\n' && text[start] !== '\n') {
-         break; // single newline can be mid-sentence, but paragraph break ends it
-      }
-      if (ch === '\n' && start + 1 < text.length && text[start] === '\n') {
-         break; // blank line boundary
-      }
-      start--;
-   }
-
-   // Find sentence end: walk forward to period/newline or end
-   let end = offset;
-   while (end < text.length) {
-      const ch = text[end];
-      if (ch === '.' || ch === '!' || ch === '?') {
-         end++; // include the punctuation
-         // Skip closing quote, paren, bracket
-         if (end < text.length && /[)'"}\]»]/.test(text[end] ?? '')) end++;
-         break;
-      }
-      if (ch === '\n' && end + 1 < text.length && text[end + 1] === '\n') {
-         break; // blank line boundary
-      }
-      end++;
-   }
-
-   const sentence = text.slice(Math.max(0, start), Math.min(text.length, end)).trim();
-   if (sentence.length < 10) return null;
-
-   return sentence;
 }

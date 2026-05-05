@@ -81,6 +81,15 @@ const CLASSIFICATION_RULES: ClassificationRule[] = [
       ],
    },
    {
+      classification: 'current-events',
+      patterns: [
+         /\b(202\d|20[2-9]\d)\b.*\b(advances?|releases?|announcements?|developments?|updates?|breakthroughs?|innovations?|capabilities?)\b/i,
+         /\b(latest|recent|new|upcoming|emerging)\b.*\b(advances?|releases?|developments?|updates?|models?|features?|capabilities?|breakthroughs?|innovations?)\b/i,
+         /^(what are|what is|what were|what have been).*\b(202\d|this year|recently|so far)\b/i,
+         /\bso far\b.*\b(202\d|this year)\b/i,
+      ],
+   },
+   {
       classification: 'historical-timeline',
       patterns: [
          /\bhistory\b/i,
@@ -334,6 +343,48 @@ const SUB_QUESTION_TEMPLATES: Record<QueryClassification, SubQuestionTemplate[]>
          preferredSources: ['web', 'reddit', 'hackernews', 'youtube'],
          freshnessRequirement: 'within 2 years',
          failureModes: ['survivorship bias in success stories', 'missing failure case studies'],
+         budgetPriority: 5,
+      },
+   ],
+   'current-events': [
+      {
+         textTemplate: 'What specific products, releases, or announcements have been made in {topic}?',
+         evidenceType: 'chronological',
+         preferredSources: ['news', 'web', 'hackernews'],
+         freshnessRequirement: 'within 3 months',
+         failureModes: ['no major announcements found', 'outdated information', 'vendor-driven announcements without independent verification'],
+         budgetPriority: 1,
+      },
+      {
+         textTemplate: 'What concrete capability improvements, features, or performance gains have been demonstrated in {topic}?',
+         evidenceType: 'empirical',
+         preferredSources: ['news', 'web', 'hackernews', 'reddit'],
+         freshnessRequirement: 'within 3 months',
+         failureModes: ['capability claims not independently verified', 'benchmarks not reproducible', 'marketing vs reality gap'],
+         budgetPriority: 2,
+      },
+      {
+         textTemplate: 'What benchmarks, evaluation results, or performance metrics have been reported for {topic}?',
+         evidenceType: 'benchmark',
+         preferredSources: ['web', 'news', 'academic', 'github'],
+         freshnessRequirement: 'within 6 months',
+         failureModes: ['benchmarks not standardized', 'conflicting benchmark results', 'vendor-produced benchmarks'],
+         budgetPriority: 3,
+      },
+      {
+         textTemplate: 'How have industry experts, practitioners, and the community responded to developments in {topic}?',
+         evidenceType: 'practitioner',
+         preferredSources: ['reddit', 'hackernews', 'web', 'news'],
+         freshnessRequirement: 'within 3 months',
+         failureModes: ['echo chamber effects', 'small sample size in community reactions', 'selection bias'],
+         budgetPriority: 4,
+      },
+      {
+         textTemplate: 'What are the broader implications, adoption trends, and expected next developments for {topic}?',
+         evidenceType: 'trend',
+         preferredSources: ['news', 'web', 'academic', 'hackernews'],
+         freshnessRequirement: 'within 6 months',
+         failureModes: ['speculative predictions not marked as such', 'hype-driven analysis', 'limited adoption data'],
          budgetPriority: 5,
       },
    ],
@@ -612,6 +663,8 @@ const PLAN_DESCRIPTIONS: Record<QueryClassification, string> = {
       'Exploring architecture, implementation patterns, operations, performance, and common pitfalls.',
    'applied-practitioner':
       'Investigating real-world usage, best practices, common pitfalls, tooling ecosystem, and migration experiences.',
+   'current-events':
+      'Covering recent announcements, capability improvements, benchmarks, community response, and adoption trends.',
    'historical-timeline':
       'Tracing origins, key milestones, paradigm shifts, current trends, and future directions.',
    'market-ecosystem':
@@ -635,6 +688,7 @@ const VALID_CLASSIFICATIONS = new Set<string>([
    'comparative',
    'technical',
    'applied-practitioner',
+   'current-events',
    'historical-timeline',
    'market-ecosystem',
    'literature-review',

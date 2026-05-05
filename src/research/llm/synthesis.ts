@@ -6,7 +6,7 @@
  */
 
 import { DeepResearchLlmClient } from './chat.js';
-import { ORCHESTRATOR_SYNTHESIS } from './prompts.js';
+import { ORCHESTRATOR_SYNTHESIS_V2 } from './prompts.js';
 import { logger } from '../../logger.js';
 import { ResearchSynthesizer } from '../synthesizer.js';
 import type {
@@ -45,6 +45,7 @@ interface SummaryFinding {
 }
 
 interface SummarySource {
+   index: number;
    title: string;
    url: string;
    sourceType: string;
@@ -105,10 +106,11 @@ function isResearchReport(value: unknown): value is ResearchReport {
       if (t === null || typeof t !== 'object') return false;
       const theme = t as Record<string, unknown>;
       if (typeof theme.title !== 'string') return false;
-      if (!Array.isArray(theme.findings)) return false;
-      for (const f of theme.findings) {
-         if (typeof f !== 'string') return false;
+      // Accept either 'narrative' (new) or 'findings' (backward compat)
+      if (typeof theme.narrative !== 'string' && !Array.isArray(theme.findings)) {
+         return false;
       }
+      if (theme.findings !== undefined && !Array.isArray(theme.findings)) return false;
       if (typeof theme.confidence !== 'string') return false;
    }
 
@@ -163,35 +165,92 @@ export class LlmSynthesizer {
       const result = await this.llm.callJSON<ResearchReport>({
          model: 'orchestrator',
          messages: [
-            { role: 'system' as const, content: ORCHESTRATOR_SYNTHESIS },
+            { role: 'system' as const, content: ORCHESTRATOR_SYNTHESIS_V2 },
             {
                role: 'user' as const,
                content: `Research state summary:\n${summary}`,
             },
          ],
          maxTokens,
+         timeoutMs: 180_000, // 3 min — synthesis prompts are large
       });
 
       if (!result.success) {
          logger.warn(
             { error: result.response.error },
-            'LLM synthesis failed; falling back to rule-based synthesizer',
+            'LLM synthesis V2 failed; falling back to rule-based synthesizer',
          );
          return this.fallback(state);
       }
 
-      if (!isResearchReport(result.data)) {
+      // Ensure narrativeMarkdown is populated — if LLM returned empty, build from themes
+      const data = result.data;
+      if (!data.narrativeMarkdown || data.narrativeMarkdown.trim().length === 0) {
+         data.narrativeMarkdown = this.buildNarrativeFromThemes(data);
+      }
+
+      if (!isResearchReport(data)) {
          logger.warn(
-            { data: JSON.stringify(result.data).slice(0, 200) },
+            { data: JSON.stringify(data).slice(0, 200) },
             'LLM synthesis returned invalid report shape; falling back to rule-based synthesizer',
          );
          return this.fallback(state);
       }
 
-      return result.data;
+      return data;
    }
 
    // ── Private helpers ──────────────────────────────────────────────────────
+
+   /**
+    * Build narrativeMarkdown from themes when the LLM didn't produce one.
+    * This is a fallback to ensure we always have a readable report.
+    */
+   private buildNarrativeFromThemes(report: ResearchReport): string {
+      const parts: string[] = [];
+      parts.push(`# Research Report: ${report.query}\n`);
+      parts.push(`## Executive Summary\n${report.executiveSummary}\n`);
+
+      for (const theme of report.themes) {
+         parts.push(`## ${theme.title}\n`);
+         if (theme.narrative) {
+            parts.push(`${theme.narrative}\n`);
+         } else if (theme.findings && theme.findings.length > 0) {
+            parts.push(theme.findings.join('\n\n') + '\n');
+         }
+         parts.push(`*Confidence: ${theme.confidence}*\n`);
+      }
+
+      if (report.contradictions.length > 0) {
+         parts.push('## Contradictions & Debates\n');
+         for (const c of report.contradictions) {
+            parts.push(`- **${c.claimA}** vs **${c.claimB}** (${c.resolutionStatus})\n`);
+         }
+         parts.push('');
+      }
+
+      if (report.uncertainties.length > 0) {
+         parts.push('## Uncertainties & Limitations\n');
+         for (const u of report.uncertainties) {
+            parts.push(`- ${u}\n`);
+         }
+         parts.push('');
+      }
+
+      if (report.openQuestions.length > 0) {
+         parts.push('## Open Questions\n');
+         for (const q of report.openQuestions) {
+            parts.push(`- ${q}\n`);
+         }
+         parts.push('');
+      }
+
+      if (report.recommendations) {
+         parts.push(`## Recommendations\n${report.recommendations}\n`);
+      }
+
+      return parts.join('\n');
+   }
 
    /**
     * Build a compact JSON summary of the research state.
@@ -230,7 +289,8 @@ export class LlmSynthesizer {
             contradictsCount: f.contradictingSourceIds.length,
             ...(f.caveats !== undefined ? { caveats: f.caveats } : {}),
          })),
-         sources: state.sources.map((s: SourceEntry) => ({
+         sources: state.sources.map((s: SourceEntry, i: number) => ({
+            index: i + 1,
             title: s.title,
             url: s.url,
             sourceType: s.sourceType,
@@ -269,15 +329,11 @@ export class LlmSynthesizer {
             });
             summary.conversationKnowledge.push({
                role: 'assistant',
-               content: `Evidence from ${f.sourceIds.length} source(s): ${f.evidenceExcerpt ?? f.evidenceSummary}`,
+               content: `Evidence from ${String(f.sourceIds.length)} source(s): ${f.evidenceExcerpt ?? f.evidenceSummary}`,
             });
          }
       }
 
-      // P7: Diary
-      if ('diary' in state && Array.isArray((state as unknown as Record<string, unknown>).diary)) {
-         summary.diary = (state as unknown as Record<string, unknown>).diary as string[];
-      }
       return JSON.stringify(summary);
    }
 

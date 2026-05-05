@@ -23,7 +23,6 @@ import type {
   Contradiction,
   ResearchResult,
   ResearchProgress,
-  ConfidenceLabel,
 } from './types.js';
 
 // ── Defaults ──────────────────────────────────────────────────────────────────
@@ -245,7 +244,7 @@ export function writeFullResultToFile(result: ResearchResult, baseDir?: string):
 
   try {
     fs.mkdirSync(dir, { recursive: true });
-    const id = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const id = `${String(Date.now())}-${Math.random().toString(36).slice(2, 8)}`;
     const filePath = path.join(dir, `deep-research-${id}.json`);
     fs.writeFileSync(filePath, JSON.stringify(result, null, 2), 'utf-8');
     scheduleCleanup(dir);
@@ -305,23 +304,6 @@ function applySizeGuard(
   return compact;
 }
 
-// ── Confidence label helpers ──────────────────────────────────────────────────
-
-const CONFIDENCE_LABELS: ConfidenceLabel[] = [
-  'well-corroborated',
-  'likely',
-  'plausible-but-thin',
-  'speculative',
-  'unsupported-or-disputed',
-];
-
-function emptyConfidenceDistribution(): Record<ConfidenceLabel, number> {
-  return Object.fromEntries(CONFIDENCE_LABELS.map((l) => [l, 0])) as Record<
-    ConfidenceLabel,
-    number
-  >;
-}
-
 // ── Main entry point ──────────────────────────────────────────────────────────
 
 /**
@@ -364,7 +346,7 @@ export function compactResearchResult(
   const contradictions = report.contradictions.map(compactContradiction);
 
   // Confidence distribution from report
-  const confidenceDist = report.confidenceDistribution ?? emptyConfidenceDistribution();
+  const confidenceDist = report.confidenceDistribution;
 
   // Layer 4: Build compact result with the compacted findings from themes
   const statistics: CompactStatistics = {

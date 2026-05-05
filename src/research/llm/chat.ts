@@ -28,6 +28,10 @@ export interface LlmCallOptions {
    temperature?: number;
    maxTokens?: number;
    responseFormat?: 'text' | 'json_object';
+   /** AbortSignal to cancel in-flight requests. Merged with the internal timeout. */
+   signal?: AbortSignal;
+   /** Request timeout in ms. Defaults to REQUEST_TIMEOUT_MS (60s). */
+   timeoutMs?: number;
 }
 
 export interface LlmResponse {
@@ -51,6 +55,7 @@ export interface TokenBudget {
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
+/** Default per-request timeout (can be overridden per-call via LlmCallOptions.timeoutMs). */
 const REQUEST_TIMEOUT_MS = 60_000;
 const ORCHESTRATOR_DEFAULT_TEMPERATURE = 0.7;
 const WORKER_DEFAULT_TEMPERATURE = 0.3;
@@ -141,14 +146,14 @@ export class DeepResearchLlmClient {
 
       // Direct parse
       try {
-         const data = JSON.parse(response.content);
+         const data = JSON.parse(response.content) as T;
          return { success: true, data, response };
       } catch {
          // Fallback: extract JSON from markdown code blocks
          const jsonMatch = /```(?:json)?\s*(\{[\s\S]*\})\s*```/.exec(response.content);
          if (jsonMatch?.[1]) {
             try {
-               const data = JSON.parse(jsonMatch[1]);
+               const data = JSON.parse(jsonMatch[1]) as T;
                return { success: true, data, response };
             } catch {
                // fall through to parseError
@@ -168,23 +173,20 @@ export class DeepResearchLlmClient {
     * Returns the first successful response, or the last failure if both fail.
     */
    async callWithFallback(options: LlmCallOptions): Promise<LlmResponse> {
-      const orchestratorResult = await this.callOrchestrator(options)
+      const orchestratorResult = await this.callOrchestrator(options);
       if (orchestratorResult.success) {
-         return orchestratorResult
+         return orchestratorResult;
       }
       logger.warn(
          { error: orchestratorResult.error },
          'Orchestrator LLM call failed, falling back to worker model',
-      )
-      const workerResult = await this.callWorker(options)
+      );
+      const workerResult = await this.callWorker(options);
       if (workerResult.success) {
-         return workerResult
+         return workerResult;
       }
-      logger.warn(
-         { error: workerResult.error },
-         'Worker LLM call also failed',
-      )
-      return workerResult
+      logger.warn({ error: workerResult.error }, 'Worker LLM call also failed');
+      return workerResult;
    }
 
    /**
@@ -211,13 +213,9 @@ export class DeepResearchLlmClient {
       if (workerResult.success) {
          return workerResult;
       }
-      logger.warn(
-         { error: workerResult.response.error },
-         'Worker JSON call also failed',
-      );
+      logger.warn({ error: workerResult.response.error }, 'Worker JSON call also failed');
       return workerResult;
    }
-
 
    // ── Internal ──────────────────────────────────────────────────────────────
 
@@ -265,9 +263,24 @@ export class DeepResearchLlmClient {
             };
 
             const controller = new AbortController();
+            const timeoutMs = options.timeoutMs ?? REQUEST_TIMEOUT_MS;
             const timeout = setTimeout(() => {
-               controller.abort();
-            }, REQUEST_TIMEOUT_MS);
+               controller.abort(new Error('LLM request timed out'));
+            }, timeoutMs);
+
+            // Merge external abort signal with local timeout
+            const externalSignal = options.signal;
+            let abortListener: (() => void) | undefined;
+            if (externalSignal) {
+               if (externalSignal.aborted) {
+                  controller.abort(externalSignal.reason);
+               } else {
+                  abortListener = () => {
+                     controller.abort(externalSignal.reason);
+                  };
+                  externalSignal.addEventListener('abort', abortListener, { once: true });
+               }
+            }
 
             let response: Response | undefined;
             try {
@@ -279,6 +292,9 @@ export class DeepResearchLlmClient {
                });
             } finally {
                clearTimeout(timeout);
+               if (abortListener && externalSignal) {
+                  externalSignal.removeEventListener('abort', abortListener);
+               }
             }
 
             if (!response.ok) {

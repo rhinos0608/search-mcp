@@ -14,10 +14,15 @@ import { academicSearch } from '../tools/academicSearch.js';
 import { getGitHubRepoSearch } from '../tools/githubRepoSearch.js';
 import { hackernewsSearch } from '../tools/hackernewsSearch.js';
 import { redditSearch } from '../tools/redditSearch.js';
+import { redditComments } from '../tools/redditComments.js';
 import { stackoverflowSearch } from '../tools/stackoverflowSearch.js';
 import { youtubeSearch } from '../tools/youtubeSearch.js';
+import { getYouTubeTranscript } from '../tools/youtubeTranscript.js';
+import { attemptExternalRecovery } from '../utils/externalRecovery.js';
 import type { SubQuestion, SourceCandidate, ScoredCandidate, SourceType, SourceEntry, SearchCluster } from './types.js';
+import type { NormalizedRedditComment } from '../tools/redditThreadParser.js';
 import { ResearchStateEngine, BudgetTracker } from './state.js';
+import { rankSource, maxPerHostname } from './sourceRanking.js';
 import type { DeepResearchLlmClient } from './llm/chat.js';
 
 // ── Configuration ──────────────────────────────────────────────────────────
@@ -68,6 +73,8 @@ const AUTHORITY_DOMAINS = new Set<string>([
    'nodejs.org',
    'npmjs.com',
    'stackoverflow.com',
+   'web.archive.org',
+   'webcache.googleusercontent.com',
 ]);
 
 // ── Helper: normalize URL for dedup ─────────────────────────────────────────
@@ -133,8 +140,12 @@ function sourceConfidencePrior(type: SourceType, url: string, _snippet: string):
       case 'stackoverflow':
          return 0.6;
       case 'reddit':
+         return 0.45;
       case 'hackernews':
          return 0.4;
+      case 'youtube':
+         // Videos with transcripts are more reliable than social media
+         return 0.55;
       default:
          return 0.5;
    }
@@ -174,6 +185,7 @@ export class DiscoveryEngine {
    private weights: ScoreWeights;
 
    private llm: DeepResearchLlmClient | undefined;
+   private intentCoverage = new Map<string, Set<string>>();
    constructor(
       state: ResearchStateEngine,
       budget: BudgetTracker,
@@ -194,49 +206,323 @@ export class DiscoveryEngine {
    async discover(subQuestions: SubQuestion[]): Promise<SourceCandidate[]> {
       const allCandidates: SourceCandidate[] = [];
 
-      for (const sq of subQuestions) {
-         if (this.budget.isExhausted()) {
-            logger.warn({ subQuestion: sq.id }, 'Budget exhausted during discovery');
-            break;
-         }
+      // Fair per-sub-question candidate cap: distribute total budget across questions
+      const perSubQuestionCap = subQuestions.length > 0
+         ? Math.max(1, Math.floor(this.config.maxTotalCandidates / subQuestions.length))
+         : this.config.maxTotalCandidates;
+      const originalCap = this.config.maxCandidatesPerSubQuestion;
+      this.config.maxCandidatesPerSubQuestion = Math.min(originalCap, perSubQuestionCap);
 
-         const candidates = await this.discoverForSubQuestion(sq);
-         allCandidates.push(...candidates);
+      // Run all sub-question discovery in parallel
+      const results = await Promise.allSettled(
+         subQuestions.map(async (sq) => {
+            if (this.budget.isExhausted()) return [] as SourceCandidate[];
+            return this.discoverForSubQuestion(sq);
+         }),
+      );
 
-         this.state.updateSubQuestionStatus(
-            sq.id,
-            candidates.length > 0 ? 'in_progress' : 'low_confidence',
-         );
+      // Restore original cap
+      this.config.maxCandidatesPerSubQuestion = originalCap;
 
-         // Cap total candidates by budget profile
-         if (allCandidates.length >= this.budget.profile.maxSources) {
-            logger.info(
-               { maxSources: this.budget.profile.maxSources },
-               'Reached max sources from budget profile during discovery',
+      // Collect results with recovery for zero-candidate sub-questions
+      for (let i = 0; i < results.length; i++) {
+         const sq = subQuestions[i];
+         if (!sq) continue;
+         const result = results[i];
+         if (result?.status === 'fulfilled') {
+            const candidates = result.value;
+            allCandidates.push(...candidates);
+            if (candidates.length === 0) {
+               // Before hard-demoting, try recovery with broader search
+               const recoveryCandidates = await this.recoverSubQuestion(sq);
+               allCandidates.push(...recoveryCandidates);
+               this.state.updateSubQuestionStatus(
+                  sq.id,
+                  recoveryCandidates.length > 0 ? 'in_progress' : 'low_confidence',
+               );
+            } else {
+               this.state.updateSubQuestionStatus(sq.id, 'in_progress');
+            }
+         } else {
+            const reason = result?.status === 'rejected' ? String(result.reason) : 'unknown';
+            logger.warn({ error: reason, subQuestion: sq.id }, 'Discovery search failed');
+            // Try recovery before hard-demoting
+            const recoveryCandidates = await this.recoverSubQuestion(sq);
+            allCandidates.push(...recoveryCandidates);
+            this.state.updateSubQuestionStatus(
+               sq.id,
+               recoveryCandidates.length > 0 ? 'in_progress' : 'low_confidence',
             );
-            break;
          }
       }
+
+      logger.info(
+         { totalCandidates: allCandidates.length },
+         'Discovery parallel phase complete',
+      );
 
       // Score, dedup, rank
       const scored = this.scoreCandidates(allCandidates);
       const deduped = this.deduplicate(scored);
       const ranked = this.rankCandidates(deduped);
 
-      // SERP clustering (P5)
-      const clusters = await this.clusterCandidates(ranked);
+      // Cap ranked to maxSources from budget profile
+      const maxSources = this.budget.profile.maxSources;
+      const capped = ranked.slice(0, maxSources);
+
+      // SERP clustering
+      const clusters = await this.clusterCandidates(capped);
       if (clusters.length > 0) {
          this.state.addSearchClusters(clusters);
       }
 
-      // Convert to source entries and store in state
+      // Store in state
+      for (const candidate of capped) {
+         this.state.addSource(this.candidateToSourceEntry(candidate));
+      }
+
+      logger.info(
+         { totalCandidates: allCandidates.length, storedSources: capped.length },
+         'Discovery complete',
+      );
+
+      return capped;
+   }
+
+   /**
+    * Adaptive discovery — runs iterative passes until target source count is met,
+    * budget is exhausted, or no new sources are being found.
+    *
+    * Each pass uses different query strategies:
+    *   Pass 1: Original sub-question text (as-is)
+    *   Pass 2: LLM-rewritten queries (broader scope, synonyms)
+    *   Pass 3: Fragment queries (key terms only)
+    */
+   async discoverAdaptive(
+      subQuestions: SubQuestion[],
+      targetSourceCount: number,
+   ): Promise<SourceCandidate[]> {
+      const allCandidates: SourceCandidate[] = [];
+      const existingUrlKeys = new Set<string>();
+      // Track which sub-questions produced candidates
+      const sqWithCandidates = new Set<string>();
+
+      const maxPasses = 3;
+      for (let pass = 1; pass <= maxPasses; pass++) {
+         if (this.budget.isExhausted()) break;
+
+         const before = this.state.sourceCount();
+         if (before >= targetSourceCount) break;
+
+         logger.info(
+            { pass, passCount: maxPasses, currentSources: before, target: targetSourceCount },
+            'Adaptive discovery pass',
+         );
+
+         // Determine query strategy for this pass
+         const passCandidates = await this.discoverWithPass(subQuestions, pass);
+
+         // Track which sub-questions have candidates
+         for (const c of passCandidates) {
+            sqWithCandidates.add(c.subQuestionId);
+         }
+
+         // Filter duplicates against previous passes
+         const freshCandidates: SourceCandidate[] = [];
+         for (const c of passCandidates) {
+            const key = normalizeUrlForDedup(c.url);
+            if (!existingUrlKeys.has(key)) {
+               existingUrlKeys.add(key);
+               freshCandidates.push(c);
+            }
+         }
+
+         allCandidates.push(...freshCandidates);
+
+         // Check plateau: if <5% new unique candidates, stop early
+         const after = this.state.sourceCount();
+         const newSources = after - before;
+         const plateau = before > 0 && newSources / before < 0.05;
+         if (plateau) {
+            logger.info({ pass, newSources, before }, 'Adaptive discovery plateau — stopping');
+            break;
+         }
+      }
+
+      // Recovery: for sub-questions that produced zero candidates across all passes
+      const sqWithoutCandidates = subQuestions.filter((sq) => !sqWithCandidates.has(sq.id));
+      for (const sq of sqWithoutCandidates) {
+         logger.info({ subQuestion: sq.id }, 'Adaptive: running recovery for zero-candidate sub-question');
+         const recoveryCandidates = await this.recoverSubQuestion(sq);
+         allCandidates.push(...recoveryCandidates);
+         if (recoveryCandidates.length > 0) {
+            sqWithCandidates.add(sq.id);
+         }
+      }
+
+      // Set sub-question status based on success/failure
+      for (const sq of subQuestions) {
+         if (sqWithCandidates.has(sq.id)) {
+            this.state.updateSubQuestionStatus(sq.id, 'in_progress');
+         } else if (this.state.getSources(sq.id).length === 0) {
+            this.state.updateSubQuestionStatus(sq.id, 'low_confidence');
+         }
+      }
+
+      logger.info(
+         { totalCandidates: allCandidates.length, withSources: sqWithCandidates.size, totalSq: subQuestions.length },
+         'Adaptive discovery complete',
+      );
+
+      return allCandidates;
+   }
+
+   /**
+    * Run discovery with a specific query strategy pass.
+    * Pass 1: Original sub-question text
+    * Pass 2: LLM-rewritten queries (existing rewriteQueries method)
+    * Pass 3: Fragment queries (key terms stripped of question words)
+    */
+   private async discoverWithPass(
+      subQuestions: SubQuestion[],
+      pass: number,
+   ): Promise<SourceCandidate[]> {
+      // For passes 2+, modify the sub-question queries to use broader terms
+      // We do this by temporarily mutating a copy
+      const modifiedSQs = subQuestions.map((sq) => {
+         if (pass === 1) {
+            // First pass: use original sub-question
+            return sq;
+         }
+         if (pass === 2 && this.llm) {
+            // Second pass: LLM can rewrite queries via rewriteQueries —
+            // handled per-backend; just pass through
+            return sq;
+         }
+         // Third pass: strip to key terms for broader search
+         return {
+            ...sq,
+            text: sq.text
+               .replace(/^(what|how|why|when|where|which|is|are|do|does|can|does|did|will|would|should|could|may|might)\s+/i, '')
+               .replace(/[?.!]+$/g, '')
+               .trim()
+               .slice(0, 60),
+         };
+      });
+
+      // Use per-sub-question cap that distributes remaining budget
+      const perSubQuestionCap = Math.max(
+         3,
+         Math.floor(this.config.maxTotalCandidates / Math.max(1, modifiedSQs.length)),
+      );
+      const originalCap = this.config.maxCandidatesPerSubQuestion;
+      this.config.maxCandidatesPerSubQuestion = Math.min(originalCap, perSubQuestionCap);
+
+      const results = await Promise.allSettled(
+         modifiedSQs.map(async (sq) => {
+            if (this.budget.isExhausted()) return [] as SourceCandidate[];
+            return this.discoverForSubQuestion(sq);
+         }),
+      );
+
+      this.config.maxCandidatesPerSubQuestion = originalCap;
+
+      const allCandidates: SourceCandidate[] = [];
+      for (let i = 0; i < results.length; i++) {
+         const sq = modifiedSQs[i];
+         if (!sq) continue;
+         const result = results[i];
+         if (result?.status === 'fulfilled') {
+            allCandidates.push(...result.value);
+         } else {
+            logger.warn({ error: result?.reason, subQuestion: sq.id }, 'Adaptive pass search failed');
+         }
+      }
+
+      // Score, dedup, rank the pass results
+      const scored = this.scoreCandidates(allCandidates);
+      const deduped = this.deduplicate(scored);
+      const ranked = this.rankCandidates(deduped);
+
+      // Store in state
+      for (const candidate of ranked) {
+         this.state.addSource(this.candidateToSourceEntry(candidate));
+      }
+
+      return ranked;
+   }
+
+   /**
+    * Recovery discovery — spawned when a sub-question initially yields zero candidates.
+    * Uses broader query strategies across multiple backends to find anything relevant.
+    */
+   async recoverSubQuestion(sq: SubQuestion): Promise<SourceCandidate[]> {
+      logger.info({ subQuestion: sq.id }, 'Running recovery discovery for zero-candidate sub-question');
+
+      if (this.budget.isExhausted()) return [];
+
+      const recoveryCandidates: SourceCandidate[] = [];
+
+      // Strategy 1: Keyword-only web search (strip all question prefixes)
+      if (this.budget.recordToolCall()) {
+         try {
+            const strippedQuery = sq.text
+               .replace(/^(what|how|why|when|where|which|is|are|do|does|can|did|will|would|should|could|may|might)\s+/i, '')
+               .replace(/[?.!]+$/g, '')
+               .trim();
+            const { webSearch } = await import('../tools/webSearch.js');
+            const results = await webSearch(strippedQuery, 10, 'moderate', false, false);
+            for (const sr of results) {
+               recoveryCandidates.push({
+                  title: sr.title,
+                  url: sr.url,
+                  snippet: sr.description,
+                  sourceType: 'web',
+                  estimatedQuality: 0.5,
+                  estimatedRelevance: 0.4,
+                  freshness: sr.age ?? '',
+                  reasonForInclusion: `Recovery search for: ${sq.text}`,
+                  subQuestionId: sq.id,
+               });
+            }
+         } catch { /* graceful skip */ }
+      }
+
+      // Strategy 2: Academic search as fallback
+      if (this.budget.recordToolCall()) {
+         try {
+            const result = await academicSearch(sq.text, 'all', 5, null);
+            const papers = (result as unknown as { papers: { title: string; url: string; abstract?: string }[] | undefined }).papers ?? [];
+            for (const p of papers.slice(0, 5)) {
+               recoveryCandidates.push({
+                  title: p.title,
+                  url: p.url,
+                  snippet: p.abstract ?? '',
+                  sourceType: 'academic',
+                  estimatedQuality: 0.6,
+                  estimatedRelevance: 0.4,
+                  freshness: '',
+                  reasonForInclusion: `Recovery academic search for: ${sq.text}`,
+                  subQuestionId: sq.id,
+               });
+            }
+         } catch { /* graceful skip */ }
+      }
+
+      // Score, dedup, rank remaining
+      if (recoveryCandidates.length === 0) return [];
+
+      const scored = this.scoreCandidates(recoveryCandidates);
+      const deduped = this.deduplicate(scored);
+      const ranked = this.rankCandidates(deduped);
+
       for (const candidate of ranked) {
          this.state.addSource(this.candidateToSourceEntry(candidate));
       }
 
       logger.info(
-         { totalCandidates: allCandidates.length, storedSources: ranked.length },
-         'Discovery complete',
+         { subQuestion: sq.id, recoveryCount: ranked.length },
+         'Recovery discovery complete',
       );
 
       return ranked;
@@ -248,19 +534,27 @@ export class DiscoveryEngine {
       const searches: Promise<SourceCandidate[]>[] = [];
 
       // Web search (always runs)
-      if (sq.preferredSources.includes('web')) {
-         searches.push(this.searchWeb(sq));
+      searches.push(this.searchWeb(sq));
+
+      // Reddit for practitioner signals — always attempt (fetch comments for richer context)
+      searches.push(this.searchRedditSemantic(sq));
+
+      // YouTube — always attempt (gracefully skips when no API key)
+      searches.push(this.searchYoutube(sq));
+
+      // Hacker News — decoupled from reddit; only when explicitly requested
+      if (sq.preferredSources.includes('hackernews')) {
+         searches.push(this.searchHackerNews(sq));
+      }
+
+      // News search (current events)
+      if (sq.preferredSources.includes('news')) {
+         searches.push(this.searchNews(sq));
       }
 
       // Academic search for technical/literature queries
       if (sq.preferredSources.includes('academic')) {
          searches.push(this.searchAcademic(sq));
-      }
-
-      // Reddit for practitioner signals
-      if (sq.preferredSources.includes('reddit') || sq.preferredSources.includes('hackernews')) {
-         searches.push(this.searchReddit(sq));
-         searches.push(this.searchHackerNews(sq));
       }
 
       // GitHub for implementation evidence
@@ -273,8 +567,9 @@ export class DiscoveryEngine {
          searches.push(this.searchStackOverflow(sq));
       }
 
-      if (sq.preferredSources.includes('youtube')) {
-         searches.push(this.searchYoutube(sq));
+      // Wayback archive search for academic/adjacent articles
+      if (sq.preferredSources.includes('academic') || sq.preferredSources.includes('web')) {
+         searches.push(this.searchWayback(sq));
       }
 
       const results = await Promise.allSettled(searches);
@@ -287,6 +582,18 @@ export class DiscoveryEngine {
             logger.warn({ error: result.reason }, 'Discovery search failed for sub-question');
          }
       }
+
+      // Proactively recover archived copies of academic/paywalled articles
+      if (candidates.length > 0) {
+         const archiveCandidates = await this.recoverAcademicArchives(sq, candidates);
+         candidates.push(...archiveCandidates);
+      }
+
+      // Track that we attempted general web search for this sub-question
+      if (!this.intentCoverage.has(sq.id)) {
+         this.intentCoverage.set(sq.id, new Set());
+      }
+      this.intentCoverage.get(sq.id)?.add('general');
 
       return candidates;
    }
@@ -340,6 +647,37 @@ export class DiscoveryEngine {
       return results;
    }
 
+   private async searchNews(sq: SubQuestion): Promise<SourceCandidate[]> {
+      if (!this.budget.recordToolCall()) return [];
+
+      const queries = buildSearchQueries(sq);
+      const results: SourceCandidate[] = [];
+
+      for (const query of queries) {
+         try {
+            const { webSearch } = await import('../tools/webSearch.js');
+            const searchResults = await webSearch(query, 10, 'moderate', false, false);
+            for (const sr of searchResults) {
+               results.push({
+                  title: sr.title,
+                  url: sr.url,
+                  snippet: sr.description,
+                  sourceType: 'news',
+                  estimatedQuality: 0.6,
+                  estimatedRelevance: 0.6,
+                  freshness: sr.age ?? '',
+                  reasonForInclusion: `News result for: ${sq.text}`,
+                  subQuestionId: sq.id,
+               });
+            }
+         } catch (err) {
+            logger.warn({ err, subQuestion: sq.id }, 'News search failed');
+         }
+      }
+
+      return results;
+   }
+
    private async rewriteQueries(sq: SubQuestion): Promise<string[]> {
       if (!this.llm) return buildSearchQueries(sq);
       try {
@@ -356,7 +694,7 @@ export class DiscoveryEngine {
             temperature: 0.3,
          });
          if (result.success && result.data.queries.length > 0) {
-            return result.data.queries.map((q) => q.q).filter((q): q is string => q !== undefined);
+            return result.data.queries.map((q) => q.q);
          }
       } catch {
          // fall through
@@ -377,7 +715,7 @@ export class DiscoveryEngine {
          const { WORKER_CLUSTER } = await import('./llm/prompts.js');
          const items = candidates
             .slice(0, 15)
-            .map((c, i) => `[${i}] ${c.title}: ${c.snippet.slice(0, 200)}`)
+            .map((c, i) => `[${String(i)}] ${c.title}: ${c.snippet.slice(0, 200)}`)
             .join('\n');
          const result = await this.llm.callJSON<{ clusters: SearchCluster[] }>({
             model: 'worker',
@@ -387,7 +725,7 @@ export class DiscoveryEngine {
             ],
             temperature: 0.3,
          });
-         if (result.success && result.data.clusters) {
+         if (result.success) {
             return result.data.clusters;
          }
       } catch {
@@ -423,29 +761,91 @@ export class DiscoveryEngine {
       }
    }
 
-   private async searchReddit(sq: SubQuestion): Promise<SourceCandidate[]> {
+   private async searchRedditSemantic(sq: SubQuestion): Promise<SourceCandidate[]> {
       if (!this.budget.recordToolCall()) return [];
 
       try {
          const query = buildRedditQuery(sq);
-         const raw = await redditSearch(query, '', 'relevance', 'year', 10);
-         const posts: { title: string; url: string; selftext?: string; created_utc?: number }[] =
-            raw;
-         return posts.map((p) => ({
-            title: p.title,
-            url: p.url,
-            snippet: p.selftext ?? p.title,
-            sourceType: 'reddit',
-            estimatedQuality: 0.4,
-            estimatedRelevance: 0.5,
-            freshness: p.created_utc
-               ? `${String(Math.floor((Date.now() / 1000 - p.created_utc) / 86400))} days ago`
-               : '',
-            reasonForInclusion: `Reddit discussion about: ${sq.text}`,
-            subQuestionId: sq.id,
-         }));
+         const posts: { title: string; url: string; selftext?: string; created_utc?: number; permalink: string }[] =
+            await redditSearch(query, '', 'relevance', 'year', 10);
+
+         const candidates: SourceCandidate[] = [];
+
+         // Fetch comments for top posts to enrich source content
+         // Expand from 5 to 10 posts for richer community signal
+         const topPosts = posts.slice(0, 10);
+         const commentSettled = await Promise.allSettled(
+            topPosts.map(async (p) => {
+               try {
+                  const result = await redditComments({ url: p.permalink }, {});
+                  // Collect top comment bodies for snippet enrichment
+                  // Expand from 20 to 30 comments per post
+                  const commentBodies = (result.comments as NormalizedRedditComment[])
+                     .filter((c): c is NormalizedRedditComment => 'body' in c)
+                     .slice(0, 30)
+                     .map((c) => c.body)
+                     .filter((b) => b && b.length > 20);
+                  const snippet = commentBodies.length > 0
+                     ? `Post: ${p.title}\n\nTop comments:\n` + commentBodies.slice(0, 20).map((b) => `- ${b.slice(0, 1000)}`).join('\n')
+                     : (p.selftext ?? p.title);
+                  return {
+                     title: p.title,
+                     url: p.url,
+                     snippet,
+                     sourceType: 'reddit' as const,
+                     estimatedQuality: 0.5,
+                     estimatedRelevance: 0.6,
+                     freshness: p.created_utc
+                        ? `${String(Math.floor((Date.now() / 1000 - p.created_utc) / 86400))} days ago`
+                        : '',
+                     reasonForInclusion: `Reddit discussion with comments about: ${sq.text}`,
+                     subQuestionId: sq.id,
+                  };
+               } catch {
+                  // Fall back to post-only metadata
+                  return {
+                     title: p.title,
+                     url: p.url,
+                     snippet: p.selftext ?? p.title,
+                     sourceType: 'reddit' as const,
+                     estimatedQuality: 0.4,
+                     estimatedRelevance: 0.5,
+                     freshness: p.created_utc
+                        ? `${String(Math.floor((Date.now() / 1000 - p.created_utc) / 86400))} days ago`
+                        : '',
+                     reasonForInclusion: `Reddit discussion about: ${sq.text}`,
+                     subQuestionId: sq.id,
+                  };
+               }
+            }),
+         );
+
+         for (const result of commentSettled) {
+            if (result.status === 'fulfilled') {
+               candidates.push(result.value);
+            }
+         }
+
+         // Also include remaining posts without comments
+         for (const p of posts.slice(10)) {
+            candidates.push({
+               title: p.title,
+               url: p.url,
+               snippet: p.selftext ?? p.title,
+               sourceType: 'reddit',
+               estimatedQuality: 0.4,
+               estimatedRelevance: 0.5,
+               freshness: p.created_utc
+                  ? `${String(Math.floor((Date.now() / 1000 - p.created_utc) / 86400))} days ago`
+                  : '',
+               reasonForInclusion: `Reddit discussion about: ${sq.text}`,
+               subQuestionId: sq.id,
+            });
+         }
+
+         return candidates;
       } catch (err) {
-         logger.warn({ err, subQuestion: sq.id }, 'Reddit search failed');
+         logger.warn({ err, subQuestion: sq.id }, 'Reddit semantic search failed');
          return [];
       }
    }
@@ -493,9 +893,12 @@ export class DiscoveryEngine {
          }[];
          if (Array.isArray(raw)) {
             items = raw;
-         } else if (raw && 'items' in raw && Array.isArray((raw as { items: unknown }).items)) {
+         } else if ('items' in raw && Array.isArray((raw as { items: unknown }).items)) {
             items = (raw as { items: { fullName?: string; htmlUrl?: string; description?: string }[] })
                .items;
+         } else if ('results' in raw && Array.isArray(raw.results)) {
+            // Added handling for results field which is what the type actually has
+            items = raw.results;
          } else {
             logger.warn({ raw }, 'Unexpected GitHub search response shape');
             items = [];
@@ -523,17 +926,69 @@ export class DiscoveryEngine {
          const apiKey = config.youtube.apiKey ?? '';
          if (!apiKey) return []; // silently skip if no key
          const videos = await youtubeSearch(sq.text, apiKey, 'relevance', 10);
-         return videos.map((v) => ({
-            title: v.title,
-            url: v.url,
-            snippet: v.description,
-            sourceType: 'youtube',
-            estimatedQuality: 0.4,
-            estimatedRelevance: 0.5,
-            freshness: v.publishedAt ? `${Math.floor((Date.now() - new Date(v.publishedAt).getTime()) / 86400000)} days ago` : '',
-            reasonForInclusion: `YouTube video: ${v.title}`,
-            subQuestionId: sq.id,
-         }));
+
+         const candidates: SourceCandidate[] = [];
+
+         // Try fetching transcripts for top videos to enrich snippet
+         // Expand from 5 to 10 videos for deeper content coverage
+         const topVideos = videos.slice(0, 10);
+         const transcriptSettled = await Promise.allSettled(
+            topVideos.map(async (v) => {
+               try {
+                  const transcriptResult = await getYouTubeTranscript(v.videoId, 'en');
+                  const transcriptText = transcriptResult.fullText || '';
+                  const snippet = transcriptText
+                     ? `Video: ${v.title}\n\nTranscript excerpt:\n${transcriptText.slice(0, 3000)}`
+                     : v.description;
+                  return {
+                     title: v.title,
+                     url: v.url,
+                     snippet,
+                     sourceType: 'youtube' as const,
+                     estimatedQuality: transcriptText ? 0.6 : 0.4,
+                     estimatedRelevance: 0.6,
+                     freshness: v.publishedAt ? `${String(Math.floor((Date.now() - new Date(v.publishedAt).getTime()) / 86400000))} days ago` : '',
+                     reasonForInclusion: `YouTube video with transcript: ${v.title}`,
+                     subQuestionId: sq.id,
+                  };
+               } catch {
+                  return {
+                     title: v.title,
+                     url: v.url,
+                     snippet: v.description,
+                     sourceType: 'youtube' as const,
+                     estimatedQuality: 0.4,
+                     estimatedRelevance: 0.5,
+                     freshness: v.publishedAt ? `${String(Math.floor((Date.now() - new Date(v.publishedAt).getTime()) / 86400000))} days ago` : '',
+                     reasonForInclusion: `YouTube video: ${v.title}`,
+                     subQuestionId: sq.id,
+                  };
+               }
+            }),
+         );
+
+         for (const result of transcriptSettled) {
+            if (result.status === 'fulfilled') {
+               candidates.push(result.value);
+            }
+         }
+
+         // Include remaining videos without transcript
+         for (const v of videos.slice(10)) {
+            candidates.push({
+               title: v.title,
+               url: v.url,
+               snippet: v.description,
+               sourceType: 'youtube',
+               estimatedQuality: 0.4,
+               estimatedRelevance: 0.5,
+               freshness: v.publishedAt ? `${String(Math.floor((Date.now() - new Date(v.publishedAt).getTime()) / 86400000))} days ago` : '',
+               reasonForInclusion: `YouTube video: ${v.title}`,
+               subQuestionId: sq.id,
+            });
+         }
+
+         return candidates;
       } catch (err) {
          logger.warn({ err, subQuestion: sq.id }, 'YouTube search failed');
          return [];
@@ -561,6 +1016,145 @@ export class DiscoveryEngine {
          logger.warn({ err, subQuestion: sq.id }, 'Stack Overflow search failed');
          return [];
       }
+   }
+
+   /**
+    * Search Wayback Machine CDX archive for content related to the sub-question.
+    * Uses keyword-based CDX API to find archived pages matching the query,
+    * then adds them as sources with archive.org URLs.
+    */
+   private async searchWayback(sq: SubQuestion): Promise<SourceCandidate[]> {
+      if (!this.budget.recordToolCall()) return [];
+
+      try {
+         // Build a CDX search URL with keyword query
+         const keywords = sq.text
+            .replace(/[?.:!]/g, '')
+            .split(/\s+/)
+            .filter((w) => w.length > 3)
+            .slice(0, 5)
+            .join(' ');
+         if (!keywords) return [];
+
+         const cdxUrl = `https://web.archive.org/cdx/search/cdx?url=*&output=json&limit=10&sort=reverse&matchType=prefix&filter=statuscode:200&q=${encodeURIComponent(keywords)}`;
+         const cdxResp = await fetch(cdxUrl, {
+            signal: AbortSignal.timeout(10_000),
+         });
+
+         if (!cdxResp.ok) {
+            logger.debug({ status: cdxResp.status }, 'Wayback CDX search failed');
+            return [];
+         }
+
+         const cdxData = (await cdxResp.json()) as unknown;
+         if (!Array.isArray(cdxData) || cdxData.length < 2) {
+            return [];
+         }
+
+         // CDX returns [[header], [row1], [row2], ...]
+         const rows = cdxData.slice(1) as string[][];
+         const urlIdx = Array.isArray(cdxData[0]) ? (cdxData[0] as string[]).indexOf('original') : -1;
+         const tsIdx = Array.isArray(cdxData[0]) ? (cdxData[0] as string[]).indexOf('timestamp') : -1;
+
+         if (urlIdx === -1 || tsIdx === -1) return [];
+
+         const candidates: SourceCandidate[] = [];
+         for (const row of rows) {
+            const originalUrl = row[urlIdx];
+            const timestamp = row[tsIdx];
+            if (!originalUrl || !timestamp) continue;
+
+            const archiveUrl = `https://web.archive.org/web/${timestamp}/${originalUrl}`;
+            candidates.push({
+               title: `Archived: ${originalUrl.replace(/^https?:\/\//, '').slice(0, 80)}`,
+               url: archiveUrl,
+               snippet: `Archived at ${timestamp} from ${originalUrl}`,
+               sourceType: 'web',
+               estimatedQuality: 0.55,
+               estimatedRelevance: 0.5,
+               freshness: timestamp
+                  ? `${String(Math.floor((Date.now() - new Date(
+                     `${timestamp.slice(0, 4)}-${timestamp.slice(4, 6)}-${timestamp.slice(6, 8)}`
+                  ).getTime()) / 86400000))} days ago`
+                  : '',
+               reasonForInclusion: `Wayback Machine archive matching: ${sq.text}`,
+               subQuestionId: sq.id,
+            });
+         }
+
+         return candidates;
+      } catch (err) {
+         logger.warn({ err, subQuestion: sq.id }, 'Wayback search failed');
+         return [];
+      }
+   }
+
+   /**
+    * For academic articles found in other backends, proactively fetch
+    * their archived copies from Wayback Machine or Google Cache.
+    * Returns additional candidates with the archived URLs.
+    */
+   private async recoverAcademicArchives(
+      sq: SubQuestion,
+      existingCandidates: SourceCandidate[],
+   ): Promise<SourceCandidate[]> {
+      if (!this.budget.recordToolCall()) return [];
+
+      // Only process academic or paywalled-looking URLs
+      const academicCandidates = existingCandidates.filter(
+         (c) =>
+            c.sourceType === 'academic' ||
+            c.url.includes('doi.org') ||
+            c.url.includes('ieee.org') ||
+            c.url.includes('acm.org') ||
+            c.url.includes('springer.com') ||
+            c.url.includes('elsevier.com') ||
+            c.url.includes('taylorandfrancis.com') ||
+            c.url.includes('sagepub.com') ||
+            c.url.includes('wiley.com'),
+      );
+
+      if (academicCandidates.length === 0) return [];
+
+      const archiveCandidates: SourceCandidate[] = [];
+      const topAcademic = academicCandidates.slice(0, 5);
+
+      const settled = await Promise.allSettled(
+         topAcademic.map(async (ac) => {
+            try {
+               const result = await attemptExternalRecovery(ac.url);
+               if (result.content !== null && result.source !== null) {
+                  // Found an archived copy — add it as an additional source with a note
+                  const archiveUrl =
+                     result.source === 'wayback'
+                        ? `https://web.archive.org/web/2024/${ac.url}`
+                        : `https://webcache.googleusercontent.com/search?q=cache:${encodeURIComponent(ac.url)}`;
+                  return {
+                     title: `${ac.title} (${result.source === 'wayback' ? 'Wayback' : 'Google Cache'})`,
+                     url: archiveUrl,
+                     snippet: `Archived version of: ${ac.url}`,
+                     sourceType: 'academic' as const,
+                     estimatedQuality: 0.6,
+                     estimatedRelevance: 0.55,
+                     freshness: '',
+                     reasonForInclusion: `Archived copy of academic article via ${result.source}`,
+                     subQuestionId: sq.id,
+                  };
+               }
+               return null;
+            } catch {
+               return null;
+            }
+         }),
+      );
+
+      for (const result of settled) {
+         if (result.status === 'fulfilled' && result.value) {
+            archiveCandidates.push(result.value);
+         }
+      }
+
+      return archiveCandidates;
    }
 
    // ── Scoring ────────────────────────────────────────────────────────────
@@ -607,6 +1201,12 @@ export class DiscoveryEngine {
          scored.estimatedQuality = boostedQuality;
          scored.totalScore = boostedQuality;
 
+         // SourceRanking: compute dual scores for sort/trust decisions
+         const rankEntry = this.toMinimalSourceEntry(c);
+         const scores = rankSource(rankEntry, count);
+         scored.readPriorityScore = scores.readPriorityScore;
+         scored.evidenceWeight = scores.evidenceWeight;
+
          return scored;
       });
    }
@@ -637,18 +1237,20 @@ export class DiscoveryEngine {
       candidates: SourceCandidate[],
    ): SourceCandidate[] {
       const sorted = [...candidates].sort((a, b) => {
-         const scoreA = (a as any).estimatedQuality ?? a.estimatedQuality;
-         const scoreB = (b as any).estimatedQuality ?? b.estimatedQuality;
+         const sa = a as ScoredCandidate;
+         const sb = b as ScoredCandidate;
+         const scoreA = sa.readPriorityScore;
+         const scoreB = sb.readPriorityScore;
          return scoreB - scoreA;
       });
 
-      // Hostname diversity: keep max 2 per domain
+      // Hostname diversity: limit per domain
       const hostnameCounts = new Map<string, number>();
       const result: SourceCandidate[] = [];
       for (const c of sorted) {
          const domain = extractDomain(c.url);
          const count = hostnameCounts.get(domain) ?? 0;
-         if (count < 2) {
+         if (count < maxPerHostname(domain)) {
             hostnameCounts.set(domain, count + 1);
             result.push(c);
          }
@@ -657,6 +1259,28 @@ export class DiscoveryEngine {
       return result.slice(0, this.config.maxCandidatesPerSubQuestion);
    }
    // ── Convert candidate → source entry ───────────────────────────────────
+
+   // ── Adapter: SourceCandidate → minimal SourceEntry for rankSource ──────────
+
+   private toMinimalSourceEntry(candidate: SourceCandidate): SourceEntry {
+      return {
+         id: '',
+         title: candidate.title,
+         url: candidate.url,
+         accessDate: new Date().toISOString(),
+         sourceType: candidate.sourceType,
+         sourceConfidencePrior: sourceConfidencePrior(
+            candidate.sourceType,
+            candidate.url,
+            candidate.snippet,
+         ),
+         domain: extractDomain(candidate.url),
+         isPrimary: candidate.sourceType === 'academic' || candidate.sourceType === 'github',
+         relevantSubQuestions: [candidate.subQuestionId],
+         extractionStatus: 'pending' as const,
+         subQuestionId: candidate.subQuestionId,
+      };
+   }
 
    private candidateToSourceEntry(candidate: SourceCandidate): SourceEntry {
       const urlSuffix = candidate.url.length > 40 ? candidate.url.slice(-40) : candidate.url;
