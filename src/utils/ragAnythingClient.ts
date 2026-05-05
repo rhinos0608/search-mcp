@@ -6,6 +6,7 @@
  */
 
 import { logger } from '../logger.js';
+import { loadConfig } from '../config.js';
 
 // ============================================================================
 // Types
@@ -149,9 +150,20 @@ export interface RAGABridgeConfig {
 // Configuration
 // ============================================================================
 
+function resolveDefaultBaseUrl(): string {
+   const envUrl = process.env.RAGA_BRIDGE_URL;
+   if (envUrl) return envUrl;
+   try {
+      const cfg = loadConfig();
+      if (cfg.raga.baseUrl) return cfg.raga.baseUrl;
+   } catch {
+      // Config system not available yet
+   }
+   return 'http://localhost:8000';
+}
+
 const DEFAULT_CONFIG: RAGABridgeConfig = {
-   // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing
-   baseUrl: process.env.RAGA_BRIDGE_URL || 'http://localhost:8000',
+   baseUrl: resolveDefaultBaseUrl(),
    timeoutMs: 180000,
    maxRetries: 2,
    cacheEnabled: true,
@@ -175,7 +187,7 @@ const extractionCache = new Map<string, CacheEntry>();
 function normalizeSource<T>(value: T): T | Record<string, unknown> | unknown[] {
    if (value === null || typeof value !== 'object') return value;
    if (Array.isArray(value))
-      return value.map(normalizeSource);
+      return (value as unknown[]).map(normalizeSource);
    const record = value as Record<string, unknown>;
    const sortedKeys = Object.keys(record).sort();
    const out: Record<string, unknown> = {};
@@ -397,7 +409,7 @@ export class RAGAnythingClient {
          throw new Error(`Extraction submission failed: ${errorText}`);
       }
 
-      const raw: Record<string, unknown> = await response.json();
+      const raw = (await response.json()) as Record<string, unknown>;
 
       // Normalize snake_case API response to camelCase TS interface
       return {
@@ -471,7 +483,7 @@ export class RAGAnythingClient {
             });
             pruneCache();
          }
-         return { ...result, cached: result.cached ?? false };
+         return result;
       }
 
       // Poll until completed
@@ -491,7 +503,7 @@ export class RAGAnythingClient {
          pruneCache();
       }
 
-      return { ...result, cached: result.cached ?? false };
+      return result;
    }
 }
 
