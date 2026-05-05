@@ -1,0 +1,14 @@
+node_modules/
+dist/
+.git/
+.gitignore
+.env
+*.log
+config.json
+config.enc
+stderr.log
+searxng/
+models/
+.DS_Store
+coverage/
+*.tsbuildinfo

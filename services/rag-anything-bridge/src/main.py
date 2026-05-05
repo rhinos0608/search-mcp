@@ -10,6 +10,7 @@ import os
 import sys
 import hashlib
 import uuid
+import asyncio
 from pathlib import Path
 from datetime import datetime, timedelta
 from typing import Optional, List, Dict, Any, Literal, cast
@@ -27,14 +28,15 @@ sys.path.insert(0, str(Path(__file__).parent))
 from parsers.parser_router import ParserRouter, ParserType
 from processors.content_processor import ContentProcessor
 from utils.cache import CacheManager
-from utils.storage import StorageManager
+from utils.storage import StorageManager, StorageConfig
 
 # Configure logging
 structlog.configure(
-    processors=[
-        structlog.processors.TimeStamper(fmt="iso"),
-        structlog.processors.JSONRenderer(),
-    ]
+   processors=[
+      structlog.processors.TimeStamper(fmt="iso"),
+      structlog.processors.format_exc_info,
+      structlog.processors.JSONRenderer(),
+   ]
 )
 logger = structlog.get_logger()
 
@@ -46,6 +48,7 @@ CONFIG = {
     "default_parser": os.getenv("RAGA_DEFAULT_PARSER", "auto"),
     "request_timeout": int(os.getenv("RAGA_REQUEST_TIMEOUT", "30")),
     "async_job_timeout": int(os.getenv("RAGA_ASYNC_TIMEOUT", "300")),
+    "gpu_enabled": os.getenv("RAGA_GPU_ENABLED", "false").lower() == "true",
 }
 
 # Metrics
@@ -163,11 +166,14 @@ class JobStatus(BaseModel):
     result: Optional[ExtractionResult] = None
 
 
-# Global state
 parser_router: ParserRouter = None  # type: ignore[assignment]
 content_processor: ContentProcessor = None  # type: ignore[assignment]
 cache_manager: CacheManager = None  # type: ignore[assignment]
 storage_manager: StorageManager = None  # type: ignore[assignment]
+
+# Async job store: {document_id: {status, progress, message, result, error}}
+async_jobs: Dict[str, Dict[str, Any]] = {}
+async_jobs_lock = asyncio.Lock()
 
 
 @asynccontextmanager
@@ -177,16 +183,30 @@ async def lifespan(app: FastAPI):
 
     logger.info("Starting RAG-Anything Bridge", config=CONFIG)
 
+    # Log GPU status
+    if CONFIG["gpu_enabled"]:
+        logger.info("GPU acceleration enabled via RAGA_GPU_ENABLED")
+        try:
+            import torch
+            if torch.cuda.is_available():
+                logger.info("CUDA GPU detected and available", device=torch.cuda.get_device_name(0))
+            elif torch.backends.mps.is_available():
+                logger.info("Apple Silicon MPS detected and available")
+            else:
+                logger.warn("RAGA_GPU_ENABLED is true but no GPU device was detected by PyTorch")
+        except ImportError:
+            logger.warn("RAGA_GPU_ENABLED is true but torch is not installed; GPU acceleration may be limited")
+    else:
+        logger.info("GPU acceleration disabled (CPU-only mode)")
+
     # Initialize components
     cache_manager = CacheManager(CONFIG["cache_dir"])
-    storage_manager = StorageManager(CONFIG["cache_dir"] / "assets")
+    storage_manager = StorageManager(StorageConfig(local_path=CONFIG["cache_dir"] / "assets"))
     parser_router = ParserRouter(default_parser=CONFIG["default_parser"])
     content_processor = ContentProcessor()
 
     # Warm up parsers
     await parser_router.initialize()
-
-    logger.info("RAG-Anything Bridge ready")
 
     yield
 
@@ -231,66 +251,32 @@ async def metrics():
     return generate_latest()
 
 
-@app.post("/extract", response_model=ExtractionResult)
-async def extract(request: ExtractionRequest, background_tasks: BackgroundTasks):
-    """
-    Extract content from a URL.
+async def _run_extraction(
+    doc_id: str,
+    request: ExtractionRequest,
+    parser_type: str,
+    start_time: datetime,
+):
+    """Run extraction in background, updating job store with progress."""
+    global parser_router, content_processor, cache_manager
+    global EXTRACTION_DURATION, EXTRACTION_COUNTER
 
-    Synchronous for small documents (<= max_sync_pages).
-    For larger documents, consider using the async job API.
-    """
-    start_time = datetime.utcnow()
+    async def set_job(status: str, progress: float, message: str):
+        async with async_jobs_lock:
+            if doc_id in async_jobs:
+                async_jobs[doc_id].update({
+                    "status": status,
+                    "progress": progress,
+                    "message": message,
+                    "updated_at": datetime.utcnow().isoformat(),
+                    "completed_at": datetime.utcnow().isoformat() if status in ("completed", "failed") else async_jobs[doc_id].get("completed_at"),
+                })
 
     try:
-        # Generate document ID
-        doc_id = hashlib.sha256(request.url.encode()).hexdigest()[:16]
-
-        # Check cache
-        cached_result = await cache_manager.get(doc_id)
-        if cached_result:
-            CACHE_HIT_COUNTER.labels(result="hit").inc()
-            cached_result["cached"] = True
-            return ExtractionResult(**cached_result)
-
-        CACHE_HIT_COUNTER.labels(result="miss").inc()
-
-        # Determine parser
-        parser_type = request.parser or CONFIG["default_parser"]
-        if parser_type == "auto":
-            parser_type = parser_router.select_parser(request.content_type)
-
-        # Check sync limits
-        if request.max_pages and request.max_pages > CONFIG["max_sync_pages"]:
-            # Would exceed sync limit
-            return ExtractionResult(
-                document_id=doc_id,
-                source_url=request.url,
-                source_type=request.content_type or "unknown",
-                parser_used=parser_type,
-                parser_version=None,
-                extraction_config={"max_pages": request.max_pages},
-                markdown="",
-                title=None,
-                description=None,
-                content_items=[],
-                assets=[],
-                page_count=None,
-                word_count=None,
-                language=None,
-                citations=[],
-                warnings=[
-                    f"Document exceeds sync page limit ({CONFIG['max_sync_pages']})"
-                ],
-                errors=[],
-                processing_time_ms=0,
-                cached=False,
-                created_at=start_time.isoformat(),
-                expires_at=None,
-            )
+        await set_job("processing", 5.0, "Initializing parser")
 
         # Perform extraction
         with EXTRACTION_DURATION.labels(parser=parser_type).time():
-            # Route to appropriate parser
             assert parser_router is not None
             parse_result = await parser_router.parse(
                 url=request.url,
@@ -304,9 +290,13 @@ async def extract(request: ExtractionRequest, background_tasks: BackgroundTasks)
                 },
             )
 
+        await set_job("processing", 70.0, "Processing content")
+
         # Process and structure content
         assert content_processor is not None
         content_items = await content_processor.process(parse_result)
+
+        await set_job("processing", 90.0, "Building result")
 
         # Build result
         processing_time = (datetime.utcnow() - start_time).total_seconds() * 1000
@@ -343,12 +333,120 @@ async def extract(request: ExtractionRequest, background_tasks: BackgroundTasks)
         assert cache_manager is not None
         await cache_manager.set(doc_id, result.dict(), ttl=86400 * 7)  # 7 days
 
+        # Store result in job store
+        async with async_jobs_lock:
+            if doc_id in async_jobs:
+                async_jobs[doc_id].update({
+                    "status": "completed",
+                    "progress": 100.0,
+                    "message": "Extraction completed",
+                    "result": result.dict(),
+                    "updated_at": datetime.utcnow().isoformat(),
+                    "completed_at": datetime.utcnow().isoformat(),
+                })
+
         EXTRACTION_COUNTER.labels(parser=parser_type, status="success").inc()
 
-        return result
+    except Exception as e:
+        logger.error("Background extraction failed", url=request.url, doc_id=doc_id, error=str(e))
+        EXTRACTION_COUNTER.labels(parser=parser_type or "unknown", status="error").inc()
+        async with async_jobs_lock:
+            if doc_id in async_jobs:
+                async_jobs[doc_id].update({
+                    "status": "failed",
+                    "progress": None,
+                    "message": f"Extraction failed: {str(e)}",
+                    "error": str(e),
+                    "updated_at": datetime.utcnow().isoformat(),
+                    "completed_at": datetime.utcnow().isoformat(),
+                })
+
+
+@app.post("/extract")
+async def extract(request: ExtractionRequest, background_tasks: BackgroundTasks):
+    """
+    Extract content from a URL.
+
+    Submits extraction as an async job and returns a JobStatus for polling.
+    Use the returned document_id to poll /extract/{document_id}/status
+    and fetch the result from /extract/{document_id}/result.
+    """
+    start_time = datetime.utcnow()
+    now_ts = start_time.isoformat()
+
+    try:
+        # Generate document ID
+        doc_id = hashlib.sha256(request.url.encode()).hexdigest()[:16]
+
+        # Check cache first
+        cached_result = await cache_manager.get(doc_id)
+        if cached_result:
+            CACHE_HIT_COUNTER.labels(result="hit").inc()
+            return JobStatus(
+                document_id=doc_id,
+                status="completed",
+                progress=100.0,
+                message="Served from cache",
+                created_at=now_ts,
+                updated_at=now_ts,
+                completed_at=now_ts,
+                result=ExtractionResult(**cached_result),
+            )
+
+        CACHE_HIT_COUNTER.labels(result="miss").inc()
+
+        # Determine parser
+        parser_type = request.parser or CONFIG["default_parser"]
+        if parser_type == "auto":
+            parser_type = parser_router.select_parser(request.content_type)
+
+        # Check sync limits
+        if request.max_pages and request.max_pages > CONFIG["max_sync_pages"]:
+            return JobStatus(
+                document_id=doc_id,
+                status="failed",
+                progress=None,
+                message=f"Document exceeds sync page limit ({CONFIG['max_sync_pages']})",
+                created_at=now_ts,
+                updated_at=now_ts,
+                completed_at=now_ts,
+            )
+
+        # Register async job
+        async with async_jobs_lock:
+            async_jobs[doc_id] = {
+                "status": "pending",
+                "progress": 0.0,
+                "message": "Queued",
+                "created_at": now_ts,
+                "updated_at": now_ts,
+                "completed_at": None,
+                "result": None,
+                "error": None,
+            }
+
+        # Start background extraction
+        background_tasks.add_task(
+            _run_extraction,
+            doc_id=doc_id,
+            request=request,
+            parser_type=parser_type,
+            start_time=start_time,
+        )
+
+        return JobStatus(
+            document_id=doc_id,
+            status="pending",
+            progress=0.0,
+            message="Extraction queued",
+            created_at=now_ts,
+            updated_at=now_ts,
+            completed_at=None,
+            result=None,
+        )
 
     except Exception:
-        logger.exception("Extraction failed", url=request.url)
+        logger.exception("Extraction submission failed", url=request.url)
         EXTRACTION_COUNTER.labels(
             parser=request.parser or "unknown", status="error"
         ).inc()
@@ -360,8 +458,21 @@ async def extract(request: ExtractionRequest, background_tasks: BackgroundTasks)
 @app.get("/extract/{document_id}/status", response_model=JobStatus)
 async def extraction_status(document_id: str):
     """Check status of async extraction job."""
-    # For v1, most extractions are synchronous
-    # This endpoint is for future async support
+    # Check job store first (live extraction)
+    async with async_jobs_lock:
+        job = async_jobs.get(document_id)
+        if job:
+            return JobStatus(
+                document_id=document_id,
+                status=job.get("status", "not_found"),
+                progress=job.get("progress"),
+                message=job.get("message"),
+                created_at=job.get("created_at", datetime.utcnow().isoformat()),
+                updated_at=job.get("updated_at", datetime.utcnow().isoformat()),
+                completed_at=job.get("completed_at"),
+            )
+
+    # Fall back to cache (completed extractions)
     assert cache_manager is not None
     cached = await cache_manager.get(document_id)
 
@@ -389,13 +500,34 @@ async def extraction_status(document_id: str):
 @app.get("/extract/{document_id}/result")
 async def extraction_result(document_id: str):
     """Get extraction result by document ID."""
+    # Check job store first (live extraction)
+    async with async_jobs_lock:
+        job = async_jobs.get(document_id)
+        if job:
+            status = job.get("status")
+            if status == "completed":
+                result_data = job.get("result")
+                if result_data:
+                    return result_data
+            elif status in ("pending", "processing"):
+                raise HTTPException(
+                    status_code=409,
+                    detail=f"Extraction still in progress (status: {status}). Poll /extract/{document_id}/status",
+                )
+            elif status == "failed":
+                raise HTTPException(
+                    status_code=422,
+                    detail=f"Extraction failed: {job.get('message', 'Unknown error')}",
+                )
+            # fall through to cache for completed jobs without stored result
+
+    # Fall back to cache
     assert cache_manager is not None
     cached = await cache_manager.get(document_id)
     if not cached:
         raise HTTPException(status_code=404, detail="Document not found or expired")
 
     return cached
-
 
 @app.post("/parse/file")
 async def parse_file(

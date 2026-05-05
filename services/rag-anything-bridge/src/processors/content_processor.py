@@ -35,6 +35,13 @@ class ContentItem:
     metadata: Optional[Dict[str, Any]] = None
 
 
+def _dict_val(element: Any, key: str, default: Any = None) -> Any:
+    """Extract value from either a dict or an object."""
+    if isinstance(element, dict):
+        return element.get(key, default)
+    return getattr(element, key, default)
+
+
 class ContentProcessor:
     """Process and structure content from various parsers."""
 
@@ -50,7 +57,7 @@ class ContentProcessor:
         Process parse result into structured content items.
 
         Args:
-            parse_result: Result from parser (Docling, PaddleOCR, etc.)
+            parse_result: ParseResult from parser (always has .elements list)
 
         Returns:
             List of structured content items
@@ -58,15 +65,9 @@ class ContentProcessor:
         items = []
 
         try:
-            # Handle different parser output formats
-            if hasattr(parse_result, "elements"):
-                # Docling-style output
-                items = await self._process_docling_elements(parse_result.elements)
-            elif hasattr(parse_result, "pages"):
-                # OCR-style output with pages
-                items = await self._process_ocr_pages(parse_result.pages)
-            else:
-                # Generic text processing
+            if hasattr(parse_result, "elements") and parse_result.elements:
+                items = await self._process_elements(parse_result.elements)
+            elif hasattr(parse_result, "markdown"):
                 items = await self._process_generic(parse_result)
 
             self.logger.info(
@@ -79,37 +80,37 @@ class ContentProcessor:
 
         return items
 
-    async def _process_docling_elements(self, elements: List[Any]) -> List[ContentItem]:
-        """Process Docling elements into content items."""
+    async def _process_elements(self, elements: List[Any]) -> List[ContentItem]:
+        """Process a list of element dicts into content items."""
         items = []
         current_section = None
 
         for element in elements:
             try:
-                item = await self._convert_docling_element(element, current_section)
+                item = self._convert_element(element, current_section)
                 if item:
                     items.append(item)
 
-                    # Track section headings
+                    # Track section headings for context
                     if item.type == "heading":
                         current_section = item.text
 
             except Exception as e:
                 self.logger.warning(
-                    f"Failed to process element element_type={getattr(element, 'type', 'unknown')} error={e}"
+                    f"Failed to process element type={_dict_val(element, 'type', 'unknown')} error={e}"
                 )
 
         return items
 
-    async def _convert_docling_element(
+    def _convert_element(
         self, element: Any, section_heading: Optional[str]
     ) -> Optional[ContentItem]:
-        """Convert single Docling element to ContentItem."""
-        element_type = getattr(element, "type", "text")
-        element_text = getattr(element, "text", "")
+        """Convert a single element (dict or object) to ContentItem."""
+        element_type = _dict_val(element, "type", "text")
+        element_text = _dict_val(element, "text", "") or ""
 
-        if element_type == "heading":
-            level = getattr(element, "level", 1)
+        if element_type in ("heading", "section_header"):
+            level = _dict_val(element, "level", 1)
             return ContentItem(
                 item_id=self._generate_item_id(),
                 type="heading",
@@ -118,7 +119,7 @@ class ContentProcessor:
                 metadata={"level": level},
             )
 
-        elif element_type == "paragraph":
+        elif element_type == "text" or element_type == "paragraph":
             return ContentItem(
                 item_id=self._generate_item_id(),
                 type="text",
@@ -128,39 +129,51 @@ class ContentProcessor:
             )
 
         elif element_type == "table":
-            # Convert table to markdown
-            table_data = getattr(element, "data", [])
-            markdown = self._table_to_markdown(table_data)
+            # Extract table data from element (can be dict or object form)
+            table_data = _dict_val(element, "data", [])
+            if isinstance(table_data, dict):
+                # Structured table data (Docling: {"cells": [...], "num_rows": N, "num_cols": N})
+                cells = table_data.get("cells", [])
+                md = self._structured_table_to_markdown(cells)
+            elif isinstance(table_data, list):
+                # Legacy flat table data
+                md = self._table_to_markdown(table_data)
+            else:
+                md = f"[Table: {element_text}]"
 
             return ContentItem(
                 item_id=self._generate_item_id(),
                 type="table",
-                text=element_text,  # Caption or summary
-                markdown=markdown,
+                text=element_text,
+                markdown=md,
                 section_heading=section_heading,
-                caption=getattr(element, "caption", None),
+                caption=_dict_val(element, "caption", None),
                 metadata={
-                    "rows": len(table_data),
-                    "cols": len(table_data[0]) if table_data else 0,
+                    "rows": _dict_val(element, "num_rows", 0),
+                    "cols": _dict_val(element, "num_cols", 0),
                 },
             )
 
         elif element_type == "image":
+            path = _dict_val(element, "path", "")
+            caption = _dict_val(element, "caption", "") or ""
+            markdown = f"![{caption}]({path})" if path else (f"[Image: {caption}]" if caption else "")
             return ContentItem(
                 item_id=self._generate_item_id(),
                 type="image",
-                text=getattr(element, "caption", ""),
-                markdown=f"![{getattr(element, 'caption', '')}]({getattr(element, 'path', '')})",
-                caption=getattr(element, "caption", None),
-                asset_ref=getattr(element, "path", None),
+                text=caption or element_text,
+                markdown=markdown,
+                caption=caption or None,
+                asset_ref=path or None,
                 metadata={
-                    "width": getattr(element, "width", None),
-                    "height": getattr(element, "height", None),
+                    "width": _dict_val(element, "width", None),
+                    "height": _dict_val(element, "height", None),
+                    "page_number": _dict_val(element, "page_number", None),
                 },
             )
 
         elif element_type == "equation":
-            latex = getattr(element, "latex", element_text)
+            latex = _dict_val(element, "latex", element_text)
             return ContentItem(
                 item_id=self._generate_item_id(),
                 type="equation",
@@ -178,8 +191,55 @@ class ContentProcessor:
             section_heading=section_heading,
         )
 
+    def _structured_table_to_markdown(self, cells: list) -> str:
+        """Convert structured table cells (from Docling) to markdown."""
+        if not cells:
+            return ""
+
+        # Discover dimensions
+        max_row = 0
+        max_col = 0
+        for cell in cells:
+            end_row = _dict_val(cell, "row_end", 0) if isinstance(cell, dict) else getattr(cell, "end_row_offset_idx", 0)
+            end_col = _dict_val(cell, "col_end", 0) if isinstance(cell, dict) else getattr(cell, "end_col_offset_idx", 0)
+            max_row = max(max_row, end_row)
+            max_col = max(max_col, end_col)
+
+        if max_row == 0 or max_col == 0:
+            return ""
+
+        # Build grid
+        grid = [["" for _ in range(max_col)] for _ in range(max_row)]
+        for cell in cells:
+            if isinstance(cell, dict):
+                text = cell.get("text", "")
+                row_start = cell.get("row_start", 0)
+                col_start = cell.get("col_start", 0)
+                row_end = cell.get("row_end", row_start + 1)
+                col_end = cell.get("col_end", col_start + 1)
+            else:
+                text = getattr(cell, "text", "")
+                row_start = getattr(cell, "start_row_offset_idx", 0)
+                col_start = getattr(cell, "start_col_offset_idx", 0)
+                row_end = getattr(cell, "end_row_offset_idx", row_start + 1)
+                col_end = getattr(cell, "end_col_offset_idx", col_start + 1)
+
+            for r in range(min(row_start, max_row), min(row_end, max_row)):
+                for c in range(min(col_start, max_col), min(col_end, max_col)):
+                    if text and not grid[r][c]:
+                        grid[r][c] = text
+
+        lines = []
+        for r, row in enumerate(grid):
+            cells_str = " | ".join(cell if cell else "" for cell in row)
+            lines.append(f"| {cells_str} |")
+            if r == 0 and max_row > 1:
+                lines.append("|" + "|".join(" --- " for _ in row) + "|")
+
+        return "\n".join(lines)
+
     def _table_to_markdown(self, table_data: list) -> str:
-        """Convert table data to markdown format."""
+        """Convert flat table data to markdown format."""
         if not table_data:
             return ""
 
@@ -198,47 +258,8 @@ class ContentProcessor:
 
         return "\n".join(lines)
 
-    async def _process_ocr_pages(self, pages: list) -> list:
-        """Process OCR output pages into content items."""
-        items = []
-
-        for page_idx, page in enumerate(pages, 1):
-            # Add page as heading
-            items.append(
-                ContentItem(
-                    item_id=self._generate_item_id(),
-                    type="heading",
-                    text=f"Page {page_idx}",
-                    markdown=f"## Page {page_idx}",
-                    page_number=page_idx,
-                    metadata={"level": 2},
-                )
-            )
-
-            # Process OCR text blocks
-            for block in page.get("blocks", []):
-                text = block.get("text", "").strip()
-                if not text:
-                    continue
-
-                items.append(
-                    ContentItem(
-                        item_id=self._generate_item_id(),
-                        type="text",
-                        text=text,
-                        markdown=text,
-                        page_number=page_idx,
-                        metadata={
-                            "bbox": block.get("bbox"),
-                            "confidence": block.get("confidence"),
-                        },
-                    )
-                )
-
-        return items
-
     async def _process_generic(self, parse_result: Any) -> list:
-        """Process generic parser output."""
+        """Process generic parser output (fallback)."""
         # Extract text content
         text = ""
         if hasattr(parse_result, "text"):

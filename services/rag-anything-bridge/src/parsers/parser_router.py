@@ -12,10 +12,11 @@ from typing import Optional, Dict, Any, List
 from dataclasses import dataclass
 from enum import Enum
 import asyncio
-
 import hashlib
+import shutil
 import tempfile
 from urllib.parse import urlparse
+import textwrap
 
 import aiohttp
 import structlog
@@ -91,19 +92,19 @@ class BaseParser:
 
 
 class DoclingParser(BaseParser):
-    """Docling parser for born-digital PDFs and Office documents."""
+    """Docling parser for born-digital PDFs and Office documents (docling v2.x)."""
 
     def __init__(self):
         super().__init__()
-        self._docling: Any = None
+        self._converter: Any = None
 
     async def initialize(self):
-        """Lazy initialization of Docling."""
-        if self._docling is None:
+        """Lazy initialization of Docling DocumentConverter."""
+        if self._converter is None:
             try:
-                from docling import Docling
+                from docling.document_converter import DocumentConverter
 
-                self._docling = Docling()
+                self._converter = DocumentConverter()
                 self.logger.info("Docling parser initialized")
             except ImportError:
                 self.logger.error("Docling not installed, Docling parser unavailable")
@@ -118,52 +119,70 @@ class DoclingParser(BaseParser):
         try:
             # Run Docling in thread pool to not block
             loop = asyncio.get_running_loop()
-            docling_result = await loop.run_in_executor(  # type: ignore[call-overload]
+            result = await loop.run_in_executor(
                 None,  # Default executor
-                lambda: self._docling.convert(str(file_path)),
+                lambda: self._converter.convert(str(file_path)),
             )
 
-            # Extract structured content
-            markdown = docling_result.export_to_markdown()
+            doc = result.document
+            markdown = doc.export_to_markdown()
 
-            # Extract elements
+            # Extract elements via iterate_items — yields (NodeItem, level) tuples
             elements = []
-            for element in docling_result.elements:
-                elements.append(
-                    {
-                        "type": element.type,
-                        "text": element.text,
-                        "level": getattr(element, "level", None),
-                        "bbox": element.bbox if hasattr(element, "bbox") else None,
-                    }
-                )
+            for item, level in doc.iterate_items():
+                label = item.label.value if hasattr(item.label, "value") else str(item.label)
+                text = getattr(item, "text", None) or getattr(item, "caption_text", None) or ""
+                element: Dict[str, Any] = {
+                    "type": label,
+                    "text": text,
+                    "level": level,
+                }
+                # Extract page number and bounding box from provenance
+                if hasattr(item, "prov") and item.prov:
+                    prov = item.prov[0]
+                    element["page_number"] = prov.page_no
+                    if prov.bbox:
+                        element["bbox"] = {
+                            "l": prov.bbox.l,
+                            "t": prov.bbox.t,
+                            "r": prov.bbox.r,
+                            "b": prov.bbox.b,
+                        }
+                elements.append(element)
 
             # Extract tables as assets
             assets = []
-            for table in docling_result.tables:
-                assets.append(
-                    {
-                        "asset_id": f"table_{table.id}",
-                        "type": "table",
-                        "caption": table.caption,
-                        "data": table.data,
-                    }
-                )
+            for i, table in enumerate(doc.tables):
+                cells = []
+                if hasattr(table, "data") and table.data:
+                    for cell in table.data.table_cells:
+                        cells.append({
+                            "text": cell.text,
+                            "row_start": cell.start_row_offset_idx,
+                            "row_end": cell.end_row_offset_idx,
+                            "col_start": cell.start_col_offset_idx,
+                            "col_end": cell.end_col_offset_idx,
+                            "column_header": cell.column_header,
+                            "row_header": cell.row_header,
+                        })
+                assets.append({
+                    "asset_id": f"table_{i}",
+                    "type": "table",
+                    "num_rows": table.data.num_rows if hasattr(table, "data") and table.data else 0,
+                    "num_cols": table.data.num_cols if hasattr(table, "data") and table.data else 0,
+                    "cells": cells,
+                })
 
             return ParseResult(
-                content_type="application/pdf",  # TODO: detect actual type
+                content_type="application/pdf",
                 parser_type=ParserType.DOCLING,
-                parser_version="1.0.0",  # TODO: get actual version
+                parser_version="2.0",
                 markdown=markdown,
-                title=docling_result.title,
+                title=doc.name or None,
                 description=None,
-                page_count=len(docling_result.pages)
-                if hasattr(docling_result, "pages")
-                else None,
+                page_count=doc.num_pages(),
                 word_count=len(markdown.split()),
-                language=docling_result.language
-                if hasattr(docling_result, "language")
-                else None,
+                language=None,
                 elements=elements,
                 assets=assets,
                 citations=[],
@@ -177,207 +196,203 @@ class DoclingParser(BaseParser):
 
 
 class PaddleOCRParser(BaseParser):
-    """PaddleOCR parser for image-heavy and scanned documents."""
+    """PaddleOCR parser for image-heavy and scanned documents.
+
+    NOTE: PaddleOCR v3.x model init may SIGSEGV on ARM Docker
+    (paddlepaddle contains x86 CUDA binaries). The probe runs in a
+    subprocess to isolate the crash; if it fails the parser is
+    marked unavailable by ParserRouter.
+    """
 
     def __init__(self):
         super().__init__()
         self._ocr: Any = None
 
     async def initialize(self):
-        """Lazy initialization of PaddleOCR."""
+        """Lazy initialization of PaddleOCR (subprocess-sandboxed)."""
         if self._ocr is None:
             try:
                 from paddleocr import PaddleOCR
 
-                self._ocr = PaddleOCR(
-                    use_angle_cls=True,
-                    lang="en",
-                    show_log=False,
-                )
-                self.logger.info("PaddleOCR parser initialized")
-            except ImportError:
-                self.logger.error("PaddleOCR not installed, OCR parser unavailable")
-                raise
+                # Sandbox: probe model load in a child process to isolate SIGSEGV
+                # from incompatible paddlepaddle binaries (x86 CUDA on ARM).
+                import subprocess
+                import sys as _sys
+                import os as _os
+                import tempfile as _tempfile
 
-    async def parse(self, file_path: Path, options: Dict[str, Any]) -> ParseResult:
-        """Parse image/PDF using PaddleOCR."""
-        await self.initialize()
+                _probe_code = textwrap.dedent("""\
+                    import sys
+                    try:
+                        from paddleocr import PaddleOCR
+                        PaddleOCR(use_angle_cls=True, lang="en")
+                        sys.exit(0)
+                    except Exception:
+                        sys.exit(1)
+                """)
 
-        self.logger.info("Parsing with PaddleOCR", file=file_path)
+                ok = False
+                try:
+                    fd, _probe_path = _tempfile.mkstemp(suffix=".py", prefix="paddle_probe_")
+                    with _os.fdopen(fd, "w") as f:
+                        f.write(_probe_code)
 
-        try:
-            # Convert PDF to images if needed
-            images = await self._convert_to_images(file_path)
+                    r = subprocess.run(
+                        [_sys.executable, _probe_path],
+                        capture_output=True,
+                        timeout=90,
+                    )
+                    ok = r.returncode == 0
+                except Exception as probe_err:
+                    self.logger.warning(
+                        "PaddleOCR subprocess probe failed", error=str(probe_err)
+                    )
+                finally:
+                    try:
+                        _os.unlink(_probe_path)
+                    except Exception:
+                        pass
 
-            # OCR each image
-            all_text = []
-            elements = []
-
-            for i, image_path in enumerate(images):
-                loop = asyncio.get_running_loop()
-                result = await loop.run_in_executor(  # type: ignore[call-overload]
-                    None, self._ocr.ocr, str(image_path), True
-                )
-
-                page_text = []
-                if not result or not result[0]:
-                    continue
-
-                for line in result[0]:
-                    if not line or len(line) < 2:
-                        continue
-                    if not isinstance(line[1], (list, tuple)) or len(line[1]) < 2:
-                        continue
-
-                    bbox = line[0]
-                    text = line[1][0]
-                    conf = line[1][1]
-
-                    page_text.append(text)
-                    elements.append(
-                        {
-                            "type": "text",
-                            "text": text,
-                            "page_number": i + 1,
-                            "confidence": conf,
-                            "bbox": bbox,
-                        }
+                if not ok:
+                    raise RuntimeError(
+                        "PaddleOCR model init failed -- incompatible architecture?"
                     )
 
-                all_text.append("\n".join(page_text))
+                self._ocr = PaddleOCR(use_angle_cls=True, lang="en")
+                self.logger.info("PaddleOCR parser initialized")
 
-            # Build markdown
-            markdown = "\n\n".join(all_text)
-
-            # Detect content type from file extension
-            suffix = file_path.suffix.lower()
-            detected_type = {
-                ".pdf": "application/pdf",
-                ".png": "image/png",
-                ".jpg": "image/jpeg",
-                ".jpeg": "image/jpeg",
-                ".tiff": "image/tiff",
-                ".tif": "image/tiff",
-                ".bmp": "image/bmp",
-                ".gif": "image/gif",
-                ".webp": "image/webp",
-            }.get(suffix, "application/octet-stream")
-
-            return ParseResult(
-                content_type=detected_type,
-                parser_type=ParserType.PADDLEOCR,
-                parser_version="2.7.0",  # TODO: get actual version
-                markdown=markdown,
-                title=None,  # Could extract with heuristic
-                description=None,
-                page_count=len(images),
-                word_count=len(markdown.split()),
-                language=options.get("ocr_language", "en"),
-                elements=elements,
-                assets=[],  # Could extract images
-                citations=[],
-                warnings=["OCR extraction may contain errors"],
-                errors=[],
-            )
-
-        except Exception as e:
-            self.logger.error("PaddleOCR parsing failed", error=str(e))
-            raise
-
-    async def _convert_to_images(self, file_path: Path) -> List[Path]:
-        """Convert PDF to images for OCR."""
-        from pdf2image import convert_from_path
-
-        loop = asyncio.get_running_loop()
-
-        try:
-            images = await loop.run_in_executor(
-                None, convert_from_path, str(file_path), 200
-            )
-        except Exception as exc:
-            self.logger.error("PDF to image conversion failed", error=str(exc))
-            raise RuntimeError(
-                f"PDF-to-image conversion failed for {file_path}; "
-                "ensure pdf2image and poppler are installed"
-            ) from exc
-
-        temp_dir = file_path.parent
-        image_paths: List[Path] = []
-
-        def _save():
-            paths = []
-            for i, image in enumerate(images):
-                image_path = temp_dir / f"{file_path.stem}_page_{i + 1}.png"
-                image.save(str(image_path), "PNG")
-                paths.append(image_path)
-            return paths
-
-        image_paths = await loop.run_in_executor(None, _save)
-        return image_paths
+            except (ImportError, RuntimeError, FileNotFoundError) as e:
+                self.logger.error("PaddleOCR not available", error=str(e))
+                raise
 
 
 class MinerUParser(BaseParser):
-    """MinerU parser for complex PDFs with equations, tables, and academic layouts."""
+    """MinerU parser for complex PDFs with equations, tables, and academic layouts.
+
+    Uses raganything's Parser class which wraps the mineru CLI.
+    """
 
     def __init__(self):
         super().__init__()
-        self._mineru: Any = None
 
     async def initialize(self):
-        """Lazy initialization of MinerU."""
-        if self._mineru is None:
-            try:
-                from raganything import MinerU as MinerUClass
-
-                self._mineru = MinerUClass()
-                self.logger.info("MinerU parser initialized")
-            except ImportError:
-                self.logger.error("MinerU not installed, MinerU parser unavailable")
-                raise
+        """Verify raganything is importable."""
+        try:
+            from raganything import Parser  # noqa: F401
+            self.logger.info("MinerU parser initialized")
+        except ImportError:
+            self.logger.error("MinerU not installed, MinerU parser unavailable")
+            raise
 
     async def parse(self, file_path: Path, options: Dict[str, Any]) -> ParseResult:
-        """Parse document using MinerU."""
-        await self.initialize()
+        """Parse document using MinerU 2.0 (via raganything Parser)."""
+        from raganything import Parser as MinerUBaseParser
 
         self.logger.info("Parsing with MinerU", file=file_path)
 
+        # Use a temp directory for mineru output
+        output_dir = tempfile.mkdtemp(prefix="mineru_")
         try:
+            parser = MinerUBaseParser()
             loop = asyncio.get_running_loop()
-            mineru_result = await loop.run_in_executor(  # type: ignore[call-overload]
+
+            content_blocks = await loop.run_in_executor(
                 None,
-                lambda: self._mineru.parse(str(file_path)),
+                lambda: parser.parse_pdf(
+                    str(file_path),
+                    output_dir=output_dir,
+                    method=options.get("parse_method", "auto"),
+                    lang=options.get("ocr_language"),
+                ),
             )
 
+            # Rebuild markdown and extract elements/assets from content blocks
             elements = []
-            for element in mineru_result.elements:
-                elements.append(
-                    {
-                        "type": element.type,
-                        "text": element.text,
-                        "level": getattr(element, "level", None),
-                        "bbox": element.bbox if hasattr(element, "bbox") else None,
-                    }
-                )
+            assets = []
+            md_parts = []
+
+            for block in content_blocks:
+                block_type = block.get("type", "text")
+                block_text = block.get("text", "")
+
+                if block_type == "text":
+                    md_parts.append(block_text)
+                    elements.append({"type": "text", "text": block_text})
+
+                elif block_type in ("heading", "section_header"):
+                    level = block.get("level", 1)
+                    prefix = "#" * level
+                    md_parts.append(f"{prefix} {block_text}")
+                    elements.append({"type": "heading", "text": block_text, "level": level})
+
+                elif block_type == "table":
+                    caption = block.get("image_caption") or block.get("img_caption", "")
+                    md_parts.append(f"[Table: {caption}]" if caption else "[Table]")
+                    if block.get("table_img_path"):
+                        assets.append({
+                            "asset_id": f"table_{len(assets)}",
+                            "type": "table",
+                            "path": block["table_img_path"],
+                            "caption": caption,
+                        })
+                    elements.append({"type": "table", "text": block_text, "caption": caption})
+
+                elif block_type == "image":
+                    caption = block.get("image_caption") or block.get("img_caption", "")
+                    img_path = block.get("img_path", "")
+                    if img_path:
+                        md_parts.append(f"![{caption}]({img_path})")
+                    elif caption:
+                        md_parts.append(f"[Image: {caption}]")
+                    assets.append({
+                        "asset_id": f"image_{len(assets)}",
+                        "type": "image",
+                        "path": img_path,
+                        "caption": caption,
+                    })
+                    elements.append({"type": "image", "text": caption, "path": img_path})
+
+                elif block_type == "equation":
+                    md_parts.append(f"$${block_text}$$" if block_text else "")
+                    elements.append({"type": "equation", "text": block_text})
+
+                else:
+                    if block_text:
+                        md_parts.append(block_text)
+                        elements.append({"type": block_type, "text": block_text})
+
+            markdown = "\n\n".join(md_parts)
+
+            # Determine title from first heading block
+            title = None
+            for block in content_blocks:
+                btype = block.get("type", "")
+                if btype in ("heading", "section_header") and block.get("text"):
+                    title = block["text"]
+                    break
 
             return ParseResult(
                 content_type="application/pdf",
                 parser_type=ParserType.MINERU,
-                parser_version="1.0.0",
-                markdown=mineru_result.markdown,
-                title=mineru_result.title,
+                parser_version="2.0",
+                markdown=markdown,
+                title=title,
                 description=None,
-                page_count=getattr(mineru_result, "page_count", None),
-                word_count=len(mineru_result.markdown.split()),
-                language=getattr(mineru_result, "language", None),
+                page_count=None,  # mineru doesn't expose page count directly
+                word_count=len(markdown.split()),
+                language=None,
                 elements=elements,
-                assets=getattr(mineru_result, "assets", []),
-                citations=getattr(mineru_result, "citations", []),
+                assets=assets,
+                citations=[],
                 warnings=[],
                 errors=[],
             )
+
         except Exception as e:
             self.logger.error("MinerU parsing failed", error=str(e))
             raise
+        finally:
+            shutil.rmtree(output_dir, ignore_errors=True)
 
 
 class ParserRouter:

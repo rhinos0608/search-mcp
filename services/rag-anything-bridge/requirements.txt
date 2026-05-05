@@ -9,8 +9,12 @@ raganything[all]>=0.1.0
 
 # Parser backends
 docling>=1.0.0
+# GPU Acceleration: Use onnxruntime-gpu instead of onnxruntime for faster inference
+# onnxruntime-gpu>=1.17.0
 paddleocr>=2.7.0
 paddlepaddle>=2.6.0
+# For GPU acceleration with Paddle:
+# paddlepaddle-gpu>=2.6.0
 
 # Document processing
 pymupdf>=1.25.3
