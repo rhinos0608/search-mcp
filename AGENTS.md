@@ -1,12 +1,11 @@
 # AGENTS.md
 
-> **Version: 3.4.0** — Search MCP server. Keep stdout JSON-RPC only; log to stderr.
 
 Guidance for AI coding agents working in this repository.
 
 ## Purpose
 
-MCP server over stdio exposing web search/read/extract/crawl, semantic RAG, GitHub, YouTube, Reddit, Twitter/X, Product Hunt, patents, podcasts, academic research, Hacker News, Stack Overflow, npm, PyPI, and jobs.
+MCP server over stdio exposing web search/read/extract/crawl, semantic RAG, GitHub, YouTube, Reddit, academic research, Hacker News, Stack Overflow, npm, PyPI, and jobs.
 
 Core RAG flow: corpus ingestion → chunking → embeddings → BM25+ → RRF fusion → top-K retrieval. Shared modules live in `src/rag/`.
 
@@ -67,7 +66,6 @@ npm run config:decrypt   # config.enc -> config.json
   - `search` — search posts by keyword, free API
   - `comments` — fetch comment tree with nested post locator (`url | permalink | id`)
   - `semantic` — search + comments + RAG ranking
-- `twitter_search` (Nitter-based, requires `NITTER_BASE_URL`)
 
 ### Research/Discovery
 - `research` (family tool with `action` discriminator):
@@ -75,14 +73,17 @@ npm run config:decrypt   # config.enc -> config.json
   - `arxiv` — direct ArXiv search with category/date filtering
   - `hackernews` — Algolia HN search
   - `stackoverflow` — Stack Exchange API (degraded without `STACKEXCHANGE_API_KEY`)
+  - `deep_research` — Deep multi-phase research with LLM orchestration (requires `DEEP_RESEARCH_ENABLED=true`)
+    - Control loop: `State → Evaluate → Decide → Act → Update State`
+    - Phases: decomposition → discovery → extraction → gap analysis → audit → synthesis
+    - Model routing: orchestrator model (planning, evaluation, audit, synthesis) + worker model (extraction)
+    - 3D confidence: evidence quality × extraction reliability × source consistency
+    - Falls back to rule-based when LLM is not configured
 
 ### Packages/Products
 - `packages` (family tool with `action` discriminator):
   - `npm` — search npm registry
   - `pypi` — search Python Package Index
-- `producthunt_search` (requires `PRODUCTHUNT_API_TOKEN`)
-- `patent_search` (requires `PATENTSVIEW_API_KEY`)
-- `podcast_search` (requires `LISTENNOTES_API_KEY`)
 
 ### System
 - `health_check`: verify server status, config health, backend connectivity.
@@ -109,6 +110,73 @@ npm run config:decrypt   # config.enc -> config.json
 - `rerank.ts`: optional cross-encoder reranking (ONNX, dynamically imported).
 - `corpusCache.ts`: SQLite-backed persistent corpus cache.
 - `jobRanking.ts`, `jobDedup.ts`, `types/job.ts`, `sources/jobSources.ts`: job search support.
+
+## Deep Research Modules (V4.0.0)
+
+`src/research/` implements the deep research orchestration engine:
+
+### Core Loop: `State → Evaluate → Decide → Act → Update State`
+
+The orchestrator runs an adaptive control loop rather than a fixed pipeline. Each iteration evaluates the current state (what's known, what's missing), decides the best next action, executes it, and updates the state.
+
+### Control Flow
+
+```
+1. Decomposition  → rule-based query → sub-questions
+2. Discovery      → multi-backend search (web, academic, Reddit, HN, GitHub, SO)
+3. Taxonomy       → rule-based revision after first discovery pass
+4. Extraction     → LLM (worker model) or regex fallback
+5. EDA Loop       → Evaluate (gaps + LLM assessment)
+                   → Decide (LLM or rule-based heuristics)
+                   → Act (extract, fill_gaps, discover, contradiction_scan)
+                   → Update State (loop until budget exhausted or all gaps resolved)
+6. Audit          → LLM (orchestrator) + rule-based, merged with dedup
+7. Synthesis      → LLM (orchestrator) or rule-based ResearchSynthesizer
+```
+
+### Model Routing
+
+| Model | Role | Default Temperature |
+|---|---|---|
+| `DEEP_RESEARCH_MODEL` (orchestrator) | Planning, evaluation, decision-making, audit, synthesis | 0.7 |
+| `DEEP_RESEARCH_WORKER_MODEL` (worker) | Extraction from source content, classification | 0.3 |
+
+Both use the same OpenAI-compatible base URL (`DEEP_RESEARCH_BASE_URL`). When LLM is not configured, all phases fall back to rule-based implementations.
+
+### Key Modules
+
+| File | Purpose |
+|---|---|
+| `llm/chat.ts` | OpenAI-compatible HTTP client with model routing, token tracking, retry logic |
+| `llm/prompts.ts` | 6 system prompts (evaluate, decide, extract, classify, audit, synthesis) |
+| `llm/extractor.ts` | Worker-based extraction with semaphore parallelism, regex fallback |
+| `llm/synthesis.ts` | Orchestrator-based narrative report generation |
+| `orchestrator.ts` | Control loop: state machine, budget tracking, model routing |
+| `confidence.ts` | 3D confidence: evidence quality × extraction reliability × source consistency |
+| `state.ts` | Durable research state (sources, findings, contradictions, gaps) |
+| `decomposer.ts` | Rule-based query → sub-question decomposition |
+| `discovery.ts` | Multi-backend source discovery with scoring/dedup |
+| `extraction.ts` | Rule-based extraction (fallback path) |
+| `gapAnalysis.ts` | Rule-based gap detection (fallback path) |
+| `audit.ts` | Rule-based state audit with 7 checks (fallback path) |
+| `synthesizer.ts` | Rule-based synthesis (fallback path) |
+
+### 3D Confidence Model
+
+Separates three distinct confidence dimensions instead of collapsing them:
+
+1. **Evidence confidence** — source authority (by type), freshness (by date), corroboration count
+2. **Extraction confidence** — method reliability (LLM=0.8, regex=0.5, direct=0.9), content quality, risk score
+3. **Consistency confidence** — agreement ratio among sources, contradiction status
+
+Aggregate: `Math.min(evidence.score, extraction.score, consistency.score)` (conservative)
+
+### Failures / Fallbacks
+
+- LLM failure at any phase → rule-based fallback
+- Budget exhaustion → `synthesizePartial()` with whatever state exists
+- Per-source extraction failures isolated (one failure doesn't block others)
+- Degenerate loop protection: max iterations per budget profile, confidence plateau detection
 
 ## Embedding Providers
 
@@ -214,6 +282,13 @@ RAGA_ENABLED                # 'true' | 'false' (default: false)
 RAGA_BRIDGE_URL             # default http://localhost:8000
 RAGA_DEFAULT_PARSER         # 'auto' | 'docling' | 'paddleocr' | 'mineru'
 RAGA_TIMEOUT_MS             # default 30000
+
+# Deep Research (V4.0.0 — opt-in, off by default)
+DEEP_RESEARCH_ENABLED       # 'true' | 'false' (default: false)
+DEEP_RESEARCH_BASE_URL      # OpenAI-compatible base URL for LLM calls
+DEEP_RESEARCH_MODEL         # Main orchestrator model (e.g. 'gpt-4o', 'claude-sonnet-4')
+DEEP_RESEARCH_WORKER_MODEL  # Worker model for cheap tasks (e.g. 'gpt-4o-mini', 'llama3')
+DEEP_RESEARCH_DEFAULT_DEPTH # 'quick' | 'standard' | 'deep' | 'exhaustive'
 
 # Persistence
 DATABASE_PATH               # default under ~/.cache/search-mcp/semantic-crawl/
