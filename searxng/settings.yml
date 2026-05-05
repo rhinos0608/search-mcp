@@ -1,34 +1,82 @@
 # SearXNG configuration for search-mcp
 # Privacy-first settings with JSON output
 
+general:
+  instance_name: "search-mcp"
+  debug: false
+  privacypolicy_url: false
+  donation_url: false
+  contact_url: false
+  enable_metrics: true
+  open_metrics: ''
+brand:
+  docs_url: https://docs.searxng.org/
+  public_instances: https://searx.space
+  wiki_url: https://github.com/searxng/searxng/wiki
+  issue_url: https://github.com/searxng/searxng/issues
+
+search:
+  safe_search: 0
+  autocomplete: ""
+  autocomplete_min: 4
+  favicon_resolver: ""
+  default_lang: "en-US"
+  ban_time_on_fail: 5
+  max_ban_time_on_fail: 120
+  formats:
+    - html
+    - json
+
 server:
-  secret_key: "replace-with-a-random-secret-key"
+  secret_key: "${SEARXNG_SECRET_KEY}"
   bind_address: "0.0.0.0"
   port: 8080
+  base_url: false
   limiter: false
+  public_instance: false
   image_proxy: false
-  # Enable JSON API for MCP server consumption
+  http_protocol_version: "1.0"
   method: "GET"
   default_http_headers:
     X-Content-Type-Options: nosniff
     X-Frame-Options: DENY
     X-XSS-Protection: 1; mode=block
-
-search:
-  safe_search: 0
-  autocomplete: ""
-  language: "en-US"
-  formats:
-    - html
-    - json
-  # Disable cookies for privacy
-  cookie_max_age: 0
+    X-Download-Options: noopen
+    X-Robots-Tag: noindex, nofollow
+    Referrer-Policy: no-referrer
 
 ui:
   static_use_hash: true
   default_theme: simple
   default_locale: ""
   results_on_new_tab: false
+  query_in_title: false
+  center_alignment: false
+  hotkeys: default
+  url_formatting: pretty
+  theme_args:
+    simple_style: auto
+  search_on_category_select: true
+
+outgoing:
+  request_timeout: 10.0
+  max_request_timeout: 15.0
+  useragent_suffix: ""
+  pool_connections: 100
+  pool_maxsize: 20
+  enable_http2: true
+  # Use Tor if available (set SOCKS_HOST/TOR_PORT env vars)
+  # proxies:
+  #   http: socks5h://tor:9050
+  #   https: socks5h://tor:9050
+doi_resolvers:
+  oadoi.org: 'https://oadoi.org/'
+  doi.org: 'https://doi.org/'
+  sci-hub.se: 'https://sci-hub.se/'
+  sci-hub.st: 'https://sci-hub.st/'
+  sci-hub.ru: 'https://sci-hub.ru/'
+
+default_doi_resolver: 'oadoi.org'
 
 engines:
   # Web search engines
@@ -57,12 +105,3 @@ engines:
     engine: bing
     shortcut: bi
     disabled: true
-
-outgoing:
-  request_timeout: 10.0
-  max_request_timeout: 15.0
-  useragent_suffix: ""
-  # Use Tor if available (set SOCKS_HOST/TOR_PORT env vars)
-  # proxies:
-  #   http:  socks5h://tor:9050
-  #   https: socks5h://tor:9050

@@ -1,16 +1,41 @@
-FROM python:3.11-slim
+# Sidecar Embedding Service
+# Multi-stage build to minimize final image
 
-WORKDIR /app
+# Stage 1: Builder with build dependencies
+FROM python:3.11-slim AS builder
 
-# Install build dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
     git \
     && rm -rf /var/lib/apt/lists/*
 
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1
 
-# Pre-download model weights during build (optional, requires HF_TOKEN build arg)
+WORKDIR /build
+COPY requirements.txt .
+# Cache mount persists pip download cache across builds (faster rebuilds)
+# Install CPU-only torch to avoid downloading 850MB of CUDA/cuDNN libs
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip install --user torch --index-url https://download.pytorch.org/whl/cpu && \
+    grep -v "^torch" requirements.txt > req-nocuda.txt && \
+    pip install --user -r req-nocuda.txt
+
+# Stage 2: Runtime
+FROM python:3.11-slim
+RUN apt-get update && apt-get install -y --no-install-recommends curl && rm -rf /var/lib/apt/lists/*
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1
+
+WORKDIR /app
+
+RUN groupadd -r appuser && useradd -r -g appuser -d /app -s /sbin/nologin appuser
+
+COPY --from=builder /root/.local /app/.local
+ENV PATH=/app/.local/bin:$PATH
+
 ARG HF_TOKEN=""
 ENV HF_TOKEN=${HF_TOKEN}
 RUN if [ -n "$HF_TOKEN" ]; then \
@@ -21,6 +46,18 @@ RUN if [ -n "$HF_TOKEN" ]; then \
 
 COPY main.py .
 
+RUN chown -R appuser:appuser /app
+USER appuser
+
 EXPOSE 8000
 
+HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=3 \
+    CMD curl -f http://localhost:8000/health || exit 1
+
 CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
+
+LABEL org.opencontainers.image.title="search-mcp-embedding-sidecar" \
+      org.opencontainers.image.description="Text embedding inference service (EmbeddingGemma 300M)" \
+      org.opencontainers.image.source="https://github.com/rhinesharar/search-mcp" \
+      org.opencontainers.image.vendor="search-mcp" \
+      org.opencontainers.image.ref.name="production"
