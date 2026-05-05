@@ -1092,7 +1092,7 @@ function isConsentWallRedirect(pageUrl: string, markdown: string): boolean {
    return false;
 }
 
-export function pagesToCorpus(pages: CrawlPageResult[], scrub?: boolean): CorpusChunk[] {
+export function pagesToCorpus(pages: CrawlPageResult[], scrub?: boolean, maxTokens?: number): CorpusChunk[] {
    const cfg = scrub ?? loadConfig().scrubContent;
    const chunks: CorpusChunk[] = [];
    let pagesWithContent = 0;
@@ -1140,7 +1140,7 @@ export function pagesToCorpus(pages: CrawlPageResult[], scrub?: boolean): Corpus
          markdown = result.content;
       }
 
-      const mdChunks = chunkMarkdown(markdown, page.url);
+      const mdChunks = chunkMarkdown(markdown, page.url, maxTokens !== undefined ? { maxTokens } : undefined);
       if (mdChunks.length === 0) continue;
       pagesWithContent++;
       chunks.push(
@@ -1252,6 +1252,9 @@ export interface SemanticCrawlOptions {
    contextualEmbedding?: LlmConfig | undefined;
    /** Use LLM-generated context when embedding chunks. */
    useContextualEmbeddings?: boolean | undefined;
+   /** Override max tokens per chunk (default: 400). Larger values produce fewer
+    * chunks, reducing LLM calls when useContextualEmbeddings is enabled. */
+   maxChunkTokens?: number | undefined;
    /** Optional security policy for domain trust evaluation. Disabled by default. */
    domainTrust?: DomainTrustConfig | undefined;
 }
@@ -1285,6 +1288,12 @@ export async function semanticCrawl(
    // Track latest pages for structured elements
    let lastPages: CrawlPageResult[] = [];
 
+   // Auto-scale chunk size when contextual embeddings are on — larger chunks
+   // mean fewer LLM calls per page, speeding up enrichment substantially.
+   const effectiveMaxChunkTokens =
+      opts.maxChunkTokens ??
+      (opts.useContextualEmbeddings ? 1200 : undefined);
+
    switch (opts.source.type) {
       case 'url': {
          seedUrl = opts.source.url;
@@ -1313,7 +1322,7 @@ export async function semanticCrawl(
                chars: page.markdown.length,
             });
          }
-         corpusChunks = pagesToCorpus(result.pages);
+         corpusChunks = pagesToCorpus(result.pages, undefined, effectiveMaxChunkTokens);
          lastPages = result.pages;
          contextualDocuments = new Map(
             result.pages
@@ -1408,7 +1417,7 @@ export async function semanticCrawl(
                chars: page.markdown.length,
             });
          }
-         corpusChunks = pagesToCorpus(result.pages);
+         corpusChunks = pagesToCorpus(result.pages, undefined, effectiveMaxChunkTokens);
          lastPages = result.pages;
          contextualDocuments = new Map(
             result.pages
@@ -1469,7 +1478,7 @@ export async function semanticCrawl(
                chars: page.markdown.length,
             });
          }
-         corpusChunks = pagesToCorpus(result.pages);
+         corpusChunks = pagesToCorpus(result.pages, undefined, effectiveMaxChunkTokens);
          lastPages = result.pages;
          contextualDocuments = new Map(
             result.pages
@@ -1498,7 +1507,7 @@ export async function semanticCrawl(
          contextualDocuments = new Map<string, string>();
          for (const doc of docs) {
             contextualDocuments.set(doc.url, doc.content);
-            const chunks = chunkMarkdown(doc.content, doc.url);
+            const chunks = chunkMarkdown(doc.content, doc.url, effectiveMaxChunkTokens !== undefined ? { maxTokens: effectiveMaxChunkTokens } : undefined);
             corpusChunks.push(
                ...chunks.map((c) => ({
                   text: c.content,
@@ -1560,6 +1569,13 @@ export async function semanticCrawl(
       });
       crawlWarnings.push(cachedMsg);
 
+      if (opts.useContextualEmbeddings) {
+         const ctxMsg =
+            'useContextualEmbeddings was requested but is not supported for cached corpora. The corpus was built with the embeddings from the original crawl. Re-crawl with the original source type to apply contextual embeddings.';
+         crawlWarnings.push(ctxMsg);
+         logger.warn({ corpusId: opts.source.corpusId }, ctxMsg);
+      }
+
       const topChunks = await retrieveSemanticChunks(corpusChunks, {
          query: opts.query,
          topK: opts.topK,
@@ -1610,6 +1626,11 @@ export async function semanticCrawl(
             if (enrichment?.enriched !== true) return chunk;
             return { ...chunk, embedText: enrichment.embedText };
          });
+      } else {
+         const msg =
+            'useContextualEmbeddings requested but all chunks were deduplicated away; using original chunk text';
+         crawlWarnings.push(msg);
+         logger.warn({ sourceType: opts.source.type }, msg);
       }
    }
    const chunkTexts = deduped.map((c) => c.embedText ?? c.text);
@@ -1620,6 +1641,13 @@ export async function semanticCrawl(
             .at(-1)
             ?.replace(/^#+\s+/, '') ?? 'none',
    );
+
+   // Build a cache variant string that differentiates contextual-embedding corpora
+   // from plain ones. This prevents a corpus built with enrichment from being
+   // served to a request that asked for no enrichment (and vice versa).
+   const corpusVariant = opts.useContextualEmbeddings && opts.contextualEmbedding?.provider
+      ? `ctx:${opts.contextualEmbedding.provider}`
+      : 'ctx:off';
 
    const corpus = await getOrBuildCorpus(
       opts.source,
@@ -1636,6 +1664,7 @@ export async function semanticCrawl(
          return { chunks: deduped, embeddings, model, contentHash };
       },
       { ttlMs: 24 * 60 * 60 * 1000, maxCorpora: 50 },
+      corpusVariant,
    );
 
    resolvedCorpusId = corpus.corpusId;

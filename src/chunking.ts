@@ -1,41 +1,50 @@
 export interface MarkdownChunk {
-  content: string;
-  section: string;
-  url: string;
-  pageTitle: string | null;
-  chunkIndex: number;
-  totalChunks: number;
-  tokenEstimate: number;
-  charOffset: number;
-  metadata?: {
-    contextBefore?: string | undefined;
-    contextAfter?: string | undefined;
-    codeFence?: true | undefined;
-    codeBlocks?:
+   content: string;
+   section: string;
+   url: string;
+   pageTitle: string | null;
+   chunkIndex: number;
+   totalChunks: number;
+   tokenEstimate: number;
+   charOffset: number;
+   metadata?: {
+      contextBefore?: string | undefined;
+      contextAfter?: string | undefined;
+      codeFence?: true | undefined;
+      codeBlocks?:
       | {
-          language: string;
-          offset: number;
-          length: number;
-        }[]
+         language: string;
+         offset: number;
+         length: number;
+      }[]
       | undefined;
-  };
+   };
 }
 
 const HEADING_RE = /^(#{1,6})\s+(.*)$/;
+/** Default max tokens per chunk. */
 export const MAX_TOKENS = 400;
+/** Minimum tokens per chunk (floors for merging small sections). */
 export const MIN_TOKENS = 50;
 export const TOKEN_RATIO = 4;
 export const OVERLAP_RATIO = 0.2;
 
+/** Options accepted by chunkMarkdown. */
+export interface ChunkOptions {
+   /** Override max tokens per chunk (default: MAX_TOKENS = 400). When
+    * set, MIN_TOKENS is scaled proportionally (min = max / 8). */
+   maxTokens?: number;
+}
+
 interface Section {
-  depth: number;
-  heading: string;
-  contentLines: string[];
+   depth: number;
+   heading: string;
+   contentLines: string[];
 }
 
 interface SectionNode extends Section {
-  chain: string;
-  tokens: number;
+   chain: string;
+   tokens: number;
 }
 
 /**
@@ -44,25 +53,25 @@ interface SectionNode extends Section {
  * We remove them at the page level so they don't pollute sections or chunks.
  */
 const NAV_STRIP_PATTERNS: RegExp[] = [
-  // "Skip to content" / "Skip to navigation" accessibility links
-  /^\[skip to (?:content|navigation|main|text)\]\([^)]*\)/i,
+   // "Skip to content" / "Skip to navigation" accessibility links
+   /^\[skip to (?:content|navigation|main|text)\]\([^)]*\)/i,
 
-  // "Back to top" links
-  /^\[back to top\]?\([^)]*\)/i,
+   // "Back to top" links
+   /^\[back to top\]?\([^)]*\)/i,
 
-  // Inline navigation bar: "[About] [Products] [Services] [Contact]"
-  // Inline social share: "[Twitter] [Facebook] [LinkedIn]"
-  // This pattern matches a line that is purely short inline markdown links
-  /^(?:\[[^\]]{1,40}\]\([^)]+\)\s*){3,}$/,
+   // Inline navigation bar: "[About] [Products] [Services] [Contact]"
+   // Inline social share: "[Twitter] [Facebook] [LinkedIn]"
+   // This pattern matches a line that is purely short inline markdown links
+   /^(?:\[[^\]]{1,40}\]\([^)]+\)\s*){3,}$/,
 
-  // Pure link rows: multiple markdown links separated by | • · * / -
-  /^(?:\[[^\]]+\]\([^)]+\)\s*[|•·*/-]\s*)+\[[^\]]+\]\([^)]+\)/,
+   // Pure link rows: multiple markdown links separated by | • · * / -
+   /^(?:\[[^\]]+\]\([^)]+\)\s*[|•·*/-]\s*)+\[[^\]]+\]\([^)]+\)/,
 
-  // Social share prefixes: "Share:" "Follow us:" "Share this:"
-  /^\s*(?:share|follow\s+us|share\s+this|connect|social|more\s+from)\s*:.*/i,
+   // Social share prefixes: "Share:" "Follow us:" "Share this:"
+   /^\s*(?:share|follow\s+us|share\s+this|connect|social|more\s+from)\s*:.*/i,
 
-  // Short lines where >80% is markdown links = pure nav (2-3 links inline)
-  // Handles: "[About](/)  [Products](/p)  [Blog](/blog)"
+   // Short lines where >80% is markdown links = pure nav (2-3 links inline)
+   // Handles: "[About](/)  [Products](/p)  [Blog](/blog)"
 ];
 
 /**
@@ -71,222 +80,225 @@ const NAV_STRIP_PATTERNS: RegExp[] = [
  * social sharing, metadata, etc.). Preserves code blocks and tables.
  */
 export function stripNavigationMarkdown(markdown: string): string {
-  if (!markdown) return '';
+   if (!markdown) return '';
 
-  const lines = markdown.split('\n');
-  const result: string[] = [];
-  let inCodeFence = false;
+   const lines = markdown.split('\n');
+   const result: string[] = [];
+   let inCodeFence = false;
 
-  for (const line of lines) {
-    // Track code fences — never strip inside code blocks
-    if (line.trimStart().startsWith('```')) {
-      inCodeFence = !inCodeFence;
-      result.push(line);
-      continue;
-    }
-    // Never strip table rows or code fences
-    if (inCodeFence || line.trimStart().startsWith('|') || line.trimStart().startsWith('> ')) {
-      result.push(line);
-      continue;
-    }
-
-    const trimmed = line.trim();
-    if (trimmed.length === 0) {
-      result.push(line);
-      continue;
-    }
-
-    // Check line-level patterns
-    let matchedPattern = false;
-    for (const pattern of NAV_STRIP_PATTERNS) {
-      if (pattern.test(trimmed)) {
-        matchedPattern = true;
-        break;
+   for (const line of lines) {
+      // Track code fences — never strip inside code blocks
+      if (line.trimStart().startsWith('```')) {
+         inCodeFence = !inCodeFence;
+         result.push(line);
+         continue;
       }
-    }
-
-    if (matchedPattern) {
-      continue; // Skip this line entirely
-    }
-
-    // Pure link line: >70% of line is markdown link syntax [text](url)
-    // Skip check for structured content markers: list items, blockquotes, headings
-    if (
-      !(/^\s*[-*+]\s/.test(trimmed) && /\[[^\]]+\]/.test(trimmed)) &&
-      !/^\s*>\s/.test(trimmed) &&
-      !trimmed.startsWith('#')
-    ) {
-      const linkParts = trimmed.match(/\[[^\]]+\]\([^)]+\)/g);
-      if (linkParts) {
-        const linkChars = linkParts.reduce((sum, m) => sum + m.length, 0);
-        if (linkChars / trimmed.length > 0.7) {
-          continue;
-        }
+      // Never strip table rows or code fences
+      if (inCodeFence || line.trimStart().startsWith('|') || line.trimStart().startsWith('> ')) {
+         result.push(line);
+         continue;
       }
-    }
 
-    // Footer boilerplate: copyright, privacy, terms lines
-    if (
-      /^\s*(?:©|copyright|all rights reserved|privacy policy|terms of service|terms of use|cookie policy|sitemap|powered by|built with)\b/i.test(
-        trimmed,
-      )
-    ) {
-      continue;
-    }
-
-    // Page metadata: "Posted on...", "Published...", "By author"
-    if (
-      /^\s*(?:posted|published|updated|modified|written|authored)\s+(?:on|by|at)\b/i.test(
-        trimmed,
-      ) &&
-      trimmed.length < 120
-    ) {
-      continue;
-    }
-
-    // "Last updated:" / "Last modified:"
-    if (/^\s*last\s+(?:updated|modified|edited)\s*:/i.test(trimmed)) {
-      continue;
-    }
-
-    // Pure breadcrumb line: "Home > Category > Subcategory > Page"
-    const breadcrumbParts = trimmed.match(/\b[a-z][a-z\s]+\s*>/gi);
-    if (breadcrumbParts) {
-      const breadcrumbChars = breadcrumbParts.reduce((sum, m) => sum + m.length, 0);
-      if (breadcrumbChars / trimmed.length > 0.5) {
-        continue;
+      const trimmed = line.trim();
+      if (trimmed.length === 0) {
+         result.push(line);
+         continue;
       }
-    }
 
-    result.push(line);
-  }
+      // Check line-level patterns
+      let matchedPattern = false;
+      for (const pattern of NAV_STRIP_PATTERNS) {
+         if (pattern.test(trimmed)) {
+            matchedPattern = true;
+            break;
+         }
+      }
 
-  // Also strip leading/trailing blank lines and consecutive blank runs
-  return result
-    .join('\n')
-    .replace(/\n{3,}/g, '\n\n')
-    .trim();
+      if (matchedPattern) {
+         continue; // Skip this line entirely
+      }
+
+      // Pure link line: >70% of line is markdown link syntax [text](url)
+      // Skip check for structured content markers: list items, blockquotes, headings
+      if (
+         !(/^\s*[-*+]\s/.test(trimmed) && /\[[^\]]+\]/.test(trimmed)) &&
+         !/^\s*>\s/.test(trimmed) &&
+         !trimmed.startsWith('#')
+      ) {
+         const linkParts = trimmed.match(/\[[^\]]+\]\([^)]+\)/g);
+         if (linkParts) {
+            const linkChars = linkParts.reduce((sum, m) => sum + m.length, 0);
+            if (linkChars / trimmed.length > 0.7) {
+               continue;
+            }
+         }
+      }
+
+      // Footer boilerplate: copyright, privacy, terms lines
+      if (
+         /^\s*(?:©|copyright|all rights reserved|privacy policy|terms of service|terms of use|cookie policy|sitemap|powered by|built with)\b/i.test(
+            trimmed,
+         )
+      ) {
+         continue;
+      }
+
+      // Page metadata: "Posted on...", "Published...", "By author"
+      if (
+         /^\s*(?:posted|published|updated|modified|written|authored)\s+(?:on|by|at)\b/i.test(
+            trimmed,
+         ) &&
+         trimmed.length < 120
+      ) {
+         continue;
+      }
+
+      // "Last updated:" / "Last modified:"
+      if (/^\s*last\s+(?:updated|modified|edited)\s*:/i.test(trimmed)) {
+         continue;
+      }
+
+      // Pure breadcrumb line: "Home > Category > Subcategory > Page"
+      const breadcrumbParts = trimmed.match(/\b[a-z][a-z\s]+\s*>/gi);
+      if (breadcrumbParts) {
+         const breadcrumbChars = breadcrumbParts.reduce((sum, m) => sum + m.length, 0);
+         if (breadcrumbChars / trimmed.length > 0.5) {
+            continue;
+         }
+      }
+
+      result.push(line);
+   }
+
+   // Also strip leading/trailing blank lines and consecutive blank runs
+   return result
+      .join('\n')
+      .replace(/\n{3,}/g, '\n\n')
+      .trim();
 }
 
-export function chunkMarkdown(markdown: string, url: string): MarkdownChunk[] {
-  // Strip navigation / boilerplate before parsing sections.
-  const cleaned = stripNavigationMarkdown(markdown);
-  const lines = cleaned.split('\n');
-  const { sections, pageTitle } = parseSections(lines);
+export function chunkMarkdown(markdown: string, url: string, options?: ChunkOptions): MarkdownChunk[] {
+   // Strip navigation / boilerplate before parsing sections.
+   const cleaned = stripNavigationMarkdown(markdown);
+   const lines = cleaned.split('\n');
+   const { sections, pageTitle } = parseSections(lines);
 
-  // Build section nodes with chains
-  const nodes: SectionNode[] = [];
-  const parentStack: Section[] = [];
+   const effectiveMaxTokens = options?.maxTokens ?? MAX_TOKENS;
+   const effectiveMinTokens = Math.max(10, Math.round(effectiveMaxTokens / 8));
 
-  for (const section of sections) {
-    if (section.depth === 1) continue;
+   // Build section nodes with chains
+   const nodes: SectionNode[] = [];
+   const parentStack: Section[] = [];
 
-    while (parentStack.length > 0) {
-      const last = parentStack[parentStack.length - 1];
-      if (last && last.depth >= section.depth) {
-        parentStack.pop();
-      } else {
-        break;
+   for (const section of sections) {
+      if (section.depth === 1) continue;
+
+      while (parentStack.length > 0) {
+         const last = parentStack[parentStack.length - 1];
+         if (last && last.depth >= section.depth) {
+            parentStack.pop();
+         } else {
+            break;
+         }
       }
-    }
 
-    const chain = buildChain(pageTitle, section, parentStack);
-    const content = section.contentLines.join('\n').trim();
-    nodes.push({
-      ...section,
-      chain,
-      tokens: estimateTokens(content),
-      contentLines: content.length > 0 ? content.split('\n') : [],
-    });
+      const chain = buildChain(pageTitle, section, parentStack);
+      const content = section.contentLines.join('\n').trim();
+      nodes.push({
+         ...section,
+         chain,
+         tokens: estimateTokens(content),
+         contentLines: content.length > 0 ? content.split('\n') : [],
+      });
 
-    parentStack.push(section);
-  }
+      parentStack.push(section);
+   }
 
-  // Strip shared nav lines across sections before filtering/merging.
-  // Only counts short lines (≤200 chars) — long content lines are never nav.
-  if (nodes.length > 1) {
-    const lineCounts = new Map<string, number>();
-    for (const node of nodes) {
-      const seen = new Set<string>();
-      for (const line of node.contentLines) {
-        const key = line.trim().toLowerCase();
-        // Only count short lines — nav items are short; long content lines are never nav
-        if (key.length === 0 || key.length > 200) continue;
-        if (!seen.has(key)) {
-          seen.add(key);
-          lineCounts.set(key, (lineCounts.get(key) ?? 0) + 1);
-        }
-      }
-    }
-
-    const sharedLines = new Set<string>();
-    for (const [line, count] of lineCounts) {
-      if (count > 1) sharedLines.add(line);
-    }
-
-    if (sharedLines.size > 0) {
+   // Strip shared nav lines across sections before filtering/merging.
+   // Only counts short lines (≤200 chars) — long content lines are never nav.
+   if (nodes.length > 1) {
+      const lineCounts = new Map<string, number>();
       for (const node of nodes) {
-        node.contentLines = node.contentLines.filter((line) => {
-          const key = line.trim().toLowerCase();
-          return key.length === 0 || !sharedLines.has(key);
-        });
+         const seen = new Set<string>();
+         for (const line of node.contentLines) {
+            const key = line.trim().toLowerCase();
+            // Only count short lines — nav items are short; long content lines are never nav
+            if (key.length === 0 || key.length > 200) continue;
+            if (!seen.has(key)) {
+               seen.add(key);
+               lineCounts.set(key, (lineCounts.get(key) ?? 0) + 1);
+            }
+         }
       }
-    }
-  }
 
-  // Save original contentLines before any stripping — needed for fallback
-  const originalContentLines = nodes.map((n) => [...n.contentLines]);
-
-  // Strip breadcrumb and pure-link lines from individual sections
-  for (const node of nodes) {
-    node.contentLines = node.contentLines.filter(
-      (line) => !isBreadcrumbLine(line) && !isPureLinkLine(line),
-    );
-  }
-
-  // Filter boilerplate sections (check stripped content with full heuristic)
-  let contentNodes = nodes.filter((n) => !isBoilerplate(n.contentLines.join('\n')));
-  // Fallback: if every section is flagged as boilerplate, restore original content.
-  // Structured pages (job listings, tables, etc.) can resemble boilerplate because
-  // they contain many short list items with links. If the filter would remove
-  // everything, we keep the original content so the page is not lost entirely.
-  if (contentNodes.length === 0 && nodes.length > 0) {
-    for (let i = 0; i < nodes.length; i++) {
-      const node = nodes[i];
-      const orig = originalContentLines[i];
-      if (node !== undefined && orig !== undefined) {
-        node.contentLines = orig;
+      const sharedLines = new Set<string>();
+      for (const [line, count] of lineCounts) {
+         if (count > 1) sharedLines.add(line);
       }
-    }
-    contentNodes = nodes;
-  }
 
-  // Merge short sections
-  const groups = mergeShortSections(contentNodes);
+      if (sharedLines.size > 0) {
+         for (const node of nodes) {
+            node.contentLines = node.contentLines.filter((line) => {
+               const key = line.trim().toLowerCase();
+               return key.length === 0 || !sharedLines.has(key);
+            });
+         }
+      }
+   }
 
-  // Split groups into chunks
-  const allChunks: MarkdownChunk[] = [];
-  let runningOffset = 0;
-  for (const group of groups) {
-    const groupContent = group
-      .map((n) => n.contentLines.join('\n'))
-      .join('\n\n')
-      .trim();
-    const groupChain = group.at(-1)?.chain ?? '';
-    const chunks = splitGroup(groupContent, groupChain, url, pageTitle, runningOffset);
-    runningOffset += groupContent.length + 2; // +2 for the '\n\n' joiner
-    allChunks.push(...chunks);
-  }
+   // Save original contentLines before any stripping — needed for fallback
+   const originalContentLines = nodes.map((n) => [...n.contentLines]);
 
-  // Post-process to ensure floor invariant
-  let processed = postProcessChunks(allChunks);
+   // Strip breadcrumb and pure-link lines from individual sections
+   for (const node of nodes) {
+      node.contentLines = node.contentLines.filter(
+         (line) => !isBreadcrumbLine(line) && !isPureLinkLine(line),
+      );
+   }
 
-  // Context-aware boilerplate filtering (breadcrumbs, link-heavy, etc.)
-  processed = filterBoilerplateWithContext(processed);
-  processed = attachCodeFenceContext(processed);
+   // Filter boilerplate sections (check stripped content with full heuristic)
+   let contentNodes = nodes.filter((n) => !isBoilerplate(n.contentLines.join('\n')));
+   // Fallback: if every section is flagged as boilerplate, restore original content.
+   // Structured pages (job listings, tables, etc.) can resemble boilerplate because
+   // they contain many short list items with links. If the filter would remove
+   // everything, we keep the original content so the page is not lost entirely.
+   if (contentNodes.length === 0 && nodes.length > 0) {
+      for (let i = 0; i < nodes.length; i++) {
+         const node = nodes[i];
+         const orig = originalContentLines[i];
+         if (node !== undefined && orig !== undefined) {
+            node.contentLines = orig;
+         }
+      }
+      contentNodes = nodes;
+   }
 
-  // Re-index after all post-processing so chunkIndex and totalChunks are consistent
-  return processed.map((c, i) => ({ ...c, chunkIndex: i, totalChunks: processed.length }));
+   // Merge short sections
+   const groups = mergeShortSections(contentNodes, effectiveMinTokens);
+
+   // Split groups into chunks
+   const allChunks: MarkdownChunk[] = [];
+   let runningOffset = 0;
+   for (const group of groups) {
+      const groupContent = group
+         .map((n) => n.contentLines.join('\n'))
+         .join('\n\n')
+         .trim();
+      const groupChain = group.at(-1)?.chain ?? '';
+      const chunks = splitGroup(groupContent, groupChain, url, pageTitle, runningOffset, effectiveMaxTokens);
+      runningOffset += groupContent.length + 2; // +2 for the '\n\n' joiner
+      allChunks.push(...chunks);
+   }
+
+   // Post-process to ensure floor invariant
+   let processed = postProcessChunks(allChunks, effectiveMinTokens);
+
+   // Context-aware boilerplate filtering (breadcrumbs, link-heavy, etc.)
+   processed = filterBoilerplateWithContext(processed);
+   processed = attachCodeFenceContext(processed);
+
+   // Re-index after all post-processing so chunkIndex and totalChunks are consistent
+   return processed.map((c, i) => ({ ...c, chunkIndex: i, totalChunks: processed.length }));
 }
 
 // --- Boilerplate heuristics ---
@@ -295,647 +307,648 @@ const BREADCRUMB_LINK_RATIO = 0.5;
 const PURE_LINK_RATIO_THRESHOLD = 0.8;
 
 function isBreadcrumbLine(line: string): boolean {
-  const trimmed = line.trim();
-  if (trimmed.length === 0) return false;
-  const linkParts = trimmed.match(/\[([^\]]+)\]\(([^)]+)\)/g);
-  if (!linkParts) return false;
-  const linkChars = linkParts.reduce((sum, m) => sum + m.length, 0);
-  return linkChars / trimmed.length > PURE_LINK_RATIO_THRESHOLD && trimmed.includes('>');
+   const trimmed = line.trim();
+   if (trimmed.length === 0) return false;
+   const linkParts = trimmed.match(/\[([^\]]+)\]\(([^)]+)\)/g);
+   if (!linkParts) return false;
+   const linkChars = linkParts.reduce((sum, m) => sum + m.length, 0);
+   return linkChars / trimmed.length > PURE_LINK_RATIO_THRESHOLD && trimmed.includes('>');
 }
 
 function isPureLinkLine(line: string): boolean {
-  const trimmed = line.trim();
-  if (trimmed.length === 0) return false;
-  const linkMatch = /\[([^\]]+)\]\(([^)]+)\)/.exec(trimmed);
-  if (!linkMatch) return false;
-  return linkMatch[0].length / trimmed.length > PURE_LINK_RATIO_THRESHOLD;
+   const trimmed = line.trim();
+   if (trimmed.length === 0) return false;
+   const linkMatch = /\[([^\]]+)\]\(([^)]+)\)/.exec(trimmed);
+   if (!linkMatch) return false;
+   return linkMatch[0].length / trimmed.length > PURE_LINK_RATIO_THRESHOLD;
 }
 
 function isBoilerplateWithBreadcrumbCheck(content: string): boolean {
-  if (isBoilerplate(content)) return true;
+   if (isBoilerplate(content)) return true;
 
-  const trimmed = content.trim();
-  const lines = trimmed.split('\n');
-  const nonEmptyLines = lines.filter((l) => l.trim().length > 0);
-  if (nonEmptyLines.length === 0) return true;
+   const trimmed = content.trim();
+   const lines = trimmed.split('\n');
+   const nonEmptyLines = lines.filter((l) => l.trim().length > 0);
+   if (nonEmptyLines.length === 0) return true;
 
-  // Breadcrumb navigation: >50% of lines are breadcrumb patterns
-  const breadcrumbLines = nonEmptyLines.filter(isBreadcrumbLine);
-  if (breadcrumbLines.length / nonEmptyLines.length > BREADCRUMB_LINK_RATIO) return true;
+   // Breadcrumb navigation: >50% of lines are breadcrumb patterns
+   const breadcrumbLines = nonEmptyLines.filter(isBreadcrumbLine);
+   if (breadcrumbLines.length / nonEmptyLines.length > BREADCRUMB_LINK_RATIO) return true;
 
-  // Short-line + link-heavy: avg words < 3 AND >30% pure link lines
-  const totalWords = nonEmptyLines.reduce((sum, l) => sum + l.trim().split(/\s+/).length, 0);
-  const avgWordsPerLine = totalWords / nonEmptyLines.length;
-  const pureLinkLines = nonEmptyLines.filter(isPureLinkLine);
-  if (avgWordsPerLine < 3 && pureLinkLines.length / nonEmptyLines.length > 0.3) return true;
+   // Short-line + link-heavy: avg words < 3 AND >30% pure link lines
+   const totalWords = nonEmptyLines.reduce((sum, l) => sum + l.trim().split(/\s+/).length, 0);
+   const avgWordsPerLine = totalWords / nonEmptyLines.length;
+   const pureLinkLines = nonEmptyLines.filter(isPureLinkLine);
+   if (avgWordsPerLine < 3 && pureLinkLines.length / nonEmptyLines.length > 0.3) return true;
 
-  return false;
+   return false;
 }
 
 export function filterBoilerplateWithContext(chunks: MarkdownChunk[]): MarkdownChunk[] {
-  if (chunks.length === 0) return chunks;
+   if (chunks.length === 0) return chunks;
 
-  // Save originals before any filtering — needed for fallback when structured
-  // pages (job listings, tables, etc.) are misclassified as boilerplate.
-  const originalChunks = [...chunks];
+   // Save originals before any filtering — needed for fallback when structured
+   // pages (job listings, tables, etc.) are misclassified as boilerplate.
+   const originalChunks = [...chunks];
 
-  // Pass 1: line-level dedup — strip short lines that appear in 2+ chunks (repeated nav blocks)
-  // Only counts short lines (≤200 chars) — long content lines are never nav.
-  if (chunks.length > 1) {
-    const lineCounts = new Map<string, number>();
-    for (const chunk of chunks) {
-      const seen = new Set<string>();
-      for (const line of chunk.content.split('\n')) {
-        const key = line.trim().toLowerCase();
-        // Only count short lines — nav items are short; long content lines are never nav
-        if (key.length === 0 || key.length > 200) continue;
-        if (!seen.has(key)) {
-          seen.add(key);
-          lineCounts.set(key, (lineCounts.get(key) ?? 0) + 1);
-        }
-      }
-    }
-
-    const sharedLines = new Set<string>();
-    for (const [line, count] of lineCounts) {
-      if (count > 1) sharedLines.add(line);
-    }
-
-    if (sharedLines.size > 0) {
-      chunks = chunks.map((chunk) => {
-        const kept = chunk.content
-          .split('\n')
-          .filter((line) => {
+   // Pass 1: line-level dedup — strip short lines that appear in 2+ chunks (repeated nav blocks)
+   // Only counts short lines (≤200 chars) — long content lines are never nav.
+   if (chunks.length > 1) {
+      const lineCounts = new Map<string, number>();
+      for (const chunk of chunks) {
+         const seen = new Set<string>();
+         for (const line of chunk.content.split('\n')) {
             const key = line.trim().toLowerCase();
-            return key.length === 0 || !sharedLines.has(key);
-          })
-          .join('\n')
-          .trim();
-        return { ...chunk, content: kept };
-      });
-    }
-  }
+            // Only count short lines — nav items are short; long content lines are never nav
+            if (key.length === 0 || key.length > 200) continue;
+            if (!seen.has(key)) {
+               seen.add(key);
+               lineCounts.set(key, (lineCounts.get(key) ?? 0) + 1);
+            }
+         }
+      }
 
-  // Pass 2: strip remaining breadcrumb and pure-link lines from chunk content
-  chunks = chunks.map((chunk) => {
-    const stripped = chunk.content
-      .split('\n')
-      .filter((line) => !isBreadcrumbLine(line) && !isPureLinkLine(line))
-      .join('\n')
-      .trim();
-    return { ...chunk, content: stripped };
-  });
+      const sharedLines = new Set<string>();
+      for (const [line, count] of lineCounts) {
+         if (count > 1) sharedLines.add(line);
+      }
 
-  // Pass 3: individual boilerplate filtering (link-heavy, sidebar, etc.)
-  const filtered = chunks.filter(
-    (c) => c.content.length > 0 && !isBoilerplateWithBreadcrumbCheck(c.content),
-  );
-  // Fallback: if all chunks would be filtered, keep the originals — structured
-  // pages (job listings, tables, etc.) can be misclassified as boilerplate.
-  if (filtered.length === 0 && chunks.length > 0) {
-    return originalChunks;
-  }
-  return filtered;
+      if (sharedLines.size > 0) {
+         chunks = chunks.map((chunk) => {
+            const kept = chunk.content
+               .split('\n')
+               .filter((line) => {
+                  const key = line.trim().toLowerCase();
+                  return key.length === 0 || !sharedLines.has(key);
+               })
+               .join('\n')
+               .trim();
+            return { ...chunk, content: kept };
+         });
+      }
+   }
+
+   // Pass 2: strip remaining breadcrumb and pure-link lines from chunk content
+   chunks = chunks.map((chunk) => {
+      const stripped = chunk.content
+         .split('\n')
+         .filter((line) => !isBreadcrumbLine(line) && !isPureLinkLine(line))
+         .join('\n')
+         .trim();
+      return { ...chunk, content: stripped };
+   });
+
+   // Pass 3: individual boilerplate filtering (link-heavy, sidebar, etc.)
+   const filtered = chunks.filter(
+      (c) => c.content.length > 0 && !isBoilerplateWithBreadcrumbCheck(c.content),
+   );
+   // Fallback: if all chunks would be filtered, keep the originals — structured
+   // pages (job listings, tables, etc.) can be misclassified as boilerplate.
+   if (filtered.length === 0 && chunks.length > 0) {
+      return originalChunks;
+   }
+   return filtered;
 }
 
 function isBoilerplate(content: string): boolean {
-  const trimmed = content.trim();
-  if (trimmed.length === 0) return true;
+   const trimmed = content.trim();
+   if (trimmed.length === 0) return true;
 
-  // Never treat code blocks as boilerplate
-  if (trimmed.includes('```')) return false;
+   // Never treat code blocks as boilerplate
+   if (trimmed.includes('```')) return false;
 
-  // Count markdown links [text](url)
-  const linkMatches = trimmed.match(/\[([^\]]+)\]\(([^)]+)\)/g);
-  const linkChars = linkMatches ? linkMatches.reduce((sum, m) => sum + m.length, 0) : 0;
-  const linkDensity = trimmed.length > 0 ? linkChars / trimmed.length : 0;
+   // Count markdown links [text](url)
+   const linkMatches = trimmed.match(/\[([^\]]+)\]\(([^)]+)\)/g);
+   const linkChars = linkMatches ? linkMatches.reduce((sum, m) => sum + m.length, 0) : 0;
+   const linkDensity = trimmed.length > 0 ? linkChars / trimmed.length : 0;
 
-  // Lowered threshold: link density > 40% = nav/footer (was 50%)
-  if (linkDensity > 0.4) return true;
+   // Lowered threshold: link density > 40% = nav/footer (was 50%)
+   if (linkDensity > 0.4) return true;
 
-  const lines = trimmed.split('\n');
-  const nonEmptyLines = lines.filter((l) => l.trim().length > 0);
-  if (nonEmptyLines.length === 0) return true;
+   const lines = trimmed.split('\n');
+   const nonEmptyLines = lines.filter((l) => l.trim().length > 0);
+   if (nonEmptyLines.length === 0) return true;
 
-  // List-item density and short-line density
-  const listItemLines = nonEmptyLines.filter((l) => /^\s*[-*+]\s/.test(l) || /^\s*\d+\.\s/.test(l));
-  const listDensity = nonEmptyLines.length > 0 ? listItemLines.length / nonEmptyLines.length : 0;
-  const shortLineCount = nonEmptyLines.filter((l) => l.length < 50).length;
-  const shortLineDensity = shortLineCount / nonEmptyLines.length;
+   // List-item density and short-line density
+   const listItemLines = nonEmptyLines.filter((l) => /^\s*[-*+]\s/.test(l) || /^\s*\d+\.\s/.test(l));
+   const listDensity = nonEmptyLines.length > 0 ? listItemLines.length / nonEmptyLines.length : 0;
+   const shortLineCount = nonEmptyLines.filter((l) => l.length < 50).length;
+   const shortLineDensity = shortLineCount / nonEmptyLines.length;
 
-  // Nav menus: mostly short list items with low-to-moderate link density
-  // Lowered thresholds: listDensity > 0.5, shortLineDensity > 0.6 (was 0.6/0.7)
-  if (listDensity > 0.5 && shortLineDensity > 0.6 && linkDensity > 0.15) return true;
+   // Nav menus: mostly short list items with low-to-moderate link density
+   // Lowered thresholds: listDensity > 0.5, shortLineDensity > 0.6 (was 0.6/0.7)
+   if (listDensity > 0.5 && shortLineDensity > 0.6 && linkDensity > 0.15) return true;
 
-  // Plain-text nav/footer lists (no markdown links but very short items)
-  if (listDensity > 0.6 && shortLineDensity > 0.7) {
-    const avgWordsPerLine =
-      nonEmptyLines.reduce((sum, l) => sum + l.trim().split(/\s+/).length, 0) /
-      nonEmptyLines.length;
-    if (avgWordsPerLine < 4) return true;
-  }
+   // Plain-text nav/footer lists (no markdown links but very short items)
+   if (listDensity > 0.6 && shortLineDensity > 0.7) {
+      const avgWordsPerLine =
+         nonEmptyLines.reduce((sum, l) => sum + l.trim().split(/\s+/).length, 0) /
+         nonEmptyLines.length;
+      if (avgWordsPerLine < 4) return true;
+   }
 
-  // Tag cloud / category list: one or two short words per line, all links
-  // e.g. "[react](/tag/react)", "[typescript](/tag/typescript)"
-  if (linkDensity > 0.2 && shortLineDensity > 0.7) {
-    const avgWordsPerLine =
-      nonEmptyLines.reduce((sum, l) => sum + l.trim().split(/\s+/).length, 0) /
-      nonEmptyLines.length;
-    if (avgWordsPerLine < 3) return true;
-  }
+   // Tag cloud / category list: one or two short words per line, all links
+   // e.g. "[react](/tag/react)", "[typescript](/tag/typescript)"
+   if (linkDensity > 0.2 && shortLineDensity > 0.7) {
+      const avgWordsPerLine =
+         nonEmptyLines.reduce((sum, l) => sum + l.trim().split(/\s+/).length, 0) /
+         nonEmptyLines.length;
+      if (avgWordsPerLine < 3) return true;
+   }
 
-  // Inline nav paragraph: a single non-list line where >60% of words are links
-  if (nonEmptyLines.length <= 3 && listDensity === 0) {
-    const allWords = nonEmptyLines.flatMap((l) => l.trim().split(/\s+/));
-    const linkWords = allWords.filter((w) => /^\[[^\]]+\]\(/.test(w));
-    if (allWords.length > 0 && linkWords.length / allWords.length > 0.6) return true;
-  }
+   // Inline nav paragraph: a single non-list line where >60% of words are links
+   if (nonEmptyLines.length <= 3 && listDensity === 0) {
+      const allWords = nonEmptyLines.flatMap((l) => l.trim().split(/\s+/));
+      const linkWords = allWords.filter((w) => /^\[[^\]]+\]\(/.test(w));
+      if (allWords.length > 0 && linkWords.length / allWords.length > 0.6) return true;
+   }
 
-  return false;
+   return false;
 }
 
 function estimateTokens(text: string): number {
-  return Math.ceil(text.length / TOKEN_RATIO);
+   return Math.ceil(text.length / TOKEN_RATIO);
 }
 
 function parseSections(lines: string[]): { sections: Section[]; pageTitle: string | null } {
-  const sections: Section[] = [];
-  let current: Section | null = null;
-  let inCodeFence = false;
-  let pageTitle: string | null = null;
+   const sections: Section[] = [];
+   let current: Section | null = null;
+   let inCodeFence = false;
+   let pageTitle: string | null = null;
 
-  for (const line of lines) {
-    // Toggle code fence state
-    if (line.trimStart().startsWith('```')) {
-      inCodeFence = !inCodeFence;
-    }
-
-    const m = !inCodeFence ? HEADING_RE.exec(line) : null;
-
-    if (m) {
-      const depth = (m[1] ?? '').length;
-      const heading = (m[2] ?? '').trim();
-      if (depth === 1) {
-        if (pageTitle === null) {
-          pageTitle = heading;
-          if (current) {
-            sections.push(current);
-          }
-          current = { depth: 2, heading: '', contentLines: [] };
-        } else {
-          current?.contentLines.push(line);
-        }
-      } else if (depth <= 3) {
-        if (current) {
-          sections.push(current);
-        }
-        current = { depth, heading, contentLines: [] };
-      } else {
-        // H4+ — treat as content, not a boundary
-        current ??= { depth: 2, heading: '', contentLines: [] };
-        current.contentLines.push(line);
+   for (const line of lines) {
+      // Toggle code fence state
+      if (line.trimStart().startsWith('```')) {
+         inCodeFence = !inCodeFence;
       }
-    } else {
-      current ??= { depth: 2, heading: '', contentLines: [] };
-      current.contentLines.push(line);
-    }
-  }
 
-  if (current) {
-    sections.push(current);
-  }
+      const m = !inCodeFence ? HEADING_RE.exec(line) : null;
 
-  return { sections, pageTitle };
+      if (m) {
+         const depth = (m[1] ?? '').length;
+         const heading = (m[2] ?? '').trim();
+         if (depth === 1) {
+            if (pageTitle === null) {
+               pageTitle = heading;
+               if (current) {
+                  sections.push(current);
+               }
+               current = { depth: 2, heading: '', contentLines: [] };
+            } else {
+               current?.contentLines.push(line);
+            }
+         } else if (depth <= 3) {
+            if (current) {
+               sections.push(current);
+            }
+            current = { depth, heading, contentLines: [] };
+         } else {
+            // H4+ — treat as content, not a boundary
+            current ??= { depth: 2, heading: '', contentLines: [] };
+            current.contentLines.push(line);
+         }
+      } else {
+         current ??= { depth: 2, heading: '', contentLines: [] };
+         current.contentLines.push(line);
+      }
+   }
+
+   if (current) {
+      sections.push(current);
+   }
+
+   return { sections, pageTitle };
 }
 
 function buildChain(pageTitle: string | null, section: Section, parentStack: Section[]): string {
-  const parts: string[] = [];
-  if (pageTitle) parts.push(`# ${pageTitle}`);
-  for (const parent of parentStack) {
-    parts.push(
-      parent.heading ? `${'#'.repeat(parent.depth)} ${parent.heading}` : '#'.repeat(parent.depth),
-    );
-  }
-  parts.push(
-    section.heading ? `${'#'.repeat(section.depth)} ${section.heading}` : '#'.repeat(section.depth),
-  );
-  return parts.join(' > ');
+   const parts: string[] = [];
+   if (pageTitle) parts.push(`# ${pageTitle}`);
+   for (const parent of parentStack) {
+      parts.push(
+         parent.heading ? `${'#'.repeat(parent.depth)} ${parent.heading}` : '#'.repeat(parent.depth),
+      );
+   }
+   parts.push(
+      section.heading ? `${'#'.repeat(section.depth)} ${section.heading}` : '#'.repeat(section.depth),
+   );
+   return parts.join(' > ');
 }
 
-function mergeShortSections(nodes: SectionNode[]): SectionNode[][] {
-  if (nodes.length === 0) return [];
+function mergeShortSections(nodes: SectionNode[], minTokens = MIN_TOKENS): SectionNode[][] {
+   if (nodes.length === 0) return [];
 
-  const groups: SectionNode[][] = nodes.map((n) => [n]);
+   const groups: SectionNode[][] = nodes.map((n) => [n]);
 
-  let i = 0;
-  while (i < groups.length) {
-    const group = groups[i];
-    if (!group) {
-      i++;
-      continue;
-    }
-    const tokens = group.reduce((sum, n) => sum + n.tokens, 0);
-    if (tokens >= MIN_TOKENS) {
-      i++;
-      continue;
-    }
-
-    if (i + 1 < groups.length) {
-      // Merge forward into next group
-      const nextGroup = groups[i + 1];
-      if (nextGroup) {
-        groups[i + 1] = group.concat(nextGroup);
+   let i = 0;
+   while (i < groups.length) {
+      const group = groups[i];
+      if (!group) {
+         i++;
+         continue;
       }
-      groups.splice(i, 1);
-      // Stay at same i to check the merged group
-    } else if (i > 0) {
-      // Merge backward into previous group
-      const prevGroup = groups[i - 1];
-      if (prevGroup) {
-        groups[i - 1] = prevGroup.concat(group);
+      const tokens = group.reduce((sum, n) => sum + n.tokens, 0);
+      if (tokens >= minTokens) {
+         i++;
+         continue;
       }
-      groups.splice(i, 1);
-      break;
-    } else {
-      // Only group and it's sub-floor; keep it
-      i++;
-    }
-  }
 
-  return groups;
+      if (i + 1 < groups.length) {
+         // Merge forward into next group
+         const nextGroup = groups[i + 1];
+         if (nextGroup) {
+            groups[i + 1] = group.concat(nextGroup);
+         }
+         groups.splice(i, 1);
+         // Stay at same i to check the merged group
+      } else if (i > 0) {
+         // Merge backward into previous group
+         const prevGroup = groups[i - 1];
+         if (prevGroup) {
+            groups[i - 1] = prevGroup.concat(group);
+         }
+         groups.splice(i, 1);
+         break;
+      } else {
+         // Only group and it's sub-floor; keep it
+         i++;
+      }
+   }
+
+   return groups;
 }
 
 function splitGroup(
-  content: string,
-  chain: string,
-  url: string,
-  pageTitle: string | null,
-  baseOffset = 0,
+   content: string,
+   chain: string,
+   url: string,
+   pageTitle: string | null,
+   baseOffset = 0,
+   maxTokens = MAX_TOKENS,
 ): MarkdownChunk[] {
-  const trimmed = content.trim();
-  if (trimmed.length === 0) return [];
+   const trimmed = content.trim();
+   if (trimmed.length === 0) return [];
 
-  const tokens = estimateTokens(trimmed);
-  if (tokens <= MAX_TOKENS) {
-    return [createChunk(trimmed, chain, url, pageTitle, 0, 1, baseOffset)];
-  }
+   const tokens = estimateTokens(trimmed);
+   if (tokens <= maxTokens) {
+      return [createChunk(trimmed, chain, url, pageTitle, 0, 1, baseOffset)];
+   }
 
-  const maxChars = MAX_TOKENS * TOKEN_RATIO;
-  const units = extractAtomicUnits(trimmed);
-  const chunks: MarkdownChunk[] = [];
-  let start = 0;
-  let charOffset = 0;
-  let unitIdx = 0;
+   const maxChars = maxTokens * TOKEN_RATIO;
+   const units = extractAtomicUnits(trimmed);
+   const chunks: MarkdownChunk[] = [];
+   let start = 0;
+   let charOffset = 0;
+   let unitIdx = 0;
 
-  while (start < trimmed.length) {
-    const remaining = trimmed.length - start;
-    if (remaining <= maxChars) {
-      const text = trimmed.slice(start).trim();
-      if (text.length > 0) {
-        chunks.push(
-          createChunk(text, chain, url, pageTitle, chunks.length, 0, baseOffset + charOffset),
-        );
+   while (start < trimmed.length) {
+      const remaining = trimmed.length - start;
+      if (remaining <= maxChars) {
+         const text = trimmed.slice(start).trim();
+         if (text.length > 0) {
+            chunks.push(
+               createChunk(text, chain, url, pageTitle, chunks.length, 0, baseOffset + charOffset),
+            );
+         }
+         break;
       }
-      break;
-    }
 
-    const splitResult = findSplitPosition(trimmed, start, maxChars, units, unitIdx);
-    let splitPos = splitResult.pos;
-    unitIdx = splitResult.unitIdx;
+      const splitResult = findSplitPosition(trimmed, start, maxChars, units, unitIdx);
+      let splitPos = splitResult.pos;
+      unitIdx = splitResult.unitIdx;
 
-    // Ensure we make progress
-    if (splitPos <= start) {
-      splitPos = Math.min(start + maxChars, trimmed.length);
-    }
-
-    const chunkText = trimmed.slice(start, splitPos).trim();
-    if (chunkText.length > 0) {
-      chunks.push(
-        createChunk(chunkText, chain, url, pageTitle, chunks.length, 0, baseOffset + charOffset),
-      );
-    }
-
-    // Calculate overlap
-    const overlapSize = Math.floor(chunkText.length * OVERLAP_RATIO);
-    let nextStart = splitPos - overlapSize;
-    if (nextStart < start) nextStart = start;
-
-    // Snap overlap start to next sentence boundary, but never inside an atomic unit
-    nextStart = snapToSentenceBoundary(trimmed, nextStart, splitPos);
-    if (nextStart >= splitPos || nextStart <= start) {
-      nextStart = splitPos;
-    } else {
-      // Ensure overlap start is not inside an atomic unit
-      const unitIdxAtStart = findUnitIndex(nextStart, units);
-      if (unitIdxAtStart !== -1) {
-        const unit = units[unitIdxAtStart];
-        if (unit && nextStart >= unit.start && nextStart < unit.end) {
-          nextStart = unit.end;
-          if (nextStart >= splitPos) {
-            nextStart = splitPos;
-          }
-        }
+      // Ensure we make progress
+      if (splitPos <= start) {
+         splitPos = Math.min(start + maxChars, trimmed.length);
       }
-    }
-    start = nextStart;
-    charOffset = start;
-  }
 
-  // Two-pass: annotate per-section indices
-  return chunks.map((c, i) => ({
-    ...c,
-    chunkIndex: i,
-    totalChunks: chunks.length,
-  }));
+      const chunkText = trimmed.slice(start, splitPos).trim();
+      if (chunkText.length > 0) {
+         chunks.push(
+            createChunk(chunkText, chain, url, pageTitle, chunks.length, 0, baseOffset + charOffset),
+         );
+      }
+
+      // Calculate overlap
+      const overlapSize = Math.floor(chunkText.length * OVERLAP_RATIO);
+      let nextStart = splitPos - overlapSize;
+      if (nextStart < start) nextStart = start;
+
+      // Snap overlap start to next sentence boundary, but never inside an atomic unit
+      nextStart = snapToSentenceBoundary(trimmed, nextStart, splitPos);
+      if (nextStart >= splitPos || nextStart <= start) {
+         nextStart = splitPos;
+      } else {
+         // Ensure overlap start is not inside an atomic unit
+         const unitIdxAtStart = findUnitIndex(nextStart, units);
+         if (unitIdxAtStart !== -1) {
+            const unit = units[unitIdxAtStart];
+            if (unit && nextStart >= unit.start && nextStart < unit.end) {
+               nextStart = unit.end;
+               if (nextStart >= splitPos) {
+                  nextStart = splitPos;
+               }
+            }
+         }
+      }
+      start = nextStart;
+      charOffset = start;
+   }
+
+   // Two-pass: annotate per-section indices
+   return chunks.map((c, i) => ({
+      ...c,
+      chunkIndex: i,
+      totalChunks: chunks.length,
+   }));
 }
 
 function findSplitPosition(
-  content: string,
-  start: number,
-  maxChars: number,
-  units: AtomicUnit[],
-  unitIdx: number,
+   content: string,
+   start: number,
+   maxChars: number,
+   units: AtomicUnit[],
+   unitIdx: number,
 ): { pos: number; unitIdx: number } {
-  const target = start + maxChars;
-  if (target >= content.length) return { pos: content.length, unitIdx };
+   const target = start + maxChars;
+   if (target >= content.length) return { pos: content.length, unitIdx };
 
-  // Advance unitIdx to first unit that could overlap the search range
-  while (unitIdx < units.length) {
-    const u = units[unitIdx];
-    if (!u || u.end > start) break;
-    unitIdx++;
-  }
+   // Advance unitIdx to first unit that could overlap the search range
+   while (unitIdx < units.length) {
+      const u = units[unitIdx];
+      if (!u || u.end > start) break;
+      unitIdx++;
+   }
 
-  // Search backward for blank line outside atomic unit
-  let pos = target;
-  while (pos > start) {
-    if (content[pos] === '\n' && content[pos + 1] === '\n') {
-      if (!isInAtomicUnit(pos, units, unitIdx)) {
-        return { pos: pos + 1, unitIdx };
+   // Search backward for blank line outside atomic unit
+   let pos = target;
+   while (pos > start) {
+      if (content[pos] === '\n' && content[pos + 1] === '\n') {
+         if (!isInAtomicUnit(pos, units, unitIdx)) {
+            return { pos: pos + 1, unitIdx };
+         }
       }
-    }
-    pos--;
-  }
+      pos--;
+   }
 
-  // Search forward for sentence boundary
-  pos = target;
-  while (pos < content.length) {
-    if (
-      (content[pos] === '.' || content[pos] === '?' || content[pos] === '!') &&
-      content[pos + 1] === ' '
-    ) {
-      if (!isInAtomicUnit(pos, units, unitIdx)) {
-        return { pos: pos + 2, unitIdx };
+   // Search forward for sentence boundary
+   pos = target;
+   while (pos < content.length) {
+      if (
+         (content[pos] === '.' || content[pos] === '?' || content[pos] === '!') &&
+         content[pos + 1] === ' '
+      ) {
+         if (!isInAtomicUnit(pos, units, unitIdx)) {
+            return { pos: pos + 2, unitIdx };
+         }
       }
-    }
-    if (content[pos] === '\n' && content[pos + 1] !== '\n') {
-      if (!isInAtomicUnit(pos, units, unitIdx)) {
-        return { pos: pos + 1, unitIdx };
+      if (content[pos] === '\n' && content[pos + 1] !== '\n') {
+         if (!isInAtomicUnit(pos, units, unitIdx)) {
+            return { pos: pos + 1, unitIdx };
+         }
       }
-    }
-    pos++;
-  }
+      pos++;
+   }
 
-  // Fallback: force split at target, but outside atomic unit
-  pos = target;
-  while (pos < content.length && isInAtomicUnit(pos, units, unitIdx)) {
-    pos++;
-  }
-  return { pos, unitIdx };
+   // Fallback: force split at target, but outside atomic unit
+   pos = target;
+   while (pos < content.length && isInAtomicUnit(pos, units, unitIdx)) {
+      pos++;
+   }
+   return { pos, unitIdx };
 }
 
 function findUnitIndex(pos: number, units: AtomicUnit[]): number {
-  for (let i = 0; i < units.length; i++) {
-    const u = units[i];
-    if (u && pos >= u.start && pos < u.end) return i;
-  }
-  return -1;
+   for (let i = 0; i < units.length; i++) {
+      const u = units[i];
+      if (u && pos >= u.start && pos < u.end) return i;
+   }
+   return -1;
 }
 
 function isInAtomicUnit(pos: number, units: AtomicUnit[], unitIdx: number): boolean {
-  // Fast path: advance pointer to relevant unit, then check
-  let i = unitIdx;
-  while (i < units.length) {
-    const u = units[i];
-    if (!u) break;
-    if (pos < u.start) break;
-    if (pos >= u.start && pos < u.end) return true;
-    i++;
-  }
-  return false;
+   // Fast path: advance pointer to relevant unit, then check
+   let i = unitIdx;
+   while (i < units.length) {
+      const u = units[i];
+      if (!u) break;
+      if (pos < u.start) break;
+      if (pos >= u.start && pos < u.end) return true;
+      i++;
+   }
+   return false;
 }
 
 interface AtomicUnit {
-  start: number;
-  end: number;
+   start: number;
+   end: number;
 }
 
 function extractAtomicUnits(content: string): AtomicUnit[] {
-  const units: AtomicUnit[] = [];
-  const lines = content.split('\n');
-  let i = 0;
-  let charOffset = 0;
+   const units: AtomicUnit[] = [];
+   const lines = content.split('\n');
+   let i = 0;
+   let charOffset = 0;
 
-  while (i < lines.length) {
-    const line = lines[i];
-    if (line === undefined) break;
+   while (i < lines.length) {
+      const line = lines[i];
+      if (line === undefined) break;
 
-    // Code fence
-    if (line.trimStart().startsWith('```')) {
-      const start = charOffset;
-      i++;
+      // Code fence
+      if (line.trimStart().startsWith('```')) {
+         const start = charOffset;
+         i++;
+         charOffset += line.length + 1;
+         while (i < lines.length) {
+            const innerLine = lines[i];
+            if (innerLine === undefined) break;
+            if (innerLine.trimStart().startsWith('```')) break;
+            charOffset += innerLine.length + 1;
+            i++;
+         }
+         if (i < lines.length) {
+            const closeLine = lines[i];
+            if (closeLine !== undefined) {
+               charOffset += closeLine.length + 1;
+            }
+            i++;
+         }
+         units.push({ start, end: charOffset });
+         continue;
+      }
+
+      // Table
+      if (line.trimStart().startsWith('|')) {
+         const start = charOffset;
+         while (i < lines.length) {
+            const tableLine = lines[i];
+            if (!tableLine?.trimStart().startsWith('|')) break;
+            charOffset += tableLine.length + 1;
+            i++;
+         }
+         units.push({ start, end: charOffset });
+         continue;
+      }
+
+      // Indented code block
+      if (line.startsWith('    ') || line.startsWith('\t')) {
+         const start = charOffset;
+         while (i < lines.length) {
+            const codeLine = lines[i];
+            if (codeLine === undefined) break;
+            if (!codeLine.startsWith('    ') && !codeLine.startsWith('\t') && codeLine.length > 0)
+               break;
+            charOffset += codeLine.length + 1;
+            i++;
+         }
+         units.push({ start, end: charOffset });
+         continue;
+      }
+
       charOffset += line.length + 1;
-      while (i < lines.length) {
-        const innerLine = lines[i];
-        if (innerLine === undefined) break;
-        if (innerLine.trimStart().startsWith('```')) break;
-        charOffset += innerLine.length + 1;
-        i++;
-      }
-      if (i < lines.length) {
-        const closeLine = lines[i];
-        if (closeLine !== undefined) {
-          charOffset += closeLine.length + 1;
-        }
-        i++;
-      }
-      units.push({ start, end: charOffset });
-      continue;
-    }
+      i++;
+   }
 
-    // Table
-    if (line.trimStart().startsWith('|')) {
-      const start = charOffset;
-      while (i < lines.length) {
-        const tableLine = lines[i];
-        if (!tableLine?.trimStart().startsWith('|')) break;
-        charOffset += tableLine.length + 1;
-        i++;
-      }
-      units.push({ start, end: charOffset });
-      continue;
-    }
-
-    // Indented code block
-    if (line.startsWith('    ') || line.startsWith('\t')) {
-      const start = charOffset;
-      while (i < lines.length) {
-        const codeLine = lines[i];
-        if (codeLine === undefined) break;
-        if (!codeLine.startsWith('    ') && !codeLine.startsWith('\t') && codeLine.length > 0)
-          break;
-        charOffset += codeLine.length + 1;
-        i++;
-      }
-      units.push({ start, end: charOffset });
-      continue;
-    }
-
-    charOffset += line.length + 1;
-    i++;
-  }
-
-  return units;
+   return units;
 }
 
 function snapToSentenceBoundary(content: string, rawStart: number, splitPos: number): number {
-  const targetOverlap = splitPos - rawStart;
-  let bestPos = rawStart;
-  let bestDiff = Infinity;
+   const targetOverlap = splitPos - rawStart;
+   let bestPos = rawStart;
+   let bestDiff = Infinity;
 
-  // Search backward from splitPos for the sentence boundary that gives
-  // overlap closest to the target. This avoids the old bug where the
-  // first boundary in the window produced a tiny overlap.
-  for (let pos = splitPos - 1; pos >= 0; pos--) {
-    if (
-      (content[pos] === '.' || content[pos] === '?' || content[pos] === '!') &&
-      content[pos + 1] === ' '
-    ) {
-      const candidateStart = pos + 2;
-      const overlap = splitPos - candidateStart;
-      const diff = Math.abs(overlap - targetOverlap);
+   // Search backward from splitPos for the sentence boundary that gives
+   // overlap closest to the target. This avoids the old bug where the
+   // first boundary in the window produced a tiny overlap.
+   for (let pos = splitPos - 1; pos >= 0; pos--) {
+      if (
+         (content[pos] === '.' || content[pos] === '?' || content[pos] === '!') &&
+         content[pos + 1] === ' '
+      ) {
+         const candidateStart = pos + 2;
+         const overlap = splitPos - candidateStart;
+         const diff = Math.abs(overlap - targetOverlap);
 
-      if (diff < bestDiff) {
-        bestDiff = diff;
-        bestPos = candidateStart;
+         if (diff < bestDiff) {
+            bestDiff = diff;
+            bestPos = candidateStart;
+         }
       }
-    }
 
-    // Stop once we've searched far enough back that overlap would be >2x target
-    if (splitPos - pos > targetOverlap * 2) break;
-  }
+      // Stop once we've searched far enough back that overlap would be >2x target
+      if (splitPos - pos > targetOverlap * 2) break;
+   }
 
-  return bestPos;
+   return bestPos;
 }
 
-function postProcessChunks(chunks: MarkdownChunk[]): MarkdownChunk[] {
-  if (chunks.length <= 1) return chunks;
+function postProcessChunks(chunks: MarkdownChunk[], minTokens = MIN_TOKENS): MarkdownChunk[] {
+   if (chunks.length <= 1) return chunks;
 
-  const result: MarkdownChunk[] = [];
+   const result: MarkdownChunk[] = [];
 
-  for (let i = 0; i < chunks.length; i++) {
-    const chunk = chunks[i];
-    if (!chunk) continue;
-    if (chunk.tokenEstimate >= MIN_TOKENS) {
-      result.push(chunk);
-      continue;
-    }
-
-    // Sub-floor chunk
-    if (result.length > 0) {
-      // Merge backward into previous chunk
-      const prev = result.at(-1);
-      if (prev) {
-        const mergedContent = prev.content + '\n\n' + chunk.content;
-        result[result.length - 1] = {
-          ...prev,
-          content: mergedContent,
-          tokenEstimate: estimateTokens(mergedContent),
-          chunkIndex: 0,
-          totalChunks: 1,
-        };
-      } else {
-        result.push(chunk);
+   for (let i = 0; i < chunks.length; i++) {
+      const chunk = chunks[i];
+      if (!chunk) continue;
+      if (chunk.tokenEstimate >= minTokens) {
+         result.push(chunk);
+         continue;
       }
-    } else if (i + 1 < chunks.length) {
-      // Merge forward into next chunk
-      const next = chunks[i + 1];
-      if (next) {
-        const mergedContent = chunk.content + '\n\n' + next.content;
-        result.push({
-          ...chunk,
-          content: mergedContent,
-          tokenEstimate: estimateTokens(mergedContent),
-          chunkIndex: 0,
-          totalChunks: 1,
-        });
-        i++; // skip next since we consumed it
-      } else {
-        result.push(chunk);
-      }
-    } else {
-      result.push(chunk);
-    }
-  }
 
-  return result;
+      // Sub-floor chunk
+      if (result.length > 0) {
+         // Merge backward into previous chunk
+         const prev = result.at(-1);
+         if (prev) {
+            const mergedContent = prev.content + '\n\n' + chunk.content;
+            result[result.length - 1] = {
+               ...prev,
+               content: mergedContent,
+               tokenEstimate: estimateTokens(mergedContent),
+               chunkIndex: 0,
+               totalChunks: 1,
+            };
+         } else {
+            result.push(chunk);
+         }
+      } else if (i + 1 < chunks.length) {
+         // Merge forward into next chunk
+         const next = chunks[i + 1];
+         if (next) {
+            const mergedContent = chunk.content + '\n\n' + next.content;
+            result.push({
+               ...chunk,
+               content: mergedContent,
+               tokenEstimate: estimateTokens(mergedContent),
+               chunkIndex: 0,
+               totalChunks: 1,
+            });
+            i++; // skip next since we consumed it
+         } else {
+            result.push(chunk);
+         }
+      } else {
+         result.push(chunk);
+      }
+   }
+
+   return result;
 }
 
 function createChunk(
-  content: string,
-  section: string,
-  url: string,
-  pageTitle: string | null,
-  chunkIndex: number,
-  totalChunks: number,
-  charOffset: number,
+   content: string,
+   section: string,
+   url: string,
+   pageTitle: string | null,
+   chunkIndex: number,
+   totalChunks: number,
+   charOffset: number,
 ): MarkdownChunk {
-  return {
-    content,
-    section,
-    url,
-    pageTitle,
-    chunkIndex,
-    totalChunks,
-    tokenEstimate: estimateTokens(content),
-    charOffset,
-  };
+   return {
+      content,
+      section,
+      url,
+      pageTitle,
+      chunkIndex,
+      totalChunks,
+      tokenEstimate: estimateTokens(content),
+      charOffset,
+   };
 }
 
 function attachCodeFenceContext(chunks: MarkdownChunk[]): MarkdownChunk[] {
-  return chunks.map((chunk) => {
-    const fenceMatch = /```[\s\S]*?```/u.exec(chunk.content);
-    if (fenceMatch?.index === undefined) return chunk;
+   return chunks.map((chunk) => {
+      const fenceMatch = /```[\s\S]*?```/u.exec(chunk.content);
+      if (fenceMatch?.index === undefined) return chunk;
 
-    const before = chunk.content.slice(0, fenceMatch.index).trim();
-    const after = chunk.content.slice(fenceMatch.index + fenceMatch[0].length).trim();
+      const before = chunk.content.slice(0, fenceMatch.index).trim();
+      const after = chunk.content.slice(fenceMatch.index + fenceMatch[0].length).trim();
 
-    // Extract code blocks >= 300 chars with language detection
-    const codeBlocks: { language: string; offset: number; length: number }[] = [];
-    const codeFenceRegex = /```(\w*)\s*\n([\s\S]*?)```/g;
-    let match: RegExpExecArray | null;
-    while ((match = codeFenceRegex.exec(chunk.content)) !== null) {
-      const codeContent = match[2] ?? '';
-      if (codeContent.length >= 300) {
-        codeBlocks.push({
-          language: (match[1] ?? '').trim().toLowerCase(),
-          offset: match.index,
-          length: match[0].length,
-        });
+      // Extract code blocks >= 300 chars with language detection
+      const codeBlocks: { language: string; offset: number; length: number }[] = [];
+      const codeFenceRegex = /```(\w*)\s*\n([\s\S]*?)```/g;
+      let match: RegExpExecArray | null;
+      while ((match = codeFenceRegex.exec(chunk.content)) !== null) {
+         const codeContent = match[2] ?? '';
+         if (codeContent.length >= 300) {
+            codeBlocks.push({
+               language: (match[1] ?? '').trim().toLowerCase(),
+               offset: match.index,
+               length: match[0].length,
+            });
+         }
       }
-    }
 
-    const meta: MarkdownChunk['metadata'] = {
-      ...(chunk.metadata ?? {}),
-      contextBefore: before.length > 0 ? before : undefined,
-      contextAfter: after.length > 0 ? after : undefined,
-      codeFence: true as const,
-      ...(codeBlocks.length > 0 ? { codeBlocks } : {}),
-    };
+      const meta: MarkdownChunk['metadata'] = {
+         ...(chunk.metadata ?? {}),
+         contextBefore: before.length > 0 ? before : undefined,
+         contextAfter: after.length > 0 ? after : undefined,
+         codeFence: true as const,
+         ...(codeBlocks.length > 0 ? { codeBlocks } : {}),
+      };
 
-    return {
-      ...chunk,
-      metadata: meta,
-    };
-  });
+      return {
+         ...chunk,
+         metadata: meta,
+      };
+   });
 }
