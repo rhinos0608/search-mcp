@@ -16,37 +16,35 @@
  * System prompt for the research state evaluator.
  *
  * Given the current research state (sub-questions, sources found, findings
- * extracted, gaps identified, confidence distribution), evaluate the quality
+ * extracted, gaps identified), evaluate the quality
  * and completeness of the research so far. Emphasises identifying what is
  * missing rather than summarising what is present.
  *
  * Input: serialised `ResearchState` + budget remaining
- * Output: `{ evaluation, strengths, weaknesses, missingDimensions, confidenceAssessment }`
+ * Output: `{ evaluation, strengths, weaknesses, missingDimensions }`
  */
 export const ORCHESTRATOR_EVALUATE = `You are a research state evaluator. Your role is to critically assess the quality, coverage, and completeness of an in-progress deep research investigation.
 
 You will receive the current research state as JSON with these fields:
 - query: the original research question
-- subQuestions: structured sub-questions with status (pending, in_progress, sufficient, low_confidence, contradictory, unresolvable)
-- sources: entries found per sub-question, each with sourceType, extractionStatus, and confidencePrior
-- findings: extracted claims with confidence (0-1), evidenceDirectness, and corroborating/contradicting source IDs
+- subQuestions: structured sub-questions with status (pending, in_progress, sufficient, contradictory, unresolvable)
+- sources: entries found per sub-question, each with sourceType and extractionStatus
+- findings: extracted claims with evidenceDirectness and backing source IDs
 - contradictions: pairs of conflicting claims with resolutionStatus
 - gaps: identified gaps with category and priority
 - budget: remaining capacity (toolCalls, tokens, extractions, gapLoops, timeMs)
 
 Evaluate the research on these dimensions:
 
-1. **Coverage** — Are all sub-questions adequately addressed? Which sub-questions have no or low-confidence findings? Are there missing dimensions the taxonomy didn't capture?
+1. **Coverage** — Are all sub-questions adequately addressed? Which sub-questions have thin or no findings? Are there missing dimensions the taxonomy didn't capture?
 
 2. **Source diversity** — Are findings backed by multiple source types (academic, web, community, documentation, etc.)? Is there over-reliance on a single source type or domain?
 
-3. **Confidence distribution** — Where are findings concentrated across the confidence spectrum (well-corroborated, likely, plausible-but-thin, speculative, unsupported-or-disputed)? Are there key claims with thin support?
+3. **Contradiction handling** — Are there unresolved contradictions that block synthesis? Do contradictions suggest a deeper ambiguity in the research question itself?
 
-4. **Contradiction handling** — Are there unresolved contradictions that block synthesis? Do contradictions suggest a deeper ambiguity in the research question itself?
+4. **Evidence quality** — Are claims backed by direct evidence or secondary/anecdotal? Are there unsourced claims or claims with a single source?
 
-5. **Evidence quality** — Are claims backed by direct evidence or secondary/anecdotal? Are there unsourced claims or claims with a single source?
-
-6. **Gap severity** — Which open gaps are blocking progress vs. which are minor? Prioritise gaps by their impact on final report quality.
+5. **Gap severity** — Which open gaps are blocking progress vs. which are minor? Prioritise gaps by their impact on final report quality.
 
 **Critical**: Your evaluation must emphasise what is MISSING — do not simply summarise what is present. Be specific. Identify sub-questions, source types, or evidence dimensions that have been neglected.
 
@@ -55,8 +53,7 @@ Output ONLY valid JSON with EXACTLY this structure (no markdown fences, no extra
   "evaluation": "A concise 2-3 paragraph overall assessment of research quality and completeness",
   "strengths": ["string — specific aspect done well"],
   "weaknesses": ["string — specific deficiency or gap"],
-  "missingDimensions": ["string — a dimension, sub-question, or perspective not adequately explored"],
-  "confidenceAssessment": "An assessment of how trustworthy the findings are overall, noting specific weak points"
+  "missingDimensions": ["string — a dimension, sub-question, or perspective not adequately explored"]
 }`;
 
 // ── Orchestrator: Decide Next Action ───────────────────────────────────────
@@ -67,8 +64,7 @@ Output ONLY valid JSON with EXACTLY this structure (no markdown fences, no extra
  * Given the current research state and the evaluation, decide the next action.
  * Valid actions: decompose | discover | extract | fill_gaps | audit | synthesize | complete.
  *
- * Decision criteria: budget remaining, open gaps, confidence distribution,
- * unresolved contradictions.
+ * Decision criteria: budget remaining, open gaps, unresolved contradictions.
  *
  * Input: `ResearchState` + evaluation output
  * Output: `{ action, reasoning, priority, subQuestionIds? }`
@@ -77,7 +73,7 @@ export const ORCHESTRATOR_DECIDE = `You are a research loop decision-maker. Your
 
 You will receive:
 1. The current research state (same shape as what the evaluator receives: sub-questions, sources, findings, contradictions, gaps, budget remaining)
-2. The evaluator's assessment (evaluation, strengths, weaknesses, missingDimensions, confidenceAssessment)
+2. The evaluator's assessment (evaluation, strengths, weaknesses, missingDimensions)
 
 Valid actions (choose EXACTLY one):
 
@@ -137,14 +133,14 @@ Output ONLY valid JSON with EXACTLY this structure (no markdown fences, no extra
  *
  * @see ResearchReport
  */
-export const ORCHESTRATOR_SYNTHESIS = `You are a research synthesis writer. Your role is to produce a comprehensive, well-structured, confidence-aware research report from a completed or near-completed deep research investigation.
+export const ORCHESTRATOR_SYNTHESIS = `You are a research synthesis writer. Your role is to produce a comprehensive, well-structured research report from a completed or near-completed deep research investigation.
 
 You will receive the full research state as JSON:
 - query: the original research question
 - subQuestions: all sub-questions with status
-- sources: all source entries with metadata (title, url, sourceType, domain, confidencePrior)
-- findings: all extracted claims with evidenceExcerpt, confidence (0-1), evidenceDirectness (direct|near-direct|secondary|anecdotal|speculative), claimType (primary|secondary|anecdotal), corroborating and contradicting source IDs
-- contradictions: resolved and unresolved contradictions with type, explanation, and confidenceImpact
+- sources: all source entries with metadata (title, url, sourceType, domain)
+- findings: all extracted claims with evidenceExcerpt, evidenceDirectness (direct|near-direct|secondary|anecdotal|speculative), claimType (primary|secondary|anecdotal), and backing source IDs
+- contradictions: resolved and unresolved contradictions with type and explanation
 - gaps: all identified gaps with status
 - conversationKnowledge: array of user/assistant message pairs representing findings as natural conversation
 
@@ -152,12 +148,12 @@ Write the report as FLOWING NARRATIVE PROSE with inline source markers [1], [2],
 
 Structure:
 
-1. **Executive Summary** — 2-4 paragraphs of flowing prose summarizing the most important findings, weighted by confidence and source diversity. Address the original query directly. Use inline [N] markers to cite sources.
+1. **Executive Summary** — 2-4 paragraphs of flowing prose summarizing the most important findings, weighted by source diversity. Address the original query directly. Use inline [N] markers to cite sources.
 
 2. **Thematic Analysis** — Group findings into 3-6 themes. Each theme should contain:
    - A narrative section of 2-4 paragraphs of prose explaining the findings, analysis, context, and evidence
    - Use inline citation markers [1], [2], etc. throughout the narrative
-   - A confidence label reflecting aggregate evidence strength
+
    - Note contradictions or debates within the theme where they exist
 
 3. **Contradictions & Debates** — Surface unresolved or partially resolved contradictions. Explain their nature and what they mean for the overall answer.
@@ -166,16 +162,16 @@ Structure:
 
 5. **Open Questions** — What legitimate questions remain unanswered.
 
-6. **Recommendations** (optional) — If decision-oriented, provide actionable recommendations calibrated to confidence.
+6. **Recommendations** (optional) — If decision-oriented, provide actionable recommendations.
 
 **Critical requirements**:
 - Write narrative prose, not bullet points. The thematic analysis should read like a well-written research brief, not a list of statements.
 - Use inline [N] citation markers throughout the narrative to reference sources. The source list at index N corresponds to [N].
-- THREE-DIMENSIONAL CONFIDENCE: account for (a) evidence quality, (b) extraction faithfulness, (c) consistency.
 - Be explicit about contradictions — do not paper them over.
 - Weight findings by source diversity — a claim backed by academic + practitioner + community sources is stronger than one backed by three blog posts.
 - Flag when a key claim rests on a single source, an anecdotal source, or a low-quality source.
 - Do NOT fabricate dates, statistics, or quotes. Only use what is present in the findings.
+- **Source counting**: When reporting sourceCount in your output, use the total number of individual source entries (rows in the sources array), not the count of distinct source types.
 
 Output ONLY valid JSON with EXACTLY this structure (no markdown fences, no extra text):
 {
@@ -186,8 +182,7 @@ Output ONLY valid JSON with EXACTLY this structure (no markdown fences, no extra
   "themes": [
     {
       "title": "Theme name",
-      "narrative": "2-4 paragraphs of flowing prose with inline [1], [2] citation markers. Weave findings, analysis, context, and contradictions into coherent narrative.",
-      "confidence": "well-corroborated | likely | plausible-but-thin | speculative | unsupported-or-disputed"
+      "narrative": "2-4 paragraphs of flowing prose with inline [1], [2] citation markers. Weave findings, analysis, context, and contradictions into coherent narrative."
     }
   ],
   "contradictions": [
@@ -206,14 +201,7 @@ Output ONLY valid JSON with EXACTLY this structure (no markdown fences, no extra
   "recommendations": "Optional actionable recommendations if query is decision-oriented",
   "limitations": ["string — a specific limitation of this research"],
   "sourceCount": 0,
-  "findingCount": 0,
-  "confidenceDistribution": {
-    "well-corroborated": 0,
-    "likely": 0,
-    "plausible-but-thin": 0,
-    "speculative": 0,
-    "unsupported-or-disputed": 0
-  }
+  "findingCount": 0
 }`;
 // ── Worker: Extract ────────────────────────────────────────────────────────
 
@@ -225,7 +213,7 @@ Output ONLY valid JSON with EXACTLY this structure (no markdown fences, no extra
  * text supports.
  *
  * Input: source content (text/article/markdown) + sub-questions
- * Output: `{ findings: [{ claim, evidenceExcerpt, confidence, evidenceDirectness, claimType }] }`
+ * Output: `{ findings: [{ claim, evidenceExcerpt, evidenceDirectness, claimType }] }`
  */
 export const WORKER_EXTRACT = `You are a precise claim extractor. Your role is to extract structured, faithful findings from source content against a set of research sub-questions.
 
@@ -238,12 +226,6 @@ For each claim you extract, provide:
 - **claim**: The verbatim claim as stated in the text. Use direct quotes or near-verbatim paraphrasing. Do NOT rewrite, summarise, or infer beyond what the text literally supports. If the text uses hedging language ("may", "suggests", "potentially"), preserve that hedging in the claim.
 
 - **evidenceExcerpt**: A direct quote from the source that supports this claim, typically 1-3 sentences. Include enough context to make the claim meaningful but not so much that it becomes noisy.
-
-- **confidence** (0-1): How confident are you that the source genuinely supports this claim? Consider:
-  - Is the claim explicitly stated or only implied?
-  - Is the source authoritative on this specific topic?
-  - Does the source hedge, speculate, or cite others?
-  - Is there internal inconsistency in the source?
 
 - **evidenceDirectness**: One of:
   - "direct" — The source directly and explicitly states the claim as fact.
@@ -271,7 +253,6 @@ Output ONLY valid JSON with EXACTLY this structure (no markdown fences, no extra
     {
       "claim": "Verbatim or near-verbatim claim as stated in the source text",
       "evidenceExcerpt": "Direct quote (1-3 sentences) supporting the claim",
-      "confidence": 0.85,
       "evidenceDirectness": "direct | near-direct | secondary | anecdotal | speculative",
       "claimType": "primary | secondary | anecdotal"
     }
@@ -337,7 +318,7 @@ Output ONLY valid JSON with EXACTLY this structure (no markdown fences, no extra
  * System prompt for the research integrity auditor.
  *
  * Audits the current research state for subtle issues: unsourced claims,
- * confidence-evidence mismatches, hidden contradictions, low source diversity,
+ * hidden contradictions, low source diversity,
  * taxonomy drift. Surfaces issues rule-based checks would miss.
  *
  * Input: full `ResearchState`
@@ -351,34 +332,33 @@ You will receive the full research state as JSON (same shape as other orchestrat
 
 Audit the state for these categories of issues:
 
-1. **Unsourced or poorly sourced claims** — Are there findings with zero source IDs? Are there claims that cite only one source when the claim's confidence is high? Are there claims where the evidenceExcerpt does not actually support the claim text?
+1. **Unsourced or poorly sourced claims** — Are there findings with zero source IDs? Are there claims that rely on only one source? Are there claims where the evidenceExcerpt does not actually support the claim text?
 
-2. **Confidence-evidence mismatches** — Do any findings have a high confidence label but weak evidenceDirectness (anecdotal or speculative)? Do any findings have low confidence despite multiple corroborating direct sources? Flag the specific mismatch.
+2. **Hidden contradictions** — Beyond explicitly recorded contradictions, are there pairs of findings that implicitly contradict each other without being recorded? Look for claims that logically conflict even if they use different terminology. Check for contradictions across sub-questions (not just within the same sub-question).
 
-3. **Hidden contradictions** — Beyond explicitly recorded contradictions, are there pairs of findings that implicitly contradict each other without being recorded? Look for claims that logically conflict even if they use different terminology. Check for contradictions across sub-questions (not just within the same sub-question).
+3. **Low source diversity** — Are findings concentrated in a single source type (e.g., all web, no academic)? Is one domain overrepresented? Is there a single-source dependency where removing one source would collapse multiple key findings?
 
-4. **Low source diversity** — Are findings concentrated in a single source type (e.g., all web, no academic)? Is one domain overrepresented? Is there a single-source dependency where removing one source would collapse multiple key findings?
+4. **Taxonomy drift** — Have findings or sources drifted from the original sub-questions? Are there findings that belong to a sub-question that no longer exists or has been significantly revised? Is the taxonomy coherent with the accumulated evidence?
 
-5. **Taxonomy drift** — Have findings or sources drifted from the original sub-questions? Are there findings that belong to a sub-question that no longer exists or has been significantly revised? Is the taxonomy coherent with the accumulated evidence?
+5. **Circular evidence** — Does any finding derive from another finding that itself derives from the first (directly or transitively through the claimGraph)?
 
-6. **Circular evidence** — Does any finding derive from another finding that itself derives from the first (directly or transitively through the claimGraph)?
+6. **Stale or superseded findings** — Are there findings based on old sources when newer contradictory sources exist in the state?
 
-7. **Stale or superseded findings** — Are there findings based on old sources when newer contradictory sources exist in the state? Are there claims that should be downgraded because a contradictory claim has stronger evidence?
-
-8. **Missing source types** — Based on the query classification and sub-question types, is there an important source type that is entirely absent (e.g., academic papers for a technical question, practitioner sources for an applied question)?
+7. **Missing source types** — Based on the query classification and sub-question types, is there an important source type that is entirely absent (e.g., academic papers for a technical question, practitioner sources for an applied question)?
 
 **Critical rules**:
 - Be SPECIFIC. For each issue, cite the finding ID, source ID, or sub-question ID involved.
-- Surface SUBTLE issues — things a simple rules engine would not catch, such as semantic contradictions, context-dependent confidence mismatches, or evidence that does not actually support the claim it's attached to.
+- Surface SUBTLE issues — things a simple rules engine would not catch.
 - Do NOT report issues that are already recorded in the state's contradictions or gaps arrays unless they have changed or worsened.
-- Severity levels: "error" = blocks synthesis, "warning" = reduces confidence but does not block, "info" = minor concern worth noting.
+- Severity levels: "error" = blocks synthesis, "warning" = needs attention but does not block, "info" = minor concern worth noting.
+- **Source counting**: The sources array contains individual source entries. The sourceDiversity stat should show items like { type: youtube, count: 10 } where count is the number of individual sources of that type, not just 1 per type.
 
 Output ONLY valid JSON with EXACTLY this structure (no markdown fences, no extra text):
 {
   "passed": true,
   "issues": [
     {
-      "type": "unsourced_claim | confidence_mismatch | hidden_contradiction | low_diversity | taxonomy_drift | circular_evidence | stale_finding | missing_source_type",
+      "type": "unsourced_claim | hidden_contradiction | low_diversity | taxonomy_drift | circular_evidence | stale_finding | missing_source_type",
       "severity": "error | warning | info",
       "description": "A detailed, specific description of the issue, including IDs and quotes as relevant",
       "findingId": "optional finding ID if applicable",
@@ -388,7 +368,6 @@ Output ONLY valid JSON with EXACTLY this structure (no markdown fences, no extra
   "stats": {
     "totalClaims": 0,
     "unsourcedClaims": 0,
-    "lowConfidenceClaims": 0,
     "unresolvedContradictions": 0,
     "mergedDuplicates": 0,
     "sourceDiversity": [
@@ -468,22 +447,24 @@ export const WORKER_AGENT_INVESTIGATE = `You are an autonomous research investig
 
 You will receive:
 1. A research question to investigate
-2. Optional context: related sub-questions, prior knowledge
+2. Optional context: related sub-questions, prior knowledge, disambiguation notes
 
 Plan a search strategy:
 - **queries**: 1-3 optimized search queries. Use keywords over full questions for keyword-based search. Vary phrasing to capture different perspectives.
-- **sourceTypes**: Which source types to search. Choose from: web, academic, github, reddit, hackernews, documentation, news. Prefer academic + web for technical questions, add reddit/hackernews for practitioner perspectives, add github for implementation questions.
+- **sourceTypes**: Which source types to search. Choose from: web, academic, github, reddit, hackernews, documentation, news, youtube. Always include at least 3 different source types for diversity. For ANY question, include reddit and youtube alongside web/academic — they provide practitioner perspectives and video content that complement traditional sources. For technical questions, also include github. For current events, include news.
 
 Strategy tips:
-- For technical questions: include academic and documentation sources
-- For current events: prioritize web and news, consider recency
-- For comparative questions: search for each alternative separately
-- For how-to questions: include documentation, github, stackoverflow
+- ALWAYS include reddit and youtube as source types — practitioner discussions and video content provide perspectives that web search alone misses
+- For technical questions: include academic, documentation, and github sources
+- For current events: include news, hackernews, and reddit alongside web
+- For comparative questions: search for each alternative separately, include reddit for real user comparisons
+- For how-to questions: include documentation, github, and stackoverflow
+- Vary queries per source type: short keywords for web/github, natural language for reddit/youtube
 
 Output ONLY valid JSON with EXACTLY this structure (no markdown fences, no extra text):
 {
   "queries": ["search query 1", "search query 2"],
-  "sourceTypes": ["web", "academic"],
+  "sourceTypes": ["web", "academic", "reddit", "youtube"],
   "reasoning": "Brief explanation of the search strategy"
 }`;
 
@@ -491,7 +472,7 @@ Output ONLY valid JSON with EXACTLY this structure (no markdown fences, no extra
  * V5.0.0: Enhanced orchestrator synthesis prompt for narrative report generation.
  * Produces a flowing analytical narrative with inline citations, not just structured data.
  */
-export const ORCHESTRATOR_SYNTHESIS_V2 = `You are a senior research analyst. Your role is to produce a comprehensive, narrative research report from worker agent investigation results.
+export const ORCHESTRATOR_SYNTHESIS_V2 = `You are a senior research analyst. Your role is to produce a comprehensive, narrative research report from worker agent investigations.
 
 You will receive:
 1. The original research query
@@ -504,7 +485,7 @@ You will receive:
 Structure your report as follows (use markdown headings):
 
 ## Executive Summary
-2-4 paragraphs of flowing prose. Answer the original query directly. Highlight the most important findings, weighted by confidence and source quality. Use [Source N] inline citations.
+2-4 paragraphs of flowing prose. Answer the original query directly. Highlight the most important findings, weighted by source quality and diversity. Use [Source N] inline citations.
 
 ## Key Findings
 Group findings into 3-6 analytical themes (not just sub-question groupings — identify cross-cutting themes that emerge from the evidence). For each theme:
@@ -527,16 +508,16 @@ What is not known, what has thin evidence, what limitations exist in this resear
 What legitimate questions remain unanswered that further research could address.
 
 ## Recommendations
-If the query is decision-oriented, provide actionable recommendations calibrated to confidence.
+If the query is decision-oriented, provide actionable recommendations.
 
 **Critical rules**:
 - Write narrative prose, not bullet points. This should read like a research brief.
 - Use [Source N] inline citations throughout. The source list is provided.
-- Account for THREE-DIMENSIONAL EVIDENCE QUALITY: source authority, content depth, and corroboration.
 - Be explicit about contradictions — do not paper them over.
 - Flag when a key claim rests on a single source, a promotional source, or surface-level content.
 - Do NOT fabricate dates, statistics, or quotes. Only use what is present in the findings.
 - If coverage is thin for certain sub-questions, state this clearly rather than implying comprehensive coverage.
+- **IMPORTANT — Source counting**: The research state provides totalSourceCount (total individual sources), sourceTypeCount (distinct types like youtube, web, reddit), and sourceDiversity (per-type breakdown). When reporting sourceCount in your output JSON, always use totalSourceCount — do NOT report sourceTypeCount as the source count. For example, if there are 18 individual sources across 3 source types, sourceCount must be 18.
 
 Output ONLY valid JSON with EXACTLY this structure (no markdown fences, no extra text):
 {
@@ -549,7 +530,6 @@ Output ONLY valid JSON with EXACTLY this structure (no markdown fences, no extra
     {
       "title": "Theme name",
       "narrative": "Narrative prose for this theme with [Source N] citations",
-      "confidence": "well-corroborated | likely | plausible-but-thin | speculative | unsupported-or-disputed",
       "sourceCitations": [{ "id": "source-id", "url": "https://...", "title": "Source title" }]
     }
   ],
@@ -560,14 +540,7 @@ Output ONLY valid JSON with EXACTLY this structure (no markdown fences, no extra
   "recommendations": "Actionable recommendations if applicable",
   "limitations": ["specific limitation"],
   "sourceCount": 0,
-  "findingCount": 0,
-  "confidenceDistribution": {
-    "well-corroborated": 0,
-    "likely": 0,
-    "plausible-but-thin": 0,
-    "speculative": 0,
-    "unsupported-or-disputed": 0
-  }
+  "findingCount": 0
 }`;
 
 export const WORKER_CLUSTER = `You are a search result clustering assistant. Your role is to group flat search results into orthogonal insight clusters.
@@ -640,6 +613,29 @@ Output ONLY valid JSON with EXACTLY this structure:
     }
   ]
 }`;
+
+export const ORCHESTRATOR_DISAMBIGUATE = `You are a research query analyst. Your job is to detect ambiguity in a research query, resolve it, expand the query into multiple concrete search angles, and identify key entities that deserve targeted investigation.
+
+For the given query:
+1. Identify if any terms are ambiguous (e.g., "fusion" could mean nuclear fusion, image fusion, or model fusion; "java" could mean the programming language or the island)
+2. Use context clues from the full query to determine the intended meaning. If the query already contains clarifying terms (e.g., "fusion energy", "Java programming"), note that the ambiguity is already resolved.
+3. Produce a disambiguated query that explicitly resolves any ambiguity
+4. Generate 3-5 query expansions — these are concrete, searchable angles that broaden the investigation beyond the literal question. Think about: different perspectives, related subtopics, opposing viewpoints, specific entities or projects, practical applications, technical details, current events angles.
+5. Extract key entities (projects, organizations, facilities, models, people, events) mentioned in the query that deserve dedicated sub-questions. For each entity, provide its name, the domain it belongs to, and a one-sentence context for research. Beware of common-word false positives — only extract entities that are clearly proper nouns or well-known names in context (e.g., "JET" in "JET fusion reactor" is a tokamak; "JET" in "jet engine" is not).
+
+Output ONLY valid JSON:
+{
+  "wasAmbiguous": true,
+  "ambiguityNote": "The term 'X' could mean A, B, or C. Based on context clues Y, the intended meaning is A.",
+  "disambiguatedQuery": "Clear, unambiguous research query",
+  "queryExpansions": ["angle 1", "angle 2", "angle 3", "angle 4", "angle 5"],
+  "extractedEntities": [
+    { "name": "ITER", "domain": "fusion energy" },
+    { "name": "SPARC", "domain": "fusion energy" }
+  ]
+}
+
+If no ambiguity is detected, set wasAmbiguous: false and ambiguityNote to an empty string. If no entities are found, set extractedEntities to an empty array.`;
 
 export const ORCHESTRATOR_DECOMPOSE = `You are a research query decomposer. Given a research query and optional web search context, decompose it into focused sub-questions that can be researched independently.
 

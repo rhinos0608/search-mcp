@@ -6,28 +6,16 @@
  * never on raw crawl output.
  */
 
-import { rankSource } from './sourceRanking.js';
 import type {
    ResearchState,
    Finding,
    SourceEntry,
    Contradiction,
-   ConfidenceLabel,
    QueryClassification,
    ResearchDepth,
    ResearchReport,
    SubQuestion,
 } from './types.js';
-
-// ── Confidence prose prefixes ───────────────────────────────────────────────
-
-const CONFIDENCE_PREFIX: Record<ConfidenceLabel, string> = {
-   'well-corroborated': 'Well-corroborated evidence suggests',
-   likely: 'Available evidence indicates',
-   'plausible-but-thin': 'Several sources suggest, though evidence is limited, that',
-   speculative: 'Some sources speculate that',
-   'unsupported-or-disputed': 'Evidence is weak or contradictory on whether',
-};
 
 // ── Synthesizer ──────────────────────────────────────────────────────────────
 
@@ -44,6 +32,15 @@ export class ResearchSynthesizer {
       const contradictions = this.state.contradictions;
       const subQuestions = this.state.subQuestions;
 
+      // Compute source type breakdown once for reuse
+      const byType = new Map<string, number>();
+      for (const s of sources) {
+         byType.set(s.sourceType, (byType.get(s.sourceType) ?? 0) + 1);
+      }
+      const sourceDiversity = [...byType.entries()]
+         .map(([type, count]) => ({ type, count }))
+         .sort((a, b) => b.count - a.count);
+
       return {
          query: this.state.query,
          classification: this.inferClassification(),
@@ -52,13 +49,14 @@ export class ResearchSynthesizer {
          narrativeMarkdown: this.buildNarrativeMarkdown(findings, subQuestions, sources, contradictions),
          themes: this.buildThemes(findings, subQuestions),
          contradictions: contradictions,
-         uncertainties: this.buildUncertainties(findings, contradictions),
-         sourceNotes: this.buildSourceNotes(sources),
+         uncertainties: this.buildUncertainties(contradictions),
+         sourceNotes: this.buildSourceNotes(sources, byType),
          openQuestions: this.state.openQuestions,
-         limitations: this.buildLimitations(sources, subQuestions),
+         limitations: this.buildLimitations(sources, subQuestions, byType),
          sourceCount: sources.length,
+         sourceTypeCount: byType.size,
+         sourceDiversity,
          findingCount: findings.length,
-         confidenceDistribution: this.computeConfidenceDistribution(findings),
       };
    }
 
@@ -94,32 +92,29 @@ export class ResearchSynthesizer {
          return 'No findings were extracted during this research run. The topic may be too narrow or no suitable sources were discovered.';
       }
 
-      const highConf = findings.filter((f) => f.confidence >= 0.7);
-      const resolvedSQs = this.state.subQuestions.filter(
-         (sq) => sq.status === 'sufficient' || sq.status === 'low_confidence',
-      );
+      // Count sub-questions that actually have findings (not by status, which may be stale)
+      const sqIdsWithFindings = new Set<string>();
+      for (const f of findings) {
+         for (const sqId of f.subQuestionIds) {
+            sqIdsWithFindings.add(sqId);
+         }
+      }
+      const coveredCount = sqIdsWithFindings.size;
+      const totalSQs = this.state.subQuestions.length;
+
       const contradictions = this.state.contradictions.filter(
          (c) => c.resolutionStatus !== 'resolved',
       );
 
       const parts: string[] = [];
 
-      if (highConf.length > 0) {
-         parts.push(
-            `This research found ${String(highConf.length)} well-supported claims across ${String(resolvedSQs.length)} of ${String(this.state.subQuestions.length)} research questions.`,
-         );
-      }
+      parts.push(
+         `This research found ${String(findings.length)} claims covering ${String(coveredCount)} of ${String(totalSQs)} research questions.`,
+      );
 
       if (contradictions.length > 0) {
          parts.push(
             `${String(contradictions.length)} unresolved ${contradictions.length === 1 ? 'contradiction was' : 'contradictions were'} identified between sources.`,
-         );
-      }
-
-      const lowConf = findings.filter((f) => f.confidence < 0.5);
-      if (lowConf.length > 0) {
-         parts.push(
-            `${String(lowConf.length)} ${lowConf.length === 1 ? 'claim has' : 'claims have'} low confidence and may need further verification.`,
          );
       }
 
@@ -129,10 +124,10 @@ export class ResearchSynthesizer {
    private buildThemes(
       findings: Finding[],
       subQuestions: SubQuestion[],
-   ): { title: string; narrative: string; confidence: ConfidenceLabel }[] {
+   ): { title: string; narrative: string }[] {
       const themeMap = new Map<
          string,
-         { title: string; claims: string[]; confidences: ConfidenceLabel[]; sourceIds: string[] }
+         { title: string; claims: string[]; sourceIds: string[] }
       >();
 
       for (const sq of subQuestions) {
@@ -140,19 +135,16 @@ export class ResearchSynthesizer {
          if (sqFindings.length === 0) continue;
 
          const claims: string[] = [];
-         const confidences: ConfidenceLabel[] = [];
          const sourceIds: string[] = [];
 
          for (const f of sqFindings) {
             claims.push(f.claim);
-            confidences.push(f.confidenceLabel);
             sourceIds.push(...f.sourceIds);
          }
 
          themeMap.set(sq.id, {
             title: sq.text,
             claims,
-            confidences,
             sourceIds: [...new Set(sourceIds)],
          });
       }
@@ -166,84 +158,42 @@ export class ResearchSynthesizer {
          themeMap.set('orphan', {
             title: 'Additional Findings',
             claims: orphanClaims,
-            confidences: orphanFindings.map((f) => f.confidenceLabel),
             sourceIds: [...new Set(orphanFindings.flatMap((f) => f.sourceIds))],
          });
       }
 
-      return Array.from(themeMap.values()).map((t) => {
-         const sourceEntries = t.sourceIds
-            .map((id) => this.state.sources.find((s) => s.id === id))
-            .filter((s): s is SourceEntry => s !== undefined);
-
-         const avgEvidenceWeight = sourceEntries.length > 0
-            ? sourceEntries.reduce((acc, s) => acc + rankSource(s).evidenceWeight, 0) / sourceEntries.length
-            : 0.5;
-
-         const baseConfidence = aggregateConfidence(t.confidences);
-         const weightedConfidence = avgEvidenceWeight >= 0.7
-            ? baseConfidence
-            : avgEvidenceWeight >= 0.5
-               ? this.downgradeConfidence(baseConfidence, 1)
-               : this.downgradeConfidence(baseConfidence, 2);
-
-         return {
-            title: t.title,
-            narrative: this.buildThemeNarrative(t.claims, t.confidences, t.sourceIds),
-            confidence: weightedConfidence,
-         };
-      });
+      return Array.from(themeMap.values()).map((t) => ({
+         title: t.title,
+         narrative: this.buildThemeNarrative(t.claims),
+      }));
    }
 
    /** Build a short prose narrative paragraph from claims and sources. */
    private buildThemeNarrative(
       claims: string[],
-      confidences: ConfidenceLabel[],
-      sourceIds: string[],
    ): string {
       if (claims.length === 0) return 'No findings were available for this theme.';
 
       const parts: string[] = [];
-      const highConf = claims.filter((_, i) => confidences[i] === 'well-corroborated' || confidences[i] === 'likely');
-      const lowConf = claims.filter((_, i) => confidences[i] === 'speculative' || confidences[i] === 'unsupported-or-disputed');
 
-      if (highConf.length > 0) {
-         parts.push(`Based on ${String(highConf.length)} well-supported finding${highConf.length === 1 ? '' : 's'} with corroborating evidence across ${String(sourceIds.length)} source${sourceIds.length === 1 ? '' : 's'}.`);
+      // Lead claim
+      if (claims[0]) {
+         parts.push(claims[0] + '.');
       }
 
-      // Add the most confident claim as the lead
-      const bestIdx = confidences.indexOf('well-corroborated');
-      const leadClaim = bestIdx >= 0 ? claims[bestIdx] : claims[0];
-      if (leadClaim) {
-         parts.push(leadClaim);
-      }
-
-      // Add secondary claims
-      for (let i = 0; i < Math.min(claims.length, 5); i++) {
-         if (i === (bestIdx >= 0 ? bestIdx : 0)) continue; // skip the lead (already included)
-         const label = confidences[i];
+      // Secondary claims
+      for (let i = 1; i < Math.min(claims.length, 5); i++) {
          const claim = claims[i];
-         const prefix = label !== undefined ? CONFIDENCE_PREFIX[label] : 'Sources indicate';
-         parts.push(prefix + ' ' + (claim ?? '').toLowerCase() + '.');
-      }
-
-      if (lowConf.length > 0) {
-         parts.push(`However, ${String(lowConf.length)} claim${lowConf.length === 1 ? '' : 's'} ${lowConf.length === 1 ? 'has' : 'have'} limited or contradictory evidence and should be treated cautiously.`);
+         if (claim) {
+            parts.push('Sources indicate ' + claim.toLowerCase() + '.');
+         }
       }
 
       return parts.join(' ');
    }
 
-   private buildUncertainties(findings: Finding[], contradictions: Contradiction[]): string[] {
+   private buildUncertainties(contradictions: Contradiction[]): string[] {
       const uncertainties: string[] = [];
-
-      // Low-confidence findings
-      const lowConf = findings.filter((f) => f.confidence < 0.5);
-      for (const f of lowConf.slice(0, 5)) {
-         uncertainties.push(
-            `${f.claim} — confidence is low (${f.confidenceLabel.replace(/-/g, ' ')}).${f.caveats ? `Caveat: ${f.caveats}` : 'Further evidence needed.'} `,
-         );
-      }
 
       // Unresolved contradictions
       const unresolved = contradictions.filter((c) => c.resolutionStatus !== 'resolved');
@@ -256,22 +206,20 @@ export class ResearchSynthesizer {
       return uncertainties;
    }
 
-   private buildSourceNotes(sources: SourceEntry[]): string[] {
+   private buildSourceNotes(sources: SourceEntry[], byType?: Map<string, number>): string[] {
       if (sources.length === 0) return ['No sources were analyzed.'];
 
       const notes: string[] = [];
-      const byType = new Map<string, number>();
-      for (const s of sources) {
-         byType.set(s.sourceType, (byType.get(s.sourceType) ?? 0) + 1);
-      }
+      const typeMap = byType ?? this.buildTypeMap(sources);
+
+      const totalSources = sources.length;
+      const totalTypes = typeMap.size;
+      const breakdown = Array.from(typeMap.entries())
+         .map(([t, c]) => `${String(c)} ${t}`)
+         .join(', ');
 
       notes.push(
-         `Analysis based on ${String(sources.length)} sources across ${String(byType.size)} source types: ${Array.from(
-            byType.entries(),
-         )
-            .map(([t, c]) => `${String(c)} ${t}`)
-            .join(', ')
-         }.`,
+         `Analysis based on ${String(totalSources)} individual sources across ${String(totalTypes)} source types (${breakdown}).`,
       );
 
       const primaryCount = sources.filter((s) => s.isPrimary).length;
@@ -284,22 +232,19 @@ export class ResearchSynthesizer {
       return notes;
    }
 
-   private buildLimitations(sources: SourceEntry[], _subQuestions: SubQuestion[]): string[] {
+   private buildLimitations(sources: SourceEntry[], _subQuestions: SubQuestion[], byType?: Map<string, number>): string[] {
       const limitations: string[] = [];
 
-      const byType = new Map<string, number>();
-      for (const s of sources) {
-         byType.set(s.sourceType, (byType.get(s.sourceType) ?? 0) + 1);
-      }
+      const typeMap = byType ?? this.buildTypeMap(sources);
 
-      if (byType.size <= 2) {
+      if (typeMap.size <= 2) {
          limitations.push(
-            `Source diversity is limited — only ${String(byType.size)} source type${byType.size === 1 ? '' : 's'} were found. Results may favor certain perspectives.`,
+            `Source diversity is limited — only ${String(typeMap.size)} source type${typeMap.size === 1 ? '' : 's'} (corpuses) were found across ${String(sources.length)} total sources. Results may favor certain perspectives.`,
          );
       }
 
-      const noAcademic = !byType.has('academic');
-      const noPractitioner = !byType.has('reddit') && !byType.has('hackernews');
+      const noAcademic = !typeMap.has('academic');
+      const noPractitioner = !typeMap.has('reddit') && !typeMap.has('hackernews');
       if (noAcademic && !noPractitioner) {
          limitations.push(
             'No academic sources were included. Technical claims may lack peer-reviewed backing.',
@@ -314,32 +259,21 @@ export class ResearchSynthesizer {
       return limitations;
    }
 
-   private computeConfidenceDistribution(findings: Finding[]): Record<ConfidenceLabel, number> {
-      const dist: Record<string, number> = {};
-      for (const f of findings) {
-         dist[f.confidenceLabel] = (dist[f.confidenceLabel] ?? 0) + 1;
-      }
-      return dist;
-   }
 
-   private downgradeConfidence(label: ConfidenceLabel, steps: number): ConfidenceLabel {
-      const order: ConfidenceLabel[] = [
-         'well-corroborated',
-         'likely',
-         'plausible-but-thin',
-         'speculative',
-         'unsupported-or-disputed',
-      ];
-      const idx = order.indexOf(label);
-      if (idx < 0) return label;
-      const newIdx = Math.min(order.length - 1, idx + steps);
-      return order[newIdx] ?? 'unsupported-or-disputed';
-   }
 
    /**
     * Build a flowing narrative markdown report from the research state.
     * This is the primary output — a report a human can read.
     */
+   /** Build a Map<sourceType, count> from sources. */
+   private buildTypeMap(sources: SourceEntry[]): Map<string, number> {
+      const m = new Map<string, number>();
+      for (const s of sources) {
+         m.set(s.sourceType, (m.get(s.sourceType) ?? 0) + 1);
+      }
+      return m;
+   }
+
    private buildNarrativeMarkdown(
       findings: Finding[],
       subQuestions: SubQuestion[],
@@ -369,7 +303,7 @@ export class ResearchSynthesizer {
 
          // Coverage note
          if (sqSources.length < 2 || domainCount < 2) {
-            parts.push(`*Note: This sub-question has thin coverage — only ${sqSources.length} source(s) from ${domainCount} domain(s).*\n`);
+            parts.push(`*Note: This sub-question has thin coverage — only ${String(sqSources.length)} source(s) from ${String(domainCount)} domain(s).*\n`);
          }
 
          for (const f of sqFindings) {
@@ -379,10 +313,7 @@ export class ResearchSynthesizer {
                .map((n) => `[Source ${String(n)}]`)
                .join(', ');
 
-            const confidenceNote = f.confidence < 0.5 ? ' *(low confidence)*' : '';
-            const sourceNote = f.sourceIds.length === 1 ? ' *(single source)*' : '';
-
-            parts.push(`- ${f.claim}${confidenceNote}${sourceNote} ${sourceRefs}`);
+            parts.push(`- ${f.claim} ${sourceRefs}`);
 
             if (f.caveats) {
                parts.push(`  - Caveat: ${f.caveats}`);
@@ -398,7 +329,7 @@ export class ResearchSynthesizer {
       if (orphanFindings.length > 0) {
          parts.push('## Additional Findings\n');
          for (const f of orphanFindings) {
-            parts.push(`- ${f.claim} *(confidence: ${(f.confidence * 100).toFixed(0)}%)*\n`);
+            parts.push(`- ${f.claim}\n`);
          }
          parts.push('');
       }
@@ -420,7 +351,7 @@ export class ResearchSynthesizer {
       }
 
       // Uncertainties
-      const uncertainties = this.buildUncertainties(findings, contradictions);
+      const uncertainties = this.buildUncertainties(contradictions);
       if (uncertainties.length > 0) {
          parts.push('\n## Uncertainties & Limitations\n');
          for (const u of uncertainties) {
@@ -439,22 +370,4 @@ export class ResearchSynthesizer {
 
       return parts.join('\n');
    }
-}
-
-// ── Helpers ─────────────────────────────────────────────────────────────────
-
-function aggregateConfidence(labels: ConfidenceLabel[]): ConfidenceLabel {
-   const order: ConfidenceLabel[] = [
-      'unsupported-or-disputed',
-      'speculative',
-      'plausible-but-thin',
-      'likely',
-      'well-corroborated',
-   ];
-   let maxIdx = 0;
-   for (const l of labels) {
-      const idx = order.indexOf(l);
-      if (idx > maxIdx) maxIdx = idx;
-   }
-   return order[maxIdx] ?? 'plausible-but-thin';
 }

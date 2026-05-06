@@ -13,12 +13,19 @@ import { academicSearch } from '../tools/academicSearch.js';
 import { getGitHubRepoSearch } from '../tools/githubRepoSearch.js';
 import { redditSearch } from '../tools/redditSearch.js';
 import { hackernewsSearch } from '../tools/hackernewsSearch.js';
+import { youtubeSearch } from '../tools/youtubeSearch.js';
+import { getYouTubeTranscript } from '../tools/youtubeTranscript.js';
+import { redditComments } from '../tools/redditComments.js';
+import { semanticYoutube } from '../tools/semanticYoutube.js';
+import { semanticReddit } from '../tools/semanticReddit.js';
+import { semanticGitHubCode } from '../tools/semanticGitHubCode.js';
+import { semanticCrawl } from '../tools/semanticCrawl.js';
 import { loadConfig } from '../config.js';
 import type { ResearchTools } from './types.js';
 
 export interface ResearchToolsOptions {
-  /** Called before each tool invocation — used for budget tracking / logging. */
-  onToolCall?: (tool: string, query: string) => void;
+   /** Called before each tool invocation — used for budget tracking / logging. */
+   onToolCall?: (tool: string, query: string) => void;
 }
 
 /**
@@ -29,127 +36,313 @@ export interface ResearchToolsOptions {
  * exceptions.
  */
 export function createResearchTools(options?: ResearchToolsOptions): ResearchTools {
-  const { onToolCall } = options ?? {};
+   const { onToolCall } = options ?? {};
 
-  return {
-    async webSearch(query: string, limit?: number) {
-      onToolCall?.('web_search', query);
-      try {
-        const results = await webSearch(query, limit ?? 10);
-        return results.map((r) => ({
-          title: r.title,
-          url: r.url,
-          description: r.description,
-          ...(r.age ? { age: r.age } : {}),
-        }));
-      } catch {
-        return [];
-      }
-    },
+   return {
+      async webSearch(query: string, limit?: number) {
+         onToolCall?.('web_search', query);
+         try {
+            const results = await webSearch(query, limit ?? 10);
+            return results.map((r) => ({
+               title: r.title,
+               url: r.url,
+               description: r.description,
+               ...(r.age ? { age: r.age } : {}),
+               // Pass through rich content from Tavily/Exa to avoid re-fetching
+               ...(r.extraSnippet ? { extraSnippet: r.extraSnippet } : {}),
+               ...(r.deepLinks ? { deepLinks: r.deepLinks } : {}),
+            }));
+         } catch {
+            return [];
+         }
+      },
 
-    async webCrawl(url: string, maxPages?: number) {
-      onToolCall?.('web_crawl', url);
-      try {
-        const cfg = loadConfig();
-        const result = await webCrawl(
-          url,
-          cfg.crawl4ai.baseUrl,
-          cfg.crawl4ai.apiToken ?? '',
-          {
-            strategy: 'bfs',
-            maxDepth: 1,
-            maxPages: maxPages ?? 1,
-            includeExternalLinks: false,
-          },
-        );
-        return result.pages.map((p) => ({
-          title: p.title ?? '',
-          url: p.url,
-          markdown: p.markdown,
-        }));
-      } catch {
-        return [];
-      }
-    },
+      async webCrawl(url: string, maxPages?: number) {
+         onToolCall?.('web_crawl', url);
+         try {
+            const cfg = loadConfig();
+            const result = await webCrawl(
+               url,
+               cfg.crawl4ai.baseUrl,
+               cfg.crawl4ai.apiToken ?? '',
+               {
+                  strategy: 'bfs',
+                  maxDepth: 1,
+                  maxPages: maxPages ?? 1,
+                  includeExternalLinks: false,
+               },
+            );
+            return result.pages.map((p) => ({
+               title: p.title ?? '',
+               url: p.url,
+               markdown: p.markdown,
+            }));
+         } catch {
+            return [];
+         }
+      },
 
-    async webRead(url: string) {
-      onToolCall?.('web_read', url);
-      try {
-        const result = await webRead(url);
-        return {
-          title: result.title ?? '',
-          url: result.url,
-          markdown: result.textContent,
-        };
-      } catch {
-        return { title: '', url, markdown: '' };
-      }
-    },
+      async webRead(url: string) {
+         onToolCall?.('web_read', url);
+         try {
+            const result = await webRead(url);
+            return {
+               title: result.title ?? '',
+               url: result.url,
+               markdown: result.textContent,
+            };
+         } catch {
+            return { title: '', url, markdown: '' };
+         }
+      },
 
-    async academicSearch(query: string, limit?: number) {
-      onToolCall?.('academic_search', query);
-      try {
-        const result = await academicSearch(query, 'all', limit ?? 20);
-        return result.papers.map((p) => ({
-          title: p.title,
-          url: p.url,
-          ...(p.abstract ? { abstract: p.abstract } : {}),
-          ...(p.year ? { year: p.year } : {}),
-        }));
-      } catch {
-        return [];
-      }
-    },
+      async academicSearch(query: string, limit?: number) {
+         onToolCall?.('academic_search', query);
+         try {
+            const result = await academicSearch(query, 'all', limit ?? 20);
+            return result.papers.map((p) => ({
+               title: p.title,
+               url: p.url,
+               ...(p.abstract ? { abstract: p.abstract } : {}),
+               ...(p.year ? { year: p.year } : {}),
+            }));
+         } catch {
+            return [];
+         }
+      },
 
-    async githubSearch(query: string, limit?: number) {
-      onToolCall?.('github_search', query);
-      try {
-        const result = await getGitHubRepoSearch(
-          query,
-          undefined,
-          undefined,
-          undefined,
-          undefined,
-          limit ?? 30,
-        );
-        return result.results.map((r) => ({
-          fullName: r.repo,
-          htmlUrl: r.htmlUrl,
-          description: '',
-        }));
-      } catch {
-        return [];
-      }
-    },
+      async githubSearch(query: string, limit?: number) {
+         onToolCall?.('github_search', query);
+         try {
+            const result = await getGitHubRepoSearch(
+               query,
+               undefined,
+               undefined,
+               undefined,
+               undefined,
+               limit ?? 30,
+            );
+            return result.results.map((r) => ({
+               fullName: r.repo,
+               htmlUrl: r.htmlUrl,
+               description: '',
+            }));
+         } catch {
+            return [];
+         }
+      },
 
-    async redditSearch(query: string, limit?: number) {
-      onToolCall?.('reddit_search', query);
-      try {
-        const results = await redditSearch(query, '', 'relevance', 'year', limit ?? 25);
-        return results.map((r) => ({
-          title: r.title,
-          url: r.url,
-          selftext: r.selftext,
-          created_utc: r.createdUtc,
-          permalink: r.permalink,
-        }));
-      } catch {
-        return [];
-      }
-    },
+      async redditSearch(query: string, limit?: number) {
+         onToolCall?.('reddit_search', query);
+         try {
+            const results = await redditSearch(query, '', 'relevance', 'year', limit ?? 25);
+            return results.map((r) => ({
+               title: r.title,
+               url: r.url,
+               selftext: r.selftext,
+               created_utc: r.createdUtc,
+               permalink: r.permalink,
+            }));
+         } catch {
+            return [];
+         }
+      },
 
-    async hackernewsSearch(query: string, limit?: number) {
-      onToolCall?.('hackernews_search', query);
-      try {
-        const results = await hackernewsSearch(query, 'story', 'relevance', null, limit ?? 20);
-        return results.map((r) => ({
-          title: r.title,
-          url: r.url ?? '',
-          ...(r.storyText ? { text: r.storyText } : {}),
-        }));
-      } catch {
-        return [];
-      }
-    },
-  };
+      async hackernewsSearch(query: string, limit?: number) {
+         onToolCall?.('hackernews_search', query);
+         try {
+            const results = await hackernewsSearch(query, 'story', 'relevance', null, limit ?? 20);
+            return results.map((r) => ({
+               title: r.title,
+               url: r.url ?? '',
+               ...(r.storyText ? { text: r.storyText } : {}),
+            }));
+         } catch {
+            return [];
+         }
+      },
+
+      // ── YouTube ─────────────────────────────────────────────────────────────
+      async youtubeSearch(query: string, limit?: number) {
+         onToolCall?.('youtube_search', query);
+         try {
+            const cfg = loadConfig();
+            const results = await youtubeSearch(query, cfg.youtube.apiKey ?? '', 'relevance', limit ?? 10);
+            return results.map((r) => ({
+               title: r.title,
+               videoId: r.videoId,
+               channelTitle: r.channelTitle,
+               publishedAt: r.publishedAt,
+               url: r.url,
+            }));
+         } catch {
+            return [];
+         }
+      },
+
+      async youtubeTranscript(videoId: string, language?: string) {
+         onToolCall?.('youtube_transcript', videoId);
+         try {
+            const result = await getYouTubeTranscript(videoId, language ?? 'en');
+            return result.transcript.map((seg) => ({
+               text: seg.text,
+               duration: seg.duration,
+               offset: seg.offset,
+            }));
+         } catch {
+            return [];
+         }
+      },
+
+      // ── Reddit comments ───────────────────────────────────────────────────
+      async redditComments(url: string, limit?: number) {
+         onToolCall?.('reddit_comments', url);
+         try {
+            const result = await redditComments({ url }, {});
+            const comments = (result.comments as { body: string; author: string; permalink: string; depth: number }[])
+               .filter((c): c is { body: string; author: string; permalink: string; depth: number } => 'body' in c)
+               .slice(0, limit ?? 50)
+               .map((c) => ({
+                  body: c.body,
+                  author: c.author,
+                  permalink: c.permalink,
+                  depth: c.depth,
+               }));
+            return {
+               post: {
+                  title: result.post.title,
+                  selftext: result.post.selftext,
+               },
+               comments,
+            };
+         } catch {
+            return { post: { title: '', selftext: '' }, comments: [] };
+         }
+      },
+
+      // ── Semantic YouTube ──────────────────────────────────────────────────
+      async semanticYoutube(query: string, options?: { maxVideos?: number; channel?: string; topK?: number }) {
+         onToolCall?.('semantic_youtube', query);
+         try {
+            const cfg = loadConfig();
+            const result = await semanticYoutube({
+               query,
+               apiKey: cfg.youtube.apiKey ?? '',
+               embeddingBaseUrl: cfg.embeddingSidecar.baseUrl,
+               embeddingApiToken: cfg.embeddingSidecar.apiToken ?? '',
+               embeddingDimensions: cfg.embeddingSidecar.dimensions,
+               maxVideos: options?.maxVideos,
+               channel: options?.channel,
+               topK: options?.topK ?? 10,
+            });
+            return {
+               chunks: result.results.map((r) => ({
+                  text: r.item.text,
+                  videoId: (r.item.metadata)?.videoId as string | undefined ?? '',
+                  title: r.item.section,
+                  score: r.score.fused,
+                  url: r.item.url,
+               })),
+               videoCount: result.videoCount,
+               failedTranscripts: result.failedTranscripts,
+               warnings: result.warnings ?? [],
+            };
+         } catch {
+            return { chunks: [], videoCount: 0, failedTranscripts: 0, warnings: [] };
+         }
+      },
+
+      // ── Semantic Reddit ───────────────────────────────────────────────────
+      async semanticReddit(query: string, options?: { subreddit?: string; maxPosts?: number; topK?: number }) {
+         onToolCall?.('semantic_reddit', query);
+         try {
+            const cfg = loadConfig();
+            const result = await semanticReddit({
+               query,
+               subreddit: options?.subreddit,
+               maxPosts: options?.maxPosts,
+               embeddingBaseUrl: cfg.embeddingSidecar.baseUrl,
+               embeddingApiToken: cfg.embeddingSidecar.apiToken ?? '',
+               embeddingDimensions: cfg.embeddingSidecar.dimensions,
+               topK: options?.topK ?? 10,
+            });
+            return {
+               chunks: result.results.map((r) => ({
+                  text: r.item.text,
+                  postTitle: r.item.section,
+                  score: r.score.fused,
+                  url: r.item.url,
+               })),
+               postCount: result.postCount,
+               failedPosts: result.failedPosts,
+               warnings: result.warnings ?? [],
+            };
+         } catch {
+            return { chunks: [], postCount: 0, failedPosts: 0, warnings: [] };
+         }
+      },
+
+      // ── Semantic GitHub Code ──────────────────────────────────────────────
+      async semanticGitHubCode(query: string, repo: string, options?: { language?: string; maxFiles?: number; topK?: number }) {
+         onToolCall?.('semantic_github_code', query);
+         try {
+            const result = await semanticGitHubCode({
+               query,
+               repo,
+               language: options?.language,
+               maxFiles: options?.maxFiles ?? 50,
+               topK: options?.topK ?? 10,
+            });
+            return {
+               results: result.results.map((r) => ({
+                  path: r.path,
+                  url: r.url,
+                  language: r.language,
+                  ...(r.symbolName !== undefined ? { symbolName: r.symbolName } : {}),
+                  ...(r.text !== undefined ? { text: r.text } : {}),
+                  score: r.score.fused,
+               })),
+               warnings: result.warnings,
+            };
+         } catch {
+            return { results: [], warnings: [] };
+         }
+      },
+
+      // ── Semantic Crawl ────────────────────────────────────────────────────
+      async semanticCrawl(url: string, query: string, options?: { maxPages?: number; topK?: number }) {
+         onToolCall?.('semantic_crawl', query);
+         try {
+            const cfg = loadConfig();
+            const result = await semanticCrawl(
+               {
+                  source: { type: 'url', url },
+                  query,
+                  topK: options?.topK ?? 10,
+                  maxPages: options?.maxPages ?? 5,
+                  maxDepth: 1,
+                  strategy: 'bfs',
+                  includeExternalLinks: false,
+               },
+               cfg.crawl4ai,
+               cfg.embeddingSidecar.baseUrl,
+               cfg.embeddingSidecar.apiToken ?? '',
+               cfg.embeddingSidecar.dimensions,
+               cfg.raga,
+            );
+            return {
+               chunks: result.chunks.map((c) => ({
+                  text: c.text,
+                  url: c.url,
+                  section: c.section,
+                  score: c.scores.rrf.normalized,
+               })),
+               pagesCrawled: result.pagesCrawled,
+               warnings: result.warnings ?? [],
+            };
+         } catch {
+            return { chunks: [], pagesCrawled: 0, warnings: [] };
+         }
+      },
+   };
 }

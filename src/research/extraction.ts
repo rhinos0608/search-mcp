@@ -25,7 +25,7 @@ import { chunksFromTranscript } from '../rag/adapters/transcript.js';
 import { redditComments } from '../tools/redditComments.js';
 import { chunksFromConversation } from '../rag/adapters/conversation.js';
 import type { ConversationCommentInput } from '../rag/adapters/conversation.js';
-import { ResearchStateEngine, BudgetTracker, confidenceToLabel } from './state.js';
+import { ResearchStateEngine, BudgetTracker } from './state.js';
 import type { Finding, SourceEntry, ClaimType, EvidenceDirectness } from './types.js';
 import { extractSentence } from './extractSentence.js';
 
@@ -148,21 +148,7 @@ function computeEvidenceDirectness(pattern: ClaimPattern, _chunkText: string): E
    return pattern.evidenceDirectness;
 }
 
-/** Heuristic: base confidence from evidence directness. */
-function directnessBaseConfidence(d: EvidenceDirectness): number {
-   switch (d) {
-      case 'direct':
-         return 0.55;
-      case 'near-direct':
-         return 0.45;
-      case 'secondary':
-         return 0.35;
-      case 'anecdotal':
-         return 0.25;
-      case 'speculative':
-         return 0.15;
-   }
-}
+
 
 /**
  * Parse HTML through JSDOM + Readability to extract clean text content.
@@ -269,7 +255,7 @@ export class ExtractionEngine {
                chunks,
                source.id,
                subQuestionIds,
-               source.sourceConfidencePrior,
+
             );
 
             // 4. Register findings with state
@@ -305,11 +291,11 @@ export class ExtractionEngine {
    // ── Source selection ─────────────────────────────────────────────────────
 
    /**
-    * Select top-N sources sorted by confidence prior.
+    * Select top-N pending sources for extraction.
     */
    private selectTopSources(sources: SourceEntry[], maxExtractions: number): SourceEntry[] {
       const available = sources.filter((s) => s.extractionStatus === 'pending');
-      const sorted = [...available].sort((a, b) => b.sourceConfidencePrior - a.sourceConfidencePrior);
+      const sorted = [...available];
       return sorted.slice(0, maxExtractions);
    }
 
@@ -379,7 +365,7 @@ export class ExtractionEngine {
             chunkTexts,
             source.id,
             subQuestionIds,
-            source.sourceConfidencePrior,
+
          );
 
          // 5. Register findings
@@ -493,7 +479,7 @@ export class ExtractionEngine {
             chunkTexts,
             source.id,
             subQuestionIds,
-            source.sourceConfidencePrior,
+
          );
 
          // 5. Register findings
@@ -787,7 +773,7 @@ export class ExtractionEngine {
       chunks: { text: string; heading?: string }[],
       sourceId: string,
       subQuestionIds: string[],
-      sourceConfidencePrior: number,
+
    ): Omit<Finding, 'id' | 'createdAt'>[] {
       const seen = new Set<string>();
       const results: Omit<Finding, 'id' | 'createdAt'>[] = [];
@@ -817,11 +803,6 @@ export class ExtractionEngine {
                seen.add(dedupKey);
 
                const evidenceDirectness = computeEvidenceDirectness(pattern, text);
-               const baseConfidence = Math.min(
-                  1,
-                  directnessBaseConfidence(evidenceDirectness) + sourceConfidencePrior * 0.2,
-               );
-
                // Use type assertion for exactOptionalPropertyTypes compliance
                const finding = {
                   claim,
@@ -833,10 +814,6 @@ export class ExtractionEngine {
                      : 'Extracted from page content',
                   evidenceExcerpt: claim.length <= 200 ? claim : claim.slice(0, 200) + '…',
                   evidenceDirectness,
-                  confidence: baseConfidence,
-                  confidenceLabel: confidenceToLabel(baseConfidence),
-                  corroboratingSourceIds: [],
-                  contradictingSourceIds: [],
                   scope: chunk.heading ?? undefined,
                   freshnessSensitive: false,
                   lastUpdated: nowISO(),

@@ -20,8 +20,7 @@ import { logger } from '../logger.js';
 import { ResearchStateEngine, BudgetTracker } from './state.js';
 import { DiscoveryEngine } from './discovery.js';
 import { ExtractionEngine } from './extraction.js';
-import { LlmExtractor } from './llm/extractor.js';
-import { DeepResearchLlmClient, type TokenBudget } from './llm/chat.js';
+import { DeepResearchLlmClient } from './llm/chat.js';
 import { TREE_GENERATE_QUERIES, TREE_PROCESS_RESULTS } from './llm/prompts.js';
 import type { TreeResearchResult, TreeLearning, SubQuestion, SourceEntry } from './types.js';
 
@@ -292,25 +291,13 @@ export class DeepTreeResearchEngine {
       if (pendingSources.length > 0 && !this.budget.isExhausted()) {
          sources.push(...pendingSources);
 
-         if (this.llm) {
-            const tokenBudget: TokenBudget = {
-               recordTokens: (count: number) => {
-                  this.budget.recordTokens(count);
-                  return !this.budget.isExhausted();
-               },
-            };
-            const llmExtractor = new LlmExtractor(this.llm, this.state, tokenBudget);
-            try {
-               await llmExtractor.extract(pendingSources, [tempSubQuestion]);
-               this.budget.recordStepCost('tree.extraction', 1);
-            } catch {
-               logger.warn({ query: treeQuery.query }, 'Tree research: LLM extraction failed, using rule-based');
-               const ruleExtractor = new ExtractionEngine(this.state, this.budget);
-               await ruleExtractor.extract(pendingSources);
-            }
-         } else {
-            const ruleExtractor = new ExtractionEngine(this.state, this.budget);
+         // Always use rule-based ExtractionEngine (LLM per-source extraction removed)
+         const ruleExtractor = new ExtractionEngine(this.state, this.budget);
+         try {
             await ruleExtractor.extract(pendingSources);
+            this.budget.recordStepCost('tree.extraction', 1);
+         } catch {
+            logger.warn({ query: treeQuery.query }, 'Tree research: rule-based extraction failed');
          }
       }
 

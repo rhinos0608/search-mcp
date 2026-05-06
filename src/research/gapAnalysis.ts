@@ -12,8 +12,8 @@
  */
 
 import { randomUUID } from 'node:crypto';
-import type { GapRecord, GapCategory, SourceType, ConfidenceLabel, ContentQualityAssessment, SubQuestionCoverage } from './types.js';
-import { ResearchStateEngine, BudgetTracker, labelToConfidence } from './state.js';
+import type { GapRecord, GapCategory, SourceType, ContentQualityAssessment, SubQuestionCoverage } from './types.js';
+import { ResearchStateEngine, BudgetTracker } from './state.js';
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -144,7 +144,7 @@ export class GapAnalyzer {
       const gaps: GapRecord[] = [];
 
       gaps.push(...this.unansweredSubQuestions());
-      gaps.push(...this.lowConfidenceClaims());
+
       gaps.push(...this.missingSourceTypes());
       gaps.push(...this.missingRecency());
       gaps.push(...this.overrepresentedViewpoints());
@@ -184,24 +184,7 @@ export class GapAnalyzer {
       }));
    }
 
-   /**
-    * Findings with confidence < 0.5 (speculative or unsupported) that need
-    * corroboration from additional sources.
-    */
-   private lowConfidenceClaims(): GapRecord[] {
-      const state = this.state.getState();
-      return state.findings
-         .filter((f) => f.confidence < 0.5)
-         .map((f) => ({
-            id: gapId(),
-            category: 'low_confidence' as const,
-            description: `Low-confidence finding (${(f.confidence * 100).toFixed(0)}%) needs corroboration: "${f.claim}"`,
-            relatedFindingId: f.id,
-            status: 'open' as const,
-            suggestedActions: suggestActions('low_confidence', { claim: f.claim }),
-            priority: defaultPriority('low_confidence'),
-         }));
-   }
+
 
    /**
     * When only 1–2 distinct source types are present in the source registry,
@@ -346,7 +329,7 @@ export class GapAnalyzer {
          gaps.push({
             id: gapId(),
             category,
-            description: `Sub-question "${sq.subQuestionText}" has only ${sq.sourceCount} source(s) from ${sq.uniqueDomainCount} domain(s)`,
+            description: `Sub-question "${sq.subQuestionText}" has only ${String(sq.sourceCount)} source(s) from ${String(sq.uniqueDomainCount)} domain(s)`,
             subQuestionId: sq.subQuestionId,
             status: 'open' as const,
             suggestedActions: suggestActions(category, {
@@ -435,7 +418,7 @@ export class GapAnalyzer {
          gaps.push({
             id: gapId(),
             category: 'promotional_bias' as const,
-            description: `Sub-question "${sq.subQuestionText}" has ${promoCount} promotional source(s) out of ${sqSources.length}`,
+            description: `Sub-question "${sq.subQuestionText}" has ${String(promoCount)} promotional source(s) out of ${String(sqSources.length)}`,
             subQuestionId: sq.subQuestionId,
             status: 'open' as const,
             suggestedActions: suggestActions('promotional_bias', {
@@ -501,15 +484,8 @@ export class GapFiller {
     *   - No open gaps
     *   - All open gaps are low-priority (priority > 3)
     *   - All sub-questions are `'sufficient'` or `'unresolvable'`
-    *   - The average confidence improvement since the last loop is below
-    *     the information-gain threshold
-    *
-    * @param previousConfidenceDistribution – distribution from the state
-    *    snapshot taken **before** the most recent gap loop.  When provided,
-    *    the method computes the current distribution and compares averages
-    *    via `BudgetTracker.isInformationGainWorthwhile`.
     */
-   shouldContinueLoop(previousConfidenceDistribution?: Record<ConfidenceLabel, number>): boolean {
+   shouldContinueLoop(): boolean {
       // 1. Budget exhausted?
       if (this.budget.isExhausted()) return false;
 
@@ -537,26 +513,14 @@ export class GapFiller {
          state.subQuestions.every((sq) => sq.status === 'sufficient' || sq.status === 'unresolvable');
       if (allSubQuestionsResolved) return false;
 
-      // 5. Confidence improvement worthwhile?
-      if (previousConfidenceDistribution) {
-         const currentDist = this.computeConfidenceDistribution();
-         const prevAvg = weightedAverageConfidence(previousConfidenceDistribution);
-         const currAvg = weightedAverageConfidence(currentDist);
 
-         if (!this.budget.isInformationGainWorthwhile(prevAvg, currAvg)) {
-            return false;
-         }
-      }
 
       return true;
    }
 
    // ── private helpers ────────────────────────────────────────────────────
 
-   /** Delegate to `state.compress()` and return only the distribution map. */
-   private computeConfidenceDistribution(): Record<string, number> {
-      return this.state.compress().confidenceDistribution;
-   }
+
 }
 
 // ── gap-level helpers (shared across both classes) ──────────────────────────
@@ -568,20 +532,3 @@ function gapKey(category: GapCategory, subQuestionId?: string, relatedFindingId?
    return `${category}::${subQuestionId ?? ''}::${relatedFindingId ?? ''}`;
 }
 
-/**
- * Compute a weighted average confidence from a label-count distribution,
- * reusing `labelToConfidence` from the state engine for the label→value
- * mapping.
- */
-function weightedAverageConfidence(distribution: Record<string, number>): number {
-   let totalWeight = 0;
-   let sum = 0;
-
-   for (const [label, count] of Object.entries(distribution)) {
-      const value = labelToConfidence(label as ConfidenceLabel);
-      sum += value * count;
-      totalWeight += count;
-   }
-
-   return totalWeight > 0 ? sum / totalWeight : 0;
-}

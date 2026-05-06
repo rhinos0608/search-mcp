@@ -44,7 +44,6 @@ export class KnowledgeBase {
             question: f.subQuestionIds.length > 0 ? `Finding for sub-question ${f.subQuestionIds[0] ?? ''}` : 'General finding',
             answer: f.claim,
             references: f.sourceIds,
-            confidence: f.confidence,
             type: 'finding',
             sourceFindingIds: [f.id],
             createdAtStep: step,
@@ -65,7 +64,6 @@ export class KnowledgeBase {
          question,
          answer: insight,
          references: sourceUrls,
-         confidence: 0.3,
          type: 'serp_hypothesis',
          sourceFindingIds: [],
          createdAtStep: step,
@@ -79,7 +77,6 @@ export class KnowledgeBase {
          question: target.question,
          answer: target.resolution.answer,
          references: sourceIds,
-         confidence: target.resolution.confidence,
          type: 'gap_resolution',
          sourceFindingIds: [],
          createdAtStep: step,
@@ -89,16 +86,14 @@ export class KnowledgeBase {
    /** Select top-K items (findings and gap resolutions) bounded by token budget. */
    selectForGap(maxItems: number, maxTokens: number): KnowledgeItem[] {
       const candidates = this.items
-         .filter((item) => item.type === 'finding' || item.type === 'gap_resolution')
-         .sort((a, b) => b.confidence - a.confidence);
+         .filter((item) => item.type === 'finding' || item.type === 'gap_resolution');
       return this.selectWithBudget(candidates, maxItems, maxTokens);
    }
 
    /** Select top-K items for synthesis, bounded by token budget. */
    selectForSynthesis(maxItems: number, maxTokens: number): KnowledgeItem[] {
       const candidates = this.items
-         .filter((item) => item.type !== 'serp_hypothesis') // exclude unconfirmed hypotheses
-         .sort((a, b) => b.confidence - a.confidence);
+         .filter((item) => item.type !== 'serp_hypothesis'); // exclude unconfirmed hypotheses
       return this.selectWithBudget(candidates, maxItems, maxTokens);
    }
 
@@ -109,7 +104,7 @@ export class KnowledgeBase {
          pairs.push({ role: 'user', content: `Research finding: ${item.question}` });
          pairs.push({
             role: 'assistant',
-            content: `${item.answer} (confidence: ${item.confidence.toFixed(2)})`,
+            content: item.answer, // sources in references: ${item.references.join(', ')}
          });
       }
       return pairs;

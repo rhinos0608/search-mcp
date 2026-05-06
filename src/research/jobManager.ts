@@ -17,7 +17,7 @@ import { logger } from '../logger.js';
 // ── Constants ──────────────────────────────────────────────────────────────────
 
 const DEFAULT_MAX_ACTIVE = 5;
-const DEFAULT_TTL_MS = 30 * 60 * 1_000; // 30 minutes
+const DEFAULT_TTL_MS = 24 * 60 * 60 * 1_000; // 24 hours
 const CLEANUP_INTERVAL_MS = 60 * 1_000; // 1 minute
 const QUERY_TRUNCATE_LENGTH = 80;
 
@@ -43,6 +43,8 @@ export interface ResearchJobPartial {
    classification: string | undefined;
    subQuestionCount: number | undefined;
    sourceCount: number | undefined;
+   /** Total individual sources (not source types). */
+   sourceTypeCount: number | undefined;
    findingCount: number | undefined;
 }
 
@@ -64,9 +66,13 @@ export interface ResearchJobSnapshot {
    classification: string | undefined;
    subQuestionCount: number | undefined;
    sourceCount: number | undefined;
+   /** Total individual sources (not source types). */
+   sourceTypeCount: number | undefined;
    findingCount: number | undefined;
    result: ResearchResult | undefined;
    error: string | undefined;
+   /** Path to persisted result file on disk, if saved. */
+   resultFile: string | undefined;
 }
 
 /** Lightweight summary returned by list. */
@@ -114,6 +120,8 @@ interface InternalJob {
    classification: string | undefined;
    subQuestionCount: number | undefined;
    sourceCount: number | undefined;
+   /** Total individual sources (not source types). */
+   sourceTypeCount: number | undefined;
    findingCount: number | undefined;
 
    // Internal (never exposed in snapshot)
@@ -121,6 +129,8 @@ interface InternalJob {
    runtimeTimeout: NodeJS.Timeout | undefined;
    result: ResearchResult | undefined;
    error: string | undefined;
+   /** Path to persisted result file on disk, if saved. */
+   resultFile: string | undefined;
 }
 
 // ── Job Manager ────────────────────────────────────────────────────────────────
@@ -177,11 +187,13 @@ export class ResearchJobManager {
          classification: undefined,
          subQuestionCount: undefined,
          sourceCount: undefined,
+         sourceTypeCount: undefined,
          findingCount: undefined,
          abortController: undefined,
          runtimeTimeout: undefined,
          result: undefined,
          error: undefined,
+         resultFile: undefined,
       };
 
       this.jobs.set(jobId, job);
@@ -206,6 +218,7 @@ export class ResearchJobManager {
       if (update.classification !== undefined) job.classification = update.classification;
       if (update.subQuestionCount !== undefined) job.subQuestionCount = update.subQuestionCount;
       if (update.sourceCount !== undefined) job.sourceCount = update.sourceCount;
+      if (update.sourceTypeCount !== undefined) job.sourceTypeCount = update.sourceTypeCount;
       if (update.findingCount !== undefined) job.findingCount = update.findingCount;
       job.updatedAt = Date.now();
    }
@@ -223,6 +236,9 @@ export class ResearchJobManager {
       job.result = result;
       job.completedAt = Date.now();
       job.updatedAt = Date.now();
+      // Populate source counts from completed result
+      job.sourceCount = result.report.sourceCount;
+      job.sourceTypeCount = result.report.sourceTypeCount;
       this.disarmJob(job);
 
       logger.info(
@@ -350,6 +366,31 @@ export class ResearchJobManager {
    /**
     * Get count of active (running + cancelling) jobs.
     */
+   /**
+    * Get the full result for a completed job. Returns undefined if the job
+    * doesn't exist, hasn't completed, or has expired.
+    */
+   getResult(jobId: string): ResearchResult | undefined {
+      return this.jobs.get(jobId)?.result;
+   }
+
+   /**
+    * Get the result file path for a job, if previously saved.
+    */
+   getResultFile(jobId: string): string | undefined {
+      return this.jobs.get(jobId)?.resultFile;
+   }
+
+   /**
+    * Record the result file path after a save operation.
+    */
+   setResultFile(jobId: string, filePath: string): void {
+      const job = this.jobs.get(jobId);
+      if (!job) return;
+      job.resultFile = filePath;
+      job.updatedAt = Date.now();
+   }
+
    activeCount(): number {
       return this.countActive();
    }
@@ -461,9 +502,11 @@ export class ResearchJobManager {
          classification: job.classification,
          subQuestionCount: job.subQuestionCount,
          sourceCount: job.sourceCount,
+         sourceTypeCount: job.sourceTypeCount,
          findingCount: job.findingCount,
          result: job.result,
          error: job.error,
+         resultFile: job.resultFile,
       };
    }
 

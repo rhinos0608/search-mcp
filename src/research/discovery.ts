@@ -43,14 +43,12 @@ interface ScoreWeights {
    relevance: number;
    diversity: number;
    freshness: number;
-   confidence: number;
 }
 
 const DEFAULT_WEIGHTS: ScoreWeights = {
-   relevance: 0.35,
-   diversity: 0.2,
-   freshness: 0.15,
-   confidence: 0.3,
+   relevance: 0.4,
+   diversity: 0.3,
+   freshness: 0.3,
 };
 
 // ── Domain authority baseline ───────────────────────────────────────────────
@@ -113,42 +111,6 @@ function estimateFreshness(age: string | null): number {
    if (lower.includes('month')) return 0.4;
    if (lower.includes('year')) return 0.2;
    return 0.5;
-}
-
-// ── Helper: compute source confidence prior by type ─────────────────────────
-
-function sourceConfidencePrior(type: SourceType, url: string, _snippet: string): number {
-   const domain = extractDomain(url);
-
-   // Boost known authority domains
-   if (AUTHORITY_DOMAINS.has(domain)) return 0.85;
-
-   switch (type) {
-      case 'academic':
-         return 0.8;
-      case 'github':
-         return 0.75;
-      case 'documentation':
-         return 0.7;
-      case 'news':
-         return 0.55;
-      case 'web':
-         // Check for high-quality signals in URL/snippet
-         if (domain.includes('blog.') || domain.includes('engineering.')) return 0.65;
-         if (domain.includes('medium.com')) return 0.45;
-         return 0.5;
-      case 'stackoverflow':
-         return 0.6;
-      case 'reddit':
-         return 0.45;
-      case 'hackernews':
-         return 0.4;
-      case 'youtube':
-         // Videos with transcripts are more reliable than social media
-         return 0.55;
-      default:
-         return 0.5;
-   }
 }
 
 // ── Helper: sub-question → search query generation ──────────────────────────
@@ -1173,8 +1135,7 @@ export class DiscoveryEngine {
          const baseScore =
             this.weights.relevance * c.estimatedRelevance +
             this.weights.diversity * c.estimatedQuality +
-            this.weights.freshness * estimateFreshness(c.freshness) +
-            this.weights.confidence * sourceConfidencePrior(c.sourceType, c.url, c.snippet);
+            this.weights.freshness * estimateFreshness(c.freshness);
 
          // Frequency boost: duplicates indicate corroboration
          const count = urlCounts.get(normalizeUrlForDedup(c.url)) ?? 1;
@@ -1269,11 +1230,6 @@ export class DiscoveryEngine {
          url: candidate.url,
          accessDate: new Date().toISOString(),
          sourceType: candidate.sourceType,
-         sourceConfidencePrior: sourceConfidencePrior(
-            candidate.sourceType,
-            candidate.url,
-            candidate.snippet,
-         ),
          domain: extractDomain(candidate.url),
          isPrimary: candidate.sourceType === 'academic' || candidate.sourceType === 'github',
          relevantSubQuestions: [candidate.subQuestionId],
@@ -1290,11 +1246,6 @@ export class DiscoveryEngine {
          title: candidate.title,
          url: candidate.url,
          sourceType: candidate.sourceType,
-         sourceConfidencePrior: sourceConfidencePrior(
-            candidate.sourceType,
-            candidate.url,
-            candidate.snippet,
-         ),
          domain: extractDomain(candidate.url),
          isPrimary: candidate.sourceType === 'academic' || candidate.sourceType === 'github',
          relevantSubQuestions: [candidate.subQuestionId],

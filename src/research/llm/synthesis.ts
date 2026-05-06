@@ -13,7 +13,6 @@ import type {
    ResearchState,
    ResearchReport,
    ResearchDepth,
-   ConfidenceLabel,
    SubQuestion,
    Finding,
    SourceEntry,
@@ -35,12 +34,8 @@ interface SummarySubQuestion {
 
 interface SummaryFinding {
    claim: string;
-   confidence: number;
-   confidenceLabel: ConfidenceLabel;
    evidenceDirectness: string;
    sourceCount: number;
-   corroborationCount: number;
-   contradictsCount: number;
    caveats?: string;
 }
 
@@ -67,6 +62,9 @@ interface ResearchStateSummary {
    query: string;
    depth: string;
    claimEdgeCount: number;
+   totalSourceCount: number;
+   sourceTypeCount: number;
+   sourceDiversity: { type: string; count: number }[];
    budgetRemaining: {
       toolCalls: number;
       tokens: number;
@@ -82,7 +80,6 @@ interface ResearchStateSummary {
    openQuestions: string[];
    conversationKnowledge?: { role: string; content: string }[];
    diary?: string[];
-   confidenceDistribution: Record<string, number>;
 }
 
 // ── Type guard ───────────────────────────────────────────────────────────────
@@ -111,7 +108,6 @@ function isResearchReport(value: unknown): value is ResearchReport {
          return false;
       }
       if (theme.findings !== undefined && !Array.isArray(theme.findings)) return false;
-      if (typeof theme.confidence !== 'string') return false;
    }
 
    // contradictions can be an empty array — just check it's an array
@@ -136,9 +132,6 @@ function isResearchReport(value: unknown): value is ResearchReport {
 
    if (typeof r.sourceCount !== 'number') return false;
    if (typeof r.findingCount !== 'number') return false;
-
-   if (r.confidenceDistribution === null || typeof r.confidenceDistribution !== 'object')
-      return false;
 
    return true;
 }
@@ -218,7 +211,6 @@ export class LlmSynthesizer {
          } else if (theme.findings && theme.findings.length > 0) {
             parts.push(theme.findings.join('\n\n') + '\n');
          }
-         parts.push(`*Confidence: ${theme.confidence}*\n`);
       }
 
       if (report.contradictions.length > 0) {
@@ -259,14 +251,24 @@ export class LlmSynthesizer {
     * under ~8000 characters for the LLM context window.
     */
    private buildStateSummary(state: ResearchState): string {
-      const confidenceDist = this.computeConfidenceDistribution(state.findings);
-
       const depth = this.inferDepth(state.sources.length);
+
+      // Compute source type breakdown for the LLM
+      const typeMap = new Map<string, number>();
+      for (const s of state.sources) {
+         typeMap.set(s.sourceType, (typeMap.get(s.sourceType) ?? 0) + 1);
+      }
+      const sourceDiversity = [...typeMap.entries()]
+         .map(([type, count]) => ({ type, count }))
+         .sort((a, b) => b.count - a.count);
 
       const summary: ResearchStateSummary = {
          query: state.query,
          depth,
          claimEdgeCount: state.claimGraph.length,
+         totalSourceCount: state.sources.length,
+         sourceTypeCount: typeMap.size,
+         sourceDiversity,
          budgetRemaining: {
             toolCalls: state.budget.maxToolCalls - state.budget.toolCallsUsed,
             tokens: state.budget.maxTokens - state.budget.tokensUsed,
@@ -281,12 +283,8 @@ export class LlmSynthesizer {
          })),
          findings: state.findings.map((f: Finding) => ({
             claim: f.claim,
-            confidence: f.confidence,
-            confidenceLabel: f.confidenceLabel,
             evidenceDirectness: f.evidenceDirectness,
             sourceCount: f.sourceIds.length,
-            corroborationCount: f.corroboratingSourceIds.length,
-            contradictsCount: f.contradictingSourceIds.length,
             ...(f.caveats !== undefined ? { caveats: f.caveats } : {}),
          })),
          sources: state.sources.map((s: SourceEntry, i: number) => ({
@@ -306,7 +304,6 @@ export class LlmSynthesizer {
             priority: g.priority,
          })),
          openQuestions: state.openQuestions,
-         confidenceDistribution: confidenceDist,
       };
 
       // P3: Conversation knowledge pairs — findings as assistant messages
@@ -335,17 +332,6 @@ export class LlmSynthesizer {
       }
 
       return JSON.stringify(summary);
-   }
-
-   /**
-    * Compute confidence-label distribution from findings.
-    */
-   private computeConfidenceDistribution(findings: Finding[]): Record<string, number> {
-      const dist: Record<string, number> = {};
-      for (const f of findings) {
-         dist[f.confidenceLabel] = (dist[f.confidenceLabel] ?? 0) + 1;
-      }
-      return dist;
    }
 
    /**

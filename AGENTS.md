@@ -73,12 +73,18 @@ npm run config:decrypt   # config.enc -> config.json
   - `arxiv` — direct ArXiv search with category/date filtering
   - `hackernews` — Algolia HN search
   - `stackoverflow` — Stack Exchange API (degraded without `STACKEXCHANGE_API_KEY`)
-  - `deep_research` — Deep multi-phase research with LLM orchestration (requires `DEEP_RESEARCH_ENABLED=true`)
-    - Control loop: `State → Evaluate → Decide → Act → Update State`
-    - Phases: decomposition → discovery → extraction → gap analysis → audit → synthesis
-    - Model routing: orchestrator model (planning, evaluation, audit, synthesis) + worker model (extraction)
-    - 3D confidence: evidence quality × extraction reliability × source consistency
-    - Falls back to rule-based when LLM is not configured
+- `deep_research` — Standalone deep multi-source research via a job/poll protocol (requires `DEEP_RESEARCH_ENABLED=true`):
+  - Actions: `start`, `poll`, `list`, `cancel`, `save`
+  - `start` returns a jobId immediately; research runs asynchronously in background
+  - `poll` blocks up to 60s waiting for completion, returns partial progress or full result
+  - `save` persists a completed result as a JSON file to a configurable path
+  - Results held in memory for 24 hours after completion; explicit save for durable persistence
+  - Control loop (orchestrator): `State → Evaluate → Decide → Act → Update State`
+  - Phases: decomposition → discovery → extraction → gap analysis → audit → synthesis
+  - Model routing: orchestrator model (planning, evaluation, audit, synthesis) + worker model (extraction)
+  - 3D confidence: evidence quality × extraction reliability × source consistency
+  - Falls back to rule-based when LLM is not configured
+  - Depth profiles: `quick` | `standard` | `deep` | `exhaustive` | `tree`
 
 ### Packages/Products
 - `packages` (family tool with `action` discriminator):
@@ -113,53 +119,84 @@ npm run config:decrypt   # config.enc -> config.json
 
 ## Deep Research Modules (V4.0.0)
 
-`src/research/` implements the deep research orchestration engine:
+`src/research/` implements the deep research orchestration engine. The tool (`deep_research`) uses a job/poll protocol — `start` returns a jobId immediately, research runs asynchronously, and `poll` retrieves progress or the final result. Results are held in memory for 24 hours, and the `save` action persists them to disk.
 
-### Core Loop: `State → Evaluate → Decide → Act → Update State`
-
-The orchestrator runs an adaptive control loop rather than a fixed pipeline. Each iteration evaluates the current state (what's known, what's missing), decides the best next action, executes it, and updates the state.
-
-### Control Flow
+### Job Protocol
 
 ```
-1. Decomposition  → rule-based query → sub-questions
-2. Discovery      → multi-backend search (web, academic, Reddit, HN, GitHub, SO)
-3. Taxonomy       → rule-based revision after first discovery pass
-4. Extraction     → LLM (worker model) or regex fallback
-5. EDA Loop       → Evaluate (gaps + LLM assessment)
-                   → Decide (LLM or rule-based heuristics)
-                   → Act (extract, fill_gaps, discover, contradiction_scan)
-                   → Update State (loop until budget exhausted or all gaps resolved)
-6. Audit          → LLM (orchestrator) + rule-based, merged with dedup
-7. Synthesis      → LLM (orchestrator) or rule-based ResearchSynthesizer
+start  → returns jobId, research runs in background
+poll   → blocks up to 60s, returns snapshot or full result
+list   → lightweight summary of all known jobs
+cancel → aborts a running job
+save   → writes full result to a JSON file on disk
 ```
+
+Jobs follow this lifecycle: `queued → running → complete | failed | cancelled → expired (24h TTL)`.
+
+### Orchestrator Control Flow
+
+The orchestrator runs inside the detached research promise. It has two paths:
+
+**Standard path** (quick/standard/deep/exhaustive):
+```
+1. Decomposition   → rule-based query → sub-questions
+2. Discovery       → multi-backend search (web, academic, Reddit, HN, GitHub, SO)
+3. Taxonomy        → rule-based revision after first discovery pass
+4. Extraction      → LLM (worker model) or regex fallback
+5. EDA Loop        → Evaluate (gaps + LLM assessment)
+                    → Decide (LLM or rule-based heuristics)
+                    → Act (extract, fill_gaps, discover, contradiction_scan)
+                    → Update State (loop until budget exhausted or all gaps resolved)
+6. Audit           → LLM (orchestrator) + rule-based, merged with dedup
+7. Synthesis       → LLM (orchestrator) or rule-based ResearchSynthesizer
+```
+
+**Tree path** (tree depth):
+- Breadth×depth recursive exploration (4 sub-queries × 2 levels)
+- Parallel discovery and extraction per level via `DeepTreeResearchEngine`
+- Bypasses Phases 2–5, uses tree expansion instead
 
 ### Model Routing
 
-| Model | Role | Default Temperature |
+|Model|Role|Default Temperature|
 |---|---|---|
-| `DEEP_RESEARCH_MODEL` (orchestrator) | Planning, evaluation, decision-making, audit, synthesis | 0.7 |
-| `DEEP_RESEARCH_WORKER_MODEL` (worker) | Extraction from source content, classification | 0.3 |
+|`DEEP_RESEARCH_MODEL` (orchestrator)|Planning, evaluation, decision-making, audit, synthesis|0.7|
+|`DEEP_RESEARCH_WORKER_MODEL` (worker)|Extraction from source content, classification|0.3|
 
 Both use the same OpenAI-compatible base URL (`DEEP_RESEARCH_BASE_URL`). When LLM is not configured, all phases fall back to rule-based implementations.
 
 ### Key Modules
 
-| File | Purpose |
+|File|Purpose|
 |---|---|
-| `llm/chat.ts` | OpenAI-compatible HTTP client with model routing, token tracking, retry logic |
-| `llm/prompts.ts` | 6 system prompts (evaluate, decide, extract, classify, audit, synthesis) |
-| `llm/extractor.ts` | Worker-based extraction with semaphore parallelism, regex fallback |
-| `llm/synthesis.ts` | Orchestrator-based narrative report generation |
-| `orchestrator.ts` | Control loop: state machine, budget tracking, model routing |
-| `confidence.ts` | 3D confidence: evidence quality × extraction reliability × source consistency |
-| `state.ts` | Durable research state (sources, findings, contradictions, gaps) |
-| `decomposer.ts` | Rule-based query → sub-question decomposition |
-| `discovery.ts` | Multi-backend source discovery with scoring/dedup |
-| `extraction.ts` | Rule-based extraction (fallback path) |
-| `gapAnalysis.ts` | Rule-based gap detection (fallback path) |
-| `audit.ts` | Rule-based state audit with 7 checks (fallback path) |
-| `synthesizer.ts` | Rule-based synthesis (fallback path) |
+|`llm/chat.ts`|OpenAI-compatible HTTP client with model routing, token tracking, retry logic|
+|`llm/prompts.ts`|16 system prompts (orchestrator evaluate, decide, synthesis_v2; worker extract, classify, rewrite, cluster, quality, etc.)|
+|`llm/extractor.ts`|Worker-based extraction with semaphore parallelism, regex fallback|
+|`llm/synthesis.ts`|Orchestrator-based narrative report generation|
+|`orchestrator.ts`|Control loop: state machine, budget tracking, model routing; tree engine dispatch|
+|`jobManager.ts`|In-memory job registry with TTL cleanup, max-active limit, AbortSignal propagation. Singleton `researchJobManager`|
+|`compaction.ts`|Multi-layer result compaction for MCP transport (trim timeline, cap findings, write full result to file, hard size guard)|
+|`treeEngine.ts`|`DeepTreeResearchEngine` — breadth×depth recursive exploration for `tree` depth profile|
+|`workerAgent.ts`|Distributed worker pool for parallel extraction across sources|
+|`state.ts`|Durable research state (sources, findings, contradictions, gaps, diary, language profile)|
+|`decomposer.ts`|Rule-based sub-question decomposition; LLM-powered variant with search-result seeding|
+|`discovery.ts`|Multi-backend source discovery with scoring/dedup; optional LLM query rewriting|
+|`extraction.ts`|Rule-based extraction (fallback path)|
+|`knowledge.ts`|Knowledge store — conversation-pair format findings for LLM-native context injection|
+|`gapAnalysis.ts`|Rule-based gap detection (fallback path); `GapFiller`, `GapAnalyzer`|
+|`audit.ts`|Rule-based state audit with 7 checks (fallback path)|
+|`synthesizer.ts`|Rule-based synthesis (fallback path)|
+|`confidence.ts`|3D confidence: evidence quality × extraction reliability × source consistency|
+|`actionGates.ts`|Per-step action disable flags — blocks `discover` after enough sources, `extract` after low yield, etc.|
+|`agenda.ts`|Structured agenda management: ordered action queue with priority, dedup, and progress tracking|
+|`taxonomy.ts`|Taxonomy revision after first discovery pass — reclassifies sub-questions based on real results|
+|`language.ts`|Language auto-detection (ISO 639-1) and style profile; parameterizes prompts for non-English queries|
+|`sourceQuality.ts`|Per-source quality scoring (freshness, authority, relevance)|
+|`sourceRanking.ts`|Multi-signal URL ranking: frequency boost, domain authority, path structure, hostname diversity|
+|`trace.ts`|Structured trace events — step-level action logging for streaming and replay|
+|`progress.ts`|Progress tracker — emits typed `ResearchProgress` events through the MCP progress callback|
+|`researchTools.ts`|Shared tool utilities: `createResearchTools()` factory for orchestrator dependencies|
+|`extractSentence.ts`|Sentence-level extraction utility — splits content into atomic claim-sized units|
 
 ### 3D Confidence Model
 
@@ -177,6 +214,9 @@ Aggregate: `Math.min(evidence.score, extraction.score, consistency.score)` (cons
 - Budget exhaustion → `synthesizePartial()` with whatever state exists
 - Per-source extraction failures isolated (one failure doesn't block others)
 - Degenerate loop protection: max iterations per budget profile, confidence plateau detection
+- Job max runtime timeout per depth profile (60s quick → 600s exhaustive); enforced via AbortController
+- In-memory jobs auto-expire 24h after terminal state; stale running jobs force-expired after 2× max runtime
+- A single `ResearchJobManager` singleton manages concurrency (max 5 active jobs) and lifecycle
 
 ## Embedding Providers
 
@@ -288,7 +328,7 @@ DEEP_RESEARCH_ENABLED       # 'true' | 'false' (default: false)
 DEEP_RESEARCH_BASE_URL      # OpenAI-compatible base URL for LLM calls
 DEEP_RESEARCH_MODEL         # Main orchestrator model (e.g. 'gpt-4o', 'claude-sonnet-4')
 DEEP_RESEARCH_WORKER_MODEL  # Worker model for cheap tasks (e.g. 'gpt-4o-mini', 'llama3')
-DEEP_RESEARCH_DEFAULT_DEPTH # 'quick' | 'standard' | 'deep' | 'exhaustive'
+DEEP_RESEARCH_DEFAULT_DEPTH # 'quick' | 'standard' | 'deep' | 'exhaustive' | 'tree'
 
 # Persistence
 DATABASE_PATH               # default under ~/.cache/search-mcp/semantic-crawl/

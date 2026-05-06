@@ -61,7 +61,6 @@ export interface SourceEntry {
    publishedDate?: string;
    accessDate: string;
    sourceType: SourceType;
-   sourceConfidencePrior: number;
    domain: string;
    isPrimary: boolean;
    relevantSubQuestions: string[];
@@ -72,12 +71,7 @@ export interface SourceEntry {
 
 // ── Findings ──────────────────────────────────────────────────────────────────
 
-export type ConfidenceLabel =
-   | 'well-corroborated'
-   | 'likely'
-   | 'plausible-but-thin'
-   | 'speculative'
-   | 'unsupported-or-disputed';
+
 
 export type EvidenceDirectness =
    | 'direct'
@@ -97,10 +91,6 @@ export interface Finding {
    evidenceSummary: string;
    evidenceExcerpt?: string;
    evidenceDirectness: EvidenceDirectness;
-   confidence: number;
-   confidenceLabel: ConfidenceLabel;
-   corroboratingSourceIds: string[];
-   contradictingSourceIds: string[];
    caveats?: string;
    scope?: string;
    freshnessSensitive: boolean;
@@ -137,7 +127,6 @@ export interface Contradiction {
    contradictionType: ContradictionType;
    likelyExplanation?: string;
    resolutionStatus: ContradictionStatus;
-   confidenceImpact: number;
    followUpSearchRecommended?: string;
 }
 
@@ -229,7 +218,6 @@ export interface GapTarget {
    resolution?: {
       answer: string;
       evidenceSummary: string;
-      confidence: number;
    };
 }
 
@@ -243,7 +231,6 @@ export interface EvaluationResult {
    unsupportedClaims: string[];
    contradictions: string[];
    requiredNextEvidence: string[];
-   confidence: number;
    reason: string;
 }
 
@@ -280,7 +267,6 @@ export interface KnowledgeItem {
    question: string;
    answer: string;
    references: string[];
-   confidence: number;
    type: KnowledgeType;
    sourceFindingIds: string[];
    createdAtStep: number;
@@ -520,7 +506,6 @@ export interface ResearchReport {
       title: string;
       narrative: string;
       findings?: string[];
-      confidence: ConfidenceLabel;
       sourceCitations?: { id: string; url: string; title: string }[];
    }[];
    contradictions: Contradiction[];
@@ -531,7 +516,10 @@ export interface ResearchReport {
    limitations: string[];
    sourceCount: number;
    findingCount: number;
-   confidenceDistribution: Record<ConfidenceLabel, number>;
+   /** Count of distinct source types (corpuses) across all sources. */
+   sourceTypeCount: number;
+   /** Breakdown of sources by type: [{ type, count }]. */
+   sourceDiversity: { type: string; count: number }[];
    /** Per-sub-question coverage summary for gap detection. */
    subQuestionCoverage?: SubQuestionCoverage[];
 }
@@ -548,10 +536,6 @@ export interface CompactFinding {
    evidenceSummary: string;
    evidenceExcerpt?: string;
    evidenceDirectness: EvidenceDirectness;
-   confidence: number;
-   confidenceLabel: ConfidenceLabel;
-   corroboratingSourceCount: number;
-   contradictingSourceCount: number;
    sourceCount: number;
    claimType: ClaimType;
    subQuestionIds: string[];
@@ -563,17 +547,18 @@ export interface CompactContradiction {
    claimB: string;
    contradictionType: ContradictionType;
    resolutionStatus: ContradictionStatus;
-   confidenceImpact: number;
 }
 
 export interface CompactStatistics {
    sourceCount: number;
+   /** Count of distinct source types (corpuses). */
+   sourceTypeCount: number;
+   /** Breakdown of sources by type: [{ type, count }]. */
+   sourceDiversity: { type: string; count: number }[];
    totalFindingCount: number;
    includedFindingCount: number;
-   droppedLowConfidenceCount: number;
    droppedByCapCount: number;
    contradictionCount: number;
-   confidenceDistribution: Record<ConfidenceLabel, number>;
    timelinePhaseCount: number;
    totalBytes?: number;
    furtherTruncated?: boolean;
@@ -597,7 +582,6 @@ export interface CompactResearchResult {
 
 export interface CompactionOptions {
    maxFindingsPerTheme?: number;
-   minConfidence?: number;
    maxExcerptChars?: number;
    softSizeLimit?: number;
    hardSizeLimit?: number;
@@ -621,7 +605,6 @@ export interface AuditReport {
    stats: {
       totalClaims: number;
       unsourcedClaims: number;
-      lowConfidenceClaims: number;
       unresolvedContradictions: number;
       mergedDuplicates: number;
       sourceDiversity: { type: string; count: number }[];
@@ -683,8 +666,6 @@ export interface WorkerReport {
    contentQuality: Record<string, ContentQualityAssessment>;
    /** Narrative summary written by the worker. */
    narrativeSummary: string;
-   /** Overall confidence in the answer (0-1). */
-   confidence: number;
    /** Search queries the worker used. */
    searchQueries: string[];
    /** Total tokens consumed by this worker. */
@@ -703,10 +684,6 @@ export interface WorkerFinding {
    evidence: string;
    /** Source URLs backing this claim. */
    sourceUrls: string[];
-   /** 0-1 confidence score. */
-   confidence: number;
-   /** Whether the worker found corroborating evidence. */
-   corroborated: boolean;
    /** Caveats or limitations the worker noted. */
    caveats?: string;
 }
@@ -743,11 +720,34 @@ export interface SubThread {
 
 /** Tool interface exposed to worker agents. */
 export interface ResearchTools {
-   webSearch(query: string, limit?: number): Promise<{ title: string; url: string; description: string; age?: string }[]>;
+   webSearch(query: string, limit?: number): Promise<{ title: string; url: string; description: string; age?: string; extraSnippet?: string; deepLinks?: { title: string; url: string }[] }[]>;
    webCrawl(url: string, maxPages?: number): Promise<{ title: string; url: string; markdown: string }[]>;
    webRead(url: string): Promise<{ title: string; url: string; markdown: string }>;
    academicSearch(query: string, limit?: number): Promise<{ title: string; url: string; abstract?: string; year?: number }[]>;
    githubSearch(query: string, limit?: number): Promise<{ fullName: string; htmlUrl: string; description: string }[]>;
    redditSearch(query: string, limit?: number): Promise<{ title: string; url: string; selftext?: string; created_utc?: number; permalink: string }[]>;
    hackernewsSearch(query: string, limit?: number): Promise<{ title: string; url: string; text?: string }[]>;
+
+   // ── YouTube ─────────────────────────────────────────────────────────────
+   /** Search YouTube videos. */
+   youtubeSearch(query: string, limit?: number): Promise<{ title: string; videoId: string; channelTitle: string; publishedAt: string; url: string }[]>;
+   /** Fetch transcript for a YouTube video. */
+   youtubeTranscript(videoId: string, language?: string): Promise<{ text: string; duration: number; offset: number }[]>;
+
+   // ── Reddit comments ─────────────────────────────────────────────────────
+   /** Fetch comment tree for a Reddit thread. */
+   redditComments(url: string, limit?: number): Promise<{ post: { title: string; selftext: string }; comments: { body: string; author: string; permalink: string; depth: number }[] }>;
+
+   // ── Semantic search tools ───────────────────────────────────────────────
+   /** Semantic YouTube: search + transcripts + rank by query relevance. */
+   semanticYoutube(query: string, options?: { maxVideos?: number; channel?: string; topK?: number }): Promise<{ chunks: { text: string; videoId: string; title: string; score: number; url: string }[]; videoCount: number; failedTranscripts: number; warnings: string[] }>;
+
+   /** Semantic Reddit: search + comments + rank by query relevance. */
+   semanticReddit(query: string, options?: { subreddit?: string; maxPosts?: number; topK?: number }): Promise<{ chunks: { text: string; postTitle: string; score: number; url: string }[]; postCount: number; failedPosts: number; warnings: string[] }>;
+
+   /** Semantic GitHub code search within a repo. */
+   semanticGitHubCode(query: string, repo: string, options?: { language?: string; maxFiles?: number; topK?: number }): Promise<{ results: { path: string; url: string; language: string; symbolName?: string; text?: string; score: number }[]; warnings: string[] }>;
+
+   /** Semantic crawl: crawl a URL and retrieve chunks relevant to query. */
+   semanticCrawl(url: string, query: string, options?: { maxPages?: number; topK?: number }): Promise<{ chunks: { text: string; url: string; section: string; score: number }[]; pagesCrawled: number; warnings: string[] }>;
 }

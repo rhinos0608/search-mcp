@@ -84,6 +84,7 @@ const CLASSIFICATION_RULES: ClassificationRule[] = [
       classification: 'current-events',
       patterns: [
          /\b(202\d|20[2-9]\d)\b.*\b(advances?|releases?|announcements?|developments?|updates?|breakthroughs?|innovations?|capabilities?)\b/i,
+         /\b(advances?|releases?|announcements?|developments?|updates?|breakthroughs?|innovations?|capabilities?)\b.*\b(202\d|20[2-9]\d)\b/i,
          /\b(latest|recent|new|upcoming|emerging)\b.*\b(advances?|releases?|developments?|updates?|models?|features?|capabilities?|breakthroughs?|innovations?)\b/i,
          /^(what are|what is|what were|what have been).*\b(202\d|this year|recently|so far)\b/i,
          /\bso far\b.*\b(202\d|this year)\b/i,
@@ -126,7 +127,7 @@ const CLASSIFICATION_RULES: ClassificationRule[] = [
    {
       classification: 'explainer',
       patterns: [
-         /^what (is|are|does)\b/i,
+         /^what (is|are|does|was|were)\b/i,
          /^explain\b/i,
          /^define\b/i,
          /\boverview\b/i,
@@ -612,6 +613,95 @@ function extractTopic(query: string): string {
    return topic || query;
 }
 
+// ── Entity extraction ────────────────────────────────────────────────────────
+
+/**
+ * Known domain entities (projects, organizations, facilities, key concepts)
+ * mapped to their domains. When detected in the query, entity-targeted
+ * sub-questions are appended to ensure coverage.
+ */
+const KNOWN_ENTITIES: { pattern: RegExp; name: string; domain: string; queryContext: string; contextTerms?: string[] }[] = [
+   // Fusion energy
+   { pattern: /\bITER\b/i, name: 'ITER', domain: 'fusion energy', queryContext: 'ITER international tokamak experimental reactor project status and timeline' },
+   { pattern: /\bSPARC\b/i, name: 'SPARC', domain: 'fusion energy', queryContext: 'SPARC compact fusion reactor by Commonwealth Fusion Systems progress and milestones' },
+   { pattern: /\bJET\b/i, name: 'JET', domain: 'fusion energy', queryContext: 'JET Joint European Torus fusion experiment results and decommissioning', contextTerms: ['fusion', 'tokamak', 'plasma', 'iter', 'nuclear'] },
+   { pattern: /\bNIF\b/i, name: 'NIF', domain: 'fusion energy', queryContext: 'NIF National Ignition Facility inertial confinement fusion breakthroughs' },
+   { pattern: /\b(tokamak|stellarator)\b/i, name: 'tokamak/stellarator', domain: 'fusion energy', queryContext: 'tokamak and stellarator magnetic confinement fusion reactor designs latest advances' },
+   // Quantum computing
+   { pattern: /\bIBM\s+Quantum\b/i, name: 'IBM Quantum', domain: 'quantum computing', queryContext: 'IBM Quantum computing roadmap and processor milestones' },
+   { pattern: /\bSycamore\b/i, name: 'Sycamore', domain: 'quantum computing', queryContext: 'Google Sycamore quantum processor quantum supremacy experiment' },
+   // Space
+   { pattern: /\b(JWST|James Webb)\b/i, name: 'JWST', domain: 'space telescopes', queryContext: 'James Webb Space Telescope latest discoveries and observations' },
+   { pattern: /\bArtemis\b/i, name: 'Artemis', domain: 'space exploration', queryContext: 'NASA Artemis program Moon mission timeline and progress', contextTerms: ['nasa', 'moon', 'lunar', 'orion', 'sls'] },
+   { pattern: /\bStarship\b/i, name: 'Starship', domain: 'space exploration', queryContext: 'SpaceX Starship development test flights and milestones', contextTerms: ['spacex', 'rocket', 'launch', 'mars', 'elon'] },
+   // AI/ML
+   { pattern: /\bGPT-?4\b/i, name: 'GPT-4', domain: 'AI models', queryContext: 'GPT-4 capabilities benchmarks and technical specifications' },
+   { pattern: /\bClaude\b/i, name: 'Claude', domain: 'AI models', queryContext: 'Anthropic Claude AI model capabilities and releases', contextTerms: ['ai', 'anthropic', 'llm', 'model', 'gpt'] },
+   { pattern: /\bGemini\b/i, name: 'Gemini', domain: 'AI models', queryContext: 'Google Gemini multimodal AI model capabilities and benchmarks', contextTerms: ['ai', 'google', 'llm', 'model', 'gpt'] },
+   // Climate/Energy
+   { pattern: /\bCOP\d{2}\b/i, name: 'COP', domain: 'climate policy', queryContext: 'UN climate conference outcomes and agreements' },
+   { pattern: /\bIPCC\b/i, name: 'IPCC', domain: 'climate science', queryContext: 'IPCC assessment report findings and climate projections' },
+];
+
+interface ExtractedEntity {
+   name: string;
+   domain: string;
+   queryContext: string;
+}
+
+/**
+ * Extract known entities from the query.
+ * Returns entities sorted by match priority (earlier match = higher).
+ * Deduplicates overlapping matches.
+ */
+function extractEntities(query: string): ExtractedEntity[] {
+   const matches: { entity: (typeof KNOWN_ENTITIES)[number]; index: number }[] = [];
+   for (const entity of KNOWN_ENTITIES) {
+      const match = entity.pattern.exec(query);
+      if (match) {
+         // If contextTerms are defined and non-empty, require at least one to appear as a word in the query
+         if (entity.contextTerms && entity.contextTerms.length > 0) {
+            const hasContext = entity.contextTerms.some((term) => new RegExp(`\\b${term}\\b`, 'i').test(query));
+            if (!hasContext) {
+               continue;
+            }
+         }
+         matches.push({ entity, index: match.index });
+      }
+   }
+   // Sort by match position (earlier in query = more likely the subject)
+   matches.sort((a, b) => a.index - b.index);
+   // Deduplicate by name
+   const seen = new Set<string>();
+   const entities: ExtractedEntity[] = [];
+   for (const { entity } of matches) {
+      if (!seen.has(entity.name)) {
+         seen.add(entity.name);
+         entities.push({ name: entity.name, domain: entity.domain, queryContext: entity.queryContext });
+      }
+   }
+   return entities.slice(0, 5); // cap at 5 entities
+}
+
+/**
+ * Generate entity-targeted sub-questions for each extracted entity.
+ * These augment the classification-based templates with specific coverage.
+ */
+function generateEntitySubQuestions(entities: ExtractedEntity[]): SubQuestion[] {
+   const pendingStatus: SubQuestionStatus = 'pending';
+   return entities.map((entity, idx) => ({
+      id: makeId(),
+      text: `What is the current status, recent progress, and key developments for ${entity.name} (${entity.domain})?`,
+      classification: 'current-events',
+      evidenceType: 'entity-status',
+      preferredSources: ['news', 'web', 'academic', 'github', 'youtube', 'reddit'] as SourceType[],
+      freshnessRequirement: 'within 1 year',
+      failureModes: ['no recent updates found', 'outdated status information'],
+      budgetPriority: idx + 1,
+      status: pendingStatus,
+   }));
+}
+
 // ── Classification ───────────────────────────────────────────────────────────
 
 /**
@@ -725,6 +815,14 @@ export interface DecomposeResult {
    subQuestions: SubQuestion[];
    /** Human-readable description of the research approach. */
    plan: string;
+   /** Topic after disambiguation (may differ from raw extraction). */
+   disambiguatedTopic: string;
+   /** Whether the topic was disambiguated. */
+   wasDisambiguated: boolean;
+   /** Optional note explaining disambiguation. */
+   disambiguationNote?: string;
+   /** Entities extracted from the query for targeted coverage. */
+   extractedEntities: { name: string; domain: string }[];
 }
 
 /**
@@ -746,10 +844,30 @@ export class QueryDecomposer {
    decompose(query: string): DecomposeResult {
       const classification = classifyQuery(query);
       const topic = extractTopic(query);
-      const subQuestions = generateSubQuestions(classification, topic);
-      const plan = generatePlan(classification, topic);
+      const entities = extractEntities(query);
 
-      return { classification, subQuestions, plan };
+      // Generate classification-based sub-questions
+      const subQuestions = generateSubQuestions(classification, topic);
+
+      // Append entity-targeted sub-questions for specific entities found in the query
+      if (entities.length > 0) {
+         const entitySubQuestions = generateEntitySubQuestions(entities);
+         subQuestions.push(...entitySubQuestions);
+      }
+
+      const plan = generatePlan(classification, topic);
+      const entityNote = entities.length > 0
+         ? ` Also tracking ${String(entities.length)} specific entit${entities.length === 1 ? 'y' : 'ies'}: ${entities.map((e) => e.name).join(', ')}.`
+         : '';
+
+      return {
+         classification,
+         subQuestions,
+         plan: plan + entityNote,
+         disambiguatedTopic: topic,
+         wasDisambiguated: false,
+         extractedEntities: entities.map((e) => ({ name: e.name, domain: e.domain })),
+      };
    }
 
    /**
@@ -773,6 +891,62 @@ export class QueryDecomposer {
          return this.decompose(query);
       }
 
+      // ── Step 1: LLM disambiguation + query expansion + entity extraction ──
+      let disambiguatedQuery = query;
+      let wasAmbiguous = false;
+      let disambiguationNote: string | undefined;
+      let queryExpansions: string[] = [];
+      let entities: { name: string; domain: string }[] = [];
+
+      try {
+         const { ORCHESTRATOR_DISAMBIGUATE } = await import('./llm/prompts.js');
+         const disambResult = await llm.callJSON<{
+            wasAmbiguous: boolean;
+            ambiguityNote: string;
+            disambiguatedQuery: string;
+            queryExpansions: string[];
+            extractedEntities?: { name: string; domain: string }[];
+         }>({
+            model: 'orchestrator',
+            messages: [
+               { role: 'system' as const, content: ORCHESTRATOR_DISAMBIGUATE },
+               { role: 'user' as const, content: query },
+            ],
+            temperature: 0.3,
+         });
+
+         if (disambResult.success) {
+            wasAmbiguous = disambResult.data.wasAmbiguous;
+            disambiguationNote = disambResult.data.ambiguityNote || undefined;
+            if (disambResult.data.disambiguatedQuery) {
+               disambiguatedQuery = disambResult.data.disambiguatedQuery;
+            }
+            queryExpansions = disambResult.data.queryExpansions;
+            // Use LLM-identified entities (handles context-aware disambiguation better than regex)
+            entities = disambResult.data.extractedEntities ?? [];
+         }
+      } catch {
+         // Fall through — use raw query without disambiguation
+      }
+
+      // Fall back to rule-based entity extraction if LLM returned none
+      if (entities.length === 0) {
+         const ruleBasedEntities = extractEntities(query);
+         entities = ruleBasedEntities.map((e) => ({ name: e.name, domain: e.domain }));
+      }
+
+      // Build enriched context for decomposition
+      let enrichedQuery = disambiguatedQuery;
+      if (wasAmbiguous && disambiguationNote) {
+         enrichedQuery += `\n\n[Disambiguation: ${disambiguationNote}]`;
+      }
+      if (queryExpansions.length > 0) {
+         enrichedQuery += `\n\n[Query expansions for broader coverage: ${queryExpansions.join(' | ')}]`;
+      }
+      if (entities.length > 0) {
+         enrichedQuery += `\n\n[Key entities to specifically cover with dedicated sub-questions: ${entities.map((e) => `${e.name} (${e.domain})`).join(', ')}]`;
+      }
+
       // Build optional context from research state
       let context = '';
       if (state) {
@@ -787,6 +961,7 @@ export class QueryDecomposer {
          }
       }
 
+      // ── Step 2: LLM decomposition ──────────────────────────────────────
       const result = await llm.callJSON<{
          classification: string;
          subQuestions: {
@@ -803,7 +978,7 @@ export class QueryDecomposer {
          model: 'orchestrator',
          messages: [
             { role: 'system' as const, content: ORCHESTRATOR_DECOMPOSE },
-            { role: 'user' as const, content: `Research query: ${query}${context}` },
+            { role: 'user' as const, content: `Research query: ${enrichedQuery}${context}` },
          ],
          temperature: 0.3,
       });
@@ -829,8 +1004,19 @@ export class QueryDecomposer {
          status: 'pending',
       }));
 
+      // Entity-targeted sub-questions are generated organically by the LLM
+      // from the entity hints in the enriched query — no template fallback needed.
+
       const plan = `${classification.charAt(0).toUpperCase() + classification.slice(1)} research on "${query}". LLM-decomposed into ${String(subQuestions.length)} sub-questions.`;
 
-      return { classification, subQuestions, plan };
+      return {
+         classification,
+         subQuestions,
+         plan,
+         disambiguatedTopic: disambiguatedQuery,
+         wasDisambiguated: wasAmbiguous,
+         ...(disambiguationNote !== undefined ? { disambiguationNote } : {}),
+         extractedEntities: entities.map((e) => ({ name: e.name, domain: e.domain })),
+      };
    }
 }

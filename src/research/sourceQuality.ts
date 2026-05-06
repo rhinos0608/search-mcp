@@ -103,9 +103,9 @@ function extractDomainWord(url: string): string | null {
     // Handle co.uk, com.au, etc.
     if (parts.length >= 2) {
       // Return the most specific non-TLD label
-      return parts[parts.length - 2]!.toLowerCase();
+      return (parts[parts.length - 2] ?? '').toLowerCase();
     }
-    return parts[0]!.toLowerCase();
+    return (parts[0] ?? '').toLowerCase();
   } catch {
     return null;
   }
@@ -116,7 +116,7 @@ function extractDomainWord(url: string): string | null {
  */
 function stripMarkdown(md: string): string {
   if (!md) return '';
-  let text = md
+  const text = md
     // Remove code blocks (fenced)
     .replace(/```[\s\S]*?```/g, ' ')
     // Remove inline code
@@ -157,7 +157,7 @@ function extractHeadings(md: string): string[] {
   const re = /^(#{1,6})\s+(.+)$/gm;
   let match: RegExpExecArray | null;
   while ((match = re.exec(md)) !== null) {
-    headings.push(match[2]!.trim());
+    headings.push((match[2] ?? '').trim());
   }
   return headings;
 }
@@ -189,7 +189,7 @@ function countCodeBlocks(md: string): number {
  * number of tables.  Each table has exactly one separator row.
  */
 function countTables(md: string): number {
-  return (md.match(/^\|[\s:-]+\|$/gm) || []).length;
+  return (md.match(/^\|[\s:-]+\|$/gm) ?? []).length;
 }
 
 /**
@@ -306,7 +306,7 @@ function assessPromotional(
       ).length;
       if (brandCount > 5) {
         signals.push(
-          `excessive_brand_mentions: "${term}" appears ${brandCount}x in headings`,
+          `excessive_brand_mentions: "${term}" appears ${String(brandCount)}x in headings`,
         );
       }
     }
@@ -446,7 +446,7 @@ function generateSummary(
     parts.push('Thin content');
   }
 
-  parts.push(`${wordCount} words across ${headingCount} headings`);
+  parts.push(`${String(wordCount)} words across ${String(headingCount)} headings`);
 
   if (hasData) parts.push('includes data');
   if (hasCitations) parts.push('cites sources');

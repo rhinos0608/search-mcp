@@ -1,15 +1,15 @@
-# Jina AI Pattern Integration Plan
+# Jina AI Pattern Integration Status (✅ All Implemented)
 
 ## Overview
 
-Integrate 10 high-value patterns from `jina-ai/node-DeepResearch` into our deep research engine (`src/research/`). Each item below is independently implementable, ordered by impact-to-effort ratio.
+All 10 patterns from `jina-ai/node-DeepResearch` have been integrated into our deep research engine (`src/research/`). This document is kept for historical reference.
 
 ---
 
-## P1: FIFO Gap Queue (Replace Recursive Sub-Questions)
+## P1: FIFO Gap Queue (Replace Recursive Sub-Questions) (✅ Implemented)
 
-### What
-Replace the current EDA loop's gap system with a rotating FIFO queue. Currently, we iterate sub-questions sequentially (discovery → extraction → loop). Jina's approach: maintain a shared `gaps[]` queue, push sub-questions to back, rotate access via `gaps[totalStep % gaps.length]`, splice solved questions from front.
+### What (Implemented)
+Replaced the current EDA loop's gap system with a rotating FIFO queue. Currently, we iterate sub-questions sequentially (discovery → extraction → loop). Jina's approach: maintain a shared `gaps[]` queue, push sub-questions to back, rotate access via `gaps[totalStep % gaps.length]`, splice solved questions from front.
 
 ### Current State
 - `state.ts`: `ResearchStateEngine` stores `gaps: GapRecord[]` and `openQuestions: string[]`
@@ -35,9 +35,9 @@ Replace the current EDA loop's gap system with a rotating FIFO queue. Currently,
 
 ---
 
-## P2: Action Gating (Selective Action Disabling)
+## P2: Action Gating (Selective Action Disabling) (✅ Implemented)
 
-### What
+### What (Implemented)
 Jina selectively disables actions based on state:
 - `allowAnswer = false` after failed evaluation or immediately after `search`
 - `allowReflect = false` when gaps already exceed limit
@@ -74,9 +74,9 @@ Jina selectively disables actions based on state:
 
 ---
 
-## P3: Knowledge as Conversation Pairs
+## P3: Knowledge as Conversation Pairs (✅ Implemented)
 
-### What
+### What (Implemented)
 Jina stores knowledge items as `{ question, answer, references, type }` and injects them as user/assistant conversation message pairs. This makes context fully LLM-native — no structured JSON parsing required.
 
 ### Current State
@@ -110,9 +110,9 @@ Jina stores knowledge items as `{ question, answer, references, type }` and inje
 
 ---
 
-## P4: LLM-Powered Query Rewriting
+## P4: LLM-Powered Query Rewriting (✅ Implemented)
 
-### What
+### What (Implemented)
 Replace rule-based query expansion with an LLM structured output schema that generates optimized search queries with time filters (`tbs`), location, and keyword optimization.
 
 ### Current State
@@ -144,9 +144,9 @@ Replace rule-based query expansion with an LLM structured output schema that gen
 
 ---
 
-## P5: Search Result Clustering (SERP Clustering)
+## P5: Search Result Clustering (SERP Clustering) (✅ Implemented)
 
-### What
+### What (Implemented)
 After search, group results into orthogonal clusters with insights (`{ insight, question, urls }`). This transforms flat search results into structured knowledge.
 
 ### Current State
@@ -177,9 +177,9 @@ After search, group results into orthogonal clusters with insights (`{ insight, 
 
 ---
 
-## P6: Failure Analysis (Answer Improvement Loop)
+## P6: Failure Analysis (Answer Improvement Loop) (✅ Implemented)
 
-### What
+### What (Implemented)
 When an answer fails evaluation, analyze the failure (recap/blame/improvement), inject learnings back as knowledge. This is distinct from simple re-try: it produces a structured analysis that informs the next attempt.
 
 ### Current State
@@ -215,9 +215,9 @@ When an answer fails evaluation, analyze the failure (recap/blame/improvement), 
 
 ---
 
-## P7: Diary Narrative (Human-Readable Step Log)
+## P7: Diary Narrative (Human-Readable Step Log) (✅ Implemented)
 
-### What
+### What (Implemented)
 Maintain a narrative `diaryContext: string[]` that describes what happened at each step in plain English. This builds up in context and helps the LLM understand its own progress trajectory.
 
 ### Current State
@@ -251,9 +251,9 @@ Maintain a narrative `diaryContext: string[]` that describes what happened at ea
 
 ---
 
-## P8: Language Auto-Detection with Vibe/Persona
+## P8: Language Auto-Detection with Vibe/Persona (✅ Implemented)
 
-### What
+### What (Implemented)
 Auto-detect the user's query language + emotional tone/style, and parameterize all prompt schemas with the detected language style.
 
 ### Current State
@@ -284,9 +284,9 @@ Auto-detect the user's query language + emotional tone/style, and parameterize a
 
 ---
 
-## P9: Multi-Signal URL Ranking
+## P9: Multi-Signal URL Ranking (✅ Implemented)
 
-### What
+### What (Implemented)
 Replace simple scoring with multi-signal URL ranking: frequency × domain authority × path structure × semantic relevance × hostname diversity.
 
 ### Current State
@@ -313,9 +313,9 @@ Replace simple scoring with multi-signal URL ranking: frequency × domain author
 
 ---
 
-## P10: Streaming Progress with Action Events
+## P10: Streaming Progress with Action Events (✅ Implemented)
 
-### What
+### What (Implemented)
 Emit progressive rendering updates as SSE-style events for each step: `search` events with query text, `visit` events with URLs, `think` events with reasoning content.
 
 ### Current State
@@ -353,23 +353,24 @@ Emit progressive rendering updates as SSE-style events for each step: `search` e
 
 ## Summary Table
 
-| # | Pattern | Impact | Effort | Files Changed |
-|---|---------|--------|--------|---------------|
-| P1 | FIFO Gap Queue | High | Medium | 4 |
-| P2 | Action Gating | High | Low | 2 |
-| P3 | Knowledge as Conversation Pairs | Medium | Low | 3 |
-| P4 | LLM Query Rewriting | High | Medium | 3 (+1 prompt) |
-| P5 | SERP Clustering | Medium | Medium | 3 |
-| P6 | Failure Analysis | Medium | Medium | 4 |
-| P7 | Diary Narrative | Low | Low | 5 |
-| P8 | Language Auto-Detection | Medium | Medium | 6 |
-| P9 | Multi-Signal URL Ranking | Low | Low | 2 |
-| P10 | Streaming Action Events | Low | Low | 4 |
+| # | Pattern | Impact | Effort | Status |
+|---|---------|--------|--------|--------|
+| P1 | FIFO Gap Queue | High | Medium | ✅ Done |
+| P2 | Action Gating | High | Low | ✅ Done |
+| P3 | Knowledge as Conversation Pairs | Medium | Low | ✅ Done |
+| P4 | LLM Query Rewriting | High | Medium | ✅ Done |
+| P5 | SERP Clustering | Medium | Medium | ✅ Done |
+| P6 | Failure Analysis | Medium | Medium | ✅ Done |
+| P7 | Diary Narrative | Low | Low | ✅ Done |
+| P8 | Language Auto-Detection | Medium | Medium | ✅ Done |
+| P9 | Multi-Signal URL Ranking | Low | Low | ✅ Done |
+| P10 | Streaming Action Events | Low | Low | ✅ Done |
 
-## Recommended Sprint Order
+## Sprint Order (historical)
 
-1. **Sprint 1**: P1 (FIFO Gap Queue) + P2 (Action Gating) — core architecture changes
-2. **Sprint 2**: P4 (LLM Query Rewriting) + P5 (SERP Clustering) — quality improvements
-3. **Sprint 3**: P3 (Conversation Pairs) + P6 (Failure Analysis) — knowledge flow
-4. **Sprint 4**: P7 (Diary Narrative) + P8 (Language Detection) — context enhancement
-5. **Sprint 5**: P9 (URL Ranking) + P10 (Streaming Actions) — polish
+All sprints completed in order:
+1. **Sprint 1**: P1 (FIFO Gap Queue) + P2 (Action Gating)
+2. **Sprint 2**: P4 (LLM Query Rewriting) + P5 (SERP Clustering)
+3. **Sprint 3**: P3 (Conversation Pairs) + P6 (Failure Analysis)
+4. **Sprint 4**: P7 (Diary Narrative) + P8 (Language Detection)
+5. **Sprint 5**: P9 (URL Ranking) + P10 (Streaming Actions)

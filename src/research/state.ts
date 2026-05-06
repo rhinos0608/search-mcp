@@ -5,14 +5,12 @@
  */
 
 import { randomUUID } from 'node:crypto';
-import { computeEvidenceConfidence } from './confidence.js';
 import type {
    ResearchPhase,
    ResearchState,
    ResearchTaxonomy,
    SourceEntry,
    Finding,
-   ConfidenceLabel,
    Contradiction,
    ContradictionStatus,
    ContradictionType,
@@ -59,53 +57,7 @@ function jaccardSimilarity(a: string, b: string): number {
    return union === 0 ? 0 : intersection / union;
 }
 
-/**
- * Map a numeric confidence to a label, with optional source-count awareness.
- *
- * When `sourceCount` is provided, the label is capped to prevent single-source
- * claims from being labeled "well-corroborated". Corroboration requires
- * independent sources converging on the same claim.
- *
- * Source-count caps:
- *   1 source  → max "likely" (0.7 effective ceiling)
- *   2 sources → max "well-corroborated" allowed (but requires score ≥ 0.85)
- *   1 source with low-authority source type → max "plausible-but-thin"
- */
-export function confidenceToLabel(score: number, sourceCount?: number): ConfidenceLabel {
-   // Apply source-count ceiling
-   let effectiveScore = score;
-   if (sourceCount !== undefined) {
-      if (sourceCount <= 0) {
-         // No backing sources: can't be above "speculative"
-         effectiveScore = Math.min(effectiveScore, 0.4);
-      } else if (sourceCount === 1) {
-         // Single source: can't be "well-corroborated"; cap at "likely"
-         effectiveScore = Math.min(effectiveScore, 0.78);
-      }
-   }
 
-   if (effectiveScore >= 0.85) return 'well-corroborated';
-   if (effectiveScore >= 0.7) return 'likely';
-   if (effectiveScore >= 0.5) return 'plausible-but-thin';
-   if (effectiveScore >= 0.3) return 'speculative';
-   return 'unsupported-or-disputed';
-}
-
-/** Get the midpoint of a confidence label range. */
-export function labelToConfidence(label: ConfidenceLabel): number {
-   switch (label) {
-      case 'well-corroborated':
-         return 0.9;
-      case 'likely':
-         return 0.78;
-      case 'plausible-but-thin':
-         return 0.6;
-      case 'speculative':
-         return 0.4;
-      case 'unsupported-or-disputed':
-         return 0.15;
-   }
-}
 
 // ── Budget profiles ──────────────────────────────────────────────────────────
 
@@ -259,12 +211,7 @@ export class BudgetTracker {
       return { ...this.state.stepCosts };
    }
 
-   /** Heuristic: is further search likely worth the cost? */
-   isInformationGainWorthwhile(previousConfidence: number, currentConfidence: number): boolean {
-      const improvement = currentConfidence - previousConfidence;
-      // If improvement per gap loop is below 0.05, diminishing returns
-      return improvement >= 0.05;
-   }
+
 }
 
 // ── Research State Engine ────────────────────────────────────────────────────
@@ -394,8 +341,7 @@ export class ResearchStateEngine {
 
    getTopSources(limit?: number): SourceEntry[] {
       const pending = this.state.sources.filter((s) => s.extractionStatus === 'pending');
-      const sorted = [...pending].sort((a, b) => b.sourceConfidencePrior - a.sourceConfidencePrior);
-      return limit ? sorted.slice(0, limit) : sorted;
+      return limit ? pending.slice(0, limit) : pending;
    }
 
    markSourceExtracted(id: string): void {
@@ -429,24 +375,12 @@ export class ResearchStateEngine {
       return this.state.findings.filter((f) => f.subQuestionIds.includes(subQuestionId));
    }
 
-   getFindingsByConfidence(minConfidence: number): Finding[] {
-      return this.state.findings.filter((f) => f.confidence >= minConfidence);
-   }
-
    getFindingsBySourceId(sourceId: string): Finding[] {
       return this.state.findings.filter((f) => f.sourceIds.includes(sourceId));
    }
 
    getFinding(id: string): Finding | undefined {
       return this.state.findings.find((f) => f.id === id);
-   }
-
-   updateConfidence(findingId: string, delta: number): void {
-      const f = this.state.findings.find((f) => f.id === findingId);
-      if (!f) return;
-      f.confidence = Math.max(0, Math.min(1, f.confidence + delta));
-      f.confidenceLabel = confidenceToLabel(f.confidence, f.sourceIds.length);
-      f.lastUpdated = nowISO();
    }
 
    /** Merge two findings (dedup). Keeps the older finding, absorbs the newer. */
@@ -457,21 +391,9 @@ export class ResearchStateEngine {
 
       // Merge source IDs
       keep.sourceIds = [...new Set([...keep.sourceIds, ...absorb.sourceIds])];
-      keep.corroboratingSourceIds = [
-         ...new Set([...keep.corroboratingSourceIds, ...absorb.corroboratingSourceIds]),
-      ];
-      keep.contradictingSourceIds = [
-         ...new Set([...keep.contradictingSourceIds, ...absorb.contradictingSourceIds]),
-      ];
 
       // Merge sub-question IDs
       keep.subQuestionIds = [...new Set([...keep.subQuestionIds, ...absorb.subQuestionIds])];
-
-      // Keep the higher confidence
-      if (absorb.confidence > keep.confidence) {
-         keep.confidence = absorb.confidence;
-         keep.confidenceLabel = absorb.confidenceLabel;
-      }
 
       keep.lastUpdated = nowISO();
 
@@ -513,7 +435,7 @@ export class ResearchStateEngine {
    canCorroborate(findingId: string): boolean {
       const f = this.state.findings.find((f) => f.id === findingId);
       if (!f) return false;
-      return f.corroboratingSourceIds.length >= 1;
+      return f.sourceIds.length >= 2;
    }
 
    // ── V5.0.0: Worker reports ───────────────────────────────────────────────
@@ -618,15 +540,13 @@ export class ResearchStateEngine {
    /**
     * Post-process findings after extraction:
     * 1. Deduplicate near-identical findings by normalized claim similarity
-    * 2. Merge duplicate findings (combine source IDs, keep higher confidence)
-    * 3. Recompute confidence for merged findings using cross-source evidence
-    * 4. Run contradiction detection
+    * 2. Merge duplicate findings (combine source IDs)
+    * 3. Run contradiction detection
     * Returns counts of merged findings and total contradictions found.
     */
    postProcessFindings(): { merged: number; contradictions: number } {
       if (this.state.findings.length === 0) return { merged: 0, contradictions: 0 };
       const merged = this.deduplicateFindings();
-      this.updateConfidenceFromEvidence();
       const contradictionCount = this.detectContradictions().length;
       return { merged, contradictions: contradictionCount };
    }
@@ -634,7 +554,7 @@ export class ResearchStateEngine {
    /**
     * Deduplicate findings by normalized claim Jaccard similarity.
     * Merges pairs with similarity > 0.7 into the first finding, absorbing
-    * source IDs and keeping the higher confidence.
+    * source IDs.
     */
    private deduplicateFindings(): number {
       const findings = this.state.findings;
@@ -670,81 +590,7 @@ export class ResearchStateEngine {
       return toMerge.length;
    }
 
-   /**
-    * Recompute confidence for all findings based on cross-source evidence:
-    * source authority, corroboration count, and freshness.
-    * Updates corroboratingSourceIds for findings with multiple backing sources.
-    */
-   private updateConfidenceFromEvidence(): void {
-      const sourceMap = new Map(this.state.sources.map((s) => [s.id, s]));
-      for (const finding of this.state.findings) {
-         const backingSources = finding.sourceIds
-            .map((id) => sourceMap.get(id))
-            .filter((s): s is SourceEntry => s !== undefined);
-         if (backingSources.length === 0) {
-            // No backing sources found — cap confidence at 0.3 (speculative)
-            finding.confidence = Math.min(finding.confidence, 0.3);
-            finding.confidenceLabel = confidenceToLabel(finding.confidence, 0);
-            finding.lastUpdated = new Date().toISOString();
-            continue;
-         }
-         // Compute best authority and freshness from all backing sources
-         let bestAuthority = 0;
-         let bestFreshness = 0;
-         for (const s of backingSources) {
-            const authority = computeEvidenceConfidence({
-               sourceType: s.sourceType,
-               domain: s.domain,
-               corroboratingSourceIds: finding.sourceIds.filter((id) => id !== s.id),
-               domainTrustEnabled: false,
-            });
-            if (authority.sourceAuthority > bestAuthority) bestAuthority = authority.sourceAuthority;
-            if (authority.sourceFreshness > bestFreshness) bestFreshness = authority.sourceFreshness;
-         }
 
-         const corroborationCount = backingSources.length;
-
-         // ── Corroboration-based confidence ceiling ───────────────────────
-         // Single-source findings can never exceed 0.6 (plausible-but-thin)
-         // Two-source findings cap at 0.78 (likely)
-         // Three+ sources: full range available
-         let corroborationCeiling: number;
-         if (corroborationCount <= 1) {
-            corroborationCeiling = 0.6;
-         } else if (corroborationCount === 2) {
-            corroborationCeiling = 0.78;
-         } else {
-            corroborationCeiling = 0.95; // essentially no ceiling from corroboration
-         }
-
-         const corroborationScore = Math.min(1, 0.5 + (corroborationCount - 1) * 0.15);
-
-         // Always apply at least a minimum cross-source weight, even for single-source findings.
-         // Single-source: crossSourceWeight = 0.1 (always some blending)
-         // Multi-source: crossSourceWeight scales with corroboration
-         const crossSourceWeight = Math.min(
-            0.5,
-            Math.max(0.1, (corroborationCount - 1) * 0.2),
-         );
-
-         const newConfidence =
-            finding.confidence * (1 - crossSourceWeight) +
-            (bestAuthority * 0.4 + corroborationScore * 0.4 + bestFreshness * 0.2) * crossSourceWeight;
-
-         // Apply corroboration ceiling
-         finding.confidence = Math.max(0, Math.min(corroborationCeiling, newConfidence));
-         finding.confidenceLabel = confidenceToLabel(finding.confidence, corroborationCount);
-         finding.lastUpdated = new Date().toISOString();
-
-         // Populate corroboratingSourceIds when multiple sources back this claim
-         if (corroborationCount > 1) {
-            const otherIds = finding.sourceIds.filter((id) => id !== finding.sourceIds[0]);
-            finding.corroboratingSourceIds = [
-               ...new Set([...finding.corroboratingSourceIds, ...otherIds]),
-            ];
-         }
-      }
-   }
 
    // ── Contradictions ─────────────────────────────────────────────────────
 
@@ -892,7 +738,6 @@ export class ResearchStateEngine {
                   sourceIdsB: [...f2.sourceIds],
                   contradictionType,
                   resolutionStatus: 'unresolved',
-                  confidenceImpact: Math.abs(f1.confidence - f2.confidence) * 0.5,
                   ...(explanation ? { likelyExplanation: explanation } : {}),
                });
             }
@@ -1065,13 +910,7 @@ export class ResearchStateEngine {
       unresolvedContradictions: number;
       openGapCount: number;
       subQuestionStatuses: { id: string; text: string; status: SubQuestionStatus }[];
-      confidenceDistribution: Record<string, number>;
    } {
-      const dist: Record<string, number> = {};
-      for (const f of this.state.findings) {
-         dist[f.confidenceLabel] = (dist[f.confidenceLabel] ?? 0) + 1;
-      }
-
       return {
          phase: this.state.currentPhase,
          sourceCount: this.state.sources.length,
@@ -1084,7 +923,6 @@ export class ResearchStateEngine {
             text: sq.text,
             status: sq.status,
          })),
-         confidenceDistribution: dist,
       };
    }
 

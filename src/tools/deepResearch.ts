@@ -16,6 +16,9 @@
  * retrieval mechanism.
  */
 
+import * as fs from 'node:fs';
+import * as path from 'node:path';
+import * as os from 'node:os';
 import { z } from 'zod/v4';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { SearchConfig } from '../config.js';
@@ -33,12 +36,16 @@ import { logger } from '../logger.js';
 
 const deepResearchSchema = z.object({
    action: z
-      .enum(['start', 'poll', 'list', 'cancel'])
+      .enum(['start', 'poll', 'list', 'cancel', 'save'])
       .describe('Which action to perform'),
    jobId: z
       .string()
       .optional()
-      .describe('Job ID (required for poll and cancel)'),
+      .describe('Job ID (required for poll, cancel, and save)'),
+   path: z
+      .string()
+      .optional()
+      .describe('Optional file path to save the research result (save action). If omitted, a default path under ~/.cache/search-mcp/research-results/ is used.'),
    query: z
       .string()
       .min(10)
@@ -165,6 +172,7 @@ async function handleStart(
          classification: undefined,
          subQuestionCount: undefined,
          sourceCount: undefined,
+         sourceTypeCount: undefined,
          findingCount: undefined,
       });
    };
@@ -250,6 +258,59 @@ async function handlePoll(
    }
 }
 
+/** Default directory for persisted research result files. */
+function getDefaultResultsDir(): string {
+   const dbPath = process.env.DATABASE_PATH;
+   if (dbPath) {
+      // Use a sibling directory relative to DATABASE_PATH
+      return path.join(path.dirname(dbPath), 'research-results');
+   }
+   return path.join(os.homedir(), '.cache', 'search-mcp', 'research-results');
+}
+
+async function handleSave(
+   args: DeepResearchArgs,
+): Promise<ReturnType<typeof successResponse> | ReturnType<typeof errorResponse>> {
+   const start = Date.now();
+
+   if (typeof args.jobId !== 'string') {
+      return errorResponse(new Error('save requires jobId'));
+   }
+   const jobId = args.jobId;
+
+   // Get the completed result
+   const result = researchJobManager.getResult(jobId);
+   if (!result) {
+      return errorResponse(
+         new Error(`Research job "${jobId}" not found, not yet complete, or has expired.`),
+      );
+   }
+
+   // Resolve output path
+   const outputPath = args.path ?? path.join(getDefaultResultsDir(), `${jobId}.json`);
+
+   try {
+      // Ensure parent directory exists
+      fs.mkdirSync(path.dirname(outputPath), { recursive: true });
+      // Write the full result as formatted JSON
+      fs.writeFileSync(outputPath, JSON.stringify(result, null, 2), 'utf-8');
+
+      // Record the file path on the job
+      researchJobManager.setResultFile(jobId, outputPath);
+
+      const elapsed = Date.now() - start;
+      logger.info({ jobId, outputPath, sizeBytes: Buffer.byteLength(JSON.stringify(result), 'utf-8') }, 'Research result saved to file');
+
+      return successResponse(
+         makeResult('deep_research', { jobId, resultFile: outputPath }, elapsed),
+      );
+   } catch (err) {
+      const error = err instanceof Error ? err : new Error(String(err));
+      logger.error({ err: error, jobId, outputPath }, 'Failed to save research result');
+      return errorResponse(new Error(`Failed to save result: ${error.message}`));
+   }
+}
+
 async function handleList(): Promise<ReturnType<typeof successResponse>> {
    const start = Date.now();
    const jobs = researchJobManager.list();
@@ -304,6 +365,8 @@ async function handleDeepResearch(
          return handleList();
       case 'cancel':
          return handleCancel(args);
+      case 'save':
+         return handleSave(args);
    }
 }
 
@@ -319,7 +382,9 @@ export function registerDeepResearchTool(server: McpServer, cfg: SearchConfig): 
             '  start  — Begin research. Returns jobId immediately. Research runs in background.\n' +
             '  poll   — Check job status and retrieve partial or complete results.\n' +
             '  list   — List all active and recent research jobs.\n' +
-            '  cancel — Cancel a running research job.\n\n' +
+            '  cancel — Cancel a running research job.\n' +
+            '  save   — Persist a completed research result to a file on disk. Provide jobId and optional path.\n\n' +
+            'Results are held in memory for 24 hours. Use save to persist the full result as a JSON file before the job expires.\n\n' +
             'Uses a 7-phase pipeline: query decomposition → parallel discovery → extraction → gap analysis → audit → synthesis.',
          inputSchema: deepResearchSchema,
       },

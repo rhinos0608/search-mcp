@@ -5,7 +5,6 @@ export type {
    SourceType,
    ExtractionStatus,
    SourceEntry,
-   ConfidenceLabel,
    EvidenceDirectness,
    ClaimType,
    Finding,
@@ -73,7 +72,6 @@ export * from './audit.js';
 export * from './synthesizer.js';
 export * from './progress.js';
 export * from './orchestrator.js';
-export * from './confidence.js';
 export * from './agenda.js';
 export * from './actionGates.js';
 export * from './trace.js';

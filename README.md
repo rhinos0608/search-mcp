@@ -15,7 +15,7 @@
 | **Semantic RAG** | Crawl, YouTube, Reddit, Jobs, GitHub code with BM25+embedding+RRF |
 | **GitHub** | Family: `repo`, `file`, `tree`, `search`, `trending`, `code_search` |
 | **Video/Social** | `youtube` (search/transcript/semantic), `reddit` (search/comments/semantic), Twitter/X |
-| **Research** | `research` (academic/arxiv/hackernews/stackoverflow), Patents |
+| **Research** | `research` (academic/arxiv/hackernews/stackoverflow), `deep_research` (multi-phase LLM orchestration with job/poll protocol) |
 | **Packages** | `packages` (npm/pypi) |
 | **Jobs** | SEEK, Indeed, Jora with structured extraction |
 | **Specialist** | Podcasts, Product Hunt, Health check |
@@ -77,6 +77,11 @@ docker compose up -d
 | `LLM_PROVIDER` | Model name for contextual embeddings (e.g. `gpt-4o-mini`, `llama3`) |
 | `LLM_BASE_URL` | Base URL for LLM API (`/v1/chat/completions`) |
 | `LLM_API_TOKEN` | Optional API token for LLM provider |
+| `DEEP_RESEARCH_ENABLED` | Enable deep research (`true`/`false`, default `false`) |
+| `DEEP_RESEARCH_BASE_URL` | OpenAI-compatible base URL for research LLM calls |
+| `DEEP_RESEARCH_MODEL` | Orchestrator model (e.g. `gpt-4o`, `claude-sonnet-4`) |
+| `DEEP_RESEARCH_WORKER_MODEL` | Worker model (e.g. `gpt-4o-mini`, `llama3`) |
+| `DEEP_RESEARCH_DEFAULT_DEPTH` | Default depth profile: `quick`, `standard`, `deep`, `exhaustive`, `tree` |
 
 ## Docker Deployment
 

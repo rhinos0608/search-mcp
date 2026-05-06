@@ -6,6 +6,9 @@ All 10 patterns are independently implementable across different files. Each pat
 ---
 
 ## P1: FIFO Gap Queue
+
+✅ Implemented — `state.ts`: `addGapTarget()`, `popNextGapTarget()`, `gapTargets`, `resolvedGaps`. `gapAnalysis.ts`: `GapFiller.pushGapTargets()`. `orchestrator.ts`: EDA loop uses FIFO gap rotation.
+
 **Files**: `types.ts`, `state.ts`, `gapAnalysis.ts`, `orchestrator.ts`
 **Goal**: Replace fixed sub-question iteration with rotating FIFO queue.
 
@@ -43,6 +46,9 @@ Add to `ResearchState`:
 ---
 
 ## P2: Action Gating
+
+✅ Implemented — `actionGates.ts`: `computeGates()` with `allowSearch`, `allowExtract`, `allowAnswer`, `allowDiscover`. Wired into orchestrator EDA loop.
+
 **Files**: `orchestrator.ts`, `prompts.ts`
 **Goal**: Disable actions based on state to constrain LLM decisions.
 
@@ -75,6 +81,9 @@ Do not suggest actions outside this list.
 ---
 
 ## P3: Knowledge as Conversation Pairs
+
+✅ Implemented — `state.ts`: `getKnowledgeMessages()` renders findings as user/assistant pairs. `knowledge.ts`: dedicated knowledge store. `synthesis.ts`: `buildStateSummary()` includes conversation context.
+
 **Files**: `state.ts`, `synthesis.ts`, `prompts.ts`
 **Goal**: Store findings as user/assistant message pairs for LLM-native context.
 
@@ -106,6 +115,9 @@ In `ORCHESTRATOR_SYNTHESIS`: add paragraph explaining the conversation knowledge
 ---
 
 ## P4: LLM-Powered Query Rewriting
+
+✅ Implemented — `prompts.ts`: `WORKER_REWRITE_QUERY`. `discovery.ts`: `rewriteQueries()` called in `discoverForSubQuestion()`. Falls back to rule-based on LLM failure.
+
 **Files**: `prompts.ts`, `discovery.ts`, `types.ts`
 **Goal**: Use LLM to generate optimized search queries with time/location filters.
 
@@ -146,6 +158,9 @@ interface DiscoveryConfig {
 ---
 
 ## P5: SERP Clustering
+
+✅ Implemented — `discovery.ts`: `clusterCandidates()` groups search results into `SearchCluster[]`. `state.ts`: `addSearchClusters()` stores them. `prompts.ts`: `WORKER_CLUSTER` prompt.
+
 **Files**: `discovery.ts`, `types.ts`, `prompts.ts`
 **Goal**: Group search results into insight clusters.
 
@@ -182,6 +197,9 @@ Prompt: group search results into MAX 5 clusters with insight, follow-up questio
 ---
 
 ## P6: Failure Analysis
+
+✅ Implemented — `prompts.ts`: `WORKER_FAILURE_ANALYSIS`. `gapAnalysis.ts`: `FailureAnalyzer` class. `orchestrator.ts`: wired into EDA loop after failed answer evaluations.
+
 **Files**: `gapAnalysis.ts`, `orchestrator.ts`, `prompts.ts`, `types.ts`
 **Goal**: Analyze why answers fail and inject learnings.
 
@@ -226,6 +244,9 @@ In EDA loop, after `fill_gaps` fails an answer evaluation:
 ---
 
 ## P7: Diary Narrative
+
+✅ Implemented — `state.ts`: `appendDiary()`, `diary: string[]` (capped at 50). `orchestrator.ts`: diary entries appended per EDA iteration. `synthesis.ts`: diary included in state summary.
+
 **Files**: `state.ts`, `types.ts`, `orchestrator.ts`, `synthesis.ts`, `prompts.ts`
 **Goal**: Human-readable step log.
 
@@ -260,6 +281,9 @@ In `ORCHESTRATOR_EVALUATE` and `ORCHESTRATOR_SYNTHESIS`: add "Research diary" as
 ---
 
 ## P8: Language Detection
+
+✅ Implemented — `language.ts`: `LanguageDetector.detect()` with ISO 639-1 support. `state.ts`: `languageProfile` on `ResearchState`. `prompts.ts`: prompts parameterized by language/style.
+
 **Files**: new `language.ts`, `chat.ts`, `prompts.ts`, `state.ts`, `types.ts`, `orchestrator.ts`
 **Goal**: Auto-detect query language and parameterize prompts.
 
@@ -306,6 +330,9 @@ No direct changes needed — prompts already accept content strings.
 ---
 
 ## P9: Multi-Signal URL Ranking
+
+✅ Implemented — `discovery.ts`: `scoreCandidates()` with frequency boost, domain authority boost, path structure score, hostname diversity enforcement (`keepKPerHostname`). `ScoredCandidate` type with `freqBoost`, `authorityBoost`, `diversityScore`.
+
 **Files**: `discovery.ts`, `types.ts`
 **Goal**: Enhanced URL ranking with frequency, domain authority, and hostname diversity.
 
@@ -330,6 +357,9 @@ export interface ScoredCandidate extends SourceCandidate {
 ---
 
 ## P10: Streaming Progress Actions
+
+✅ Implemented — `progress.ts`: `reportAction()` emits step-level action events. `trace.ts`: structured trace events for streaming. Action events emitted in orchestrator ACT phase.
+
 **Files**: `progress.ts`, `state.ts`, `orchestrator.ts`, `types.ts`
 **Goal**: Step-level action events for streaming.
 
