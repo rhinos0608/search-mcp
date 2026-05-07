@@ -4,7 +4,10 @@ export type {
    QueryClassification,
    SourceType,
    ExtractionStatus,
+   SourceUsageStatus,
+   DiscardReason,
    SourceEntry,
+   SourceSummary,
    EvidenceDirectness,
    ClaimType,
    Finding,
@@ -77,3 +80,7 @@ export * from './actionGates.js';
 export * from './trace.js';
 export * from './knowledge.js';
 export * from './sourceRanking.js';
+export * from './pruning.js';
+export * from './compactionInFlight.js';
+export * from './retry.js';
+export * from './urlHealth.js';

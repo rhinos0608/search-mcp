@@ -22,6 +22,8 @@ import { DiscoveryEngine } from './discovery.js';
 import { ExtractionEngine } from './extraction.js';
 import { DeepResearchLlmClient } from './llm/chat.js';
 import { TREE_GENERATE_QUERIES, TREE_PROCESS_RESULTS } from './llm/prompts.js';
+import { loadConfig } from '../config.js';
+import { embedTexts } from '../rag/embedding.js';
 import type { TreeResearchResult, TreeLearning, SubQuestion, SourceEntry } from './types.js';
 
 // ── Types ──────────────────────────────────────────────────────────────────────
@@ -39,12 +41,51 @@ interface TreeQueryResult {
    followUpQuestions: string[];
 }
 
-/** Progress report callback. */
-type ProgressCallback = (progress: number, message?: string) => void | Promise<void>;
+/** Progress report callback. Optional phase parameter for downstream phase labelling. */
+type ProgressCallback = (progress: number, message?: string, phase?: string) => void | Promise<void>;
 
 // ── Defaults ───────────────────────────────────────────────────────────────────
 
 const DEFAULT_CONCURRENCY = 2;
+const TOPIC_DRIFT_THRESHOLD = 0.3;
+const MAX_FOLLOW_UPS = 3;
+
+// ── Similarity helpers ────────────────────────────────────────────────────────
+
+/** Jaccard similarity over word sets for topic-drift fallback. */
+function jaccardSimilarity(a: string, b: string): number {
+   const setA = new Set(
+      a.toLowerCase().split(/\s+/).filter((w) => w.length > 0),
+   );
+   const setB = new Set(
+      b.toLowerCase().split(/\s+/).filter((w) => w.length > 0),
+   );
+   if (setA.size === 0 && setB.size === 0) return 1;
+   if (setA.size === 0 || setB.size === 0) return 0;
+   let intersection = 0;
+   for (const word of setA) {
+      if (setB.has(word)) intersection++;
+   }
+   const union = setA.size + setB.size - intersection;
+   return union === 0 ? 0 : intersection / union;
+}
+
+/** Cosine similarity between two embedding vectors. */
+function cosineSimilarity(a: number[], b: number[]): number {
+   let dot = 0;
+   let normA = 0;
+   let normB = 0;
+   const len = Math.min(a.length, b.length);
+   for (let i = 0; i < len; i++) {
+      const ai = a[i] ?? 0;
+      const bi = b[i] ?? 0;
+      dot += ai * bi;
+      normA += ai * ai;
+      normB += bi * bi;
+   }
+   const denom = Math.sqrt(normA) * Math.sqrt(normB);
+   return denom === 0 ? 0 : dot / denom;
+}
 
 // ── Semaphore helper ───────────────────────────────────────────────────────────
 
@@ -94,6 +135,8 @@ export class DeepTreeResearchEngine {
    private onProgress: ProgressCallback;
    private contextWordLimit: number;
    private abortSignal: AbortSignal | undefined;
+   private originalQuery = '';
+   private originalQueryEmbedding: number[] | null = null;
 
    constructor(options: {
       state: ResearchStateEngine;
@@ -133,6 +176,20 @@ export class DeepTreeResearchEngine {
    ): Promise<TreeResearchResult> {
       logger.info({ query, breadth, depth, concurrency }, 'Tree research started');
       await this.onProgress(35, `Starting tree research: breadth=${String(breadth)}, depth=${String(depth)}`);
+
+      // C1: Store original query and try to embed for topic-drift detection
+      this.originalQuery = query;
+      this.originalQueryEmbedding = null;
+      try {
+         const config = loadConfig();
+         if (config.embeddingSidecar.baseUrl) {
+            const embResponse = await embedTexts({ texts: [query], mode: 'query', dimensions: 384 });
+            this.originalQueryEmbedding = embResponse.embeddings[0] ?? null;
+            logger.info('Topic-drift: embedded original query');
+         }
+      } catch {
+         logger.warn('Topic-drift: embedding unavailable, using Jaccard fallback');
+      }
 
       // Save sub-question count so we can clean up temp sub-questions after research
       const initialSQCount = this.state.getSubQuestions().length;
@@ -180,6 +237,7 @@ export class DeepTreeResearchEngine {
       parentLearnings: string[],
       parentVisitedUrls: string[],
       concurrency: number,
+      contextLimitOverride?: number,
    ): Promise<TreeResearchResult> {
       // Base case: depth exhausted or budget exhausted
       this.checkAborted();
@@ -210,7 +268,7 @@ export class DeepTreeResearchEngine {
       const semaphore = new Semaphore(concurrency);
       const tasks = queries.map((q) =>
          semaphore.run(() =>
-            this.processQueryAtLevel(q, depth, breadth, parentLearnings, parentVisitedUrls, concurrency),
+            this.processQueryAtLevel(q, depth, breadth, parentLearnings, parentVisitedUrls, concurrency, contextLimitOverride),
          ),
       );
 
@@ -226,7 +284,7 @@ export class DeepTreeResearchEngine {
       }
 
       // Phase C: Aggregate results
-      return this.aggregate(successfulResults, parentLearnings, parentVisitedUrls);
+      return this.aggregate(successfulResults, parentLearnings, parentVisitedUrls, contextLimitOverride);
    }
 
    // ── Single query processing at one tree level ──────────────────────────────
@@ -247,6 +305,7 @@ export class DeepTreeResearchEngine {
       parentLearnings: string[],
       parentVisitedUrls: string[],
       concurrency: number,
+      contextLimitOverride?: number,
    ): Promise<TreeQueryResult> {
       this.checkAborted();
       const learnings: string[] = [];
@@ -333,25 +392,49 @@ export class DeepTreeResearchEngine {
                }
                learnings.push(...localLearnings);
 
+               // C3: Prune branch if no findings produced at this level
+               const prunedLowYield = localLearnings.length === 0 && depth > 1;
+               if (prunedLowYield) {
+                  logger.warn({ query: treeQuery.query, depth }, 'Branch pruned: no findings produced');
+               }
+
                // Step 4: Recurse deeper with follow-up questions
                if (
                   depth > 1 &&
                   llmResult.data.followUpQuestions.length > 0 &&
+                  !prunedLowYield &&
                   !this.budget.isExhausted()
                ) {
-                  const nextBreadth = Math.max(2, Math.floor(breadth / 2));
                   const nextDepth = depth - 1;
                   const accumulatedLearnings = [...parentLearnings, ...learnings];
-                  const nextQuery = llmResult.data.followUpQuestions[0] ?? '';
 
-                  if (nextQuery) {
+                  // C2: Process up to 3 follow-up questions with reduced breadth
+                  const followUpsToProcess = llmResult.data.followUpQuestions.slice(0, MAX_FOLLOW_UPS);
+                  const followUpBreadth = Math.max(1, Math.floor(breadth / MAX_FOLLOW_UPS));
+                  const followUpConcurrency = Math.max(1, Math.min(concurrency, followUpBreadth));
+
+                  for (const fq of followUpsToProcess) {
+                     if (!fq) continue;
+
+                     // C1: Topic-drift check against original query
+                     const similarity = await this.computeTopicSimilarity(fq);
+                     if (similarity < TOPIC_DRIFT_THRESHOLD) {
+                        logger.warn({ followUp: fq, similarity }, 'Branch pruned: semantic drift detected');
+                        continue;
+                     }
+
+                     // C4: Dynamic context budget — proportional split
+                     const nextContextLimit = contextLimitOverride ??
+                        (this.contextWordLimit / Math.max(1, Math.pow(followUpBreadth, nextDepth)));
+
                      const deeper = await this.deepResearch(
-                        nextQuery,
-                        nextBreadth,
+                        fq,
+                        followUpBreadth,
                         nextDepth,
                         accumulatedLearnings,
                         visitedUrls,
-                        concurrency,
+                        followUpConcurrency,
+                        nextContextLimit,
                      );
 
                      // Merge deeper results into current level's output
@@ -383,8 +466,33 @@ export class DeepTreeResearchEngine {
          allLearnings.push({ learning: `No findings extracted` });
       }
 
-      const remainingFQs = followUpQuestions.slice(1);
+      const remainingFQs = followUpQuestions.slice(MAX_FOLLOW_UPS);
       return { learnings, allLearnings, visitedUrls, sources, followUpQuestions: remainingFQs };
+   }
+
+   // ── Topic-drift detection (C1) ────────────────────────────────────────────
+
+   /**
+    * Compute similarity between a follow-up query and the original query.
+    * Uses cosine similarity on embeddings when available, falls back to Jaccard.
+    */
+   private async computeTopicSimilarity(followUp: string): Promise<number> {
+      if (this.originalQueryEmbedding) {
+         try {
+            const embResponse = await embedTexts({
+               texts: [followUp],
+               mode: 'query',
+               dimensions: 384,
+            });
+            const fqEmbedding = embResponse.embeddings[0];
+            if (fqEmbedding) {
+               return cosineSimilarity(this.originalQueryEmbedding, fqEmbedding);
+            }
+         } catch {
+            // Fall through to Jaccard
+         }
+      }
+      return jaccardSimilarity(this.originalQuery, followUp);
    }
 
    // ── Query generation ──────────────────────────────────────────────────────
@@ -429,6 +537,7 @@ export class DeepTreeResearchEngine {
       results: TreeQueryResult[],
       parentLearnings: string[],
       parentVisitedUrls: string[],
+      contextLimitOverride?: number,
    ): TreeResearchResult {
       const allLearnings: TreeLearning[] = [];
       const learnings: string[] = [];
@@ -439,8 +548,12 @@ export class DeepTreeResearchEngine {
 
       let wordCount = 0;
 
+      const effectiveLimit = contextLimitOverride ?? this.contextWordLimit;
+
       for (const r of results) {
          for (const l of r.learnings) {
+            // C3: Filter out failed-query noise
+            if (l.startsWith('No findings for:')) continue;
             if (!learnings.includes(l)) {
                learnings.push(l);
             }
@@ -455,10 +568,11 @@ export class DeepTreeResearchEngine {
             sources.push(s);
             citations[s.url] ??= s.title;
          }
-         // Context with word budget (gpt-researcher's MAX_CONTEXT_WORDS = 25000)
+         // C4: Context with dynamic word budget (proportional split)
          for (const l of r.learnings) {
+            if (l.startsWith('No findings for:')) continue;
             const words = l.split(/\s+/).length;
-            if (wordCount + words <= this.contextWordLimit) {
+            if (wordCount + words <= effectiveLimit) {
                context.push(l);
                wordCount += words;
             }

@@ -21,10 +21,10 @@ import { getYouTubeTranscript } from '../tools/youtubeTranscript.js';
 import { attemptExternalRecovery } from '../utils/externalRecovery.js';
 import type { SubQuestion, SourceCandidate, ScoredCandidate, SourceType, SourceEntry, SearchCluster } from './types.js';
 import type { NormalizedRedditComment } from '../tools/redditThreadParser.js';
+import { withRetry } from './retry.js';
 import { ResearchStateEngine, BudgetTracker } from './state.js';
 import { rankSource, maxPerHostname } from './sourceRanking.js';
 import type { DeepResearchLlmClient } from './llm/chat.js';
-
 // ── Configuration ──────────────────────────────────────────────────────────
 
 interface DiscoveryConfig {
@@ -148,12 +148,15 @@ export class DiscoveryEngine {
 
    private llm: DeepResearchLlmClient | undefined;
    private intentCoverage = new Map<string, Set<string>>();
+   private abortSignal: AbortSignal | undefined;
    constructor(
       state: ResearchStateEngine,
       budget: BudgetTracker,
       config?: Partial<DiscoveryConfig>,
       llm?: DeepResearchLlmClient,
+      abortSignal?: AbortSignal,
    ) {
+      this.abortSignal = abortSignal;
       this.state = state;
       this.budget = budget;
       this.config = { ...DEFAULT_CONFIG, ...config };
@@ -433,7 +436,7 @@ export class DiscoveryEngine {
                .replace(/[?.!]+$/g, '')
                .trim();
             const { webSearch } = await import('../tools/webSearch.js');
-            const results = await webSearch(strippedQuery, 10, 'moderate', false, false);
+            const results = await withRetry(() => webSearch(strippedQuery, 10, 'moderate', false, false), { signal: this.abortSignal });
             for (const sr of results) {
                recoveryCandidates.push({
                   title: sr.title,
@@ -453,7 +456,7 @@ export class DiscoveryEngine {
       // Strategy 2: Academic search as fallback
       if (this.budget.recordToolCall()) {
          try {
-            const result = await academicSearch(sq.text, 'all', 5, null);
+            const result = await withRetry(() => academicSearch(sq.text, 'all', 5, null), { signal: this.abortSignal });
             const papers = (result as unknown as { papers: { title: string; url: string; abstract?: string }[] | undefined }).papers ?? [];
             for (const p of papers.slice(0, 5)) {
                recoveryCandidates.push({
@@ -573,7 +576,7 @@ export class DiscoveryEngine {
             // Use the lower-level search function that doesn't require deps injection
             // We access the webSearch module directly
             const { webSearch } = await import('../tools/webSearch.js');
-            const searchResults = await webSearch(query, 10, 'moderate', false, false);
+            const searchResults = await withRetry(() => webSearch(query, 10, 'moderate', false, false), { signal: this.abortSignal });
             for (const sr of searchResults) {
                results.push({
                   title: sr.title,
@@ -618,7 +621,7 @@ export class DiscoveryEngine {
       for (const query of queries) {
          try {
             const { webSearch } = await import('../tools/webSearch.js');
-            const searchResults = await webSearch(query, 10, 'moderate', false, false);
+            const searchResults = await withRetry(() => webSearch(query, 10, 'moderate', false, false), { signal: this.abortSignal });
             for (const sr of searchResults) {
                results.push({
                   title: sr.title,
@@ -700,7 +703,7 @@ export class DiscoveryEngine {
       if (!this.budget.recordToolCall()) return [];
 
       try {
-         const result = await academicSearch(sq.text, 'all', 10, null);
+         const result = await withRetry(() => academicSearch(sq.text, 'all', 10, null), { signal: this.abortSignal });
          const papers: { title: string; url: string; abstract?: string; year?: number }[] = (
             result as unknown as {
                papers: { title: string; url: string; abstract?: string; year?: number }[];
@@ -729,7 +732,7 @@ export class DiscoveryEngine {
       try {
          const query = buildRedditQuery(sq);
          const posts: { title: string; url: string; selftext?: string; created_utc?: number; permalink: string }[] =
-            await redditSearch(query, '', 'relevance', 'year', 10);
+            await withRetry(() => redditSearch(query, '', 'relevance', 'year', 10), { signal: this.abortSignal });
 
          const candidates: SourceCandidate[] = [];
 
@@ -739,7 +742,7 @@ export class DiscoveryEngine {
          const commentSettled = await Promise.allSettled(
             topPosts.map(async (p) => {
                try {
-                  const result = await redditComments({ url: p.permalink }, {});
+                  const result = await withRetry(() => redditComments({ url: p.permalink }, {}), { signal: this.abortSignal });
                   // Collect top comment bodies for snippet enrichment
                   // Expand from 20 to 30 comments per post
                   const commentBodies = (result.comments as NormalizedRedditComment[])
@@ -816,7 +819,7 @@ export class DiscoveryEngine {
       if (!this.budget.recordToolCall()) return [];
 
       try {
-         const raw = await hackernewsSearch(sq.text, 'story', 'relevance', null, 10);
+         const raw = await withRetry(() => hackernewsSearch(sq.text, 'story', 'relevance', null, 10), { signal: this.abortSignal });
          const results: { title?: string; url?: string; text?: string }[] = raw as unknown as {
             title?: string;
             url?: string;
@@ -844,7 +847,7 @@ export class DiscoveryEngine {
 
       try {
          const query = buildGitHubQuery(sq);
-         const raw = await getGitHubRepoSearch(query, undefined, undefined, undefined, undefined, 10);
+         const raw = await withRetry(() => getGitHubRepoSearch(query, undefined, undefined, undefined, undefined, 10), { signal: this.abortSignal });
          // Handle both array and { items: [...] } return shapes, plus nil/malformed responses
          let items: {
             fullName?: string;
@@ -887,7 +890,7 @@ export class DiscoveryEngine {
          const config = loadConfig();
          const apiKey = config.youtube.apiKey ?? '';
          if (!apiKey) return []; // silently skip if no key
-         const videos = await youtubeSearch(sq.text, apiKey, 'relevance', 10);
+         const videos = await withRetry(() => youtubeSearch(sq.text, apiKey, 'relevance', 10), { signal: this.abortSignal });
 
          const candidates: SourceCandidate[] = [];
 
@@ -897,7 +900,7 @@ export class DiscoveryEngine {
          const transcriptSettled = await Promise.allSettled(
             topVideos.map(async (v) => {
                try {
-                  const transcriptResult = await getYouTubeTranscript(v.videoId, 'en');
+                  const transcriptResult = await withRetry(() => getYouTubeTranscript(v.videoId, 'en'), { signal: this.abortSignal });
                   const transcriptText = transcriptResult.fullText || '';
                   const snippet = transcriptText
                      ? `Video: ${v.title}\n\nTranscript excerpt:\n${transcriptText.slice(0, 3000)}`
@@ -961,7 +964,7 @@ export class DiscoveryEngine {
       if (!this.budget.recordToolCall()) return [];
 
       try {
-         const raw = await stackoverflowSearch(sq.text, '', 'relevance', '', false, 10);
+         const raw = await withRetry(() => stackoverflowSearch(sq.text, '', 'relevance', '', false, 10), { signal: this.abortSignal });
          const results: { title?: string; url?: string; body?: string }[] = raw;
          return results.map((r) => ({
             title: r.title ?? '',
@@ -999,9 +1002,7 @@ export class DiscoveryEngine {
          if (!keywords) return [];
 
          const cdxUrl = `https://web.archive.org/cdx/search/cdx?url=*&output=json&limit=10&sort=reverse&matchType=prefix&filter=statuscode:200&q=${encodeURIComponent(keywords)}`;
-         const cdxResp = await fetch(cdxUrl, {
-            signal: AbortSignal.timeout(10_000),
-         });
+         const cdxResp = await withRetry(() => fetch(cdxUrl, { signal: AbortSignal.timeout(10_000) }), { signal: this.abortSignal });
 
          if (!cdxResp.ok) {
             logger.debug({ status: cdxResp.status }, 'Wayback CDX search failed');
@@ -1084,7 +1085,7 @@ export class DiscoveryEngine {
       const settled = await Promise.allSettled(
          topAcademic.map(async (ac) => {
             try {
-               const result = await attemptExternalRecovery(ac.url);
+               const result = await withRetry(() => attemptExternalRecovery(ac.url), { signal: this.abortSignal });
                if (result.content !== null && result.source !== null) {
                   // Found an archived copy — add it as an additional source with a note
                   const archiveUrl =

@@ -36,6 +36,7 @@ interface SummaryFinding {
    claim: string;
    evidenceDirectness: string;
    sourceCount: number;
+   sourceIds: string[];
    caveats?: string;
 }
 
@@ -190,8 +191,67 @@ export class LlmSynthesizer {
          return this.fallback(state);
       }
 
+      // Validate citations in narrativeMarkdown: check [Source N] refs are in range
+      const citationIssues = this.validateCitations(data, state.sources.length);
+      if (citationIssues.length > 0) {
+         logger.warn(
+            { issues: citationIssues.length },
+            'LLM synthesis has citation validation issues; surfacing as uncertainties',
+         );
+         data.uncertainties = [...data.uncertainties, ...citationIssues];
+      }
+
       return data;
    }
+
+   /**
+    * Validate that [Source N] references in the narrative are in range.
+    * Returns citation issues as uncertainty strings.
+    */
+   private validateCitations(
+      report: ResearchReport,
+      totalSources: number,
+   ): string[] {
+      const issues: string[] = [];
+      const narrative = report.narrativeMarkdown;
+
+      // Extract all [Source N] references
+      const refRegex = /\[Source (\d+)\]/g;
+      const refs = new Set<number>();
+      let match: RegExpExecArray | null;
+      while ((match = refRegex.exec(narrative)) !== null) {
+         const numString = match[1];
+         if (numString) {
+            const num = parseInt(numString, 10);
+            if (num > 0) refs.add(num);
+         }
+      }
+
+      if (refs.size === 0) {
+         issues.push(
+            'No [Source N] citations found in the synthesis narrative. Claims may not be properly attributed to sources.',
+         );
+         return issues;
+      }
+
+      // Check for out-of-range references
+      const outOfRange = [...refs].filter((n) => n > totalSources);
+      if (outOfRange.length > 0) {
+         issues.push(
+            `${String(outOfRange.length)} citation(s) reference non-existent sources (indices ${outOfRange.join(', ')} exceed ${String(totalSources)} total sources).`,
+         );
+      }
+
+      // Check for stale (source #1) overuse — if >50% of citations are source 1
+      if (refs.size <= 2 && refs.has(1) && totalSources > 3) {
+         issues.push(
+            'Citation diversity is low — most claims cite only Source 1. This may indicate fallback/default citation behavior rather than genuine source attribution.',
+         );
+      }
+
+      return issues;
+   }
+
 
    // ── Private helpers ──────────────────────────────────────────────────────
 
@@ -285,6 +345,7 @@ export class LlmSynthesizer {
             claim: f.claim,
             evidenceDirectness: f.evidenceDirectness,
             sourceCount: f.sourceIds.length,
+            sourceIds: f.sourceIds,
             ...(f.caveats !== undefined ? { caveats: f.caveats } : {}),
          })),
          sources: state.sources.map((s: SourceEntry, i: number) => ({

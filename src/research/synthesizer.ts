@@ -17,6 +17,18 @@ import type {
    SubQuestion,
 } from './types.js';
 
+// ── Utilities ───────────────────────────────────────────────────────────────────
+
+function capitalize(s: string): string {
+   if (s.length === 0) return s;
+   return s.charAt(0).toUpperCase() + s.slice(1);
+}
+
+function decapitalize(s: string): string {
+   if (s.length === 0) return s;
+   return s.charAt(0).toLowerCase() + s.slice(1);
+}
+
 // ── Synthesizer ──────────────────────────────────────────────────────────────
 
 export class ResearchSynthesizer {
@@ -168,6 +180,45 @@ export class ResearchSynthesizer {
       }));
    }
 
+   private formatSourceRefs(
+      sourceIds: string[],
+      sourceIndex: Map<string, number>,
+   ): string {
+      const refs = sourceIds
+         .map((sid) => sourceIndex.get(sid))
+         .filter((n): n is number => n !== undefined)
+         .map((n) => `[Source ${String(n)}]`)
+         .join(', ');
+      return refs ? `(${refs})` : '';
+   }
+
+   private buildProseParagraph(
+      findings: Finding[],
+      _sqSources: SourceEntry[],
+      sourceIndex: Map<string, number>,
+   ): string {
+      const firstFinding = findings[0];
+      if (!firstFinding) return '';
+
+      const sentences: string[] = [];
+
+      // Opening sentence
+      const firstRefs = this.formatSourceRefs(firstFinding.sourceIds, sourceIndex);
+      sentences.push(`${capitalize(firstFinding.claim)}${firstRefs ? ` ${firstRefs}` : ''}.`);
+
+      // Supporting sentences
+      for (let i = 1; i < Math.min(findings.length, 6); i++) {
+         const f = findings[i];
+         if (!f) continue;
+         const refs = this.formatSourceRefs(f.sourceIds, sourceIndex);
+         const starter = i % 3 === 0 ? 'Additionally, ' : i % 3 === 1 ? 'Evidence also suggests that ' : 'Sources indicate that ';
+         const refSuffix = refs ? ` ${refs}` : '';
+         sentences.push(`${starter}${decapitalize(f.claim)}${refSuffix}.`);
+      }
+
+      return sentences.join(' ');
+   }
+
    /** Build a short prose narrative paragraph from claims and sources. */
    private buildThemeNarrative(
       claims: string[],
@@ -306,18 +357,10 @@ export class ResearchSynthesizer {
             parts.push(`*Note: This sub-question has thin coverage — only ${String(sqSources.length)} source(s) from ${String(domainCount)} domain(s).*\n`);
          }
 
-         for (const f of sqFindings) {
-            const sourceRefs = f.sourceIds
-               .map((sid) => sourceIndex.get(sid))
-               .filter((n): n is number => n !== undefined)
-               .map((n) => `[Source ${String(n)}]`)
-               .join(', ');
-
-            parts.push(`- ${f.claim} ${sourceRefs}`);
-
-            if (f.caveats) {
-               parts.push(`  - Caveat: ${f.caveats}`);
-            }
+         // Build prose paragraph from all findings in this sub-question
+         const proseParagraph = this.buildProseParagraph(sqFindings, sqSources, sourceIndex);
+         if (proseParagraph) {
+            parts.push(proseParagraph);
          }
          parts.push('');
       }
@@ -328,8 +371,9 @@ export class ResearchSynthesizer {
       );
       if (orphanFindings.length > 0) {
          parts.push('## Additional Findings\n');
-         for (const f of orphanFindings) {
-            parts.push(`- ${f.claim}\n`);
+         const orphanParagraph = this.buildProseParagraph(orphanFindings, [], sourceIndex);
+         if (orphanParagraph) {
+            parts.push(orphanParagraph);
          }
          parts.push('');
       }
@@ -344,10 +388,30 @@ export class ResearchSynthesizer {
          }
       }
 
-      // Source list
+      // Source list — split into used vs discarded/failed
+      const usedSources = sources.filter(
+         (s) => s.usageStatus !== 'discarded' && s.usageStatus !== 'failed',
+      );
+      const discardedSources = sources.filter(
+         (s) => s.usageStatus === 'discarded' || s.usageStatus === 'failed',
+      );
+
       parts.push('## Sources\n');
-      for (const [i, s] of sources.entries()) {
-         parts.push(`${String(i + 1)}. [${s.title}](${s.url}) (${s.sourceType}, domain: ${s.domain})\n`);
+      if (usedSources.length === 0) {
+         parts.push('*No cited sources.*\n');
+      } else {
+         for (const [i, s] of usedSources.entries()) {
+            parts.push(`${String(i + 1)}. [${s.title}](${s.url}) (${s.sourceType}, domain: ${s.domain})\n`);
+         }
+      }
+
+      if (discardedSources.length > 0) {
+         parts.push('\n## Sources Examined\n');
+         parts.push('The following sources were examined during research but did not contribute findings to this report:\n\n');
+         for (const [i, s] of discardedSources.entries()) {
+            const reason = s.discardReason ?? 'unknown';
+            parts.push(`${String(i + 1)}. [${s.title}](${s.url}) (${s.sourceType}, domain: ${s.domain}) — Discarded: ${reason}\n`);
+         }
       }
 
       // Uncertainties

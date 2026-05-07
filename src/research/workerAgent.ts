@@ -16,6 +16,7 @@
 
 import { randomUUID } from 'node:crypto';
 import { logger } from '../logger.js';
+import { CircuitBreaker, CircuitBreakerOpenError } from './retry.js';
 import type { DeepResearchLlmClient, TokenBudget } from './llm/chat.js';
 import { WORKER_AGENT_INVESTIGATE } from './llm/prompts.js';
 import type {
@@ -105,6 +106,19 @@ function quickQuality(markdown: string, url: string, title: string): ContentQual
    return assessContentQuality(markdown, url, title);
 }
 
+// ── Circuit breaker registry (shared across all WorkerAgent instances) ──────
+
+const circuitBreakers = new Map<string, CircuitBreaker>();
+
+function getBreaker(name: string): CircuitBreaker {
+   let b = circuitBreakers.get(name);
+   if (!b) {
+      b = new CircuitBreaker({ windowSize: 10, failureThreshold: 0.8, cooldownMs: 60_000 });
+      circuitBreakers.set(name, b);
+   }
+   return b;
+}
+
 // ── WorkerAgent ─────────────────────────────────────────────────────────────
 
 export class WorkerAgent {
@@ -138,6 +152,7 @@ export class WorkerAgent {
          parentSubQuestionId?: string;
          subQuestions?: SubQuestion[];
          priorKnowledge?: string;
+         onProgress?: (stage: string, detail: string) => void;
       },
    ): Promise<WorkerReport> {
       const startTime = Date.now();
@@ -324,22 +339,25 @@ export class WorkerAgent {
          // Web search (always runs when sourceTypes includes web or is empty)
          if (plan.sourceTypes.includes('web') || plan.sourceTypes.length === 0) {
             searchPromises.push(
-               this.tools.webSearch(query, 10).then((r) => { addResults(r.map((x) => ({ title: x.title, url: x.url, description: x.description, ...(x.extraSnippet ? { extraSnippet: x.extraSnippet } : {}), ...(x.deepLinks ? { deepLinks: x.deepLinks } : {}) })), 'web'); })
-                  .catch(() => { /* skip */ }),
+               getBreaker('web').execute(() => this.tools.webSearch(query, 10))
+                  .then((r) => { addResults(r.map((x) => ({ title: x.title, url: x.url, description: x.description, ...(x.extraSnippet ? { extraSnippet: x.extraSnippet } : {}), ...(x.deepLinks ? { deepLinks: x.deepLinks } : {}) })), 'web'); })
+                  .catch((err) => { if (err instanceof CircuitBreakerOpenError) { logger.debug({ backend: 'web' }, 'Circuit breaker open, skipping web search'); } }),
             );
          }
          // Academic search (LLM-requested or fallback)
          if (plan.sourceTypes.includes('academic')) {
             searchPromises.push(
-               this.tools.academicSearch(query, 5).then((r) => { addResults(r.map((x) => ({ ...x, description: x.abstract ?? '' })), 'academic'); })
-                  .catch(() => { /* skip */ }),
+               getBreaker('academic').execute(() => this.tools.academicSearch(query, 5))
+                  .then((r) => { addResults(r.map((x) => ({ ...x, description: x.abstract ?? '' })), 'academic'); })
+                  .catch((err) => { if (err instanceof CircuitBreakerOpenError) { logger.debug({ backend: 'academic' }, 'Circuit breaker open, skipping academic search'); } }),
             );
          }
          // GitHub (LLM-requested)
          if (plan.sourceTypes.includes('github')) {
             searchPromises.push(
-               this.tools.githubSearch(query, 5).then((r) => { addResults(r.map((x) => ({ title: x.fullName, url: x.htmlUrl, description: x.description })), 'github'); })
-                  .catch(() => { /* skip */ }),
+               getBreaker('github').execute(() => this.tools.githubSearch(query, 5))
+                  .then((r) => { addResults(r.map((x) => ({ title: x.fullName, url: x.htmlUrl, description: x.description })), 'github'); })
+                  .catch((err) => { if (err instanceof CircuitBreakerOpenError) { logger.debug({ backend: 'github' }, 'Circuit breaker open, skipping github search'); } }),
             );
          }
       }
@@ -349,37 +367,41 @@ export class WorkerAgent {
       if (primaryQuery) {
          // Reddit — practitioner perspectives
          searchPromises.push(
-            this.tools.redditSearch(primaryQuery, 5).then((r) => { addResults(r.map((x) => ({ ...x, description: x.selftext ?? '' })), 'reddit'); })
-               .catch(() => { /* skip */ }),
+            getBreaker('reddit').execute(() => this.tools.redditSearch(primaryQuery, 5))
+               .then((r) => { addResults(r.map((x) => ({ ...x, description: x.selftext ?? '' })), 'reddit'); })
+               .catch((err) => { if (err instanceof CircuitBreakerOpenError) { logger.debug({ backend: 'reddit' }, 'Circuit breaker open, skipping reddit search'); } }),
          );
          // Hacker News
          searchPromises.push(
-            this.tools.hackernewsSearch(primaryQuery, 5).then((r) => { addResults(r.map((x) => ({ ...x, description: x.text ?? '' })), 'hackernews'); })
-               .catch(() => { /* skip */ }),
+            getBreaker('hackernews').execute(() => this.tools.hackernewsSearch(primaryQuery, 5))
+               .then((r) => { addResults(r.map((x) => ({ ...x, description: x.text ?? '' })), 'hackernews'); })
+               .catch((err) => { if (err instanceof CircuitBreakerOpenError) { logger.debug({ backend: 'hackernews' }, 'Circuit breaker open, skipping hackernews search'); } }),
          );
          // YouTube — gracefully skips when no API key configured
          searchPromises.push(
-            this.tools.semanticYoutube(primaryQuery, { maxVideos: 5, topK: 5 }).then((r) => {
-               for (const chunk of r.chunks) {
-                  this.semanticContentCache.set(chunk.url, chunk.text);
-               }
-               addResults(
-                  r.chunks.map((c) => ({ title: c.title, url: c.url, description: c.text.slice(0, 500) })),
-                  'youtube',
-               );
-            }).catch(() => { /* skip */ }),
+            getBreaker('youtube').execute(() => this.tools.semanticYoutube(primaryQuery, { maxVideos: 5, topK: 5 }))
+               .then((r) => {
+                  for (const chunk of r.chunks) {
+                     this.semanticContentCache.set(chunk.url, chunk.text);
+                  }
+                  addResults(
+                     r.chunks.map((c) => ({ title: c.title, url: c.url, description: c.text.slice(0, 500) })),
+                     'youtube',
+                  );
+               }).catch((err) => { if (err instanceof CircuitBreakerOpenError) { logger.debug({ backend: 'youtube' }, 'Circuit breaker open, skipping youtube search'); } }),
          );
          // Reddit semantic — deeper community context
          searchPromises.push(
-            this.tools.semanticReddit(primaryQuery, { maxPosts: 5, topK: 5 }).then((r) => {
-               for (const chunk of r.chunks) {
-                  this.semanticContentCache.set(chunk.url, chunk.text);
-               }
-               addResults(
-                  r.chunks.map((c) => ({ title: c.postTitle, url: c.url, description: c.text.slice(0, 500) })),
-                  'reddit',
-               );
-            }).catch(() => { /* skip */ }),
+            getBreaker('reddit-semantic').execute(() => this.tools.semanticReddit(primaryQuery, { maxPosts: 5, topK: 5 }))
+               .then((r) => {
+                  for (const chunk of r.chunks) {
+                     this.semanticContentCache.set(chunk.url, chunk.text);
+                  }
+                  addResults(
+                     r.chunks.map((c) => ({ title: c.postTitle, url: c.url, description: c.text.slice(0, 500) })),
+                     'reddit',
+                  );
+               }).catch((err) => { if (err instanceof CircuitBreakerOpenError) { logger.debug({ backend: 'reddit-semantic' }, 'Circuit breaker open, skipping reddit semantic search'); } }),
          );
       }
 
@@ -844,12 +866,13 @@ Output ONLY valid JSON:
                claim: f.claim,
                evidence: f.evidence,
                sourceUrls: this.resolveSourceUrls(f.evidence, compacted),
+               citationConfidence: 'explicit' as const,
                ...(f.caveats !== undefined ? { caveats: f.caveats } : {}),
             }));
 
             const subThreads = result.data.subThreads;
             return { findings, subThreads, tokensUsed: result.response.tokensUsed };
-            }
+         }
          logger.warn('WorkerAgent LLM synthesis call failed');
          return { findings: [], subThreads: [], tokensUsed: 0 };
       } catch (err) {

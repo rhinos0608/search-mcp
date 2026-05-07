@@ -7,6 +7,8 @@
  * This is a shell — populated during Phase 1 implementation.
  */
 
+import type { BrowserSessionConfig } from '../browser/types.js';
+
 // ── Research phases ───────────────────────────────────────────────────────────
 
 export type ResearchPhase =
@@ -48,9 +50,28 @@ export type SourceType =
    | 'patent'
    | 'podcast'
    | 'producthunt'
-   | 'youtube';
+   | 'youtube'
+   | 'browser-interactive';
 
 export type ExtractionStatus = 'pending' | 'extracted' | 'failed';
+
+// ── Phase 2: Source lifecycle tracking ─────────────────────────────────────
+
+/** How a source was ultimately used (or not) in the research. */
+export type SourceUsageStatus = 'searched' | 'selected' | 'read' | 'used' | 'discarded' | 'failed';
+
+/** Why a source was discarded (examined but contributed no findings). */
+export type DiscardReason =
+   | 'duplicate'
+   | 'stale'
+   | 'low_relevance'
+   | 'thin_content'
+   | 'extraction_failed'
+   | 'bot_challenge'
+   | 'paywall'
+   | 'no_findings'
+   | 'unsupported'
+   | 'budget_exceeded';
 
 export interface SourceEntry {
    id: string;
@@ -67,6 +88,36 @@ export interface SourceEntry {
    extractionStatus: ExtractionStatus;
    limitations?: string;
    subQuestionId: string;
+   /** Phase 2: Current usage status in the research lifecycle. */
+   usageStatus?: SourceUsageStatus;
+   /** Phase 2: Reason for discard when usageStatus is 'discarded'. */
+   discardReason?: DiscardReason;
+   /** Phase 2: Quality score (0-1) from content assessment. */
+   qualityScore?: number;
+   /** Phase 2: Relevance score (0-1) to the research question. */
+   relevanceScore?: number;
+   /** Phase 2: Freshness score (0-1) based on recency. */
+   freshnessScore?: number;
+   /** Phase 2: Which worker agent first discovered this source. */
+   workerId?: string;
+}
+
+/**
+ * Per-source LLM-generated summary for synthesis context.
+ * Replaces raw compacted content blocks with summarized, attributed content.
+ */
+export interface SourceSummary {
+   url: string;
+   title: string;
+   sourceType: SourceType;
+   domain: string;
+   publishedDate?: string;
+   /** 2-3 sentence summary of key information relevant to the research question. */
+   summary: string;
+   /** 3-5 verbatim excerpts from the source most relevant to the research question. */
+   keyExcerpts: string[];
+   /** Quality assessment (0-1) based on content depth and relevance. */
+   qualityScore?: number;
 }
 
 // ── Findings ──────────────────────────────────────────────────────────────────
@@ -332,6 +383,34 @@ export interface ClaimEdge {
    description?: string;
 }
 
+// ── Browser interactive extraction plans ──────────────────────────────────────
+
+/** Plan for interactive browser extraction (login walls, SPAs, bot challenges). */
+export interface InteractiveExtractionPlan {
+   /** Sequence of browser actions to execute before extraction. */
+   actions: InteractiveAction[];
+   /** Extraction strategy after actions complete. */
+   extraction: {
+      /** NL instruction for what to extract (requires LLM). */
+      instruction?: string;
+      /** CSS selector scoping the content area. */
+      selector?: string;
+   };
+   /** Max time for the plan execution in ms. */
+   maxTimeMs?: number;
+}
+
+/** A single browser action in an extraction plan. */
+export interface InteractiveAction {
+   type: 'navigate' | 'click' | 'type' | 'wait' | 'evaluate' | 'scroll' | 'screenshot' | 'select';
+   /** Target ref (from snapshot), CSS selector, or text to match. */
+   target?: string;
+   /** Value for type/select actions. */
+   value?: string;
+   /** Timeout per action in ms. */
+   timeout?: number;
+}
+
 // ── Sub-questions ─────────────────────────────────────────────────────────────
 
 export type SubQuestionStatus =
@@ -349,9 +428,15 @@ export interface SubQuestion {
    evidenceType: string;
    preferredSources: SourceType[];
    freshnessRequirement: string;
+   /** Phase 6: Intent for freshness scoring — controls how recency is valued. */
+   freshnessIntent?: 'recent' | 'historical' | 'any';
    failureModes: string[];
    budgetPriority: number;
    status: SubQuestionStatus;
+   /** Whether this sub-question requires authenticated access (login-walled content). */
+   requiresAuth?: boolean;
+   /** Plan for interactive browser extraction if the page has bot detection. */
+   extractionPlan?: InteractiveExtractionPlan;
 }
 
 // ── Discovery ─────────────────────────────────────────────────────────────────
@@ -389,6 +474,7 @@ export interface BudgetProfile {
    maxToolCalls: number;
    maxTokens: number;
    maxTimeMs: number;
+   maxStateEntries: number;
 }
 
 export interface TreeProfile {
@@ -424,8 +510,12 @@ export interface BudgetState {
    maxTokens: number;
    maxExtractions: number;
    maxGapLoops: number;
+   stateEntriesUsed: number;
+   maxStateEntries: number;
    stepCosts: Record<string, number>;
    maxTimeMs: number;
+   /** Per-gap-loop findings count for confidence plateau detection. */
+   findingsAddedPerLoop: number[];
 }
 
 // ── Taxonomy ──────────────────────────────────────────────────────────────────
@@ -668,11 +758,19 @@ export interface WorkerReport {
    narrativeSummary: string;
    /** Search queries the worker used. */
    searchQueries: string[];
+   /** Trail of LLM reflection decisions made during investigation. */
+   reflectionTrail?: string[];
    /** Total tokens consumed by this worker. */
    tokensUsed: number;
    /** Elapsed time in ms. */
    elapsedMs: number;
 }
+
+/** Confidence level for a finding's source citation mapping. */
+export type CitationConfidence =
+   | 'explicit'    // LLM provided structured sourceIndices for this finding
+   | 'inferred'    // Resolved via secondary method (regex, similarity)
+   | 'unattributed'; // No source could be determined
 
 /** A single finding from a worker agent. */
 export interface WorkerFinding {
@@ -684,6 +782,8 @@ export interface WorkerFinding {
    evidence: string;
    /** Source URLs backing this claim. */
    sourceUrls: string[];
+   /** How confident we are that the sourceUrls correctly map to this claim. */
+   citationConfidence: CitationConfidence;
    /** Caveats or limitations the worker noted. */
    caveats?: string;
 }
@@ -704,6 +804,18 @@ export interface WorkerSource {
    relevanceRationale: string;
    /** Publication date if known. */
    publishedDate?: string;
+   /** Phase 2: Current usage status in the research lifecycle. */
+   usageStatus?: SourceUsageStatus;
+   /** Phase 2: Reason for discard when usageStatus is 'discarded'. */
+   discardReason?: DiscardReason;
+   /** Phase 2: Quality score (0-1) from content assessment. */
+   qualityScore?: number;
+   /** Phase 2: Relevance score (0-1) to the research question. */
+   relevanceScore?: number;
+   /** Phase 2: Freshness score (0-1) based on recency. */
+   freshnessScore?: number;
+   /** Phase 2: Which worker agent first discovered this source. */
+   workerId?: string;
 }
 
 /** A sub-thread identified by a worker for further investigation. */
@@ -750,4 +862,19 @@ export interface ResearchTools {
 
    /** Semantic crawl: crawl a URL and retrieve chunks relevant to query. */
    semanticCrawl(url: string, query: string, options?: { maxPages?: number; topK?: number }): Promise<{ chunks: { text: string; url: string; section: string; score: number }[]; pagesCrawled: number; warnings: string[] }>;
+
+   // ── Browser interactive extraction ──────────────────────────────────
+   /** Create a browser session for interactive extraction. */
+   browserSession: (config: BrowserSessionConfig) => Promise<{ sessionId: string }>;
+
+   /** Extract content interactively (login walls, SPAs, bot challenges). */
+   browserExtract: (sessionId: string, url: string, plan: InteractiveExtractionPlan) => Promise<{
+      content: string;
+      findings: Finding[];
+      sources: SourceEntry[];
+      screenshots?: string[];
+   }>;
+
+   /** Close the browser session. */
+   browserClose: (sessionId: string) => Promise<void>;
 }

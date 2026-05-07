@@ -73,6 +73,16 @@ export interface ResearchJobSnapshot {
    error: string | undefined;
    /** Path to persisted result file on disk, if saved. */
    resultFile: string | undefined;
+   /** Original max time at job creation (before any extensions). */
+   originalMaxTimeMs: number;
+   /** Current max time (may have been extended). */
+   maxTimeMs: number;
+   /** Total additional ms granted via extendRuntime. */
+   totalExtensionsMs: number;
+   /** Number of times extendRuntime was called. */
+   extensionCount: number;
+   /** Gap loop iterations executed so far. */
+   gapLoopCount: number;
 }
 
 /** Lightweight summary returned by list. */
@@ -100,6 +110,9 @@ interface InternalJob {
    jobId: string;
    query: string;
    depth: ResearchDepth;
+   /** Original max time at job creation (before any extensions). */
+   originalMaxTimeMs: number;
+   /** Current max time (may have been extended). */
    maxTimeMs: number;
 
    // Status lifecycle
@@ -123,6 +136,14 @@ interface InternalJob {
    /** Total individual sources (not source types). */
    sourceTypeCount: number | undefined;
    findingCount: number | undefined;
+
+   // Adaptive timeout tracking
+   /** Total additional ms granted via extendRuntime. */
+   totalExtensionsMs: number;
+   /** Number of times extendRuntime was called. */
+   extensionCount: number;
+   /** Gap loop iterations executed so far (for observability). */
+   gapLoopCount: number;
 
    // Internal (never exposed in snapshot)
    abortController: AbortController | undefined;
@@ -173,6 +194,7 @@ export class ResearchJobManager {
          jobId,
          query: params.query,
          depth: params.depth,
+         originalMaxTimeMs: maxTimeMs,
          maxTimeMs,
          status: 'queued',
          progress: 0,
@@ -189,6 +211,9 @@ export class ResearchJobManager {
          sourceCount: undefined,
          sourceTypeCount: undefined,
          findingCount: undefined,
+         totalExtensionsMs: 0,
+         extensionCount: 0,
+         gapLoopCount: 0,
          abortController: undefined,
          runtimeTimeout: undefined,
          result: undefined,
@@ -313,6 +338,69 @@ export class ResearchJobManager {
       this.disarmJob(job);
 
       logger.info({ jobId }, 'Research job cancelled');
+   }
+
+   /**
+    * Extend a running job's max runtime by additionalMs.
+    *
+    * Clears the existing timeout and sets a new one. Only works on running
+    * jobs. Caps total extensions at 2× the original max time to prevent
+    * unbounded growth. Each extension is at most 5 minutes.
+    *
+    * Returns true if the extension was applied, false otherwise.
+    */
+   extendRuntime(jobId: string, additionalMs: number): boolean {
+      const job = this.jobs.get(jobId);
+      if (!job) return false;
+      if (job.status !== 'running') return false;
+
+      // Safety caps
+      const maxTotal = job.originalMaxTimeMs * 2;
+      if (job.totalExtensionsMs + additionalMs > maxTotal) {
+         additionalMs = Math.max(0, maxTotal - job.totalExtensionsMs);
+      }
+      if (additionalMs <= 0) return false;
+
+      const perExtensionCap = 300_000; // 5 minutes per extension call
+      if (additionalMs > perExtensionCap) {
+         additionalMs = perExtensionCap;
+      }
+
+      // Apply extension
+      job.totalExtensionsMs += additionalMs;
+      job.extensionCount++;
+      job.maxTimeMs = job.originalMaxTimeMs + job.totalExtensionsMs;
+
+      // Clear old timeout, set new one
+      if (job.runtimeTimeout) clearTimeout(job.runtimeTimeout);
+      const remaining = job.maxTimeMs - (Date.now() - (job.startedAt ?? Date.now()));
+      const effectiveTimeout = Math.max(remaining + additionalMs, 0);
+
+      job.runtimeTimeout = setTimeout(() => {
+         if (job.abortController && !job.abortController.signal.aborted) {
+            logger.warn(
+               { jobId, maxTimeMs: job.maxTimeMs, extensions: job.extensionCount },
+               'Job max runtime exceeded (after extensions)',
+            );
+            job.abortController.abort(new Error('Research exceeded max runtime'));
+         }
+      }, effectiveTimeout);
+      job.runtimeTimeout.unref();
+
+      job.updatedAt = Date.now();
+      logger.info(
+         { jobId, additionalMs, totalExtensionsMs: job.totalExtensionsMs, extensionCount: job.extensionCount },
+         'Research job runtime extended',
+      );
+      return true;
+   }
+
+   /** Increment the gap loop counter for a job (observability only). */
+   incrementGapLoops(jobId: string): void {
+      const job = this.jobs.get(jobId);
+      if (!job) return;
+      job.gapLoopCount++;
+      job.updatedAt = Date.now();
    }
 
    /**
@@ -507,6 +595,11 @@ export class ResearchJobManager {
          result: job.result,
          error: job.error,
          resultFile: job.resultFile,
+         originalMaxTimeMs: job.originalMaxTimeMs,
+         maxTimeMs: job.maxTimeMs,
+         totalExtensionsMs: job.totalExtensionsMs,
+         extensionCount: job.extensionCount,
+         gapLoopCount: job.gapLoopCount,
       };
    }
 

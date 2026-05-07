@@ -21,7 +21,8 @@ import { semanticReddit } from '../tools/semanticReddit.js';
 import { semanticGitHubCode } from '../tools/semanticGitHubCode.js';
 import { semanticCrawl } from '../tools/semanticCrawl.js';
 import { loadConfig } from '../config.js';
-import type { ResearchTools } from './types.js';
+import type { ResearchTools, InteractiveExtractionPlan } from './types.js';
+import type { BrowserSessionConfig } from '../browser/types.js';
 
 export interface ResearchToolsOptions {
    /** Called before each tool invocation — used for budget tracking / logging. */
@@ -342,6 +343,92 @@ export function createResearchTools(options?: ResearchToolsOptions): ResearchToo
             };
          } catch {
             return { chunks: [], pagesCrawled: 0, warnings: [] };
+         }
+      },
+
+      // ── Browser interactive extraction ──────────────────────────────────
+      async browserSession(config: BrowserSessionConfig) {
+         onToolCall?.('browser_session', `viewport:${String(config.viewport.width)}x${String(config.viewport.height)}`);
+         try {
+            const { browserManager } = await import('../browser/browserManager.js');
+            const session = await browserManager.launch(config);
+            return { sessionId: session.id };
+         } catch {
+            return { sessionId: '' };
+         }
+      },
+
+      async browserExtract(sessionId: string, url: string, plan: InteractiveExtractionPlan) {
+         onToolCall?.('browser_extract', url);
+         try {
+            const { browserManager } = await import('../browser/browserManager.js');
+            const { InteractiveBrowserAgent } = await import('./interactiveAgent.js');
+            const session = browserManager.getActiveSession();
+            if (session?.id !== sessionId) {
+               return { content: '', findings: [], sources: [], screenshots: [], };
+            }
+            const agent = new InteractiveBrowserAgent({
+               browser: {
+                  headless: true,
+                  viewport: { width: 1280, height: 720 },
+                  userAgent: '',
+                  proxyServer: '',
+                  executablePath: '',
+                  profile: null,
+                  stealthEnabled: true,
+                  rebrowser: false,
+                  maxSessionTimeMs: 0,
+                  bypassCSP: false,
+                  credentials: {},
+               },
+            });
+            const result = await agent.executePlan(url, plan, session);
+            // Map InteractiveResult fields to research domain objects
+            return {
+               content: result.content,
+               findings: result.findings.map((f) => ({
+                  id: `browser-${String(Date.now())}-${Math.random().toString(36).slice(2, 8)}`,
+                  claim: f.text.slice(0, 2000),
+                  normalizedClaim: f.text.slice(0, 2000),
+                  subQuestionIds: [],
+                  sourceIds: [],
+                  evidenceSummary: '',
+                  evidenceDirectness: 'near-direct' as const,
+                  freshnessSensitive: false,
+                  lastUpdated: new Date().toISOString(),
+                  claimType: 'secondary' as const,
+                  createdAt: new Date().toISOString(),
+                  confidence: f.confidence,
+               })),
+               sources: [{
+                  id: `browser-src-${String(Date.now())}`,
+                  url: result.url || url,
+                  title: result.title || '',
+                  sourceType: 'browser-interactive' as const,
+                  domain: (() => { try { return new URL(result.url || url).hostname; } catch { return ''; } })(),
+                  isPrimary: true,
+                  relevantSubQuestions: [],
+                  extractionStatus: 'extracted' as const,
+                  subQuestionId: '',
+                  accessDate: new Date().toISOString(),
+               }],
+               screenshots: result.screenshots,
+            };
+         } catch {
+            return { content: '', findings: [], sources: [], screenshots: [], };
+         }
+      },
+
+      async browserClose(sessionId: string) {
+         onToolCall?.('browser_close', sessionId);
+         try {
+            const { browserManager } = await import('../browser/browserManager.js');
+            const session = browserManager.getActiveSession();
+            if (session?.id === sessionId) {
+               await browserManager.close(session);
+            }
+         } catch {
+            // silently ignore close failures
          }
       },
    };

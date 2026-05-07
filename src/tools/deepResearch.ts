@@ -146,7 +146,7 @@ async function handleStart(
    const abortSignal = researchJobManager.getAbortSignal(jobId);
 
    // ── Build progress callback ─────────────────────────────────────────────
-   const onProgress: ProgressCallback = async (progress, message) => {
+   const onProgress: ProgressCallback = async (progress, message, phase, partials) => {
       // 1. MCP progress notifications (fire-and-forget)
       if (extra?._meta?.progressToken !== undefined) {
          try {
@@ -165,15 +165,17 @@ async function handleStart(
       }
 
       // 2. Update job state with progress and bounded partials
+      // Use explicit phase from orchestrator when available, otherwise derive from progress
+      const resolvedPhase = phase ?? derivePhase(progress);
       researchJobManager.update(jobId, {
          progress,
-         phase: derivePhase(progress),
+         phase: resolvedPhase,
          message: message ?? undefined,
-         classification: undefined,
-         subQuestionCount: undefined,
-         sourceCount: undefined,
+         classification: partials?.classification ?? undefined,
+         subQuestionCount: partials?.subQuestionCount ?? undefined,
+         sourceCount: partials?.sourceCount ?? undefined,
          sourceTypeCount: undefined,
-         findingCount: undefined,
+         findingCount: partials?.findingCount ?? undefined,
       });
    };
 
@@ -181,7 +183,7 @@ async function handleStart(
    const orchestrator = new ResearchOrchestrator(drCfg, llmConfig);
 
    // Not awaited — runs in background
-   const promise = orchestrator.run(query, depth, maxTimeMs, abortSignal, onProgress);
+   const promise = orchestrator.run(query, depth, maxTimeMs, abortSignal, onProgress, jobId);
 
    promise
       .then((result) => {
@@ -286,8 +288,19 @@ async function handleSave(
       );
    }
 
-   // Resolve output path
-   const outputPath = args.path ?? path.join(getDefaultResultsDir(), `${jobId}.json`);
+   // Resolve output path with path-traversal protection
+   const safeBaseDir = path.resolve(getDefaultResultsDir());
+   const outputPath = args.path
+      ? (() => {
+         const resolved = path.resolve(safeBaseDir, args.path);
+         if (!resolved.startsWith(safeBaseDir)) {
+            throw new Error(
+               `Path "${args.path}" escapes the results directory "${safeBaseDir}". Use a relative filename or omit path to save to the default location.`,
+            );
+         }
+         return resolved;
+      })()
+      : path.join(safeBaseDir, `${jobId}.json`);
 
    try {
       // Ensure parent directory exists
@@ -398,12 +411,19 @@ export function registerDeepResearchTool(server: McpServer, cfg: SearchConfig): 
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
-/** Derive a human-readable phase label from progress percentage. */
+/**
+ * Derive a human-readable phase label from progress percentage.
+ * Used as a fallback when the orchestrator does not provide an explicit phase.
+ */
 function derivePhase(progress: number): string {
    if (progress < 10) return 'initializing';
-   if (progress < 25) return 'decomposition';
-   if (progress < 60) return 'worker_investigation';
-   if (progress < 65) return 'gap_analysis';
-   if (progress < 90) return 'audit';
-   return 'synthesis';
+   if (progress < 20) return 'decomposition';
+   if (progress < 30) return 'worker_searching';
+   if (progress < 45) return 'worker_fetching';
+   if (progress < 52) return 'worker_synthesizing';
+   if (progress < 60) return 'gap_analysis';
+   if (progress < 65) return 'gap_filling';
+   if (progress < 95) return 'audit';
+   if (progress < 100) return 'synthesis';
+   return 'complete';
 }

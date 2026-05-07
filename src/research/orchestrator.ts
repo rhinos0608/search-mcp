@@ -32,6 +32,11 @@ import { LanguageDetector } from './language.js';
 import { DeepTreeResearchEngine } from './treeEngine.js';
 import { WorkerAgent } from './workerAgent.js';
 import { createResearchTools } from './researchTools.js';
+import { researchJobManager } from './jobManager.js';
+import { GapFiller } from './gapAnalysis.js';
+import { PruningEngine } from './pruning.js';
+import { InFlightCompactor } from './compactionInFlight.js';
+import { validateUrls } from './urlHealth.js';
 import type {
    ResearchDepth,
    ResearchResult,
@@ -53,8 +58,18 @@ export interface OrchestratorLlmConfig {
    apiToken?: string;
 }
 
-/** Progress notification callback. */
-export type ProgressCallback = (progress: number, message?: string) => void | Promise<void>;
+/** Progress notification callback. Optional phase overrides derivePhase in the handler. */
+export type ProgressCallback = (
+   progress: number,
+   message?: string,
+   phase?: string,
+   partials?: {
+      sourceCount?: number;
+      findingCount?: number;
+      subQuestionCount?: number;
+      classification?: string;
+   },
+) => void | Promise<void>;
 
 /**
  * Build prior knowledge string from decomposition metadata for worker agents.
@@ -97,23 +112,23 @@ const DEFAULT_CONFIG: Required<DeepResearchConfig> = {
    treeContextWordLimit: 25000,
 };
 
-function normalizeConfig(cfg?: DeepResearchConfig): Required<DeepResearchConfig> {
+function normalizeConfig(cfg?: Partial<DeepResearchConfig>): Required<DeepResearchConfig> {
    if (!cfg) return DEFAULT_CONFIG;
    return {
-      enabled: cfg.enabled,
-      defaultDepth: cfg.defaultDepth,
-      maxDepth: cfg.maxDepth,
-      maxToolCalls: cfg.maxToolCalls,
-      maxTokens: cfg.maxTokens,
-      maxTimeMs: cfg.maxTimeMs,
-      baseUrl: cfg.baseUrl,
-      model: cfg.model,
-      workerModel: cfg.workerModel,
-      apiToken: cfg.apiToken,
-      treeBreadth: cfg.treeBreadth,
-      treeDepth: cfg.treeDepth,
-      treeConcurrency: cfg.treeConcurrency,
-      treeContextWordLimit: cfg.treeContextWordLimit,
+      enabled: cfg.enabled ?? DEFAULT_CONFIG.enabled,
+      defaultDepth: cfg.defaultDepth ?? DEFAULT_CONFIG.defaultDepth,
+      maxDepth: cfg.maxDepth ?? DEFAULT_CONFIG.maxDepth,
+      maxToolCalls: cfg.maxToolCalls ?? DEFAULT_CONFIG.maxToolCalls,
+      maxTokens: cfg.maxTokens ?? DEFAULT_CONFIG.maxTokens,
+      maxTimeMs: cfg.maxTimeMs ?? DEFAULT_CONFIG.maxTimeMs,
+      baseUrl: cfg.baseUrl ?? DEFAULT_CONFIG.baseUrl,
+      model: cfg.model ?? DEFAULT_CONFIG.model,
+      workerModel: cfg.workerModel ?? DEFAULT_CONFIG.workerModel,
+      apiToken: cfg.apiToken ?? DEFAULT_CONFIG.apiToken,
+      treeBreadth: cfg.treeBreadth ?? DEFAULT_CONFIG.treeBreadth,
+      treeDepth: cfg.treeDepth ?? DEFAULT_CONFIG.treeDepth,
+      treeConcurrency: cfg.treeConcurrency ?? DEFAULT_CONFIG.treeConcurrency,
+      treeContextWordLimit: cfg.treeContextWordLimit ?? DEFAULT_CONFIG.treeContextWordLimit,
    };
 }
 
@@ -132,11 +147,14 @@ export class ResearchOrchestrator {
    /**
     * Optional progress callback, set by run().
     */
+   private pruning: PruningEngine;
+   private compactor: InFlightCompactor;
+
    private onProgress: ProgressCallback = () => {
       // Default empty callback
    };
 
-   constructor(config?: DeepResearchConfig, llmConfig?: OrchestratorLlmConfig) {
+   constructor(config?: Partial<DeepResearchConfig>, llmConfig?: OrchestratorLlmConfig) {
       this.config = normalizeConfig(config);
       const depth = this.config.defaultDepth;
       const profile = resolveBudgetProfile(depth, {
@@ -146,6 +164,8 @@ export class ResearchOrchestrator {
       this.state = new ResearchStateEngine(this.budget);
       this.progress = new ProgressTracker();
       this.llm = this.createLlmClient(llmConfig);
+      this.pruning = new PruningEngine();
+      this.compactor = new InFlightCompactor(this.state, this.budget);
    }
 
    /** Create LLM client when config is fully populated, else return undefined. */
@@ -185,6 +205,7 @@ export class ResearchOrchestrator {
     * Run the full research pipeline for a query.
     * @param abortSignal - Optional AbortSignal to cancel research externally (MCP cancellation).
     * @param onProgress - Optional callback invoked at phase boundaries with (percentage, message).
+    * @param jobId - Optional job ID for adaptive timeout extension during gap filling.
     */
    async run(
       query: string,
@@ -192,13 +213,14 @@ export class ResearchOrchestrator {
       maxTimeMs?: number,
       _abortSignal?: AbortSignal,
       onProgress?: ProgressCallback,
+      jobId?: string,
    ): Promise<ResearchResult> {
       const effectiveDepth = depth ?? this.config.defaultDepth;
       this.onProgress = onProgress ?? (() => {
          // Default empty callback
       });
       this.abortSignal = _abortSignal;
-      await this.reportProgress(0, `Starting deep research: ${query.slice(0, 80)}`);
+      await this.reportProgress(0, `Starting deep research: ${query.slice(0, 80)}`, 'initializing');
       // Build budget from effective depth and optional time override
       const maxTimeOverride =
          maxTimeMs && maxTimeMs < this.config.maxTimeMs ? { maxTimeMs } : undefined;
@@ -227,12 +249,20 @@ export class ResearchOrchestrator {
          const { classification, subQuestions, disambiguationNote, extractedEntities } = await decomposer.llmDecompose(query, this.llm ?? undefined, this.state);
 
          for (const sq of subQuestions) {
+            // Phase 6: Set freshness intent based on query classification
+            if (classification === 'current-events' || classification === 'market-ecosystem') {
+               sq.freshnessIntent = 'recent';
+            } else if (classification === 'historical-timeline') {
+               sq.freshnessIntent = 'historical';
+            } else {
+               sq.freshnessIntent = 'any';
+            }
             this.state.addSubQuestion(sq);
          }
 
          this.progress.decompositionComplete(classification, subQuestions);
          logger.info({ subQuestions: subQuestions.length, classification }, 'Query decomposed');
-         await this.reportProgress(10, `Query decomposed: ${String(subQuestions.length)} sub-questions`);
+         await this.reportProgress(10, `Query decomposed: ${String(subQuestions.length)} sub-questions`, 'decomposition');
 
          // Budget check after phase 1
          if (this.budget.isExhausted()) {
@@ -275,33 +305,136 @@ export class ResearchOrchestrator {
             if (this.llm) {
                const priorKnowledge = buildPriorKnowledge(disambiguationNote, extractedEntities);
                await this.runWorkerAgentPhase(subQuestions, effectiveDepth, priorKnowledge);
+               // In-flight compaction after worker agent phase
+               try { this.compactor.compact(); } catch (e) { logger.warn({ err: e }, 'Compaction after worker phase failed'); }
                if (this.budget.isExhausted()) {
                   logger.warn('Budget exhausted after worker agent phase');
                   return await this.synthesizePartial();
                }
 
-               // Compute coverage and run enhanced gap analysis
-               const coverage = this.state.computeSubQuestionCoverage();
-               const contentQuality = this.state.getAllContentQuality();
-               const analyzer = new GapAnalyzer(this.state);
-               const gaps = analyzer.analyze(coverage, contentQuality);
-               this.progress.gapsIdentified(gaps);
-               logger.info({ gaps: gaps.length }, 'Enhanced gap analysis complete');
+               // ── Gap analysis retry loop ───────────────────────────────
+               const maxLoops = this.budget.profile.maxGapLoops;
+               const gapFiller = new GapFiller(this.state, this.budget);
+               let skipExtension = false;
 
-               // Follow-up for critical gaps
-               const criticalGaps = gaps.filter((g) => g.priority <= 2);
-               if (criticalGaps.length > 0 && !this.budget.isExhausted()) {
-                  await this.reportProgress(55, `Investigating ${String(criticalGaps.length)} critical gap(s)`);
+               for (let loopIdx = 0; loopIdx < maxLoops; loopIdx++) {
+                  if (this.budget.isExhausted()) break;
+                  this.checkAborted();
+
+                  // Compute coverage and run enhanced gap analysis
+                  const coverage = this.state.computeSubQuestionCoverage();
+                  const contentQuality = this.state.getAllContentQuality();
+                  const analyzer = new GapAnalyzer(this.state);
+                  const gaps = analyzer.analyze(coverage, contentQuality);
+                  this.progress.gapsIdentified(gaps);
+
+                  const { filled, remaining } = await gapFiller.fillGaps(gaps);
+                  logger.info(
+                     { loop: loopIdx + 1, gaps: gaps.length, filled, remaining: remaining.length },
+                     'Gap analysis loop',
+                  );
+
+                  // Check confidence plateau — stop if diminishing returns
+                  if (this.budget.isConfidencePlateau(this.state.findingCount())) {
+                     logger.info({ loop: loopIdx + 1 }, 'Confidence plateau detected, ending gap loop');
+                     break;
+                  }
+
+                  // Stop if nothing left to chase
+                  if (!gapFiller.shouldContinueLoop()) {
+                     logger.info({ loop: loopIdx + 1 }, 'Gap filler stop heuristics met');
+                     break;
+                  }
+
+                  // Follow-up for critical gaps (priority <= 2)
+                  const criticalGaps = gaps.filter((g) => g.priority <= 2);
+                  if (criticalGaps.length === 0) break;
+
+                  // ── D3: Track findings before extension for progress check ──
+                  const findingsBeforeExtension = this.state.findingCount();
+
+                  // Extend job timeout for gap-fill work (skip if previous extension yielded too little)
+                  const unansweredCount = criticalGaps.filter(
+                     (g) => g.category === 'unanswered_sub_question',
+                  ).length;
+                  const extensionMs = unansweredCount * 120_000 + (criticalGaps.length - unansweredCount) * 60_000;
+                  if (!skipExtension && jobId && extensionMs > 0) {
+                     if (researchJobManager.extendRuntime(jobId, extensionMs)) {
+                        this.budget.extendTimeBudget(extensionMs);
+                     }
+                  }
+                  if (jobId) researchJobManager.incrementGapLoops(jobId);
+
+                  // Progress: spread 50-60% across gap loops
+                  const loopProgress = 50 + Math.round((loopIdx / maxLoops) * 10);
+                  await this.reportProgress(
+                     loopProgress,
+                     `Gap loop ${String(loopIdx + 1)}/${String(maxLoops)}: investigating ${String(criticalGaps.length)} gap(s)`,
+                     'gap_filling',
+                  );
+
                   const followUpQuestions = criticalGaps.map((g) => g.description);
                   const followUpSubQuestions: SubQuestion[] = criticalGaps
                      .filter((g) => g.subQuestionId)
                      .map((g) => this.state.getSubQuestions().find((sq) => sq.id === g.subQuestionId))
                      .filter((sq): sq is SubQuestion => sq !== undefined);
                   await this.spawnWorkers(followUpQuestions, 'gap_fill', effectiveDepth, followUpSubQuestions);
-                  this.state.computeSubQuestionCoverage();
+
+                  // Record findings added this loop for confidence plateau detection
+                  const findingsAfterLoop = this.state.findingCount();
+                  this.budget.recordFindingsAddedThisLoop(
+                     findingsAfterLoop - findingsBeforeExtension,
+                  );
+
+                  // ── D3: Progress check — skip further extensions if yield is too low ──
+                  const findingsAdded = findingsAfterLoop - findingsBeforeExtension;
+                  if (extensionMs > 0) {
+                     const rate = findingsAdded / extensionMs;
+                     if (rate < 0.001) {
+                        logger.warn(
+                           { findingsAdded, extensionMs, rate },
+                           'Gap-fill yield below threshold, skipping further runtime extensions',
+                        );
+                        skipExtension = true;
+                     }
+                  }
+
+                  // ── D2: Priority-based budget for low-priority gaps (3-5) ──────────
+                  // Low-priority gaps are batched into a single web search pass without
+                  // spawning full worker agents. This avoids the overhead of LLM worker
+                  // orchestration for marginal topics while still attempting lightweight discovery.
+                  const lowPriorityGaps = gaps.filter((g) => g.priority >= 3 && g.priority <= 5);
+                  if (lowPriorityGaps.length > 0) {
+                     const batchedQuery = lowPriorityGaps
+                        .map((g) => g.description)
+                        .join(' ');
+                     const tools = createResearchTools({
+                        onToolCall: (_tool, _query) => {
+                           this.budget.recordToolCall();
+                        },
+                     });
+                     await tools.webSearch(batchedQuery, 5);
+                  }
+
+                  // Pruning after gap loop
+                  try {
+                     this.pruning.enforceStateGuard(this.state, this.budget);
+                     this.compactor.compact();
+                  } catch (e) {
+                     logger.warn({ err: e }, 'Pruning/compaction after gap loop failed');
+                  }
                }
 
-               await this.reportProgress(60, `Investigation complete: ${String(this.state.workerReportCount())} workers, ${String(this.state.findingCount())} findings`);
+               await this.reportProgress(
+                  60,
+                  `Investigation complete: ${String(this.state.workerReportCount())} workers, ${String(this.state.findingCount())} findings`,
+                  'gap_analysis',
+                  {
+                     sourceCount: this.state.sourceCount(),
+                     findingCount: this.state.findingCount(),
+                     subQuestionCount: this.state.getSubQuestions().length,
+                  },
+               );
             } else {
                // ── Phase 2: Discovery (tool-based, always) ──────────────────────────
 
@@ -325,7 +458,16 @@ export class ResearchOrchestrator {
                   'Discovery complete',
                );
 
-               await this.reportProgress(25, `Discovery complete: ${String(this.state.sourceCount())} sources`);
+               await this.reportProgress(25, `Discovery complete: ${String(this.state.sourceCount())} sources`, 'discovery');
+
+               // Pruning after discovery
+               try {
+                  this.pruning.evictSources(this.state, this.budget);
+                  this.pruning.enforceStateGuard(this.state, this.budget);
+               } catch (e) {
+                  logger.warn({ err: e }, 'Pruning after discovery failed');
+               }
+
                // Budget check after phase 2
                if (this.budget.isExhausted()) {
                   logger.warn('Budget exhausted after discovery');
@@ -340,7 +482,7 @@ export class ResearchOrchestrator {
                      this.state.reviseTaxonomy(revisedTaxonomy);
                      this.progress.taxonomyRevised(revisedTaxonomy);
                      logger.info('Taxonomy revised after early discovery');
-                     await this.reportProgress(30, 'Taxonomy revised');
+                     await this.reportProgress(30, 'Taxonomy revised', 'taxonomy_revision');
                   }
                }
 
@@ -365,7 +507,14 @@ export class ResearchOrchestrator {
                      'Extraction complete',
                   );
 
-                  await this.reportProgress(50, `Extraction complete: ${String(findings.length)} findings`);
+                  await this.reportProgress(50, `Extraction complete: ${String(findings.length)} findings`, 'extraction');
+
+                  // Pruning after extraction
+                  try {
+                     this.pruning.enforceStateGuard(this.state, this.budget);
+                  } catch (e) {
+                     logger.warn({ err: e }, 'Pruning after extraction failed');
+                  }
 
                   // Budget check
                   if (this.budget.isExhausted()) {
@@ -387,6 +536,7 @@ export class ResearchOrchestrator {
          // ── Phase 6: Audit (LLM + rule-based combined) ──────────────────────
          this.state.transitionTo('audit');
          logger.info('Phase 6: State audit');
+         await this.reportProgress(65, 'Auditing research quality', 'audit');
 
          const auditor = new StateAuditor(this.state);
          const ruleAudit = auditor.audit();
@@ -440,7 +590,7 @@ export class ResearchOrchestrator {
             'Audit complete',
          );
 
-         await this.reportProgress(90, 'Audit complete');
+         await this.reportProgress(90, 'Audit complete', 'audit');
          // P10: streaming action
          this.progress.reportAction('audit', 'Audit complete');
 
@@ -452,13 +602,25 @@ export class ResearchOrchestrator {
          }
 
          // ── Phase 7: Synthesis (LLM or rule-based, terminal) ────────────────
-         return await this.synthesizeResults(
+         await this.reportProgress(95, 'Synthesizing research report', 'synthesis');
+         const result = await this.synthesizeResults(
             startTime,
             mergedAuditReport.issues
                .filter((i) => i.severity === 'warning')
                .slice(0, 3)
                .map((i) => i.description),
          );
+
+         // Pruning final cleanup (not in tree mode — tree engine handles its own state)
+         if (!isTreeMode) {
+            try {
+               this.pruning.enforceStateGuard(this.state, this.budget);
+               this.compactor.compact();
+            } catch (e) {
+               logger.warn({ err: e }, 'Pruning/compaction final cleanup failed');
+            }
+         }
+         return result;
       } catch (err) {
          logger.error({ err }, 'Deep research failed');
          this.state.transitionTo('complete');
@@ -485,7 +647,7 @@ export class ResearchOrchestrator {
    ): Promise<void> {
       this.state.transitionTo('discovery');
       logger.info({ subQuestions: subQuestions.length }, 'V5: Worker agent phase starting');
-      await this.reportProgress(20, `Launching ${String(subQuestions.length)} worker agent(s)`);
+      await this.reportProgress(20, `Launching ${String(subQuestions.length)} worker agent(s)`, 'worker_investigation');
 
       await this.spawnWorkers(
          subQuestions.map((sq) => sq.text),
@@ -540,6 +702,14 @@ export class ResearchOrchestrator {
                   ...(parentId !== undefined ? { parentSubQuestionId: parentId } : {}),
                   ...(contextSubQuestions !== undefined ? { subQuestions: contextSubQuestions } : {}),
                   ...(priorKnowledge !== undefined ? { priorKnowledge } : {}),
+                  onProgress: (stage, detail) => {
+                     // Fire-and-forget: surface worker sub-steps as progress messages
+                     void this.reportProgress(
+                        20 + Math.round((i / questions.length) * 30),
+                        `[${stage}] ${detail}`,
+                        'worker_investigation',
+                     );
+                  },
                });
                this.state.addWorkerReport(report);
                for (const [url, quality] of Object.entries(report.contentQuality)) {
@@ -554,58 +724,135 @@ export class ResearchOrchestrator {
 
          await Promise.allSettled(workerPromises);
 
-         const pct = 20 + Math.round(((i + batch.length) / questions.length) * 20);
-         await this.reportProgress(pct, `Workers: ${String(Math.min(i + batch.length, questions.length))}/${String(questions.length)} complete`);
+         const completed = Math.min(i + batch.length, questions.length);
+         // Spread worker progress from 20% to 50%
+         const pct = 20 + Math.round((completed / questions.length) * 30);
+         const firstQuestion = batch[0] ?? '';
+         await this.reportProgress(
+            pct,
+            `Worker ${String(completed)}/${String(questions.length)}: ${firstQuestion.slice(0, 50)}`,
+            'worker_investigation',
+            {
+               sourceCount: this.state.sourceCount(),
+               findingCount: this.state.findingCount(),
+               subQuestionCount: questions.length,
+            },
+         );
       }
 
       this.ingestWorkerReports();
    }
 
-   /** Convert worker report findings into the legacy Finding format. */
+   /**
+    * Convert worker report findings into the legacy Finding format.
+    *
+    * Phase 1 fix: Two-pass ingestion.
+    * Pass 1 — ingest all WorkerReport.sources (preserving actual sourceType) before findings.
+    * Pass 2 — ingest findings linking ALL sourceUrls, not just the first.
+    */
    private ingestWorkerReports(): void {
       const reports = this.state.getAllWorkerReports();
+
+      // ── Pass 1: Ingest all sources from every worker report ─────────────
+      for (const report of reports) {
+         for (const ws of report.sources) {
+            this.ensureSourceExists(ws.url, report);
+         }
+      }
+
+      // ── Pass 2: Ingest findings with all sourceUrls linked ──────────────
+      let unattributedCount = 0;
+      let inferredCount = 0;
       for (const report of reports) {
          for (const wf of report.findings) {
-            const sourceId = this.ensureSourceExists(wf.sourceUrls[0] ?? '', report);
+            // Track citation quality
+            if (wf.citationConfidence === 'unattributed') unattributedCount++;
+            else if (wf.citationConfidence === 'inferred') inferredCount++;
+
+            // Resolve all source URLs to state source IDs
+            const allSourceIds: string[] = [];
+            const allSources = this.state.getSources();
+            for (const url of wf.sourceUrls) {
+               const existing = allSources.find((s) => s.url === url);
+               if (existing) {
+                  allSourceIds.push(existing.id);
+               } else {
+                  // Fallback: create a minimal source entry for unknown URLs
+                  const fallbackId = this.ensureSourceExists(url, report);
+                  allSourceIds.push(fallbackId);
+               }
+            }
+
+            // Use the first source's quality for evidence directness
+            const firstSourceQuality = wf.sourceUrls.length > 0
+               ? report.contentQuality[wf.sourceUrls[0] ?? '']
+               : undefined;
+
             this.state.addFinding({
                claim: wf.claim,
                normalizedClaim: wf.claim.toLowerCase().replace(/[^\w\s]/g, '').trim(),
                subQuestionIds: report.parentSubQuestionId ? [report.parentSubQuestionId] : [],
-               sourceIds: wf.sourceUrls.length > 0 ? [sourceId] : [],
+               sourceIds: [...new Set(allSourceIds)],
                evidenceSummary: wf.evidence,
                evidenceExcerpt: wf.evidence.slice(0, 500),
-               evidenceDirectness: this.deriveEvidenceDirectness(wf, report.contentQuality[wf.sourceUrls[0] ?? '']),
-
+               evidenceDirectness: this.deriveEvidenceDirectness(wf, firstSourceQuality),
+               // Surface citation confidence in caveats when unattributed/inferred
                ...(wf.caveats !== undefined ? { caveats: wf.caveats } : {}),
+               ...(wf.citationConfidence === 'unattributed'
+                  ? { caveats: (wf.caveats ? wf.caveats + ' ' : '') + '[Citation: unattributed — no source could be verified for this claim]' }
+                  : wf.citationConfidence === 'inferred'
+                     ? { caveats: (wf.caveats ? wf.caveats + ' ' : '') + '[Citation: inferred — source mapping may be imprecise]' }
+                     : {}),
                freshnessSensitive: false,
                lastUpdated: new Date().toISOString(),
                claimType: 'primary' as const,
             });
          }
       }
+
+      // Surface citation quality issues as open questions for the report
+      if (unattributedCount > 0) {
+         this.state.addOpenQuestion(
+            `${String(unattributedCount)} finding(s) have unattributed citations — claims could not be verified against any source. Treat these claims as low-confidence.`,
+         );
+      }
+      if (inferredCount > 0) {
+         this.state.addOpenQuestion(
+            `${String(inferredCount)} finding(s) have inferred citations — source mapping was estimated rather than explicitly provided. Verify before relying on these claims.`,
+         );
+      }
    }
 
-   /** Ensure a source entry exists for a URL. Returns the source ID. */
+   /**
+    * Ensure a source entry exists for a URL. Returns the source ID.
+    *
+    * Phase 1 fix: Uses actual sourceType from WorkerReport.sources instead of
+    * hard-coding 'web'. Falls back to the report's first matching source, then
+    * to 'web' only if no metadata is available.
+    */
    private ensureSourceExists(url: string, report: WorkerReport): string {
       if (!url) return `src-${report.id}`;
       const existingSources = this.state.getSources();
       const existing = existingSources.find((s) => s.url === url);
       if (existing) return existing.id;
 
-      const sourceType: SourceType = 'web';
+      // Look up real source type from the worker report's sources
+      const wsEntry = report.sources.find((s) => s.url === url);
+      const sourceType: SourceType = wsEntry?.sourceType ?? 'web';
       const sourceId = `src-${url.slice(-40).replace(/[^a-zA-Z0-9_-]/g, '_')}-${String(Date.now())}`;
 
       this.state.addSource({
          id: sourceId,
-         title: report.sources.find((s) => s.url === url)?.title ?? url,
+         title: wsEntry?.title ?? url,
          url,
          sourceType,
 
-         domain: this.extractDomain(url),
-         isPrimary: false,
+         domain: wsEntry?.domain ?? this.extractDomain(url),
+         isPrimary: sourceType === 'academic',
          relevantSubQuestions: report.parentSubQuestionId ? [report.parentSubQuestionId] : [],
          extractionStatus: 'extracted',
          accessDate: new Date().toISOString(),
+         ...(wsEntry?.publishedDate !== undefined ? { publishedDate: wsEntry.publishedDate } : {}),
          subQuestionId: report.parentSubQuestionId ?? '',
       });
 
@@ -745,13 +992,25 @@ export class ResearchOrchestrator {
    }
 
    /**
-    * Surface percentage + message via the onProgress callback.
-    * Clamped to 0-100.
+    * Surface percentage + message + optional phase + optional bounded partials
+    * via the onProgress callback. Clamped to 0-100.
+    * When phase is provided the downstream handler uses it directly
+    * instead of deriving from the progress percentage.
     */
-   private async reportProgress(progress: number, message?: string): Promise<void> {
+   private async reportProgress(
+      progress: number,
+      message?: string,
+      phase?: string,
+      partials?: {
+         sourceCount?: number;
+         findingCount?: number;
+         subQuestionCount?: number;
+         classification?: string;
+      },
+   ): Promise<void> {
       const clamped = Math.max(0, Math.min(100, progress));
       try {
-         await this.onProgress(clamped, message);
+         await this.onProgress(clamped, message, phase, partials);
       } catch {
          // Callback errors are non-fatal
       }
@@ -782,12 +1041,41 @@ export class ResearchOrchestrator {
          }
 
          this.report = report;
+
+         // Validate citation URLs (Phase F: URL health)
+         try {
+            const allUrls = state.sources.map((s) => s.url);
+            if (allUrls.length > 0) {
+               const urlResults = await validateUrls(allUrls);
+               const hallucinated = urlResults.filter((r) => r.status === 'LIKELY_HALLUCINATED');
+               const dead = urlResults.filter((r) => r.status === 'DEAD');
+               const live = urlResults.filter((r) => r.status === 'LIVE');
+               logger.info({ live: live.length, dead: dead.length, hallucinated: hallucinated.length }, 'Citation URL validation complete');
+
+               // Annotate hallucinated sources in report
+               if (hallucinated.length > 0) {
+                  const urls = hallucinated.map((r) => r.url).join(', ');
+                  report.openQuestions.push(
+                     `${hallucinated.length} cited URL(s) could not be verified and may be hallucinated. Unverified URLs: ${urls}`,
+                  );
+               }
+               if (dead.length > 0) {
+                  const deadUrls = dead.map((r) => r.url).join(', ');
+                  report.sourceNotes.push(
+                     `${dead.length} cited URL(s) appear to be dead (no longer accessible): ${deadUrls}`,
+                  );
+               }
+            }
+         } catch (e) {
+            logger.warn({ err: e }, 'Citation URL validation failed');
+         }
+
          this.state.transitionTo('complete');
          this.progress.researchComplete();
 
          const elapsed = Date.now() - startTime;
          logger.info({ elapsedMs: elapsed, findings: report.findingCount }, 'Deep research complete');
-         await this.reportProgress(100, 'Deep research complete');
+         await this.reportProgress(100, 'Deep research complete', 'complete');
 
          return {
             report,

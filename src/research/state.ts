@@ -70,6 +70,7 @@ const BUDGET_PROFILES: Record<ResearchDepth, BudgetProfile> = {
       maxToolCalls: 30,
       maxTokens: 100_000,
       maxTimeMs: 60_000,
+      maxStateEntries: 200,
    },
    standard: {
       depth: 'standard',
@@ -79,6 +80,7 @@ const BUDGET_PROFILES: Record<ResearchDepth, BudgetProfile> = {
       maxToolCalls: 100,
       maxTokens: 300_000,
       maxTimeMs: 180_000,
+      maxStateEntries: 500,
    },
    deep: {
       depth: 'deep',
@@ -88,6 +90,7 @@ const BUDGET_PROFILES: Record<ResearchDepth, BudgetProfile> = {
       maxToolCalls: 200,
       maxTokens: 500_000,
       maxTimeMs: 300_000,
+      maxStateEntries: 1000,
    },
    exhaustive: {
       depth: 'exhaustive',
@@ -97,6 +100,7 @@ const BUDGET_PROFILES: Record<ResearchDepth, BudgetProfile> = {
       maxToolCalls: 400,
       maxTokens: 1_000_000,
       maxTimeMs: 600_000,
+      maxStateEntries: 2000,
    },
    tree: {
       depth: 'tree',
@@ -106,6 +110,7 @@ const BUDGET_PROFILES: Record<ResearchDepth, BudgetProfile> = {
       maxToolCalls: 150,
       maxTokens: 400_000,
       maxTimeMs: 240_000,
+      maxStateEntries: 500,
    },
 };
 
@@ -136,8 +141,11 @@ export class BudgetTracker {
          maxTokens: profile.maxTokens,
          maxExtractions: profile.maxExtractions,
          maxGapLoops: profile.maxGapLoops,
+         stateEntriesUsed: 0,
+         maxStateEntries: profile.maxStateEntries,
          maxTimeMs: profile.maxTimeMs,
          stepCosts: {},
+         findingsAddedPerLoop: [],
       };
    }
 
@@ -159,9 +167,41 @@ export class BudgetTracker {
       return this.state.extractionsUsed <= this.profile.maxExtractions;
    }
 
+   /** Record state entries (sources + findings + gaps). */
+   incrementStateEntries(n: number): boolean {
+      if (n < 0) n = 0;
+      this.state.stateEntriesUsed += n;
+      return this.state.stateEntriesUsed <= this.state.maxStateEntries;
+   }
+
    /** Record a gap loop iteration. */
    recordGapLoop(): void {
       this.state.gapLoopsUsed++;
+   }
+
+   /** Record the number of findings added during this gap loop iteration. */
+   recordFindingsAddedThisLoop(n: number): void {
+      this.state.findingsAddedPerLoop.push(n);
+   }
+
+   /**
+    * Returns true if the last 2 gap loops each added fewer than 5% of total findings,
+    * indicating a confidence plateau. Returns false if fewer than 2 loops recorded.
+    */
+   isConfidencePlateau(totalFindings: number): boolean {
+      const arr = this.state.findingsAddedPerLoop;
+      if (arr.length < 2) return false;
+      if (totalFindings <= 0) return false;
+      const threshold = 0.05 * totalFindings;
+      const last = arr[arr.length - 1];
+      const secondLast = arr[arr.length - 2];
+      if (last === undefined || secondLast === undefined) return false;
+      return last < threshold && secondLast < threshold;
+   }
+
+   /** Extend the time budget by additionalMs (called when job runtime is extended). */
+   extendTimeBudget(additionalMs: number): void {
+      this.state.maxTimeMs += additionalMs;
    }
 
    /** Check if any budget dimension is exhausted. */
@@ -171,7 +211,8 @@ export class BudgetTracker {
          this.state.tokensUsed >= this.profile.maxTokens ||
          this.state.extractionsUsed >= this.profile.maxExtractions ||
          this.state.gapLoopsUsed >= this.profile.maxGapLoops ||
-         this.elapsedMs() >= this.profile.maxTimeMs
+         this.state.stateEntriesUsed >= this.state.maxStateEntries ||
+         this.elapsedMs() >= this.state.maxTimeMs
       );
    }
 
@@ -181,6 +222,7 @@ export class BudgetTracker {
       tokens: number;
       extractions: number;
       gapLoops: number;
+      stateEntries: number;
       timeMs: number;
    } {
       return {
@@ -188,7 +230,8 @@ export class BudgetTracker {
          tokens: Math.max(0, this.profile.maxTokens - this.state.tokensUsed),
          extractions: Math.max(0, this.profile.maxExtractions - this.state.extractionsUsed),
          gapLoops: Math.max(0, this.profile.maxGapLoops - this.state.gapLoopsUsed),
-         timeMs: Math.max(0, this.profile.maxTimeMs - this.elapsedMs()),
+         stateEntries: Math.max(0, this.state.maxStateEntries - this.state.stateEntriesUsed),
+         timeMs: Math.max(0, this.state.maxTimeMs - this.elapsedMs()),
       };
    }
 

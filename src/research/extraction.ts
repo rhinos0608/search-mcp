@@ -26,7 +26,8 @@ import { redditComments } from '../tools/redditComments.js';
 import { chunksFromConversation } from '../rag/adapters/conversation.js';
 import type { ConversationCommentInput } from '../rag/adapters/conversation.js';
 import { ResearchStateEngine, BudgetTracker } from './state.js';
-import type { Finding, SourceEntry, ClaimType, EvidenceDirectness } from './types.js';
+import { isBotChallenge } from './contentQuality.js';
+import type { Finding, SourceEntry, ClaimType, EvidenceDirectness, InteractiveExtractionPlan } from './types.js';
 import { extractSentence } from './extractSentence.js';
 
 // ── Extraction configuration ────────────────────────────────────────────────
@@ -244,6 +245,69 @@ export class ExtractionEngine {
                logger.warn({ url: source.url, sourceId: source.id }, 'extraction: fetch failed');
                this.state.markSourceFailed(source.id);
                continue;
+            }
+
+            // 1.5 Interactive fallback for bot challenges
+            if (fetchResult.markdown && isBotChallenge(fetchResult.markdown)) {
+               const plan = this.getSubQuestionExtractionPlan(source.relevantSubQuestions);
+               if (plan) {
+                  let fallbackSucceeded = false;
+                  try {
+                     const { InteractiveBrowserAgent } = await import('./interactiveAgent.js');
+                     const agent = new InteractiveBrowserAgent({
+                        browser: {
+                           headless: true,
+                           viewport: { width: 1280, height: 720 },
+                           userAgent: '',
+                           proxyServer: '',
+                           executablePath: '',
+                           profile: null,
+                           stealthEnabled: true,
+                           rebrowser: false,
+                           maxSessionTimeMs: 0,
+                           bypassCSP: false,
+                           credentials: {},
+                        },
+                     });
+                     const result = await agent.executePlan(source.url, plan);
+                     if (result.content && !isBotChallenge(result.content)) {
+                        fetchResult.markdown = result.content;
+                        fetchResult.title = result.title || fetchResult.title;
+                        fallbackSucceeded = true;
+                        logger.info(
+                           { url: source.url, sourceId: source.id },
+                           'extraction: interactive fallback succeeded',
+                        );
+                     }
+                     await agent.close();
+                  } catch (err) {
+                     logger.warn(
+                        {
+                           url: source.url,
+                           sourceId: source.id,
+                           err: err instanceof Error ? err.message : String(err),
+                        },
+                        'extraction: interactive fallback failed',
+                     );
+                  }
+                  // If fallback did not produce clean content, skip this source entirely
+                  if (!fallbackSucceeded) {
+                     logger.warn(
+                        { url: source.url, sourceId: source.id },
+                        'extraction: skipping source — bot challenge could not be bypassed',
+                     );
+                     this.state.markSourceFailed(source.id);
+                     continue;
+                  }
+               } else {
+                  // No extraction plan available — cannot bypass bot challenge, skip source
+                  logger.warn(
+                     { url: source.url, sourceId: source.id },
+                     'extraction: skipping source — bot challenge detected and no extraction plan available',
+                  );
+                  this.state.markSourceFailed(source.id);
+                  continue;
+               }
             }
 
             // 2. Chunk content
@@ -518,6 +582,16 @@ export class ExtractionEngine {
       const subQuestions = this.state.getSubQuestions();
       const sq = subQuestions.find((s) => subQuestionIds.includes(s.id));
       return sq?.text;
+   }
+
+   /**
+    * Get the first matching sub-question's extraction plan for interactive browser fallback.
+    */
+   private getSubQuestionExtractionPlan(subQuestionIds: string[]): InteractiveExtractionPlan | undefined {
+      if (subQuestionIds.length === 0) return undefined;
+      const subQuestions = this.state.getSubQuestions();
+      const sq = subQuestions.find((s) => subQuestionIds.includes(s.id));
+      return sq?.extractionPlan;
    }
 
    // ── Content fetching ─────────────────────────────────────────────────────

@@ -512,12 +512,13 @@ If the query is decision-oriented, provide actionable recommendations.
 
 **Critical rules**:
 - Write narrative prose, not bullet points. This should read like a research brief.
-- Use [Source N] inline citations throughout. The source list is provided.
+- Use [Source N] inline citations throughout. The source list is provided. Every factual claim MUST have at least one citation.
 - Be explicit about contradictions — do not paper them over.
 - Flag when a key claim rests on a single source, a promotional source, or surface-level content.
 - Do NOT fabricate dates, statistics, or quotes. Only use what is present in the findings.
 - If coverage is thin for certain sub-questions, state this clearly rather than implying comprehensive coverage.
 - **IMPORTANT — Source counting**: The research state provides totalSourceCount (total individual sources), sourceTypeCount (distinct types like youtube, web, reddit), and sourceDiversity (per-type breakdown). When reporting sourceCount in your output JSON, always use totalSourceCount — do NOT report sourceTypeCount as the source count. For example, if there are 18 individual sources across 3 source types, sourceCount must be 18.
+- **CITATION ACCURACY**: Only cite Source N if you are confident that source actually supports the claim. The findings array includes sourceIds that map to specific sources via the source list. Cross-reference findings with their sourceIds before assigning [Source N] labels. If a finding has no sourceIds (unattributed), mark it as speculative rather than inventing a citation.
 
 Output ONLY valid JSON with EXACTLY this structure (no markdown fences, no extra text):
 {
@@ -530,7 +531,7 @@ Output ONLY valid JSON with EXACTLY this structure (no markdown fences, no extra
     {
       "title": "Theme name",
       "narrative": "Narrative prose for this theme with [Source N] citations",
-      "sourceCitations": [{ "id": "source-id", "url": "https://...", "title": "Source title" }]
+      "sourceCitations": [{ "sourceIndex": 1, "url": "https://...", "title": "Source title" }]
     }
   ],
   "contradictions": [],
