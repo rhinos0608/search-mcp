@@ -9,188 +9,188 @@ import { loadConfig, resetConfig } from '../src/config.js';
 // ── Test isolation ─────────────────────────────────────────────────────────
 
 beforeEach(() => {
-  resetConfig();
-  resetTrackers();
+   resetConfig();
+   resetTrackers();
 });
 
 afterEach(() => {
-  resetConfig();
-  resetTrackers();
+   resetConfig();
+   resetTrackers();
 });
 
 // ── Types ───────────────────────────────────────────────────────────────────
 
 test('GitHubTreeEntry is a valid interface with required fields', () => {
-  const entry: types.GitHubTreeEntry = {
-    name: 'src',
-    path: 'packages/search-mcp/src',
-    type: 'dir',
-    htmlUrl: 'https://github.com/example/repo/tree/main/src',
-    apiUrl: 'https://api.github.com/repos/example/repo/contents/src',
-  };
-  assert.equal(entry.name, 'src');
-  assert.equal(entry.type, 'dir');
+   const entry: types.GitHubTreeEntry = {
+      name: 'src',
+      path: 'packages_search-mcp/src',
+      type: 'dir',
+      htmlUrl: 'https://github.com/example_repo_tree/main/src',
+      apiUrl: 'https://api.github.com_repos/example_repo/contents/src',
+   };
+   assert.equal(entry.name, 'src');
+   assert.equal(entry.type, 'dir');
 });
 
 test('GitHubTreeEntry supports all type variants', () => {
-  const variants: types.GitHubTreeEntry['type'][] = ['file', 'dir', 'symlink', 'submodule'];
-  for (const t of variants) {
-    const entry: types.GitHubTreeEntry = {
-      name: 'test',
-      path: 'test',
-      type: t,
-      htmlUrl: 'https://github.com/example/repo/blob/main/test',
-      apiUrl: 'https://api.github.com/repos/example/repo/contents/test',
-    };
-    assert.equal(entry.type, t);
-  }
+   const variants: types.GitHubTreeEntry['type'][] = ['file', 'dir', 'symlink', 'submodule'];
+   for (const t of variants) {
+      const entry: types.GitHubTreeEntry = {
+         name: 'test',
+         path: 'test',
+         type: t,
+         htmlUrl: 'https://github.com/example_repo/blob/main/test',
+         apiUrl: 'https://api.github.com_repos/example_repo/contents/test',
+      };
+      assert.equal(entry.type, t);
+   }
 });
 
 test('GitHubTreeResult has entries array and truncated flag', () => {
-  const result: types.GitHubTreeResult = {
-    entries: [],
-    truncated: false,
-  };
-  assert.ok(Array.isArray(result.entries));
-  assert.equal(result.truncated, false);
+   const result: types.GitHubTreeResult = {
+      entries: [],
+      truncated: false,
+   };
+   assert.ok(Array.isArray(result.entries));
+   assert.equal(result.truncated, false);
 });
 
 test('GitHubFileResult has required fields including isBinary', () => {
-  const file: types.GitHubFileResult = {
-    name: 'README.md',
-    path: 'README.md',
-    size: 1234,
-    sha: 'abc123',
-    content: 'Hello world',
-    encoding: 'utf-8',
-    htmlUrl: 'https://github.com/example/repo/blob/main/README.md',
-    apiUrl: 'https://api.github.com/repos/example/repo/contents/README.md',
-    truncated: false,
-    isBinary: false,
-    totalLines: 1,
-    lineOffset: 0,
-    lineLimit: null,
-    hasMore: false,
-    byteOffset: null,
-    byteLimit: null,
-  };
-  assert.equal(file.name, 'README.md');
-  assert.equal(file.encoding, 'utf-8');
-  assert.equal(file.isBinary, false);
+   const file: types.GitHubFileResult = {
+      name: 'README.md',
+      path: 'README.md',
+      size: 1234,
+      sha: 'abc123',
+      content: 'Hello world',
+      encoding: 'utf-8',
+      htmlUrl: 'https://github.com/example_repo/blob/main/README.md',
+      apiUrl: 'https://api.github.com_repos/example_repo/contents/README.md',
+      truncated: false,
+      isBinary: false,
+      totalLines: 1,
+      lineOffset: 0,
+      lineLimit: null,
+      hasMore: false,
+      byteOffset: null,
+      byteLimit: null,
+   };
+   assert.equal(file.name, 'README.md');
+   assert.equal(file.encoding, 'utf-8');
+   assert.equal(file.isBinary, false);
 });
 
 test('GitHubCodeResult has textMatches with match indices', () => {
-  const result: types.GitHubCodeResult = {
-    url: 'https://api.github.com/search/code?q=example',
-    htmlUrl: 'https://github.com/example/repo/search?q=example',
-    repo: 'example/repo',
-    path: 'src/index.ts',
-    name: 'index.ts',
-    score: 100,
-    textMatches: [
-      {
-        fragment: 'function example()',
-        matches: [{ text: 'example', indices: [[9, 16]] as [number, number][] }],
-      },
-    ],
-  };
-  assert.equal(result.score, 100);
-  assert.ok(result.textMatches);
-  assert.equal(result.textMatches[0]!.fragment, 'function example()');
+   const result: types.GitHubCodeResult = {
+      url: 'https://api.github.com_search/code?q=example',
+      htmlUrl: 'https://github.com/example_repo_search?q=example',
+      repo: 'example_repo',
+      path: 'src/index.ts',
+      name: 'index.ts',
+      score: 100,
+      textMatches: [
+         {
+            fragment: 'function example()',
+            matches: [{ text: 'example', indices: [[9, 16]] as [number, number][] }],
+         },
+      ],
+   };
+   assert.equal(result.score, 100);
+   assert.ok(result.textMatches);
+   assert.equal(result.textMatches[0]!.fragment, 'function example()');
 });
 
 test('GitHubCodeSearchResult has totalCount and results array', () => {
-  const searchResult: types.GitHubCodeSearchResult = {
-    totalCount: 42,
-    results: [],
-  };
-  assert.equal(searchResult.totalCount, 42);
-  assert.ok(Array.isArray(searchResult.results));
+   const searchResult: types.GitHubCodeSearchResult = {
+      totalCount: 42,
+      results: [],
+   };
+   assert.equal(searchResult.totalCount, 42);
+   assert.ok(Array.isArray(searchResult.results));
 });
 
 // ── RateLimit: behavioral test for independent trackers ─────────────────────
 
 test('github_search tracker is independent from github tracker', () => {
-  const searchTracker = getTracker('github_search');
-  const githubTracker = getTracker('github');
+   const searchTracker = getTracker('github_search');
+   const githubTracker = getTracker('github');
 
-  // Initially both have no info
-  assert.equal(searchTracker.getInfo(), null);
-  assert.equal(githubTracker.getInfo(), null);
+   // Initially both have no info
+   assert.equal(searchTracker.getInfo(), null);
+   assert.equal(githubTracker.getInfo(), null);
 
-  // Recording a limit hit on one should not affect the other
-  searchTracker.recordLimitHit();
-  assert.equal(searchTracker.canProceed(), false);
-  assert.equal(githubTracker.canProceed(), true);
+   // Recording a limit hit on one should not affect the other
+   searchTracker.recordLimitHit();
+   assert.equal(searchTracker.canProceed(), false);
+   assert.equal(githubTracker.canProceed(), true);
 });
 
 // ── RateLimit: parseGitHubSearchHeaders behavioral test ────────────────────
 
 test('parseGitHubSearchHeaders returns RateLimitInfo with backend github_search', () => {
-  const headers = new Headers({
-    'x-ratelimit-remaining': '42',
-    'x-ratelimit-limit': '5000',
-    'x-ratelimit-reset': '1735689600',
-  });
+   const headers = new Headers({
+      'x-ratelimit-remaining': '42',
+      'x-ratelimit-limit': '5000',
+      'x-ratelimit-reset': '1735689600',
+   });
 
-  const result = parseRateLimitHeaders('github_search', headers);
+   const result = parseRateLimitHeaders('github_search', headers);
 
-  assert.ok(result !== null, 'parseGitHubSearchHeaders should return non-null for valid headers');
-  assert.equal(result!.backend, 'github_search', 'backend should be github_search');
-  assert.equal(result!.remaining, 42);
-  assert.equal(result!.limit, 5000);
-  // resetAt = resetEpochSec * 1000 + clockSkewMs (may have small clock skew)
-  assert.ok(result!.resetAt >= 1735689600000, 'resetAt should be >= 1735689600000, got: ' + result!.resetAt);
+   assert.ok(result !== null, 'parseGitHubSearchHeaders should return non-null for valid headers');
+   assert.equal(result!.backend, 'github_search', 'backend should be github_search');
+   assert.equal(result!.remaining, 42);
+   assert.equal(result!.limit, 5000);
+   // resetAt = resetEpochSec * 1000 + clockSkewMs (may have small clock skew)
+   assert.ok(result!.resetAt >= 1735689600000, 'resetAt should be >= 1735689600000, got: ' + result!.resetAt);
 });
 
 // ── Health: GitHub consolidated actions are mapped ─────────────────────────
 
 test('RATE_LIMIT_TOOL_MAP includes github.repo and github.tree mapping to github', () => {
-  const repoEntry = RATE_LIMIT_TOOL_MAP.find(([tool]) => tool === 'github.repo');
-  assert.ok(repoEntry, 'RATE_LIMIT_TOOL_MAP should have an entry for github.repo');
-  assert.equal(repoEntry[1], 'github', 'github.repo should map to github backend');
+   const repoEntry = RATE_LIMIT_TOOL_MAP.find(([tool]) => tool === 'github_repo');
+   assert.ok(repoEntry, 'RATE_LIMIT_TOOL_MAP should have an entry for github.repo');
+   assert.equal(repoEntry[1], 'github', 'github.repo should map to github backend');
 
-  const treeEntry = RATE_LIMIT_TOOL_MAP.find(([tool]) => tool === 'github.tree');
-  assert.ok(treeEntry, 'RATE_LIMIT_TOOL_MAP should have an entry for github.tree');
-  assert.equal(treeEntry[1], 'github', 'github.tree should map to github backend');
+   const treeEntry = RATE_LIMIT_TOOL_MAP.find(([tool]) => tool === 'github_tree');
+   assert.ok(treeEntry, 'RATE_LIMIT_TOOL_MAP should have an entry for github.tree');
+   assert.equal(treeEntry[1], 'github', 'github.tree should map to github backend');
 
-  const fileEntry = RATE_LIMIT_TOOL_MAP.find(([tool]) => tool === 'github.file');
-  assert.ok(fileEntry, 'RATE_LIMIT_TOOL_MAP should have an entry for github.file');
-  assert.equal(fileEntry[1], 'github', 'github.file should map to github backend');
+   const fileEntry = RATE_LIMIT_TOOL_MAP.find(([tool]) => tool === 'github_file');
+   assert.ok(fileEntry, 'RATE_LIMIT_TOOL_MAP should have an entry for github.file');
+   assert.equal(fileEntry[1], 'github', 'github.file should map to github backend');
 });
 
 test('RATE_LIMIT_TOOL_MAP includes github.search to github_search', () => {
-  const entry = RATE_LIMIT_TOOL_MAP.find(([tool]) => tool === 'github.search');
-  assert.ok(entry, 'RATE_LIMIT_TOOL_MAP should have an entry for github.search');
-  assert.equal(entry[1], 'github_search', 'github.search should map to github_search backend');
+   const entry = RATE_LIMIT_TOOL_MAP.find(([tool]) => tool === 'github_search');
+   assert.ok(entry, 'RATE_LIMIT_TOOL_MAP should have an entry for github.search');
+   assert.equal(entry[1], 'github_search', 'github.search should map to github_search backend');
 });
 
 // ── Health: configHealth returns healthy for GitHub consolidated actions ────
 
 test('configHealth returns healthy status for github.repo, github.file, github.tree', () => {
-  const cfg = loadConfig();
-  const health = configHealth(cfg);
+   const cfg = loadConfig();
+   const health = configHealth(cfg);
 
-  assert.equal(health['github.repo']?.status, 'healthy', 'github.repo should be healthy');
-  assert.equal(health['github.file']?.status, 'healthy', 'github.file should be healthy');
-  assert.equal(health['github.tree']?.status, 'healthy', 'github.tree should be healthy');
+   assert.equal(health['github_repo']?.status, 'healthy', 'github.repo should be healthy');
+   assert.equal(health['github_file']?.status, 'healthy', 'github.file should be healthy');
+   assert.equal(health['github_tree']?.status, 'healthy', 'github.tree should be healthy');
 });
 
 // ── Health: getNetworkProbes returns probe for github tools ─────────────────
 
 test('getNetworkProbes returns probes for all github actions', () => {
-  const cfg = loadConfig();
-  const probes = getNetworkProbes(cfg);
-  const githubProbe = probes.find((p) => p.tools.includes('github.repo'));
-  assert.ok(githubProbe, 'getNetworkProbes should return a probe for github.repo');
+   const cfg = loadConfig();
+   const probes = getNetworkProbes(cfg);
+   const githubProbe = probes.find((p) => p.tools.includes('github_repo'));
+   assert.ok(githubProbe, 'getNetworkProbes should return a probe for github.repo');
 
-  // Verify all GitHub actions are in the probe
-  const githubActions = ['github.repo', 'github.tree', 'github.file', 'github.search'];
-  for (const action of githubActions) {
-    assert.ok(
-      githubProbe.tools.includes(action),
-      'probe should include ' + action,
-    );
-  }
-  assert.ok(githubProbe.url.includes('api.github.com'), 'probe URL should use GitHub API');
+   // Verify all GitHub actions are in the probe
+   const githubActions = ['github_repo', 'github_tree', 'github_file', 'github_search'];
+   for (const action of githubActions) {
+      assert.ok(
+         githubProbe.tools.includes(action),
+         'probe should include ' + action,
+      );
+   }
+   assert.ok(githubProbe.url.includes('api.github.com'), 'probe URL should use GitHub API');
 });

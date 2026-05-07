@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import * as ytModule from 'youtube-transcript/dist/youtube-transcript.esm.js';
+import * as ytModule from 'youtube-transcript';
 import {
   getYouTubeTranscript,
   transcriptSegmentsToStructuredContent,
