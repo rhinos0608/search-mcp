@@ -1,10 +1,10 @@
 # Search MCP Roadmap — Implementation Plans Index
 
-**Version**: V3.3.0 (Released) → V3.3.1 (Planning) → V4.0.0 (Implemented ✅)
+**Version**: V5.3.0 (Current) · Previous: V4.1.0 (Implemented ✅)
 
 This document indexes all implementation plans for the Search MCP roadmap.
 
-## Current State: V3.3.0 Complete ✅ (2026-04-30)
+## Current State: V5.3.0 Complete ✅ (2026-05-18)
 
 - **V3.0.0** — COMPLETE: RAG pipeline extraction, YouTube/Reddit adapters
 - **V3.0.5** — COMPLETE: job adapter MVP with structured extraction, SEEK/Indeed/Jora
@@ -12,7 +12,7 @@ This document indexes all implementation plans for the Search MCP roadmap.
 - **V3.1.0 (Code)** — COMPLETE: tree-sitter code adapter, `semantic_github_code`
 - **V3.1.1** — COMPLETE: crawl reliability (HTML threading, timeout scaling, size guard)
 - **V3.1.5** — COMPLETE: RAG-Anything integration, code review quality fixes
-- 884 tests pass; typecheck ✅ · lint ✅ · format ✅
+- 900+ tests pass; typecheck ✅ · lint ✅ · format ✅
 
 ---
 
@@ -340,13 +340,13 @@ This document indexes all implementation plans for the Search MCP roadmap.
 | V3.1.5  | RAG-Anything             | PDF/Office extraction bridge, code review fixes                                                      | ~1,200 LOC |
 | V3.2.0  | Domains + Dist           | SO, HN, academic, news adapters, full jobs, dedup, constraints, **Docker Compose, Ollama, registry** | ~2,840 LOC |
 | V3.3.0  | Resilience               | Contextual embeddings, domain trust, kill chain, query expansion                                     | ~2,500 LOC |
-| V3.3.1  | Search Backend Expansion | DuckDuckGo zero-key fallback, opt-in Ollama web search, availability-aware selection + merge         | ~900 LOC   |
-| V3.4.0  | Integration              | Resolver pattern, output budget, structured errors, diagnostics                                      | ~800 LOC   |
 | V4.0.0  | Deep Research            | LLM control loop, 3D confidence, multi-backend discovery, gap analysis, audit, synthesis             | ~5,600 LOC |
 | V4.1.0  | Agent Enhancement         | Typed agenda, budget-aware gates, query rewriting, failure analysis, prose synthesis, trace          | ~1,500 LOC |
+| V5.1.0  | Pipeline Fix              | Source ingestion, source lifecycle tracking, prose synthesis, freshness scoring, browser fallback    | ~1,200 LOC |
+| V5.2.0  | Browser Bridge            | CDP auto-connect, profile persistence, stealth health, multi-mode browser architecture                | ~2,000 LOC |
+| V5.3.0  | Resilience & Pruning      | In-flight pruning, retry/circuit-breaker, compaction, topic-drift, URL health                        | ~2,500 LOC |
 
-**Total V3 Series**: ~11,740 LOC new code  
-**V4.0.0**: ~5,600 LOC new code (LLM orchestration + rule-based foundation)
+| **V5 Series**: ~5,700 LOC new code
 
 ---
 
@@ -360,4 +360,4 @@ This document indexes all implementation plans for the Search MCP roadmap.
 
 ---
 
-_Generated: 2026-05-04 · Last updated: 2026-05-04 (V4.0.0 Deep Research Orchestration Engine)_
+_Generated: 2026-05-04 · Last updated: 2026-05-18 (V5.3.0 Research Resilience & Pruning)_
