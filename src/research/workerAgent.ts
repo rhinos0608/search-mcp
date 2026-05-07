@@ -341,7 +341,7 @@ export class WorkerAgent {
             searchPromises.push(
                getBreaker('web').execute(() => this.tools.webSearch(query, 10))
                   .then((r) => { addResults(r.map((x) => ({ title: x.title, url: x.url, description: x.description, ...(x.extraSnippet ? { extraSnippet: x.extraSnippet } : {}), ...(x.deepLinks ? { deepLinks: x.deepLinks } : {}) })), 'web'); })
-                  .catch((err) => { if (err instanceof CircuitBreakerOpenError) { logger.debug({ backend: 'web' }, 'Circuit breaker open, skipping web search'); } }),
+                  .catch((err: unknown) => { if (err instanceof CircuitBreakerOpenError) { logger.debug({ backend: 'web' }, 'Circuit breaker open, skipping web search'); } }),
             );
          }
          // Academic search (LLM-requested or fallback)
@@ -349,7 +349,7 @@ export class WorkerAgent {
             searchPromises.push(
                getBreaker('academic').execute(() => this.tools.academicSearch(query, 5))
                   .then((r) => { addResults(r.map((x) => ({ ...x, description: x.abstract ?? '' })), 'academic'); })
-                  .catch((err) => { if (err instanceof CircuitBreakerOpenError) { logger.debug({ backend: 'academic' }, 'Circuit breaker open, skipping academic search'); } }),
+                  .catch((err: unknown) => { if (err instanceof CircuitBreakerOpenError) { logger.debug({ backend: 'academic' }, 'Circuit breaker open, skipping academic search'); } }),
             );
          }
          // GitHub (LLM-requested)
@@ -357,7 +357,7 @@ export class WorkerAgent {
             searchPromises.push(
                getBreaker('github').execute(() => this.tools.githubSearch(query, 5))
                   .then((r) => { addResults(r.map((x) => ({ title: x.fullName, url: x.htmlUrl, description: x.description })), 'github'); })
-                  .catch((err) => { if (err instanceof CircuitBreakerOpenError) { logger.debug({ backend: 'github' }, 'Circuit breaker open, skipping github search'); } }),
+                  .catch((err: unknown) => { if (err instanceof CircuitBreakerOpenError) { logger.debug({ backend: 'github' }, 'Circuit breaker open, skipping github search'); } }),
             );
          }
       }
@@ -369,13 +369,13 @@ export class WorkerAgent {
          searchPromises.push(
             getBreaker('reddit').execute(() => this.tools.redditSearch(primaryQuery, 5))
                .then((r) => { addResults(r.map((x) => ({ ...x, description: x.selftext ?? '' })), 'reddit'); })
-               .catch((err) => { if (err instanceof CircuitBreakerOpenError) { logger.debug({ backend: 'reddit' }, 'Circuit breaker open, skipping reddit search'); } }),
+               .catch((err: unknown) => { if (err instanceof CircuitBreakerOpenError) { logger.debug({ backend: 'reddit' }, 'Circuit breaker open, skipping reddit search'); } }),
          );
          // Hacker News
          searchPromises.push(
             getBreaker('hackernews').execute(() => this.tools.hackernewsSearch(primaryQuery, 5))
                .then((r) => { addResults(r.map((x) => ({ ...x, description: x.text ?? '' })), 'hackernews'); })
-               .catch((err) => { if (err instanceof CircuitBreakerOpenError) { logger.debug({ backend: 'hackernews' }, 'Circuit breaker open, skipping hackernews search'); } }),
+               .catch((err: unknown) => { if (err instanceof CircuitBreakerOpenError) { logger.debug({ backend: 'hackernews' }, 'Circuit breaker open, skipping hackernews search'); } }),
          );
          // YouTube — gracefully skips when no API key configured
          searchPromises.push(
@@ -388,7 +388,7 @@ export class WorkerAgent {
                      r.chunks.map((c) => ({ title: c.title, url: c.url, description: c.text.slice(0, 500) })),
                      'youtube',
                   );
-               }).catch((err) => { if (err instanceof CircuitBreakerOpenError) { logger.debug({ backend: 'youtube' }, 'Circuit breaker open, skipping youtube search'); } }),
+               }).catch((err: unknown) => { if (err instanceof CircuitBreakerOpenError) { logger.debug({ backend: 'youtube' }, 'Circuit breaker open, skipping youtube search'); } })
          );
          // Reddit semantic — deeper community context
          searchPromises.push(
@@ -401,7 +401,7 @@ export class WorkerAgent {
                      r.chunks.map((c) => ({ title: c.postTitle, url: c.url, description: c.text.slice(0, 500) })),
                      'reddit',
                   );
-               }).catch((err) => { if (err instanceof CircuitBreakerOpenError) { logger.debug({ backend: 'reddit-semantic' }, 'Circuit breaker open, skipping reddit semantic search'); } }),
+               }).catch((err: unknown) => { if (err instanceof CircuitBreakerOpenError) { logger.debug({ backend: 'reddit-semantic' }, 'Circuit breaker open, skipping reddit semantic search'); } }),
          );
       }
 

@@ -1066,13 +1066,13 @@ export class ResearchOrchestrator {
                if (hallucinated.length > 0) {
                   const urls = hallucinated.map((r) => r.url).join(', ');
                   report.openQuestions.push(
-                     `${hallucinated.length} cited URL(s) could not be verified and may be hallucinated. Unverified URLs: ${urls}`,
+                     `${String(hallucinated.length)} cited URL(s) could not be verified and may be hallucinated. Unverified URLs: ${urls}`,
                   );
                }
                if (dead.length > 0) {
                   const deadUrls = dead.map((r) => r.url).join(', ');
                   report.sourceNotes.push(
-                     `${dead.length} cited URL(s) appear to be dead (no longer accessible): ${deadUrls}`,
+                     `${String(dead.length)} cited URL(s) appear to be dead (no longer accessible): ${deadUrls}`,
                   );
                }
             }
