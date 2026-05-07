@@ -1,9 +1,4 @@
-// youtube-transcript@1.3.1 has a fixed "exports" map — import the package directly.
-import * as _ytModule from 'youtube-transcript';
-import type { YoutubeTranscript as YoutubeTranscriptType } from 'youtube-transcript';
-
-const YoutubeTranscript = (_ytModule as { YoutubeTranscript: typeof YoutubeTranscriptType })
-   .YoutubeTranscript;
+import { YoutubeTranscript } from 'youtube-transcript';
 import { logger } from '../logger.js';
 import { TRUNCATED_MARKER } from '../httpGuards.js';
 import { ToolCache, cacheKey } from '../cache.js';

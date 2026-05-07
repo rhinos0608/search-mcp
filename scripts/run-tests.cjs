@@ -63,6 +63,14 @@ function main(args) {
   let exitCode = 0;
 
   try {
+    // Symlink models directory
+    const modelsSource = path.join(repoRoot, 'models');
+    const modelsTarget = path.join(outDir, 'models');
+    fs.mkdirSync(outDir, { recursive: true });
+    if (fs.existsSync(modelsSource)) {
+       fs.symlinkSync(modelsSource, modelsTarget);
+    }
+
     const compileResult = run(process.execPath, [
       tscBin,
       '-p',
