@@ -14,6 +14,7 @@ import { registerYoutubeTool } from './tools/families/youtube.js';
 import { registerRedditTool } from './tools/families/reddit.js';
 import { registerPackagesTool } from './tools/families/packages.js';
 import { registerResearchTool } from './tools/families/research.js';
+import { registerBrowserTool } from './tools/families/browser.js';
 import { registerDeepResearchTool } from './tools/deepResearch.js';
 import { webCrawl } from './tools/webCrawl.js';
 import { webRead } from './tools/webRead.js';
@@ -1047,6 +1048,7 @@ export function createServer(): McpServer {
    registerGitHubTool(server, cfg);
    registerPackagesTool(server, cfg);
    registerResearchTool(server, cfg);
+   registerBrowserTool(server, cfg);
 
    // ── deep_research ────────────────────────────
    if (!gated.has('deep_research')) registerDeepResearchTool(server, cfg);
