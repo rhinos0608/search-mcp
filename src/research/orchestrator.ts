@@ -149,6 +149,8 @@ export class ResearchOrchestrator {
     */
    private pruning: PruningEngine;
    private compactor: InFlightCompactor;
+   /** Track already-ingested worker report IDs to prevent duplicate findings on re-processing. */
+   private ingestedReportIds = new Set<string>();
 
    private onProgress: ProgressCallback = () => {
       // Default empty callback
@@ -751,7 +753,15 @@ export class ResearchOrchestrator {
     * Pass 2 — ingest findings linking ALL sourceUrls, not just the first.
     */
    private ingestWorkerReports(): void {
-      const reports = this.state.getAllWorkerReports();
+      const allReports = this.state.getAllWorkerReports();
+      // Only process reports not yet ingested — prevents duplicate findings on repeated gap loops
+      const reports = allReports.filter((r) => !this.ingestedReportIds.has(r.id));
+      if (reports.length === 0) return;
+
+      // Mark before processing so failures don't cause infinite retry loops
+      for (const report of reports) {
+         this.ingestedReportIds.add(report.id);
+      }
 
       // ── Pass 1: Ingest all sources from every worker report ─────────────
       for (const report of reports) {
