@@ -1639,3 +1639,64 @@ Verify server status and configuration health.
 Reports backend connectivity (search, embedding, social) and config degradation states.
 
 **Caveats:** No auth required.
+
+---
+
+## `deep_research`
+
+Run asynchronous multi-source research with a `start`/`poll`/`list`/`cancel`/`save` job protocol.
+
+### Inputs
+
+| Parameter       | Type    | Required | Default    | Description                                                                                                    |
+| --------------- | ------- | -------- | ---------- | -------------------------------------------------------------------------------------------------------------- |
+| `action`        | string  | yes      | —          | One of `start`, `poll`, `list`, `cancel`, `save`.                                                              |
+| `query`         | string  | yes      | —          | Research question. Minimum 10 chars. Required for `action: start`.                                             |
+| `depth`         | string  | no       | `standard` | `quick`, `standard`, `deep`, `exhaustive`, or `tree`.                                                          |
+| `strategy`      | string  | no       | auto       | `agent`, `pipeline`, or `tree`. Tree depth always resolves to `tree`; `deterministic: true` forces `pipeline`. |
+| `deterministic` | boolean | no       | `false`    | Disable all LLM calls and run the deterministic pipeline only.                                                 |
+| `jobId`         | string  | no       | —          | Existing research job ID. Required for `action: poll`, `cancel`, `save`.                                       |
+| `path`          | string  | no       | cache path | Save destination for `action: save`.                                                                           |
+| `maxTimeMs`     | number  | no       | by depth   | Optional runtime cap.                                                                                          |
+
+### Notes
+
+- `agent` uses a ReAct loop and dynamic tool list when an LLM is configured.
+- `pipeline` is the deterministic fallback and also handles tree-mode synthesis.
+- `poll` blocks up to 60s waiting for job progress or completion.
+
+---
+
+## `search_pubmed`
+
+Search PubMed through NCBI E-utilities.
+
+**Inputs:** `query: string`, `limit?: number` (`1-30`, default `10`).
+
+**Output:** Array of results with `title`, `link`, `snippet`, and optional publication metadata.
+
+**Caveats:** Free. Set `PUBMED_EMAIL` for polite identification and `PUBMED_API_KEY` for higher rate limits.
+
+---
+
+## `search_wikipedia`
+
+Search Wikipedia articles.
+
+**Inputs:** `query: string`, `language?: string` (default `en`).
+
+**Output:** Array of results with `title`, `link`, `snippet`, and optional `pageId`.
+
+**Caveats:** Free. Tries direct article summary first, then falls back to Wikipedia search API.
+
+---
+
+## `fetch_focus`
+
+Fetch a page and extract only the spans relevant to a question.
+
+**Inputs:** `url: string`, `focus: string`.
+
+**Output:** `{ title, url, focus, extractedText, usedFallback }`.
+
+**Caveats:** Requires both `CRAWL4AI_BASE_URL` and deep research LLM config (`DEEP_RESEARCH_BASE_URL`, `DEEP_RESEARCH_MODEL`). Falls back to a truncated raw page excerpt if focused extraction fails.

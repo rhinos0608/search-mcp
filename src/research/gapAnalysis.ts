@@ -507,11 +507,25 @@ export class GapFiller {
       // 3. All open gaps are low priority?
       if (openGaps.every((g) => g.priority > 3)) return false;
 
-      // 4. All sub-questions resolved?
-      const allSubQuestionsResolved =
-         state.subQuestions.length > 0 &&
-         state.subQuestions.every((sq) => sq.status === 'sufficient' || sq.status === 'unresolvable');
-      if (allSubQuestionsResolved) return false;
+      // 4. Check if most sub-questions are well-covered (>3 sources AND >2 source types)
+      // Only stop when >50% of sub-questions have deep, diverse coverage
+      const wellCoveredCount = state.subQuestions.filter((sq) => {
+         const sqSources = state.sources.filter((s) => s.subQuestionId === sq.id);
+         const sourceTypes = new Set(sqSources.map((s) => s.sourceType));
+         return sqSources.length >= 3 && sourceTypes.size >= 2;
+      }).length;
+      const wellCoveredRatio = state.subQuestions.length > 0
+         ? wellCoveredCount / state.subQuestions.length
+         : 0;
+
+      // Escape valve: if >50% well-covered AND we have at least 2+ gap loop iterations,
+      // it's safe to stop (prevents infinite looping on niche topics)
+      const currentLoops = this.budget.snapshot().gapLoopsUsed;
+      if (wellCoveredRatio > 0.5 && currentLoops >= state.subQuestions.length) return false;
+
+      // Niche-topic escape: if we've done 2+ loops and still can't find source diversity,
+      // the topic is genuinely niche — stop to avoid infinite loops
+      if (currentLoops >= 2 && wellCoveredRatio >= 0.3) return false;
 
 
 

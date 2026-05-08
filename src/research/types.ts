@@ -48,10 +48,38 @@ export type SourceType =
    | 'documentation'
    | 'news'
    | 'patent'
+   | 'pubmed'
+   | 'wikipedia'
    | 'podcast'
    | 'producthunt'
    | 'youtube'
    | 'browser-interactive';
+
+/**
+ * Source quality tier used for synthesis gating.
+ * Tier 1 = primary evidence (arXiv, official blogs, repos, conference proceedings).
+ * Tier 2 = reputable secondary (established tech publications, HN discussions with substance).
+ * Tier 3 = community/ambient (Reddit threads, YouTube videos, Medium cross-posts).
+ * Tier 4 = low-quality/excluded (SEO blogs, event calendars, homepages, social posts unless explicitly needed).
+ */
+export type SourceQualityTier = 1 | 2 | 3 | 4;
+
+/**
+ * Citable category labels for findings — more specific than generic "architecture".
+ * Helps the audit pass detect category mismatches (e.g. TTT labeled as
+ * "architecture" when it is really a "training/inference paradigm").
+ */
+export type FindingCategory =
+   | 'architecture'
+   | 'training_paradigm'
+   | 'inference_framework'
+   | 'world_model'
+   | 'evaluation_method'
+   | 'application'
+   | 'community_reaction'
+   | 'benchmark'
+   | 'definition'
+   | 'other';
 
 export type ExtractionStatus = 'pending' | 'extracted' | 'failed';
 
@@ -147,8 +175,42 @@ export interface Finding {
    freshnessSensitive: boolean;
    lastUpdated: string;
    claimType: ClaimType;
+   /** Explicit category label for audit accuracy (architecture, training_paradigm, world_model, etc.). */
+   category?: FindingCategory;
+   /** Source quality tier of the best source backing this finding. */
+   bestSourceTier?: SourceQualityTier;
    createdAt: string;
+   /** Post-extraction relevance score (0-1) against the original research query. */
+   relevanceScore?: number;
+   /** Human-readable explanation for the relevance score. */
+   relevanceReason?: string;
+   /** If this finding was split from a multi-claim parent, the parent finding's ID. */
+   splitFromId?: string;
+   /** Source perspective: who is making this claim? */
+   perspective?: Perspective;
+   /** Whether the source has a potential conflict of interest. */
+   conflictOfInterest?: boolean;
+   /** Epistemic status of this claim within the broader literature. */
+   epistemicStatus?: EpistemicStatus;
 }
+
+// ── Source-perspective metadata ────────────────────────────────────────────────
+
+export type Perspective =
+   | 'vendor'
+   | 'academic'
+   | 'practitioner'
+   | 'official'
+   | 'community'
+   | 'media'
+   | 'unknown';
+
+export type EpistemicStatus =
+   | 'consensus'
+   | 'contested'
+   | 'emerging'
+   | 'speculative'
+   | 'unknown';
 
 // ── Contradictions ────────────────────────────────────────────────────────────
 
@@ -589,6 +651,10 @@ export interface ResearchReport {
    query: string;
    classification: QueryClassification;
    depth: ResearchDepth;
+   /** 'deep' = normal deep research with extracted findings.
+    * 'source_note_synthesis' = no findings were extracted; report is based on source notes/snippets only.
+    * 'extraction_fallback' = extraction was re-attempted after initial zero-finding result. */
+   degradationMode?: 'deep' | 'source_note_synthesis' | 'extraction_fallback';
    executiveSummary: string;
    /** Full narrative report in markdown — the primary output. */
    narrativeMarkdown: string;
@@ -610,6 +676,8 @@ export interface ResearchReport {
    sourceTypeCount: number;
    /** Breakdown of sources by type: [{ type, count }]. */
    sourceDiversity: { type: string; count: number }[];
+   /** Curated evidence sources cited in the narrative (quality-gated, primary-preferring. Tier 1-3 always included; tier 4 only if backing a finding). */
+   evidenceSources: { index: number; title: string; url: string; sourceType: SourceType; tier: SourceQualityTier; domain: string }[];
    /** Per-sub-question coverage summary for gap detection. */
    subQuestionCoverage?: SubQuestionCoverage[];
 }
@@ -687,6 +755,8 @@ export interface AuditIssue {
    description: string;
    findingId?: string;
    sourceId?: string;
+   /** Suggested correction for category mismatch issues. */
+   suggestedCorrection?: string;
 }
 
 export interface AuditReport {
@@ -862,6 +932,16 @@ export interface ResearchTools {
 
    /** Semantic crawl: crawl a URL and retrieve chunks relevant to query. */
    semanticCrawl(url: string, query: string, options?: { maxPages?: number; topK?: number }): Promise<{ chunks: { text: string; url: string; section: string; score: number }[]; pagesCrawled: number; warnings: string[] }>;
+
+   // ── Medical/Reference ──────────────────────────────────────────────────
+   /** Search PubMed for medical/scientific literature. */
+   pubmedSearch(query: string, limit?: number): Promise<{ title: string; link: string; snippet: string; publishedDate?: string | undefined; authors?: string[] | undefined; journal?: string | undefined }[]>;
+   /** Search Wikipedia for general knowledge. */
+   wikipediaSearch(query: string, language?: string): Promise<{ title: string; link: string; snippet: string; pageId?: number | undefined; language?: string | undefined }[]>;
+
+   // ── Developer Q&A ────────────────────────────────────────────────────────
+   /** Search Stack Overflow / Stack Exchange for technical Q&A. */
+   stackoverflowSearch(query: string, limit?: number): Promise<{ title: string; link: string; bodySnippet: string; answerCount: number; score: number; tags: string[]; isAnswered: boolean }[]>;
 
    // ── Browser interactive extraction ──────────────────────────────────
    /** Create a browser session for interactive extraction. */

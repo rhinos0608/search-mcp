@@ -21,6 +21,8 @@ import { academicSearch } from '../academicSearch.js';
 import { arxivSearch } from '../arxivSearch.js';
 import { hackernewsSearch } from '../hackernewsSearch.js';
 import { stackoverflowSearch } from '../stackoverflowSearch.js';
+import { searchPubMed } from '../pubmedSearch.js';
+import { searchWikipedia } from '../wikipediaSearch.js';
 import { wrapResponse } from '../response.js';
 import { registerFamily, type FamilyDefinition } from '../registry.js';
 
@@ -138,12 +140,55 @@ const stackoverflowAction = z.object({
       .describe('Maximum questions to return (1–100, default 20)'),
 });
 
+const semanticScholarAction = z.object({
+   action: z.literal('semantic_scholar').describe('Search academic papers via Semantic Scholar with citation data'),
+   query: z.string().describe('The search query string'),
+   limit: z
+      .number()
+      .int()
+      .min(1)
+      .max(50)
+      .optional()
+      .default(20)
+      .describe('Maximum papers to return (1–50, default 20)'),
+   yearFrom: z
+      .number()
+      .int()
+      .min(1900)
+      .max(2099)
+      .optional()
+      .describe('Earliest publication year filter'),
+});
+
+const pubmedAction = z.object({
+   action: z.literal('pubmed').describe('Search biomedical literature on PubMed'),
+   query: z.string().describe('The search query string'),
+   limit: z
+      .number()
+      .int()
+      .min(1)
+      .max(30)
+      .optional()
+      .default(10)
+      .describe('Maximum papers to return (1–30, default 10)'),
+});
+
+const wikipediaAction = z.object({
+   action: z.literal('wikipedia').describe('Search Wikipedia for background knowledge'),
+   query: z.string().describe('The search query string'),
+   language: z
+      .string()
+      .optional()
+      .default('en')
+      .describe('Language code (e.g. "en", "es", "fr")'),
+});
+
 // ── Family definition ───────────────────────────────────────────────────────
 
 const researchFamily: FamilyDefinition = {
    name: 'research',
    description:
-      'Search academic/research sources: ArXiv, Semantic Scholar, Hacker News, and Stack Overflow. ' +
+      'Search academic/research sources: ArXiv, Semantic Scholar, PubMed, Wikipedia, Hacker News, and Stack Overflow. ' +
       'Choose the `action` field to select the source.',
    actions: [
       {
@@ -236,6 +281,41 @@ const researchFamily: FamilyDefinition = {
                return 'Without STACKEXCHANGE_API_KEY, limited to 300 requests/day (shared IP quota). Set STACKEXCHANGE_API_KEY for 10,000 requests/day.';
             }
             return null;
+         },
+      },
+      {
+         name: 'semantic_scholar',
+         description: 'Search academic papers via Semantic Scholar with citation counts and influential citations',
+         schema: semanticScholarAction,
+         handler: async (args, _cfg) => {
+            void _cfg;
+            const { query, limit, yearFrom } = args as {
+               query: string;
+               limit: number;
+               yearFrom?: number;
+            };
+            const result = await academicSearch(query, 'semantic_scholar', limit, yearFrom ?? null);
+            return wrapResponse(result.papers, result.warnings);
+         },
+      },
+      {
+         name: 'pubmed',
+         description: 'Search biomedical literature on PubMed',
+         schema: pubmedAction,
+         handler: async (args, _cfg) => {
+            void _cfg;
+            const { query, limit } = args as { query: string; limit: number };
+            return searchPubMed(query, limit);
+         },
+      },
+      {
+         name: 'wikipedia',
+         description: 'Search Wikipedia for encyclopedia articles',
+         schema: wikipediaAction,
+         handler: async (args, _cfg) => {
+            void _cfg;
+            const { query, language } = args as { query: string; language: string };
+            return searchWikipedia(query, language);
          },
       },
    ],

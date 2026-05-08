@@ -58,6 +58,8 @@ export type {
    AuditIssue,
    AuditReport,
    ContentQualityAssessment,
+   Perspective,
+   EpistemicStatus,
    SubQuestionCoverage,
    WorkerReport,
    WorkerFinding,

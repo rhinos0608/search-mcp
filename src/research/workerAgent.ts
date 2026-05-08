@@ -46,17 +46,21 @@ export interface WorkerAgentConfig {
    maxContentCharsPerPage: number;
    /** Timeout per LLM call in ms. */
    llmTimeoutMs: number;
+   /** Whether to run in deterministic mode (no LLM calls). */
+   deterministicMode: boolean;
 }
 
 const DEFAULT_CONFIG: WorkerAgentConfig = {
-   maxSearchRounds: 3,
+   maxSearchRounds: 5,
    maxPagesPerRound: 10,
-   maxSubThreadDepth: 1,
+   maxSubThreadDepth: 2,
    readConcurrency: 3,
    maxContextChars: 24_000,
    maxContentCharsPerPage: 12_000,
    llmTimeoutMs: 120_000,
+   deterministicMode: false,
 };
+
 
 // ── Internal types ─────────────────────────────────────────────────────────
 
@@ -127,7 +131,7 @@ export class WorkerAgent {
    private semanticContentCache = new Map<string, string>();
 
    constructor(
-      private llm: DeepResearchLlmClient,
+      private llm: DeepResearchLlmClient | undefined,
       private tools: ResearchTools,
       private budget: TokenBudget | undefined,
       config?: Partial<WorkerAgentConfig>,
@@ -164,8 +168,20 @@ export class WorkerAgent {
 
       logger.info({ question: truncate(question, 80), reportId }, 'WorkerAgent investigating');
 
-      // ── Round 1: Plan & Search (LLM-based planning stays) ──────────────
-      const plan = await this.planSearch(question, context);
+      // ── Round 1: Plan & Search ─────────────────────────────────────────
+      let plan: SearchPlan & { tokensUsed: number };
+      if (this.config.deterministicMode) {
+         plan = {
+            queries: [question],
+            sourceTypes: ['web'],
+            reasoning: 'Deterministic mode: using sub-question text directly.',
+            tokensUsed: 0,
+         };
+         logger.info({ question: truncate(question, 80) }, 'Worker planning (deterministic)');
+      } else {
+         plan = await this.planSearch(question, context);
+         logger.info({ question: truncate(question, 80), queries: plan.queries.length }, 'Worker planning (LLM)');
+      }
       totalTokens += plan.tokensUsed;
       allQueries.push(...plan.queries);
 
@@ -262,7 +278,16 @@ export class WorkerAgent {
    private async planSearch(
       question: string,
       context?: { subQuestions?: SubQuestion[]; priorKnowledge?: string },
-   ): Promise<{ queries: string[]; sourceTypes: string[]; tokensUsed: number }> {
+   ): Promise<SearchPlan & { tokensUsed: number }> {
+      if (!this.llm) {
+         return {
+            queries: [question],
+            sourceTypes: ['web', 'academic', 'reddit', 'youtube', 'hackernews'],
+            reasoning: 'No LLM available; using direct question fallback.',
+            tokensUsed: 0,
+         };
+      }
+
       try {
          const ctxParts: string[] = [`Research question: ${question}`];
          if (context?.priorKnowledge) {
@@ -290,6 +315,18 @@ export class WorkerAgent {
             return {
                queries: result.data.queries.slice(0, 3),
                sourceTypes: result.data.sourceTypes,
+               reasoning: result.data.reasoning,
+               tokensUsed: result.response.tokensUsed,
+            };
+         }
+
+         // Fallback for non-JSON or failed LLM planning
+         if (result.response.content && result.response.content.length > 20) {
+            logger.warn({ question: truncate(question, 60) }, 'Worker planning returned non-JSON text; using fallback');
+            return {
+               queries: [question],
+               sourceTypes: ['web', 'academic', 'reddit', 'youtube', 'hackernews'],
+               reasoning: `LLM planning returned text: ${truncate(result.response.content, 200)}`,
                tokensUsed: result.response.tokensUsed,
             };
          }
@@ -300,7 +337,8 @@ export class WorkerAgent {
       // Fallback: use question directly as query, diverse source types
       return {
          queries: [question],
-         sourceTypes: ['web', 'academic', 'reddit', 'youtube', 'hackernews'],
+         sourceTypes: ['web', 'academic', 'reddit', 'youtube', 'hackernews', 'wikipedia', 'pubmed', 'stackoverflow'],
+         reasoning: 'LLM planning failed; using direct question fallback.',
          tokensUsed: 0,
       };
    }
@@ -403,6 +441,27 @@ export class WorkerAgent {
                   );
                }).catch((err: unknown) => { if (err instanceof CircuitBreakerOpenError) { logger.debug({ backend: 'reddit-semantic' }, 'Circuit breaker open, skipping reddit semantic search'); } }),
          );
+
+         // Wikipedia — general background knowledge
+         searchPromises.push(
+            getBreaker('wikipedia').execute(() => this.tools.wikipediaSearch(primaryQuery))
+               .then((r) => { addResults(r.map((x) => ({ title: x.title, url: x.link, description: x.snippet })), 'wikipedia'); })
+               .catch((err: unknown) => { if (err instanceof CircuitBreakerOpenError) { logger.debug({ backend: 'wikipedia' }, 'Circuit breaker open, skipping wikipedia search'); } }),
+         );
+
+         // PubMed — medical/scientific literature
+         searchPromises.push(
+            getBreaker('pubmed').execute(() => this.tools.pubmedSearch(primaryQuery, 5))
+               .then((r) => { addResults(r.map((x) => ({ title: x.title, url: x.link, description: x.snippet })), 'pubmed'); })
+               .catch((err: unknown) => { if (err instanceof CircuitBreakerOpenError) { logger.debug({ backend: 'pubmed' }, 'Circuit breaker open, skipping pubmed search'); } }),
+         );
+
+         // Stack Overflow — technical Q&A
+         searchPromises.push(
+            getBreaker('stackoverflow').execute(() => this.tools.stackoverflowSearch(primaryQuery, 5))
+               .then((r) => { addResults(r.map((x) => ({ title: x.title, url: x.link, description: x.bodySnippet })), 'stackoverflow'); })
+               .catch((err: unknown) => { if (err instanceof CircuitBreakerOpenError) { logger.debug({ backend: 'stackoverflow' }, 'Circuit breaker open, skipping stackoverflow search'); } }),
+         );
       }
 
       await Promise.allSettled(searchPromises);
@@ -410,7 +469,7 @@ export class WorkerAgent {
       // Sort: prefer academic, then web, then social
       const typeOrder: Record<string, number> = {
          academic: 0, web: 1, documentation: 2, github: 3,
-         hackernews: 4, reddit: 5, youtube: 5, stackoverflow: 6, news: 7,
+         wikipedia: 3, pubmed: 3, stackoverflow: 4, hackernews: 5, reddit: 6, youtube: 6, news: 7,
       };
       allUrls.sort((a, b) => (typeOrder[a.sourceType] ?? 5) - (typeOrder[b.sourceType] ?? 5));
 
@@ -443,7 +502,7 @@ export class WorkerAgent {
 
       // Phase 2: fill remaining slots round-robin from what's left
       const typeOrder: Record<string, number> = {
-         academic: 0, documentation: 1, github: 2, web: 3,
+         academic: 0, documentation: 1, github: 2, wikipedia: 2, pubmed: 2, web: 3,
          news: 4, hackernews: 5, reddit: 6, youtube: 7, stackoverflow: 8,
       };
       const remaining = [...byType.entries()]
@@ -781,6 +840,13 @@ export class WorkerAgent {
          return { findings: [], subThreads: [], tokensUsed: 0 };
       }
 
+      if (this.config.deterministicMode || !this.llm) {
+         // ── Deterministic Mode: Regex-based extraction ───────────────────
+         logger.info({ question: truncate(question, 60) }, 'WorkerAgent: deterministic synthesis (regex)');
+         const findings: WorkerFinding[] = this.extractFindingsRegex(compacted);
+         return { findings, subThreads: [], tokensUsed: 0 };
+      }
+
       // Build compacted context block with source attribution
       const contextParts: string[] = [];
       contextParts.push(`Research question: ${question}`);
@@ -873,11 +939,25 @@ Output ONLY valid JSON:
             const subThreads = result.data.subThreads;
             return { findings, subThreads, tokensUsed: result.response.tokensUsed };
          }
-         logger.warn('WorkerAgent LLM synthesis call failed');
-         return { findings: [], subThreads: [], tokensUsed: 0 };
+
+         // Handle cases where the LLM returns substantive text instead of requested JSON findings
+         if (result.response.content && result.response.content.length > 200) {
+            logger.warn({ question: truncate(question, 60) }, 'Worker synthesis returned text instead of JSON; wrapping as finding');
+            const findings: WorkerFinding[] = [{
+               id: makeId(),
+               claim: `Synthesis summary for "${truncate(question, 80)}"`,
+               evidence: result.response.content,
+               sourceUrls: compacted.map(c => c.url).slice(0, 10),
+               citationConfidence: 'inferred' as const,
+               caveats: '[Note: LLM failed to produce structured JSON; content preserved as raw text]'
+            }];
+            return { findings, subThreads: [], tokensUsed: result.response.tokensUsed };
+         }
+         
+         throw new Error(`Worker synthesis failed: ${result.response.error || 'Unknown error'}. Guidance required.`);
       } catch (err) {
          logger.warn({ err }, 'WorkerAgent LLM synthesis error');
-         return { findings: [], subThreads: [], tokensUsed: 0 };
+         throw err;
       }
    }
 
@@ -1023,6 +1103,51 @@ Output ONLY valid JSON:
    }
 
    // ── Helpers ───────────────────────────────────────────────────────────────
+
+   /**
+    * Regex-based claim extraction for deterministic mode.
+    */
+   private extractFindingsRegex(compacted: CompactBlock[]): WorkerFinding[] {
+      const findings: WorkerFinding[] = [];
+      const patterns = [
+         { name: 'mechanism', regex: /\b(uses?|utilizes?|employs?|leverages?|implements?)\s+([^.]{10,100})/i },
+         { name: 'benchmark', regex: /\b(achieved?|reached?|attained?|scored?)\s+(\d+[^.]{2,50})/i },
+         { name: 'comparison', regex: /\b(compared?\s+to|versus|vs\.?)\s+([^.]{10,100})/i },
+         { name: 'stat', regex: /\b(\d+%\s+of|\d+\s+out\s+of\s+\d+|majority\s+of)\s+([^.]{10,100})/i },
+      ];
+
+      for (const block of compacted) {
+         // Split into sentences for more precise extraction
+         const sentences = block.text.split(/[.!?]\s+/);
+         for (const sentence of sentences) {
+            const cleanSentence = sentence.trim();
+            if (cleanSentence.length < 30) continue;
+
+            for (const p of patterns) {
+               const match = p.regex.exec(cleanSentence);
+               if (match) {
+                  findings.push({
+                     id: makeId(),
+                     claim: cleanSentence,
+                     evidence: `Sentence matching ${p.name} pattern: "${cleanSentence}"`,
+                     sourceUrls: [block.url],
+                     citationConfidence: 'inferred',
+                  });
+                  break; // Move to next sentence once a claim is found
+               }
+            }
+         }
+      }
+
+      // De-duplicate findings by claim text
+      const seen = new Set<string>();
+      return findings.filter((f) => {
+         const norm = f.claim.toLowerCase().replace(/[^\w]/g, '');
+         if (seen.has(norm)) return false;
+         seen.add(norm);
+         return true;
+      }).slice(0, 15); // Cap findings per worker
+   }
 
    private extractDomain(url: string): string {
       try {

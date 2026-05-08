@@ -70,6 +70,8 @@ npm run config:decrypt   # config.enc -> config.json
 ### Research/Discovery
 - `research` (family tool with `action` discriminator):
   - `academic` — ArXiv + Semantic Scholar with automatic cross-backend fallback
+  - `pubmed` — search PubMed for medical/biomedical literature
+  - `wikipedia` — search Wikipedia for background knowledge
   - `arxiv` — direct ArXiv search with category/date filtering
   - `hackernews` — Algolia HN search
   - `stackoverflow` — Stack Exchange API (degraded without `STACKEXCHANGE_API_KEY`)

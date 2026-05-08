@@ -70,6 +70,17 @@ const deepResearchSchema = z.object({
       .max(600_000)
       .optional()
       .describe('Optional max execution time in ms (default: based on depth profile).'),
+   strategy: z
+      .enum(['agent', 'pipeline', 'tree'])
+      .optional()
+      .describe(
+         'Research strategy. When omitted, defaults to agent (when LLM configured) or pipeline (deterministic fallback). Use tree for breadth×depth recursive exploration.',
+      ),
+   deterministic: z
+      .boolean()
+      .optional()
+      .default(false)
+      .describe('When true, forces the research to run without any LLM API calls (purely deterministic algorithms).'),
 });
 
 type DeepResearchArgs = z.infer<typeof deepResearchSchema>;
@@ -109,6 +120,9 @@ async function handleStart(
    const query = args.query;
    const depth = args.depth;
    const maxTimeMs = args.maxTimeMs;
+   const strategy = args.strategy;
+   const deterministic = args.deterministic;
+   const requestedStrategy = depth === 'tree' ? 'tree' : deterministic ? 'pipeline' : strategy;
 
    const drCfg = cfg.deepResearch;
    if (!drCfg.enabled) {
@@ -131,7 +145,12 @@ async function handleStart(
    }
 
    // Register job with the manager
-   const snapshot = researchJobManager.create({ query, depth, maxTimeMs: maxTimeMs ?? undefined });
+   const snapshot = researchJobManager.create({
+      query,
+      depth,
+      maxTimeMs: maxTimeMs ?? undefined,
+      ...(requestedStrategy !== undefined ? { strategy: requestedStrategy } : {}),
+   });
    if (!snapshot) {
       return errorResponse(
          new Error(
@@ -174,8 +193,9 @@ async function handleStart(
          classification: partials?.classification ?? undefined,
          subQuestionCount: partials?.subQuestionCount ?? undefined,
          sourceCount: partials?.sourceCount ?? undefined,
-         sourceTypeCount: undefined,
+         sourceTypeCount: partials?.sourceTypeCount ?? undefined,
          findingCount: partials?.findingCount ?? undefined,
+         gapLoopCount: partials?.gapLoopCount ?? undefined,
       });
    };
 
@@ -183,7 +203,7 @@ async function handleStart(
    const orchestrator = new ResearchOrchestrator(drCfg, llmConfig);
 
    // Not awaited — runs in background
-   const promise = orchestrator.run(query, depth, maxTimeMs, abortSignal, onProgress, jobId);
+   const promise = orchestrator.run(query, depth, maxTimeMs, abortSignal, onProgress, jobId, strategy, deterministic);
 
    promise
       .then((result) => {
@@ -398,7 +418,10 @@ export function registerDeepResearchTool(server: McpServer, cfg: SearchConfig): 
             '  cancel — Cancel a running research job.\n' +
             '  save   — Persist a completed research result to a file on disk. Provide jobId and optional path.\n\n' +
             'Results are held in memory for 24 hours. Use save to persist the full result as a JSON file before the job expires.\n\n' +
-            'Uses a 7-phase pipeline: query decomposition → parallel discovery → extraction → gap analysis → audit → synthesis.',
+            'Uses strategy-based research: agent (LLM-driven ReAct, default when LLM configured), pipeline (fixed 7-phase), or tree (recursive).\n' +
+            'The agent strategy adapts tactics mid-research using tool-calling.\n' +
+            'The pipeline strategy uses a fixed 7-phase pipeline: decomposition → discovery → extraction → gap analysis → audit → synthesis.\n\n' +
+            'Use the `deterministic` flag to force research without any LLM calls (algorithmic decomposition, regex extraction).',
          inputSchema: deepResearchSchema,
       },
       async (rawArgs: unknown, extra) => {

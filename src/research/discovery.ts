@@ -548,6 +548,17 @@ export class DiscoveryEngine {
          }
       }
 
+      // Wikipedia & PubMed (hybrid discovery)
+      if (sq.classification === 'technical' || sq.classification === 'literature-review' || sq.preferredSources.includes('academic')) {
+         const hybridSearches = [this.searchWikipedia(sq), this.searchPubMed(sq)];
+         const hybridResults = await Promise.allSettled(hybridSearches);
+         for (const hr of hybridResults) {
+            if (hr.status === 'fulfilled') {
+               candidates.push(...hr.value);
+            }
+         }
+      }
+
       // Proactively recover archived copies of academic/paywalled articles
       if (candidates.length > 0) {
          const archiveCandidates = await this.recoverAcademicArchives(sq, candidates);
@@ -658,7 +669,7 @@ export class DiscoveryEngine {
             ],
             temperature: 0.3,
          });
-         if (result.success && result.data.queries.length > 0) {
+         if (result.success && !('isRaw' in (result.data as any)) && (result.data as any).queries?.length > 0) {
             return result.data.queries.map((q) => q.q);
          }
       } catch {
@@ -690,7 +701,7 @@ export class DiscoveryEngine {
             ],
             temperature: 0.3,
          });
-         if (result.success) {
+         if (result.success && !('isRaw' in (result.data as any))) {
             return result.data.clusters;
          }
       } catch {
@@ -979,6 +990,50 @@ export class DiscoveryEngine {
          }));
       } catch (err) {
          logger.warn({ err, subQuestion: sq.id }, 'Stack Overflow search failed');
+         return [];
+      }
+   }
+
+   private async searchWikipedia(sq: SubQuestion): Promise<SourceCandidate[]> {
+      if (!this.budget.recordToolCall()) return [];
+      try {
+         const { searchWikipedia } = await import('../tools/wikipediaSearch.js');
+         const results = await withRetry(() => searchWikipedia(sq.text), { signal: this.abortSignal });
+         return results.map((r) => ({
+            title: r.title,
+            url: r.link,
+            snippet: r.snippet,
+            sourceType: 'wikipedia',
+            estimatedQuality: 0.7,
+            estimatedRelevance: 0.8,
+            freshness: '',
+            reasonForInclusion: `Wikipedia reference for: ${sq.text}`,
+            subQuestionId: sq.id,
+         }));
+      } catch (err) {
+         logger.warn({ err, subQuestion: sq.id }, 'Wikipedia search failed');
+         return [];
+      }
+   }
+
+   private async searchPubMed(sq: SubQuestion): Promise<SourceCandidate[]> {
+      if (!this.budget.recordToolCall()) return [];
+      try {
+         const { searchPubMed } = await import('../tools/pubmedSearch.js');
+         const results = await withRetry(() => searchPubMed(sq.text, 5), { signal: this.abortSignal });
+         return results.map((r) => ({
+            title: r.title,
+            url: r.link,
+            snippet: r.snippet,
+            sourceType: 'pubmed',
+            estimatedQuality: 0.9,
+            estimatedRelevance: 0.7,
+            freshness: r.publishedDate || '',
+            reasonForInclusion: `PubMed medical literature for: ${sq.text}`,
+            subQuestionId: sq.id,
+         }));
+      } catch (err) {
+         logger.warn({ err, subQuestion: sq.id }, 'PubMed search failed');
          return [];
       }
    }

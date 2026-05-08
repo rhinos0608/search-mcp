@@ -85,57 +85,7 @@ interface ResearchStateSummary {
 
 // ── Type guard ───────────────────────────────────────────────────────────────
 
-/**
- * Validate that an unknown value conforms to the ResearchReport shape.
- *
- * Designed as a standalone type guard so the compiler narrows the type in
- * strict mode without forcing inline casts or assertions.
- */
-function isResearchReport(value: unknown): value is ResearchReport {
-   if (value === null || typeof value !== 'object') return false;
 
-   const r = value as Record<string, unknown>;
-
-   if (typeof r.query !== 'string') return false;
-   if (typeof r.executiveSummary !== 'string') return false;
-
-   if (!Array.isArray(r.themes)) return false;
-   for (const t of r.themes) {
-      if (t === null || typeof t !== 'object') return false;
-      const theme = t as Record<string, unknown>;
-      if (typeof theme.title !== 'string') return false;
-      // Accept either 'narrative' (new) or 'findings' (backward compat)
-      if (typeof theme.narrative !== 'string' && !Array.isArray(theme.findings)) {
-         return false;
-      }
-      if (theme.findings !== undefined && !Array.isArray(theme.findings)) return false;
-   }
-
-   // contradictions can be an empty array — just check it's an array
-   if (!Array.isArray(r.contradictions)) return false;
-
-   if (typeof r.classification !== 'string') return false;
-   if (typeof r.depth !== 'string') return false;
-
-   // uncertainties, sourceNotes, openQuestions, limitations are string[]
-   const stringArrayFields: (keyof ResearchReport)[] = [
-      'uncertainties',
-      'sourceNotes',
-      'openQuestions',
-      'limitations',
-   ];
-   for (const field of stringArrayFields) {
-      if (!Array.isArray(r[field])) return false;
-      for (const item of r[field] as unknown[]) {
-         if (typeof item !== 'string') return false;
-      }
-   }
-
-   if (typeof r.sourceCount !== 'number') return false;
-   if (typeof r.findingCount !== 'number') return false;
-
-   return true;
-}
 
 // ── LlmSynthesizer ───────────────────────────────────────────────────────────
 
@@ -170,38 +120,79 @@ export class LlmSynthesizer {
       });
 
       if (!result.success) {
-         logger.warn(
-            { error: result.response.error },
-            'LLM synthesis V2 failed; falling back to rule-based synthesizer',
+         // Attempt to salvage substantive but non-JSON response for synthesis
+         if (result.response.content && result.response.content.length > 500) {
+            logger.info('LLM synthesis returned non-JSON content but it is substantive; parsing as raw narrative.');
+            const data: any = {
+               query: state.query,
+               executiveSummary: 'Raw analysis provided below. Structure not recognized but content preserved.',
+               narrativeMarkdown: result.response.content,
+               findings: [],
+               themes: [],
+               uncertainties: ['Note: Synthesis was not structured as JSON; preserved as raw text.'],
+            }
+            return this.enrichReport(data, state);
+         }
+
+         logger.error(
+            { error: result.response.error || result.parseError },
+            'LLM synthesis failed after retry; falling back to rule-based synthesizer',
          );
          return this.fallback(state);
       }
 
+      // Normalize and guide the data into the correct shape
+      // We don't enforce a schema, we ensure the data is usable.
+      const data = result.data as any;
+      
+      // Ensure critical collections exist so the UI/downstream doesn't crash
+      if (!data.findings) data.findings = [];
+      if (!data.themes) data.themes = [];
+      if (!data.uncertainties) data.uncertainties = [];
+      if (!data.executiveSummary) {
+         data.executiveSummary = 'Research complete. See sections for findings.';
+      }
+
       // Ensure narrativeMarkdown is populated — if LLM returned empty, build from themes
-      const data = result.data;
       if (!data.narrativeMarkdown || data.narrativeMarkdown.trim().length === 0) {
          data.narrativeMarkdown = this.buildNarrativeFromThemes(data);
       }
 
-      if (!isResearchReport(data)) {
-         logger.warn(
-            { data: JSON.stringify(data).slice(0, 200) },
-            'LLM synthesis returned invalid report shape; falling back to rule-based synthesizer',
-         );
-         return this.fallback(state);
-      }
+      return this.enrichReport(data, state);
+   }
 
+   /**
+    * Internal helper to enrich a report with citations and degradation info.
+    */
+   private async enrichReport(data: any, state: ResearchState): Promise<ResearchReport> {
       // Validate citations in narrativeMarkdown: check [Source N] refs are in range
       const citationIssues = this.validateCitations(data, state.sources.length);
       if (citationIssues.length > 0) {
-         logger.warn(
-            { issues: citationIssues.length },
-            'LLM synthesis has citation validation issues; surfacing as uncertainties',
-         );
-         data.uncertainties = [...data.uncertainties, ...citationIssues];
+         data.uncertainties = [...(data.uncertainties || []), ...citationIssues];
       }
 
-      return data;
+      // ── Enrich with degradation mode and curated evidence sources ──
+      data.degradationMode = (data.findings.length === 0)
+         ? 'source_note_synthesis'
+         : 'deep';
+
+      try {
+         // Add curated evidence sources (tier-based, primary-preferring)
+         const { curateEvidenceSources } = await import('../sourceQuality.js');
+         const curated = curateEvidenceSources(state.sources, state.findings);
+         data.evidenceSources = curated.map((c, i) => ({
+            index: i + 1,
+            title: c.source.title,
+            url: c.source.url,
+            sourceType: c.source.sourceType,
+            tier: c.tier,
+            domain: c.source.domain,
+         }));
+      } catch (e) {
+         logger.warn({ err: e }, 'Failed to enrich evidence sources; skipping enrichment');
+      }
+
+      return data as ResearchReport;
    }
 
    /**

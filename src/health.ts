@@ -64,6 +64,14 @@ const GATED_TOOLS: Record<string, GateRule> = {
       check: (cfg) => cfg.deepResearch.enabled,
       remediation: 'Set DEEP_RESEARCH_ENABLED=true to enable the deep research orchestration engine.',
    },
+   fetch_focus: {
+      check: (cfg) =>
+         cfg.crawl4ai.baseUrl.length > 0 &&
+         cfg.deepResearch.baseUrl.length > 0 &&
+         cfg.deepResearch.model.length > 0,
+      remediation:
+         'Set CRAWL4AI_BASE_URL plus DEEP_RESEARCH_BASE_URL and DEEP_RESEARCH_MODEL to enable fetch_focus.',
+   },
    browser: {
       check: (cfg) => cfg.browser.enabled,
       remediation: 'Set BROWSER_ENABLED=true to enable interactive browser control via Playwright + CDP.',
@@ -528,6 +536,21 @@ export function getNetworkProbes(cfg: SearchConfig): NetworkProbe[] {
          url: 'https://registry.npmjs.org/-/v1/search?text=test&size=1',
          tools: ['packages_npm'],
       },
+      {
+         label: 'pubmed',
+         url: 'https://eutils.ncbi.nlm.nih.gov/entrez/eutils/einfo.fcgi?retmode=json',
+         tools: ['research_pubmed'],
+      },
+      {
+         label: 'wikipedia',
+         url: 'https://en.wikipedia.org/w/api.php?action=query&format=json&list=search&srsearch=test',
+         tools: ['research_wikipedia'],
+      },
+      {
+         label: 'semantic-scholar',
+         url: 'https://api.semanticscholar.org/graph/v1/paper/search?query=test&limit=1&fields=title',
+         tools: ['research_academic', 'research_semantic_scholar'],
+      },
    ];
 
    if (cfg.searxng.baseUrl.length > 0) {
@@ -568,6 +591,7 @@ export const RATE_LIMIT_TOOL_MAP: [string, RateLimitedBackend][] = [
    ['github_file', 'github'],
    ['github_search', 'github_search'],
    ['research_academic', 'semantic_scholar'],
+   ['research_semantic_scholar', 'semantic_scholar'],
 ];
 
 // ── runHealthProbes (async, on demand) ──────────────────────────────────────

@@ -57,6 +57,40 @@ function jaccardSimilarity(a: string, b: string): number {
    return union === 0 ? 0 : intersection / union;
 }
 
+/**
+ * N-gram (trigram) character overlap for dedup.
+ * Catches near-duplicate findings that word Jaccard might miss
+ * (e.g., "DeepSeek-V3 achieves 89.4% on MMLU" vs "DeepSeek V3 scored 89.4% on MMLU benchmark").
+ */
+function trigramSimilarity(a: string, b: string): number {
+   const textA = a.toLowerCase().replace(/\s+/g, ' ').trim();
+   const textB = b.toLowerCase().replace(/\s+/g, ' ').trim();
+   if (textA.length < 3 || textB.length < 3) return 0;
+   const trigramsA = new Set<string>();
+   const trigramsB = new Set<string>();
+   for (let i = 0; i <= textA.length - 3; i++) {
+      trigramsA.add(textA.slice(i, i + 3));
+   }
+   for (let i = 0; i <= textB.length - 3; i++) {
+      trigramsB.add(textB.slice(i, i + 3));
+   }
+   if (trigramsA.size === 0 && trigramsB.size === 0) return 1;
+   if (trigramsA.size === 0 || trigramsB.size === 0) return 0;
+   let intersection = 0;
+   for (const t of trigramsA) {
+      if (trigramsB.has(t)) intersection++;
+   }
+   const union = trigramsA.size + trigramsB.size - intersection;
+   return union === 0 ? 0 : intersection / union;
+}
+
+/** Combined similarity: max of Jaccard and trigram overlap. */
+function combinedSimilarity(a: string, b: string): number {
+   const jaccard = jaccardSimilarity(a, b);
+   const trigram = trigramSimilarity(a, b);
+   return Math.max(jaccard, trigram);
+}
+
 
 
 // ── Budget profiles ──────────────────────────────────────────────────────────
@@ -66,7 +100,7 @@ const BUDGET_PROFILES: Record<ResearchDepth, BudgetProfile> = {
       depth: 'quick',
       maxSources: 10,
       maxExtractions: 5,
-      maxGapLoops: 1,
+      maxGapLoops: 2,
       maxToolCalls: 30,
       maxTokens: 100_000,
       maxTimeMs: 60_000,
@@ -75,8 +109,8 @@ const BUDGET_PROFILES: Record<ResearchDepth, BudgetProfile> = {
    standard: {
       depth: 'standard',
       maxSources: 25,
-      maxExtractions: 15,
-      maxGapLoops: 2,
+      maxExtractions: 30,
+      maxGapLoops: 4,
       maxToolCalls: 100,
       maxTokens: 300_000,
       maxTimeMs: 180_000,
@@ -85,8 +119,8 @@ const BUDGET_PROFILES: Record<ResearchDepth, BudgetProfile> = {
    deep: {
       depth: 'deep',
       maxSources: 60,
-      maxExtractions: 30,
-      maxGapLoops: 3,
+      maxExtractions: 60,
+      maxGapLoops: 6,
       maxToolCalls: 200,
       maxTokens: 500_000,
       maxTimeMs: 300_000,
@@ -96,7 +130,7 @@ const BUDGET_PROFILES: Record<ResearchDepth, BudgetProfile> = {
       depth: 'exhaustive',
       maxSources: 100,
       maxExtractions: 50,
-      maxGapLoops: 5,
+      maxGapLoops: 8,
       maxToolCalls: 400,
       maxTokens: 1_000_000,
       maxTimeMs: 600_000,
@@ -368,6 +402,7 @@ export class ResearchStateEngine {
    // ── Sources ────────────────────────────────────────────────────────────
 
    addSource(entry: SourceEntry): string {
+      if (!this.budget.incrementStateEntries(1)) return entry.id;
       this.state.sources.push(entry);
       return entry.id;
    }
@@ -405,6 +440,7 @@ export class ResearchStateEngine {
 
    addFinding(finding: Omit<Finding, 'id' | 'createdAt'>): string {
       const id = makeId();
+      if (!this.budget.incrementStateEntries(1)) return id;
       this.state.findings.push({
          ...finding,
          id,
@@ -595,9 +631,9 @@ export class ResearchStateEngine {
    }
 
    /**
-    * Deduplicate findings by normalized claim Jaccard similarity.
-    * Merges pairs with similarity > 0.7 into the first finding, absorbing
-    * source IDs.
+    * Deduplicate findings by normalized claim Jaccard similarity AND trigram overlap.
+    * Merges pairs with combined (max of Jaccard + trigram) similarity > 0.65
+    * into the first finding, absorbing source IDs.
     */
    private deduplicateFindings(): number {
       const findings = this.state.findings;
@@ -611,8 +647,8 @@ export class ResearchStateEngine {
          for (let j = i + 1; j < findings.length; j++) {
             const fj = findings[j];
             if (!fj) continue;
-            const sim = jaccardSimilarity(fi.normalizedClaim, fj.normalizedClaim);
-            if (sim > 0.7 && sim > bestSim) {
+            const sim = combinedSimilarity(fi.normalizedClaim, fj.normalizedClaim);
+            if (sim > 0.65 && sim > bestSim) {
                bestSim = sim;
                bestJ = j;
             }
@@ -804,6 +840,11 @@ export class ResearchStateEngine {
       this.state.contradictions.push(c);
    }
 
+   /** Replace all contradictions (used by contradiction merge). */
+   setContradictions(contradictions: Contradiction[]): void {
+      this.state.contradictions = contradictions;
+   }
+
    resolveContradiction(id: string, status: ContradictionStatus, explanation?: string): void {
       const c = this.state.contradictions.find((c) => c.id === id);
       if (!c) return;
@@ -822,6 +863,7 @@ export class ResearchStateEngine {
    // ── Gaps ───────────────────────────────────────────────────────────────
 
    addGap(gap: GapRecord): string {
+      if (!this.budget.incrementStateEntries(1)) return gap.id;
       this.state.gaps.push(gap);
       return gap.id;
    }

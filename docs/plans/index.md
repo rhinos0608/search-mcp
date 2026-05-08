@@ -1,6 +1,6 @@
 # Search MCP Roadmap — Implementation Plans Index
 
-**Version**: V5.3.0 (Current) · Previous: V4.1.0 (Implemented ✅)
+**Version**: V5.4.0 (Planning) · Previous: V5.3.0 (Implemented ✅)
 
 This document indexes all implementation plans for the Search MCP roadmap.
 
@@ -311,42 +311,43 @@ This document indexes all implementation plans for the Search MCP roadmap.
 
 **Summary**: Transform the rigid phase pipeline into an agent-guided research engine with typed gap lifecycle (Agenda), budget-aware action gating, LLM-powered query rewriting, failure analysis with retry limits, unified trace events, prose synthesis with inline citations, citation chasing, and SERP clustering.
 
-| Document | Path |
-| -------- | ---- |
-| Full Spec | `docs/plans/v4.1.0/SPEC.md` |
+| Document            | Path                                  |
+| ------------------- | ------------------------------------- |
+| Full Spec           | `docs/plans/v4.1.0/SPEC.md`           |
 | Implementation Plan | `docs/plans/v4.1.0/IMPLEMENTATION.md` |
 
 ### Sprint Breakdown
 
-| Sprint | Deliverable | Status |
-|--------|-------------|--------|
-| 0 | Substrate: 5 modules (Agenda, ActionGates, Trace, Knowledge, SourceRanking) + prose synthesis + new types | ✅ Complete |
-| 1 | Working loop with gates + agenda (wire into orchestrator) | 📋 Planned |
-| 2 | LLM-powered query rewriting + dual-score ranking | 📋 Planned |
-| 3 | Failure analysis + gap completion (retry limits, abandonment) | 📋 Planned |
-| 4 | Unified knowledge + trace + prose synthesis | 📋 Planned |
-| 5 | SERP clustering + language detection | 📋 Planned |
+| Sprint | Deliverable                                                                                               | Status      |
+| ------ | --------------------------------------------------------------------------------------------------------- | ----------- |
+| 0      | Substrate: 5 modules (Agenda, ActionGates, Trace, Knowledge, SourceRanking) + prose synthesis + new types | ✅ Complete |
+| 1      | Working loop with gates + agenda (wire into orchestrator)                                                 | 📋 Planned  |
+| 2      | LLM-powered query rewriting + dual-score ranking                                                          | 📋 Planned  |
+| 3      | Failure analysis + gap completion (retry limits, abandonment)                                             | 📋 Planned  |
+| 4      | Unified knowledge + trace + prose synthesis                                                               | 📋 Planned  |
+| 5      | SERP clustering + language detection                                                                      | 📋 Planned  |
 
 ---
 
 ## Summary Table
 
-| Version | Focus                    | Key Deliverables                                                                                     | Est. Scope |
-| ------- | ------------------------ | ---------------------------------------------------------------------------------------------------- | ---------- |
-| V3.0.0  | Core Pipeline            | RAG module extraction, adapter system, YouTube/Reddit tools, eval                                    | ~1,700 LOC |
-| V3.0.5  | Jobs MVP                 | Job adapter (SEEK, Indeed, Jora), structured extraction                                              | ~750 LOC   |
-| V3.1.0  | Code/GitHub              | Code adapter, semantic GitHub search, SQLite cache, Exa                                              | ~800 LOC   |
-| V3.1.1  | Reliability              | HTML threading, timeout scaling, size guard                                                          | ~300 LOC   |
-| V3.1.5  | RAG-Anything             | PDF/Office extraction bridge, code review fixes                                                      | ~1,200 LOC |
-| V3.2.0  | Domains + Dist           | SO, HN, academic, news adapters, full jobs, dedup, constraints, **Docker Compose, Ollama, registry** | ~2,840 LOC |
-| V3.3.0  | Resilience               | Contextual embeddings, domain trust, kill chain, query expansion                                     | ~2,500 LOC |
-| V4.0.0  | Deep Research            | LLM control loop, 3D confidence, multi-backend discovery, gap analysis, audit, synthesis             | ~5,600 LOC |
-| V4.1.0  | Agent Enhancement         | Typed agenda, budget-aware gates, query rewriting, failure analysis, prose synthesis, trace          | ~1,500 LOC |
-| V5.1.0  | Pipeline Fix              | Source ingestion, source lifecycle tracking, prose synthesis, freshness scoring, browser fallback    | ~1,200 LOC |
-| V5.2.0  | Browser Bridge            | CDP auto-connect, profile persistence, stealth health, multi-mode browser architecture                | ~2,000 LOC |
-| V5.3.0  | Resilience & Pruning      | In-flight pruning, retry/circuit-breaker, compaction, topic-drift, URL health                        | ~2,500 LOC |
+| Version | Focus                 | Key Deliverables                                                                                                                                               | Est. Scope |
+| ------- | --------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------- |
+| V3.0.0  | Core Pipeline         | RAG module extraction, adapter system, YouTube/Reddit tools, eval                                                                                              | ~1,700 LOC |
+| V3.0.5  | Jobs MVP              | Job adapter (SEEK, Indeed, Jora), structured extraction                                                                                                        | ~750 LOC   |
+| V3.1.0  | Code/GitHub           | Code adapter, semantic GitHub search, SQLite cache, Exa                                                                                                        | ~800 LOC   |
+| V3.1.1  | Reliability           | HTML threading, timeout scaling, size guard                                                                                                                    | ~300 LOC   |
+| V3.1.5  | RAG-Anything          | PDF/Office extraction bridge, code review fixes                                                                                                                | ~1,200 LOC |
+| V3.2.0  | Domains + Dist        | SO, HN, academic, news adapters, full jobs, dedup, constraints, **Docker Compose, Ollama, registry**                                                           | ~2,840 LOC |
+| V3.3.0  | Resilience            | Contextual embeddings, domain trust, kill chain, query expansion                                                                                               | ~2,500 LOC |
+| V4.0.0  | Deep Research         | LLM control loop, 3D confidence, multi-backend discovery, gap analysis, audit, synthesis                                                                       | ~5,600 LOC |
+| V4.1.0  | Agent Enhancement     | Typed agenda, budget-aware gates, query rewriting, failure analysis, prose synthesis, trace                                                                    | ~1,500 LOC |
+| V5.1.0  | Pipeline Fix          | Source ingestion, source lifecycle tracking, prose synthesis, freshness scoring, browser fallback                                                              | ~1,200 LOC |
+| V5.2.0  | Browser Bridge        | CDP auto-connect, profile persistence, stealth health, multi-mode browser architecture                                                                         | ~2,000 LOC |
+| V5.3.0  | Resilience & Pruning  | In-flight pruning, retry/circuit-breaker, compaction, topic-drift, URL health                                                                                  | ~2,500 LOC |
+| V5.4.0  | Agent-Native Research | Strategy registry, ReAct agent (default), deterministic pipeline fallback, tool expansion (PubMed/Wikipedia/Semantic Scholar), fetch_focus, citation collector | ~4,500 LOC |
 
-| **V5 Series**: ~5,700 LOC new code
+**V5 Series**: ~10,200 LOC new code
 
 ---
 
@@ -360,4 +361,71 @@ This document indexes all implementation plans for the Search MCP roadmap.
 
 ---
 
-_Generated: 2026-05-04 · Last updated: 2026-05-18 (V5.3.0 Research Resilience & Pruning)_
+_Generated: 2026-05-04 · Last updated: 2026-05-20 (V5.4.0 Agent-Native Research)_
+
+---
+
+## V5.4.0 — Agent-Native Deep Research
+
+**Status**: Planning · **Priority**: Critical  
+**Depends On**: V4.0.0, V5.1.0, V5.3.0 (existing deep research infrastructure)
+
+**Summary**: Transform the fixed 7-phase pipeline into a pluggable strategy architecture. Make LLM-driven ReAct agent the default research path. Degrade existing pipeline to deterministic fallback for users without LLM access. Expand tool suite with domain-specific search backends modeled on local-deep-research. Add summary-focus content extraction for efficient agent research.
+
+| Document            | Path                                                                                                                            |
+| ------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| Full Plan           | `docs/plans/v5.3.0-agent-native-research-plan.md` _(documents V5.4.0 Agent-Native Research; filename reflects planning period)_ |
+| Implementation Spec | `docs/plans/v5.3.0-agent-native-research-spec.md` _(documents V5.4.0 Agent-Native Research; filename reflects planning period)_ |
+
+### Key Deliverables
+
+1. **Strategy Registry** (`src/research/strategies/`)
+   - `ResearchStrategy` interface + `StrategyContext`
+   - `StrategyRegistry` with `register`, `create`, `selectDefault`, `listAvailable`
+   - `PipelineStrategy` — existing pipeline wrapped in strategy interface
+   - `TreeStrategy` — existing tree engine wrapped in strategy interface
+
+2. **Agent Strategy** (new default when LLM present)
+   - ReAct loop: THOUGHT → ACTION → ARGUMENTS → OBSERVATION → repeat → ANSWER
+   - Dynamic tool list based on configured backends
+   - `fetch_focus(url, focus)` — LLM extracts only relevant spans from pages
+   - `research_subtopic` — spawn parallel subagents for multi-faceted queries
+   - Graceful fallback: collector-based synthesis when loop exceeds max iterations
+
+3. **Deterministic Pipeline** (fallback, zero LLM)
+   - Rule-based decomposition (no LLM calls)
+   - Algorithmic discovery and extraction (existing)
+   - No gap-fill phase (requires LLM query generation)
+   - Rule-based audit and synthesis (existing `ResearchSynthesizer`)
+
+4. **Tool Suite Expansion**
+   - `search_pubmed` — NCBI E-utilities (free, no API key)
+   - `search_wikipedia` — Wikipedia REST API (free, no key)
+   - `search_semantic_scholar` — Academic papers with citations (free)
+   - Existing tools made agent-callable: arXiv, HackerNews, StackExchange, Reddit
+
+5. **Citation Collector** (`src/research/citationCollector.ts`)
+   - Thread-safe citation index assignment
+   - URL dedup (reuses existing citation)
+   - Globally unique 1-based indices
+
+### Architecture Shift
+
+```
+deep_research(start) → orchestrator.run()
+                            ↓
+              StrategyRegistry.select(strategy)
+               ↙                              ↘
+        AgentStrategy (DEFAULT)        PipelineStrategy (FALLBACK)
+        ┌─ ReAct loop ─────────┐       ┌─ 7-phase pipeline ──┐
+        │ LLM decides tools     │       │ Rule-based decompose │
+        │ search_web()          │       │ Algorithmic discover │
+        │ search_pubmed()       │       │ Regex extraction     │
+        │ fetch_focus(url,focus)│       │ Coverage gap detect  │
+        │ research_subtopic()   │       │ Rule-based audit     │
+        │ ANSWER                │       │ Rule-based synthesis │
+        └───────────────────────┘       └──────────────────────┘
+        (requires LLM)                  (no LLM required)
+```
+
+**Estimated Scope**: ~4,500 LOC new code, 15 new files, 10 modified files

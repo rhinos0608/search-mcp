@@ -155,7 +155,7 @@ const SUB_QUESTION_TEMPLATES: Record<QueryClassification, SubQuestionTemplate[]>
       {
          textTemplate: 'What are the fundamental concepts and core definitions of {topic}?',
          evidenceType: 'definitional',
-         preferredSources: ['documentation', 'web', 'academic', 'youtube'],
+         preferredSources: ['documentation', 'web', 'academic', 'youtube', 'wikipedia'],
          freshnessRequirement: 'any',
          failureModes: ['no sources found', 'contradictory definitions across sources'],
          budgetPriority: 1,
@@ -197,9 +197,10 @@ const SUB_QUESTION_TEMPLATES: Record<QueryClassification, SubQuestionTemplate[]>
    ],
    comparative: [
       {
-         textTemplate: 'How do the main options or approaches for {topic} differ from each other?',
+         textTemplate:
+            'How do the main options or approaches for {topic} differ from each other?',
          evidenceType: 'comparative',
-         preferredSources: ['web', 'documentation', 'academic'],
+         preferredSources: ['web', 'documentation', 'academic', 'wikipedia'],
          freshnessRequirement: 'within 2 years',
          failureModes: ['superficial comparison', 'biased comparison favoring one option'],
          budgetPriority: 1,
@@ -491,7 +492,7 @@ const SUB_QUESTION_TEMPLATES: Record<QueryClassification, SubQuestionTemplate[]>
          textTemplate:
             'What are the foundational papers, seminal works, and key references for {topic}?',
          evidenceType: 'foundational',
-         preferredSources: ['academic'],
+         preferredSources: ['academic', 'pubmed'],
          freshnessRequirement: 'any',
          failureModes: ['missing seminal papers', 'citation bias toward recent work'],
          budgetPriority: 1,
@@ -512,7 +513,7 @@ const SUB_QUESTION_TEMPLATES: Record<QueryClassification, SubQuestionTemplate[]>
          textTemplate:
             'What are the key findings, established results, and areas of consensus in {topic} research?',
          evidenceType: 'consensus',
-         preferredSources: ['academic'],
+         preferredSources: ['academic', 'pubmed'],
          freshnessRequirement: 'within 3 years',
          failureModes: ['overstated consensus', 'seminal results not replicated'],
          budgetPriority: 3,
@@ -528,7 +529,7 @@ const SUB_QUESTION_TEMPLATES: Record<QueryClassification, SubQuestionTemplate[]>
       {
          textTemplate: 'What meta-analyses, surveys, and comprehensive reviews exist for {topic}?',
          evidenceType: 'survey',
-         preferredSources: ['academic'],
+         preferredSources: ['academic', 'pubmed'],
          freshnessRequirement: 'within 3 years',
          failureModes: ['survey may be outdated', 'survey may have selection bias'],
          budgetPriority: 5,
@@ -795,6 +796,8 @@ const VALID_SOURCE_TYPES = new Set<string>([
    'documentation',
    'news',
    'patent',
+   'pubmed',
+   'wikipedia',
    'podcast',
    'producthunt',
    'youtube',
@@ -853,6 +856,15 @@ export class QueryDecomposer {
       if (entities.length > 0) {
          const entitySubQuestions = generateEntitySubQuestions(entities);
          subQuestions.push(...entitySubQuestions);
+      }
+
+      // Enforce minimum sub-questions — broad queries need at least 3
+      const minSQs = MIN_SUBQUESTIONS_BY_CLASSIFICATION[classification] ?? 2;
+      if (subQuestions.length < minSQs) {
+         logger.warn(
+            { classification, subQuestionCount: subQuestions.length, minRequired: minSQs },
+            `Decomposition produced ${String(subQuestions.length)} sub-questions for a ${classification} query — below minimum of ${String(minSQs)}. Consider query expansion.`,
+         );
       }
 
       const plan = generatePlan(classification, topic);
@@ -1003,6 +1015,20 @@ export class QueryDecomposer {
          budgetPriority: typeof sq.budgetPriority === 'number' ? sq.budgetPriority : 1,
          status: 'pending',
       }));
+
+      // Enforce minimum sub-questions for the LLM path too
+      const minSQs = MIN_SUBQUESTIONS_BY_CLASSIFICATION[classification] ?? 2;
+      if (subQuestions.length < minSQs) {
+         logger.warn(
+            { classification, subQuestionCount: subQuestions.length, minRequired: minSQs },
+            `LLM decomposition produced only ${String(subQuestions.length)} sub-questions for a ${classification} query — below minimum of ${String(minSQs)}. SubQuestionCount of 0 or very low suggests the agent is not properly decomposing.`,
+         );
+      }
+      if (subQuestions.length === 0) {
+         // LLM returned zero sub-questions — fall back to rule-based
+         logger.warn('LLM decompose returned 0 sub-questions, falling back to rule-based');
+         return this.decompose(query);
+      }
 
       // Entity-targeted sub-questions are generated organically by the LLM
       // from the entity hints in the enriched query — no template fallback needed.

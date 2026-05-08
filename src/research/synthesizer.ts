@@ -15,7 +15,9 @@ import type {
    ResearchDepth,
    ResearchReport,
    SubQuestion,
+   SourceQualityTier,
 } from './types.js';
+import { curateEvidenceSources } from './sourceQuality.js';
 
 // ── Utilities ───────────────────────────────────────────────────────────────────
 
@@ -44,6 +46,18 @@ export class ResearchSynthesizer {
       const contradictions = this.state.contradictions;
       const subQuestions = this.state.subQuestions;
 
+      // ── Gate findings by relevance score for thematic inclusion ──
+      // Findings with relevanceScore >= 0.72 enter themes.
+      // Findings below threshold or without a score are still available for
+      // source indexing and stats, but do not contribute to theme narratives.
+      const RELEVANCE_THRESHOLD = 0.72;
+      const admissibleFindings = findings.filter(
+        (f) => f.relevanceScore === undefined || f.relevanceScore >= RELEVANCE_THRESHOLD,
+      );
+      const gatedFindings = findings.filter(
+        (f) => f.relevanceScore !== undefined && f.relevanceScore < RELEVANCE_THRESHOLD,
+      );
+
       // Compute source type breakdown once for reuse
       const byType = new Map<string, number>();
       for (const s of sources) {
@@ -53,22 +67,56 @@ export class ResearchSynthesizer {
          .map(([type, count]) => ({ type, count }))
          .sort((a, b) => b.count - a.count);
 
+      // ── Degradation mode: 0 findings → source-note synthesis only ──
+      const degradationMode: ResearchReport['degradationMode'] =
+         admissibleFindings.length === 0 ? 'source_note_synthesis' : 'deep';
+
+      // ── Curate evidence sources (quality-gated, primary-preferring) ──
+      // Use ALL findings for evidence curation, not just admissible ones
+      const curated = curateEvidenceSources(sources, findings);
+      const evidenceSources = curated.map((c, i) => ({
+         index: i + 1,
+         title: c.source.title,
+         url: c.source.url,
+         sourceType: c.source.sourceType,
+         tier: c.tier as SourceQualityTier,
+         domain: c.source.domain,
+      }));
+
+      // ── Build finding-based source index (only sources backed by admissible findings for themes) ──
+      const findingBackingSourceIds = new Set<string>();
+      for (const f of admissibleFindings) {
+         for (const sid of f.sourceIds) {
+            findingBackingSourceIds.add(sid);
+         }
+      }
+
+      // Build limitations, adding gated-finding note when applicable
+      const baseLimitations = this.buildLimitations(sources, subQuestions, byType, degradationMode);
+      if (gatedFindings.length > 0) {
+        baseLimitations.push(
+          `${String(gatedFindings.length)} finding(s) were below the relevance threshold (${String(RELEVANCE_THRESHOLD)}) and excluded from thematic analysis. These findings remain available in source notes and state for review.`,
+        );
+      }
+
       return {
          query: this.state.query,
          classification: this.inferClassification(),
          depth: this.inferDepth(),
-         executiveSummary: this.buildExecutiveSummary(findings),
-         narrativeMarkdown: this.buildNarrativeMarkdown(findings, subQuestions, sources, contradictions),
-         themes: this.buildThemes(findings, subQuestions),
+         degradationMode,
+         executiveSummary: this.buildExecutiveSummary(admissibleFindings),
+         narrativeMarkdown: this.buildNarrativeMarkdown(admissibleFindings, subQuestions, sources, contradictions),
+         themes: this.buildThemes(admissibleFindings, subQuestions),
          contradictions: contradictions,
          uncertainties: this.buildUncertainties(contradictions),
          sourceNotes: this.buildSourceNotes(sources, byType),
          openQuestions: this.state.openQuestions,
-         limitations: this.buildLimitations(sources, subQuestions, byType),
+         limitations: baseLimitations,
          sourceCount: sources.length,
          sourceTypeCount: byType.size,
          sourceDiversity,
          findingCount: findings.length,
+         evidenceSources,
       };
    }
 
@@ -101,7 +149,7 @@ export class ResearchSynthesizer {
 
    private buildExecutiveSummary(findings: Finding[]): string {
       if (findings.length === 0) {
-         return 'No findings were extracted during this research run. The topic may be too narrow or no suitable sources were discovered.';
+         return '[Source-note synthesis only] No structured findings were extracted during this research run. The following summary is based on source snippets and metadata, not on verified extracted evidence. Treat claims with lower confidence.';
       }
 
       // Count sub-questions that actually have findings (not by status, which may be stale)
@@ -283,8 +331,20 @@ export class ResearchSynthesizer {
       return notes;
    }
 
-   private buildLimitations(sources: SourceEntry[], _subQuestions: SubQuestion[], byType?: Map<string, number>): string[] {
+   private buildLimitations(
+      sources: SourceEntry[],
+      _subQuestions: SubQuestion[],
+      byType?: Map<string, number>,
+      degradationMode?: ResearchReport['degradationMode'],
+   ): string[] {
       const limitations: string[] = [];
+
+      // Degradation-specific limitation
+      if (degradationMode === 'source_note_synthesis') {
+         limitations.push(
+            'This report is based on source-note synthesis only — no structured findings were extracted from sources. Claims should be treated as lower-confidence and verified independently.',
+         );
+      }
 
       const typeMap = byType ?? this.buildTypeMap(sources);
 
@@ -325,6 +385,34 @@ export class ResearchSynthesizer {
       return m;
    }
 
+   /**
+    * Build a finding-backed source index — only sources that appear in at least one finding.
+    * This prevents citing weak/unrelated sources just because they were in the source list.
+    */
+   private buildFindingBackedSourceIndex(
+      findings: Finding[],
+      sources: SourceEntry[],
+   ): Map<string, number> {
+      const backedSourceIds = new Set<string>();
+      for (const f of findings) {
+         for (const sid of f.sourceIds) {
+            backedSourceIds.add(sid);
+         }
+      }
+      // Only include sources that have finding backing, assign 1-based indices
+      const index = new Map<string, number>();
+      let displayIdx = 0;
+      for (const s of sources) {
+         if (backedSourceIds.has(s.id) || findings.length === 0) {
+            // If no findings at all, fall back to all non-discarded sources
+            // so the source-note synthesis still has citation references
+            displayIdx++;
+            index.set(s.id, displayIdx);
+         }
+      }
+      return index;
+   }
+
    private buildNarrativeMarkdown(
       findings: Finding[],
       subQuestions: SubQuestion[],
@@ -335,15 +423,19 @@ export class ResearchSynthesizer {
       parts.push(`# Research Report: ${this.state.query}\n`);
       parts.push(`## Executive Summary\n${this.buildExecutiveSummary(findings)}\n`);
 
-      // Build source index for inline citations
-      const sourceIndex = new Map(sources.map((s, i) => [s.id, i + 1]));
+      // Build finding-backed source index — only sources that appear in at least one finding
+      const sourceIndex = this.buildFindingBackedSourceIndex(findings, sources);
 
       // Themes grouped by sub-question
       for (const sq of subQuestions) {
          const sqFindings = findings.filter((f) => f.subQuestionIds.includes(sq.id));
          if (sqFindings.length === 0) {
             parts.push(`## ${sq.text}\n`);
-            parts.push(`*No findings were discovered for this sub-question.*\n`);
+            if (findings.length === 0) {
+               parts.push('*No structured findings were extracted. See discovered sources below for context.*\n');
+            } else {
+               parts.push('*No findings were discovered for this sub-question.*\n');
+            }
             continue;
          }
 
@@ -424,7 +516,7 @@ export class ResearchSynthesizer {
       }
 
       // Limitations
-      const limitations = this.buildLimitations(sources, subQuestions);
+      const limitations = this.buildLimitations(sources, subQuestions, undefined, this.state.findings.length === 0 ? 'source_note_synthesis' : 'deep');
       if (limitations.length > 0) {
          parts.push('\n## Research Limitations\n');
          for (const l of limitations) {

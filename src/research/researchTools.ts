@@ -19,7 +19,10 @@ import { redditComments } from '../tools/redditComments.js';
 import { semanticYoutube } from '../tools/semanticYoutube.js';
 import { semanticReddit } from '../tools/semanticReddit.js';
 import { semanticGitHubCode } from '../tools/semanticGitHubCode.js';
-import { semanticCrawl } from '../tools/semanticCrawl.js';
+import { searchPubMed } from '../tools/pubmedSearch.js';
+import { searchWikipedia } from '../tools/wikipediaSearch.js';
+import { stackoverflowSearch as searchStackOverflow } from '../tools/stackoverflowSearch.js';
+import { semanticCrawl as realSemanticCrawl } from '../tools/semanticCrawl.js';
 import { loadConfig } from '../config.js';
 import type { ResearchTools, InteractiveExtractionPlan } from './types.js';
 import type { BrowserSessionConfig } from '../browser/types.js';
@@ -315,7 +318,7 @@ export function createResearchTools(options?: ResearchToolsOptions): ResearchToo
          onToolCall?.('semantic_crawl', query);
          try {
             const cfg = loadConfig();
-            const result = await semanticCrawl(
+            const result = await realSemanticCrawl(
                {
                   source: { type: 'url', url },
                   query,
@@ -332,7 +335,7 @@ export function createResearchTools(options?: ResearchToolsOptions): ResearchToo
                cfg.raga,
             );
             return {
-               chunks: result.chunks.map((c) => ({
+               chunks: (result.chunks as any[]).map((c) => ({
                   text: c.text,
                   url: c.url,
                   section: c.section,
@@ -343,6 +346,54 @@ export function createResearchTools(options?: ResearchToolsOptions): ResearchToo
             };
          } catch {
             return { chunks: [], pagesCrawled: 0, warnings: [] };
+         }
+      },
+
+      // ── PubMed ────────────────────────────────────────────────────────────
+      async pubmedSearch(query: string, limit?: number) {
+         onToolCall?.('pubmed_search', query);
+         try {
+            return await searchPubMed(query, limit);
+         } catch {
+            return [];
+         }
+      },
+
+      // ── Wikipedia ─────────────────────────────────────────────────────────
+      async wikipediaSearch(query: string, language?: string) {
+         onToolCall?.('wikipedia_search', query);
+         try {
+            const results = await searchWikipedia(query, language ?? 'en');
+            return results.map((r) => ({
+               title: r.title,
+               link: r.link,
+               snippet: r.snippet,
+               pageId: r.pageId,
+               language: r.language,
+            }));
+         } catch {
+            return [];
+         }
+      },
+
+      // ── Stack Overflow ─────────────────────────────────────────────────────
+      async stackoverflowSearch(query: string, limit?: number) {
+         onToolCall?.('stackoverflow_search', query);
+         try {
+            const cfg = loadConfig();
+            const apiKey = cfg.stackexchange?.apiKey ?? process.env['STACKEXCHANGE_API_KEY'] ?? '';
+            const results = await searchStackOverflow(query, apiKey, 'relevance', '', false, limit ?? 20);
+            return results.map((r) => ({
+               title: r.title,
+               link: r.link,
+               bodySnippet: r.body?.replace(/<[^>]+>/g, '').slice(0, 500) ?? '',
+               answerCount: r.answerCount,
+               score: r.score,
+               tags: r.tags,
+               isAnswered: r.isAnswered,
+            }));
+         } catch {
+            return [];
          }
       },
 

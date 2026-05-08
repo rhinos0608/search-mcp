@@ -1,34 +1,23 @@
 # Progress
 
 ## Status
-In Progress
+Completed telemetry bug fixes for research strategies.
 
-### Completed: prompts.ts `contradiction_scan` action
-- Added `contradiction_scan` to ORCHESTRATOR_DECIDE valid actions list (after `fill_gaps`)
-- Added comment block at top of file noting action naming conventions and internal actions
+## Tasks
+- [x] Fix `subQuestionCount` in `pipelineStrategy.ts`
+- [x] Add `sourceTypeCount` to all `onProgress` calls in `pipelineStrategy.ts`
+- [x] Add `getSourceTypeCount` helper method to `PipelineStrategy`
+- [x] Ensure `findingCount` uses `ctx.state.findingCount()`
+- [x] Wire up `sourceTypeCount` and `gapLoopCount` in `deepResearch.ts`
+- [x] Update `ProgressCallback` type in `orchestrator.ts`
+- [x] Add and wire `gapLoopCount` in `jobManager.ts`
 
-### Completed: confidence.ts fixes
-- Updated `domainTrustScore` JSDoc to clarify it's optional with 0.5 default
-- Added NaN propagation guard in `computeExtractionConfidence` using `typeof === 'number' && isFinite()` clamp
-
-### Completed: chat.ts assertSafeUrl + budget comment
-- Changed `assertSafeUrl(endpoint)` → `assertSafeUrl(endpoint, true)` at callModel's URL assertion — allows operator-configured local endpoints (Ollama, LM Studio)
-
-### Completed: synthesis.ts fixes
-- Added `classification` and `depth` type-guard checks in `isResearchReport()`
-- Removed dead `state.budget` ternary in `buildStateSummary()` — budget is always present
-- Added `claimEdgeCount` and `budgetRemaining` to `ResearchStateSummary` interface and builder
-- Added `max*` fields to `BudgetState` to support budget-remaining computation
-- Updated `BudgetTracker` constructor to populate `max*` fields from profile
-
-- [x] Remove `void await` in 3 extractPendingSources() calls
-- [x] Remove unused startTime param from synthesizePartial + update 3 callers
-- [x] Normalize descriptions in audit dedup + add `passed` field merge
-- [x] Add `toSafeNumber` guard for audit stats Number() calls
-- [x] Run typecheck — passes
-- `src/research/llm/prompts.ts` — added `contradiction_scan` action entry + naming convention comment
-- `src/research/confidence.ts` — updated domainTrustScore JSDoc; added NaN-safe riskScore clamping
-- `src/research/llm/chat.ts` — changed assertSafeUrl to allow local endpoints; added budget comment
-- `src/research/orchestrator.ts` — 5 targeted fixes applied (void await, synthesizePartial param, dedup normalize, passed merge, toSafeNumber guard)
+## Files Changed
+- `src/research/strategies/pipelineStrategy.ts`
+- `src/tools/deepResearch.ts`
+- `src/research/orchestrator.ts`
+- `src/research/jobManager.ts`
 
 ## Notes
+- `PipelineStrategy.reportProgress` now automatically injects `sourceCount`, `findingCount`, `subQuestionCount`, and `sourceTypeCount` from global state if not explicitly overridden.
+- `gapLoopCount` is now correctly tracked in the job manager and visible via `poll` / `list` snapshots.

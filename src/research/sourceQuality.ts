@@ -561,3 +561,188 @@ export function assessContentQuality(
 export function isContentSubstantive(quality: ContentQualityAssessment): boolean {
   return quality.isSubstantive;
 }
+
+// ── Source Quality Tier Classification ─────────────────────────────────────────
+
+import type { SourceEntry, SourceQualityTier } from './types.js';
+
+/**
+ * Tier-1 domains: primary evidence sources.
+ * arXiv, official project repos, conference proceedings, official research blogs.
+ */
+const TIER1_DOMAINS = new Set([
+  'arxiv.org',
+  'openreview.net',
+  'aclanthology.org',
+  'proceedings.mlr.press',
+  'papers.nips.cc',
+  'aaai.org',
+  'neurips.cc',
+  'acm.org',
+  'ieee.org',
+  'dl.acm.org',
+  'ieeexplore.ieee.org',
+  'springer.com',
+  'nature.com',
+  'science.org',
+  'wikipedia.org',
+  'pubmed.ncbi.nlm.nih.gov',
+]);
+
+/**
+ * Domains that get automatic Tier-4 (low-quality / excluded) unless explicitly
+ * needed for community reaction.
+ */
+const TIER4_DOMAIN_PATTERNS: RegExp[] = [
+  /(?:^|\.)(?:medium|towardsdatascience|betterprogramming|levelup|javascript-in-plain-english|blog\.devgenius|blog\.bitsrc)\.com$/i,
+  /(?:^|\.)reddit\.com$/i,
+  /(?:^|\.)youtube\.com$/i,
+  /(?:^|\.)tiktok\.com$/i,
+  /(?:^|\.)twitter\.com$/i,
+  /(?:^|\.)x\.com$/i,
+  /(?:^|\.)facebook\.com$/i,
+  /(?:^|\.)linkedin\.com\/pulse/i,
+  /(?:^|\.)producthunt\.com$/i,
+  /(?:^|\.)eventbrite\.com$/i,
+  /(?:^|\.)meetup\.com$/i,
+  /(?:^|\.)lu\.ma$/i,
+];
+
+/**
+ * URL path patterns indicating low-quality content.
+ * Event calendars, homepages, SEO landing pages.
+ */
+const LOW_QUALITY_PATH_PATTERNS: RegExp[] = [
+  /^\/$/,                        // bare homepage
+  /\/events?\//i,                // event pages
+  /\/calendar/i,                 // event calendars
+  /\/pricing/i,                  // pricing pages
+  /\/about/i,                    // about pages
+  /\/contact/i,                  // contact pages
+  /\/(?:tag|category|archive)\//i, // SEO category pages
+];
+
+/**
+ * Classify a source into a quality tier for synthesis gating.
+ *
+ * Tier 1: Primary evidence — arXiv, official repos, academic publishers, official research/engineering blogs
+ * Tier 2: Reputable secondary — established tech publications, official docs, substantive HN
+ * Tier 3: Community/ambient — Reddit, YouTube, Medium cross-posts, forum threads
+ * Tier 4: Low-quality/excluded — SEO blogs, homepages, event calendars, social posts without substance
+ */
+export function classifySourceTier(source: SourceEntry): SourceQualityTier {
+  const domain = source.domain.toLowerCase();
+
+  // Tier 1: Academic / primary domains
+  if (TIER1_DOMAINS.has(domain)) return 1;
+
+  // Tier 1: GitHub repos with deep content (not just READMEs)
+  if (source.sourceType === 'github') return 1;
+
+  // Tier 1: Official documentation / research blogs on the project domain
+  if (source.sourceType === 'documentation') return 1;
+
+  // Tier 1: Academic source type
+  if (source.sourceType === 'academic' || source.sourceType === 'pubmed') return 1;
+
+  // Tier 2: Wiki / Reference
+  if (source.sourceType === 'wikipedia') return 2;
+
+  // Tier 4: Domain blocklist (social, content farms)
+  for (const pat of TIER4_DOMAIN_PATTERNS) {
+    if (pat.test(domain)) return 4;
+  }
+
+  // Tier 4: Low-quality path patterns
+  try {
+    const u = new URL(source.url);
+    for (const pat of LOW_QUALITY_PATH_PATTERNS) {
+      if (pat.test(u.pathname)) return 4;
+    }
+  } catch { /* ignore */ }
+
+  // Tier 4: Promotional content from quality assessment
+  if (source.qualityScore !== undefined && source.qualityScore < 0.3) return 4;
+
+  // Tier 3: Source types that are inherently community-level
+  if (source.sourceType === 'reddit' || source.sourceType === 'youtube' || source.sourceType === 'podcast') return 3;
+
+  // Tier 2: Established news sources, HN, StackOverflow
+  if (source.sourceType === 'news' || source.sourceType === 'hackernews' || source.sourceType === 'stackoverflow') return 2;
+
+  // Tier 2: Web with high quality score
+  if (source.sourceType === 'web' && source.qualityScore !== undefined && source.qualityScore >= 0.6) return 2;
+
+  // Tier 3: Generic web with moderate quality
+  if (source.sourceType === 'web') return 3;
+
+  // Default tier
+  return 3;
+}
+
+/**
+ * Filter and curate sources for the evidence section of the final report.
+ *
+ * No arbitrary cap — the system includes as many sources as it wants, provided they're
+ * high quality. Tier 1-3 sources are always included (sorted by relevance). Tier 4
+ * sources (social posts, SEO blogs, etc.) are only included if they directly back a
+ * finding claim — community reaction sources are useful when cited.
+ *
+ * @param sources - All discovered sources
+ * @param findings - Extracted findings (to find which sources actually back claims)
+ */
+export function curateEvidenceSources(
+  sources: SourceEntry[],
+  findings: { sourceIds: string[] }[],
+): { source: SourceEntry; tier: SourceQualityTier; findingCount: number }[] {
+  // Build a map of sourceId → how many findings cite it
+  const sourceFindingCounts = new Map<string, number>();
+  for (const f of findings) {
+    for (const sid of f.sourceIds) {
+      sourceFindingCounts.set(sid, (sourceFindingCounts.get(sid) ?? 0) + 1);
+    }
+  }
+
+  // Classify and score every source
+  const classified = sources.map((s) => ({
+    source: s,
+    tier: classifySourceTier(s),
+    findingCount: sourceFindingCounts.get(s.id) ?? 0,
+  }));
+
+  // Sort: tier ascending (best first), then findingCount descending, then qualityScore descending
+  classified.sort((a, b) => {
+    if (a.tier !== b.tier) return a.tier - b.tier;
+    if (a.findingCount !== b.findingCount) return b.findingCount - a.findingCount;
+    const qA = a.source.qualityScore ?? 0.5;
+    const qB = b.source.qualityScore ?? 0.5;
+    return qB - qA;
+  });
+
+  // Include all tier 1-3 sources (primary evidence, reputable secondary, community).
+  // Exclude tier 4 (low-quality) unless it backs at least one finding.
+  const result = classified.filter((c) => {
+    if (c.tier <= 3) return true;
+    // Tier 4: only include if a finding actually cites this source
+    return c.findingCount > 0;
+  });
+
+  return result;
+}
+
+/**
+ * Get the domain patterns that define Tier 4 (for use in prompts/other modules).
+ */
+export function getTier4DomainPatterns(): RegExp[] {
+  return [...TIER4_DOMAIN_PATTERNS];
+}
+
+/**
+ * Check if a URL matches a Tier-4 domain pattern.
+ */
+export function isTier4Domain(url: string): boolean {
+  try {
+    const domain = new URL(url).hostname.toLowerCase();
+    return TIER4_DOMAIN_PATTERNS.some((p) => p.test(domain));
+  } catch { return false; }
+}

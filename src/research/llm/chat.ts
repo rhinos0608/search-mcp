@@ -144,55 +144,49 @@ export class DeepResearchLlmClient {
          return { success: false, response };
       }
 
-      // Direct parse
+      // ── Guiding Parsers ──────────────────────────────────────────────────
+      
+      // Attempt 1: Direct parse
       try {
          const data = JSON.parse(response.content) as T;
          return { success: true, data, response };
       } catch {
-         // Fallback: extract JSON from markdown code blocks
-         const jsonMatch = /```(?:json)?\s*(\{[\s\S]*\})\s*```/.exec(response.content);
+         // Attempt 2: Extract JSON from markdown code blocks or loose braces
+         const jsonMatch = /```(?:json)?\s*(\{[\s\S]*\})\s*```/.exec(response.content) ||
+                           /(\{[\s\S]*\})/.exec(response.content);
+         
          if (jsonMatch?.[1]) {
             try {
                const data = JSON.parse(jsonMatch[1]) as T;
                return { success: true, data, response };
             } catch {
-               // fall through to parseError
+               // fall through
             }
          }
 
+         // Attempt 3: If no JSON structure can be retrieved, return success: false
+         // This protects callers from type-errors while still providing raw content in result.response.
+         logger.warn('LLM returned non-JSON content');
          return {
             success: false,
             response,
-            parseError: 'Failed to parse JSON from response content',
+            parseError: 'LLM returned non-JSON content',
          };
       }
    }
    /**
-    * Call orchestrator model with worker model fallback.
-    * Tries orchestrator first; on failure, tries the cheaper worker model.
-    * Returns the first successful response, or the last failure if both fail.
+    * Call orchestrator with one retry.
     */
    async callWithFallback(options: LlmCallOptions): Promise<LlmResponse> {
-      const orchestratorResult = await this.callOrchestrator(options);
-      if (orchestratorResult.success) {
-         return orchestratorResult;
-      }
-      logger.warn(
-         { error: orchestratorResult.error },
-         'Orchestrator LLM call failed, falling back to worker model',
-      );
-      const workerResult = await this.callWorker(options);
-      if (workerResult.success) {
-         return workerResult;
-      }
-      logger.warn({ error: workerResult.error }, 'Worker LLM call also failed');
-      return workerResult;
+      const result = await this.callOrchestrator(options);
+      if (result.success) return result;
+
+      logger.warn({ error: result.error }, 'Primary LLM call failed, retrying once...');
+      return this.callOrchestrator(options);
    }
 
    /**
-    * Call orchestrator JSON with worker fallback.
-    * Tries orchestrator JSON first; on failure, tries the cheaper worker model.
-    * Returns the first successful JSON parse, or the last failure if both fail.
+    * Call JSON with one retry.
     */
    // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-parameters -- used by callers for return type inference
    async callJSONWithFallback<T>(
@@ -201,20 +195,11 @@ export class DeepResearchLlmClient {
       | { success: true; data: T; response: LlmResponse }
       | { success: false; response: LlmResponse; parseError?: string }
    > {
-      const orchestratorResult = await this.callJSON<T>({ ...options, model: 'orchestrator' });
-      if (orchestratorResult.success) {
-         return orchestratorResult;
-      }
-      logger.warn(
-         { error: orchestratorResult.response.error },
-         'Orchestrator JSON call failed, falling back to worker model',
-      );
-      const workerResult = await this.callJSON<T>({ ...options, model: 'worker' });
-      if (workerResult.success) {
-         return workerResult;
-      }
-      logger.warn({ error: workerResult.response.error }, 'Worker JSON call also failed');
-      return workerResult;
+      const result = await this.callJSON<T>({ ...options, model: 'orchestrator' });
+      if (result.success) return result;
+
+      logger.warn({ error: result.parseError ?? result.response.error ?? 'Unknown parse error' }, 'Primary JSON call failed, retrying once...');
+      return this.callJSON<T>({ ...options, model: 'orchestrator' });
    }
 
    // ── Internal ──────────────────────────────────────────────────────────────

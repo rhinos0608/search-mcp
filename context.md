@@ -1,118 +1,64 @@
-# search-mcp Context
+# Code Context
 
-> MCP server over stdio. All JSON-RPC goes to stdout; all logging goes to stderr.
+## Files Retrieved
+1. `src/research/strategies/agentStrategy.ts` - Found `findingCount: 0` hardcoded in progress reports and final report.
+2. `src/research/strategies/pipelineStrategy.ts` - Found `subQuestionCount: questions.length` bug where it uses the current batch length instead of the total.
+3. `src/research/orchestrator.ts` - Interface for `onProgress` and pass-through logic.
+4. `src/research/state.ts` - Source of truth for findings, sources, sub-questions, and budget.
+5. `src/research/synthesizer.ts` - Rule-based report generator. Computes `sourceTypeCount` correctly from `sources`.
+6. `src/research/llm/synthesis.ts` - LLM-based report generator.
+7. `src/research/compaction.ts` - Multi-layer compaction for MCP transport. Recomputes `CompactStatistics` but relies on `report.findingCount`.
+8. `src/research/jobManager.ts` - In-memory job registry. Stores partials updated via `update()`.
+9. `src/research/progress.ts` - Timeline tracker for progress UI.
+10. `src/tools/deepResearch.ts` - MCP tool entry point. Mapping from orchestrator `onProgress` to `researchJobManager.update`. **FOUND BUG 7 HERE**: `sourceTypeCount` is hardcoded to `undefined`.
+
+## Key Code
+
+### 1. `findingCount` always 0
+In `src/research/strategies/agentStrategy.ts` (lines 205, 262):
+```typescript
+findingCount: 0, // Agent doesn't track findings explicitly in state during loop
+```
+The agent strategy uses a `CitationCollector` instead of the full `ResearchStateEngine` for findings, so `findingCount` is never updated or reported.
+
+### 2. `subQuestionCount` always 0 / wrong
+In `src/research/strategies/pipelineStrategy.ts` (line 580):
+```typescript
+subQuestionCount: questions.length, // questions is the current BATCH, not total
+```
+Inside `spawnWorkers`, it reports the batch size as the total. Additionally, `agentStrategy` defaults it to 0.
+
+### 3. `sourceTypeCount` always 0 (or 1)
+In `src/tools/deepResearch.ts` (line 197), the mapper from orchestrator to job manager hardcodes it:
+```typescript
+sourceTypeCount: undefined,
+```
+When `complete()` is called in `jobManager.ts`, it pulls from the report, but interim progress updates always show no variety.
+
+### 4. Themes, Contradictions, Uncertainties empty
+These are only populated in the final `ResearchReport` generated at the end of the research in `synthesizer.ts` or `llm/synthesis.ts`. The `ResearchJobSnapshot` used for polling does not have fields for these, so the "live" view is always empty.
 
 ## Architecture
+- **Source of Truth**: `ResearchStateEngine` (which wraps `ResearchState` and `BudgetTracker`).
+- **Telemetry Flow**: 
+    1. Strategy (Agent/Pipeline/Tree) calls `ctx.onProgress`.
+    2. `ResearchOrchestrator.reportProgress` passes it to the `onProgress` callback.
+    3. `src/tools/deepResearch.ts` callback receives it and calls `researchJobManager.update(jobId, partials)`.
+    4. `ResearchJobManager` updates the `InternalJob` record, which is returned by `poll`.
 
-**Transport:** stdio only via `@modelcontextprotocol/sdk` `StdioServerTransport`.
-**No HTTP server.** No Fastify/no Express. stdout = JSON-RPC frames only.
+## Bug Audit Results
 
-```
-AI client (Claude Desktop / claude CLI)
-  │  JSON-RPC → stdin
-  │  JSON-RPC ← stdout
-  │  log output ← stderr (pino)
-  ▼
-search-mcp process
-```
+| Bug | File | Line | Cause | Fix |
+|---|---|---|---|---|
+| **1. findingCount 0** | `agentStrategy.ts` | 205, 262 | Hardcoded to 0; agent uses collector, not state engine. | Return `this.collector.count` or sync collector to state. |
+| **2. subQuestionCount 0** | `pipelineStrategy.ts` | 580 | Uses `questions.length` (batch) instead of `ctx.state.getSubQuestions().length`. | Use `ctx.state.getSubQuestions().length`. |
+| **3. themes empty** | `jobManager.ts` | 43-51 | `ResearchJobPartial` interface lacks `themes`. | Add `themes` to `ResearchJobPartial`, update in `synthesizer`. |
+| **4. contradictions empty** | `jobManager.ts` | 43-51 | `ResearchJobPartial` interface lacks `contradictions`. | Add to interface and progress callback. |
+| **5. uncertainties empty** | `jobManager.ts` | 43-51 | `ResearchJobPartial` interface lacks `uncertainties`. | Add to interface. |
+| **6. gapLoopCount 0** | `jobManager.ts` | 88 | UI may not be reading reaching the snapshot value. | Ensure `poll` returns the most recent `gapLoopCount`. |
+| **7. sourceTypeCount 1** | `tools/deepResearch.ts` | 197 | Hardcoded to `undefined` in progress callback. | Pass `ctx.state.sourceTypeCount()` from strategies. |
 
-## Entry & Server
+## Start Here
+Open `src/tools/deepResearch.ts` to fix the `sourceTypeCount` mapping, then `src/research/strategies/pipelineStrategy.ts` to fix the `subQuestionCount` logic.
 
-| File | Role |
-|------|------|
-| `src/index.ts` | CLI entry. Creates `McpServer`, attaches `StdioServerTransport`, calls `server.connect()`. |
-| `src/server.ts` | `createServer()` — instantiates `McpServer` and calls `server.registerTool()` for all 28 tools. |
-| `src/logger.ts` | pino — writes all log output to `process.stderr`. |
-| `src/config.ts` | Config resolution: encrypted file → env vars → defaults. Cached after first load. |
-
-## Tools (28)
-
-| Category | Tools |
-|---|---|
-| **Web** | `web_search`, `web_read`, `web_crawl` |
-| **GitHub** | `github_repo`, `github_repo_file`, `github_repo_search`, `github_repo_tree`, `github_trending`, `semantic_github_code` |
-| **Video** | `youtube_search`, `youtube_transcript`, `semantic_youtube` |
-| **Social** | `reddit_search`, `reddit_comments`, `twitter_search` |
-| **Research** | `academic_search`, `arxiv_search`, `hackernews_search`, `stackoverflow_search` |
-| **Packages** | `npm_search`, `pypi_search` |
-| **Products** | `producthunt_search`, `patent_search`, `podcast_search` |
-| **Semantic** | `semantic_crawl`, `semantic_jobs`, `semantic_reddit` |
-| **System** | `health_check` |
-
-Each tool registered via `server.registerTool(name, schema, handler)`. Input validation via Zod v4 (`zod/v4`). Handler returns `ToolResult<T>` serialized as JSON text content. Errors return `isError: true`.
-
-## Config & Env Vars
-
-Resolution: encrypted config file (`config.enc`) → individual env vars → defaults.
-
-### Search (at least one required)
-`SEARXNG_BASE_URL`, `BRAVE_API_KEY`, `EXA_API_KEY`, `SEARCH_BACKEND`
-
-### Embedding (choose one provider)
-`EMBEDDING_PROVIDER` (`sidecar`|`ollama`|`transformers`|`openai`, default `sidecar`)
-
-| Provider | Vars |
-|---|---|
-| `sidecar` | `EMBEDDING_SIDECAR_BASE_URL`, `EMBEDDING_SIDECAR_API_TOKEN`, `EMBEDDING_DIMENSIONS` (default `768`) |
-| `ollama` | `EMBEDDING_OLLAMA_BASE_URL` (default `http://localhost:11434`), `EMBEDDING_OLLAMA_MODEL` (default `nomic-embed-text`) |
-| `transformers` | `EMBEDDING_TRANSFORMERS_MODEL` (default `Xenova/all-MiniLM-L6-v2`) |
-| `openai` | `EMBEDDING_OPENAI_BASE_URL` (default `https://api.openai.com/v1`), `EMBEDDING_OPENAI_MODEL` (default `text-embedding-3-small`), `EMBEDDING_OPENAI_API_KEY` |
-
-### Crawl
-`CRAWL4AI_BASE_URL`, `CRAWL4AI_API_TOKEN`
-
-### Social / Video
-`YOUTUBE_API_KEY`, `NITTER_BASE_URL`, `REDDIT_CLIENT_ID`, `REDDIT_CLIENT_SECRET`, `REDDIT_USER_AGENT`
-
-### Specialist
-`LISTENNOTES_API_KEY`, `PRODUCTHUNT_API_TOKEN`, `PATENTSVIEW_API_KEY`, `STACKEXCHANGE_API_KEY`, `GITHUB_TOKEN`
-
-### RAG-Anything Bridge
-`RAGA_ENABLED`, `RAGA_BRIDGE_URL` (default `http://localhost:8000`), `RAGA_DEFAULT_PARSER` (`auto`|`docling`|`paddleocr`|`mineru`), `RAGA_TIMEOUT_MS` (default `30000`)
-
-### Persistence
-`DATABASE_PATH` (default `~/.cache/search-mcp/semantic-crawl/`)
-
-## RAG Pipeline (`src/rag/`)
-
-Core flow: **chunk → embed → BM25+ → RRF → top-K**
-
-- `pipeline.ts` — `prepareCorpus()`, `retrieveCorpus()`, `prepareAndRetrieve()`
-- `embedding.ts` — batched embedding client dispatches to configured provider
-- `profiles.ts` — `balanced`, `lexical-heavy`, `semantic-heavy`, `high-precision`, `fast`, `precision`, `recall`
-- `adapters/` — `text.ts` (web pages), `transcript.ts` (YouTube), `conversation.ts` (Reddit), `job.ts` (listings), `code.ts` (AST-aware)
-- `code/` — language detection, lazy tree-sitter WASM grammars, symbol extraction
-- `dedup.ts`, `constraints.ts`, `fusion.ts`, `rerank.ts`
-- `metrics.ts` — counters, histograms, gauges
-- `instrumentation.ts` — tracing spans, timed wrappers
-
-## Utilities (`src/utils/`)
-
-`bm25.ts`, `fusion.ts`, `rerank.ts` (ONNX cross-encoder), `corpusCache.ts` (SQLite), `crawlBudget.ts`, `githubCorpus.ts`, `lexicalConstraint.ts`, `sitemap.ts`, `url.ts`, `cookieBanner.ts`, `rescore.ts`, `extractionConfig.ts`, `extractionQuality.ts`, `llmSummarizer.ts`, `ragAnythingClient.ts` (TypeScript bridge client), `smartExtraction.ts`, `semanticResponse.ts`, `embedding.ts` (dispatch), `ollamaEmbedding.ts`, `transformersEmbedding.ts`, `renderRecovery.ts`
-
-## HTTP Safety (`src/httpGuards.ts`)
-
-- `assertSafeUrl()` — blocks private IPs, localhost, cloud metadata
-- `safeResponseText()` / `safeResponseJson()` — enforces 10MB response size limit
-- Sidecar/bridge URLs (operator-configured) bypass SSRF guards
-
-## Sidecars
-
-- `sidecar/embedding/` — FastAPI local embedding service
-- `sidecar/openai-embedding-proxy/` — OpenAI-compatible proxy to sidecar
-- `services/rag-anything-bridge/` — Python bridge for multimodal document extraction (PDFs, Office, scanned docs)
-
-## Error Handling
-
-- Unexpected errors → JSON-RPC protocol-level error (code + message)
-- Expected tool errors → `isError: true` + sanitized message in content
-- Errors are loud (never silently swallowed)
-
-## Key Constraints
-
-- TypeScript strict mode + `exactOptionalPropertyTypes`, `noUncheckedIndexedAccess`, `noUnusedLocals`, `noUnusedParameters`
-- ESM-only, local imports with `.js` extension
-- Zod v4 from `zod/v4`
-- `youtube-transcript` imported from ESM workaround path with `@ts-expect-error`
-- `rerank.ts` and `githubCorpus.ts` dynamically imported for fast startup
-- Corpus cache is persistent SQLite, survives restarts
+The findings have been written to `/Users/rhinesharar/search-mcp/context.md`.

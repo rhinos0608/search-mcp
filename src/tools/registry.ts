@@ -26,6 +26,11 @@ import {
    type ToolWrappedResponse,
 } from './response.js';
 
+/** Zod v4's discriminatedUnion requires a tuple of at least one discriminable ZodType. */
+// The schemas built by action families all include { action: z.literal(...) } so
+// they're $ZodTypeDiscriminable at runtime — the cast below is intentional.
+type ZodSchemaArray = [z.core.$ZodTypeDiscriminable<string>, ...z.core.$ZodTypeDiscriminable<string>[]];
+
 // ── Types ────────────────────────────────────────────────────────────────────
 
 /**
@@ -95,56 +100,88 @@ export function registerFamily(
    family: FamilyDefinition,
    cfg: SearchConfig,
 ): void {
+   const actionMap = new Map(family.actions.map((a) => [a.name, a]));
+
+   // Pre-compute config issues at registration time
+   const issueMap = new Map<string, string | null>();
    for (const action of family.actions) {
-      const toolName = `${family.name}_${action.name}`;
-      const issue = action.configIssue?.(cfg);
-
-      server.registerTool(
-         toolName,
-         {
-            description: `${family.description} — Action: ${action.name}. ${action.description}`,
-            inputSchema: action.schema,
-         },
-         async (rawArgs: unknown, extra: unknown) => {
-            if (issue) {
-               logger.warn({ tool: toolName, issue }, 'Action unavailable');
-               return errorResponse(new Error(`${toolName} unavailable: ${issue}`));
-            }
-
-            const start = Date.now();
-            logger.info({ tool: toolName }, `${toolName} invoked`);
-
-            try {
-               const result = await action.handler(
-                  rawArgs as Record<string, unknown>,
-                  cfg,
-                  extra,
-               );
-
-               const resultObj = result as Record<string, unknown>;
-               const isWrapped = resultObj.kind === 'wrapped';
-               const responseData = isWrapped ? resultObj.data : result;
-               const ws =
-                  isWrapped &&
-                     Array.isArray(resultObj.warnings) &&
-                     (resultObj.warnings as string[]).length > 0
-                     ? [...(resultObj.warnings as string[])]
-                     : undefined;
-
-               const full = makeResult(
-                  toolName,
-                  responseData,
-                  Date.now() - start,
-                  ws !== undefined ? { warnings: ws } : undefined,
-               );
-               return successResponse(full);
-            } catch (err: unknown) {
-               logger.error({ err, tool: toolName }, 'Action failed');
-               return errorResponse(err);
-            }
-         },
-      );
+      issueMap.set(action.name, action.configIssue?.(cfg) ?? null);
    }
+
+   // Build a single discriminated-union schema from all action schemas
+   const schemas = family.actions.map(
+      (a) => a.schema,
+   ) as unknown as ZodSchemaArray;
+   const unionSchema = z.discriminatedUnion('action', schemas);
+
+   server.registerTool(
+      family.name,
+      {
+         description: family.description,
+         inputSchema: unionSchema,
+      },
+      async (rawArgs: unknown, extra: unknown) => {
+         const args = rawArgs as Record<string, unknown>;
+         const actionName = args.action as string | undefined;
+
+         if (!actionName) {
+            return errorResponse(
+               new Error(
+                  `Missing "action" field. Available actions: ${family.actions.map((a) => a.name).join(', ')}`,
+               ),
+            );
+         }
+
+         const actionEntry = actionMap.get(actionName);
+         if (!actionEntry) {
+            return errorResponse(
+               new Error(
+                  `Unknown action "${actionName}". Available actions: ${family.actions.map((a) => a.name).join(', ')}`,
+               ),
+            );
+         }
+
+         const issue = issueMap.get(actionName);
+         if (issue) {
+            logger.warn({ tool: family.name, action: actionName, issue }, 'Action unavailable');
+            return errorResponse(
+               new Error(`${family.name}.${actionName} unavailable: ${issue}`),
+            );
+         }
+
+         const start = Date.now();
+         logger.info({ tool: family.name, action: actionName }, `${family.name}.${actionName} invoked`);
+
+         try {
+            const result = await actionEntry.handler(
+               rawArgs as Record<string, unknown>,
+               cfg,
+               extra,
+            );
+
+            const resultObj = result as Record<string, unknown>;
+            const isWrapped = resultObj.kind === 'wrapped';
+            const responseData = isWrapped ? resultObj.data : result;
+            const ws =
+               isWrapped &&
+                  Array.isArray(resultObj.warnings) &&
+                  (resultObj.warnings as string[]).length > 0
+                  ? [...(resultObj.warnings as string[])]
+                  : undefined;
+
+            const full = makeResult(
+               `${family.name}.${actionName}`,
+               responseData,
+               Date.now() - start,
+               ws !== undefined ? { warnings: ws } : undefined,
+            );
+            return successResponse(full);
+         } catch (err: unknown) {
+            logger.error({ err, tool: family.name, action: actionName }, 'Action failed');
+            return errorResponse(err);
+         }
+      },
+   );
 
    logger.info(
       { tool: family.name, actions: family.actions.map((a) => a.name) },

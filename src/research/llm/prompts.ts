@@ -451,11 +451,13 @@ You will receive:
 
 Plan a search strategy:
 - **queries**: 1-3 optimized search queries. Use keywords over full questions for keyword-based search. Vary phrasing to capture different perspectives.
-- **sourceTypes**: Which source types to search. Choose from: web, academic, github, reddit, hackernews, documentation, news, youtube. Always include at least 3 different source types for diversity. For ANY question, include reddit and youtube alongside web/academic — they provide practitioner perspectives and video content that complement traditional sources. For technical questions, also include github. For current events, include news.
+- **sourceTypes**: Which source types to search. Choose from: web, academic, github, reddit, hackernews, documentation, news, youtube, pubmed, wikipedia. Always include at least 3 different source types for diversity. For ANY question, include reddit and youtube alongside web/academic — they provide practitioner perspectives and video content that complement traditional sources. For medical or biology questions, include pubmed. For general background, include wikipedia. For technical questions, also include github. For current events, include news.
 
 Strategy tips:
 - ALWAYS include reddit and youtube as source types — practitioner discussions and video content provide perspectives that web search alone misses
 - For technical questions: include academic, documentation, and github sources
+- For medical/scientific questions: include pubmed and academic sources
+- For background/encyclopedic knowledge: include wikipedia and web sources
 - For current events: include news, hackernews, and reddit alongside web
 - For comparative questions: search for each alternative separately, include reddit for real user comparisons
 - For how-to questions: include documentation, github, and stackoverflow
@@ -513,12 +515,15 @@ If the query is decision-oriented, provide actionable recommendations.
 **Critical rules**:
 - Write narrative prose, not bullet points. This should read like a research brief.
 - Use [Source N] inline citations throughout. The source list is provided. Every factual claim MUST have at least one citation.
+- **CITATION INTEGRITY**: You MUST only cite a source [N] if a Finding object explicitly lists that source in its sourceIds. The findings array includes sourceIds for each claim — cross-reference findings with their sourceIds before assigning [Source N] labels. Do NOT cite a source just because it is in the source list; cite only sources that back specific findings.
 - Be explicit about contradictions — do not paper them over.
 - Flag when a key claim rests on a single source, a promotional source, or surface-level content.
 - Do NOT fabricate dates, statistics, or quotes. Only use what is present in the findings.
 - If coverage is thin for certain sub-questions, state this clearly rather than implying comprehensive coverage.
+- **DEGRADATION**: If findingCount is 0, you MUST start the executive summary with "[Source-note synthesis only]" and explicitly state that the report is based on source snippets and metadata, not on verified extracted evidence. Do not present as completed deep research.
 - **IMPORTANT — Source counting**: The research state provides totalSourceCount (total individual sources), sourceTypeCount (distinct types like youtube, web, reddit), and sourceDiversity (per-type breakdown). When reporting sourceCount in your output JSON, always use totalSourceCount — do NOT report sourceTypeCount as the source count. For example, if there are 18 individual sources across 3 source types, sourceCount must be 18.
 - **CITATION ACCURACY**: Only cite Source N if you are confident that source actually supports the claim. The findings array includes sourceIds that map to specific sources via the source list. Cross-reference findings with their sourceIds before assigning [Source N] labels. If a finding has no sourceIds (unattributed), mark it as speculative rather than inventing a citation.
+- **SOURCE QUALITY GATING**: Prefer citing primary sources (tier 1: arXiv, official repos, academic publishers, official research/engineering blogs). Downrank or avoid citing social posts, Medium clones, Reddit, random YouTube, homepages, event calendars, and SEO blogs unless they are the only source for a specific community reaction claim.
 
 Output ONLY valid JSON with EXACTLY this structure (no markdown fences, no extra text):
 {
@@ -611,6 +616,67 @@ Output ONLY valid JSON with EXACTLY this structure:
       "q": "optimized search query",
       "tbs": "qdr:y",
       "location": "optional location"
+    }
+  ]
+}`;
+
+// ── Orchestrator: Contradiction Scanner ──────────────────────────────────
+
+/**
+ * System prompt for the LLM-powered contradiction scanner.
+ *
+ * Given a batch of findings grouped by sub-question, scans for semantic
+ * contradictions that the rule-based detector would miss.
+ *
+ * Runs during gap loop iterations (every 2nd loop) with batched input.
+ *
+ * Input: findings grouped by sub-question (up to 20 findings per batch)
+ * Output: `{ contradictions: [{ claimA, claimB, contradictionType, explanation }] }`
+ */
+export const ORCHESTRATOR_CONTRADICTION_SCAN = `You are a semantic contradiction detector. Your role is to scan a set of research findings grouped by sub-question and identify contradictions that are NOT surface-level keyword mismatches.
+
+Rule-based detectors already catch these cases:
+- Negation contradictions ("X improves Y" vs "X does not improve Y")
+- Directional contradictions ("X increases" vs "X decreases")
+- Numerical disagreements (different benchmark scores for the same thing)
+- Scope mismatches ("always" vs "never")
+
+Your job is to find the DEEPER contradictions:
+
+1. **Implicit contradiction** — Two claims don't directly negate each other but lead to incompatible conclusions. Example: "Model A is state-of-the-art for image classification" vs "Model B outperforms all existing approaches on ImageNet by 5%" — both can't be true simultaneously.
+
+2. **Terminology mismatch** — Two claims disagree on the same underlying concept but use different terminology. Example: "The system uses a transformer encoder" vs "The architecture is based on attention layers" — these may be the same thing or subtly different.
+
+3. **Context/version mismatch** — Claims may disagree because they're about different versions, configurations, or contexts. Example: "This API has a 100ms latency" vs "This API has 500ms latency" — could be cold start vs warm, different endpoints, or different measurement conditions.
+
+4. **Perspective conflict** — Claims from different source perspectives that clash. Example: vendor claiming "90% customer satisfaction" vs community reporting "frequent outages and poor support".
+
+5. **Qualified vs absolute** — One claim makes a nuanced statement while another makes an absolute one. Example: "Feature X is generally reliable" vs "Feature X should never be used in production".
+
+For each contradiction found, provide:
+- **claimA**: The first conflicting claim text (use the exact text from findings)
+- **claimB**: The second conflicting claim text (use the exact text from findings)
+- **contradictionType**: Use the most specific type from this list:
+  factual_disagreement | benchmark_disagreement | terminology_mismatch | time_version_mismatch | scope_mismatch | implementation_specific | opinion_tradeoff | vendor_vs_independent | academic_vs_practitioner
+- **explanation**: Why these claims conflict (1-2 sentences). Be specific — cite what aspect conflicts.
+- **followUpSearchRecommended**: Optional suggested search query to help resolve the contradiction
+
+**Critical rules**:
+- Only flag REAL contradictions. Two findings that are about different things, different systems, or different time periods are NOT contradictions.
+- If you're uncertain whether two claims truly conflict, explain the uncertainty in the explanation and set resolutionStatus to "unresolved".
+- Do NOT flag contradictions that are already recorded in the existing contradiction set provided.
+- Skip contradictions that are purely about different preferences or opinions unless they represent fundamentally incompatible claims.
+- Each finding should appear in at most 2 contradictions (avoid combinatorial explosion).
+
+Output ONLY valid JSON with EXACTLY this structure (no markdown fences, no extra text):
+{
+  "contradictions": [
+    {
+      "claimA": "exact claim text from finding A",
+      "claimB": "exact claim text from finding B",
+      "contradictionType": "factual_disagreement",
+      "explanation": "Why these claims conflict",
+      "followUpSearchRecommended": "optional search to help resolve"
     }
   ]
 }`;

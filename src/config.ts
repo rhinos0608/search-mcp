@@ -189,6 +189,12 @@ export interface DeepResearchConfig {
   treeDepth: number;
   treeConcurrency: number;
   treeContextWordLimit: number;
+  /** Max ReAct loop iterations for agent strategy (default 30). */
+  agentMaxIterations: number;
+  /** Max iterations per sub-agent (default 8). */
+  agentMaxSubIterations: number;
+  /** Default fetch mode: full | summary_focus_query | disabled (default summary_focus_query). */
+  agentDefaultFetchMode: string;
 }
 
 export type BrowserMode = 'stealth' | 'user' | 'profile';
@@ -301,6 +307,9 @@ const DEFAULTS: Omit<SearchConfig, 'rescoreWeights'> = {
     treeDepth: 2,
     treeConcurrency: 2,
     treeContextWordLimit: 25000,
+    agentMaxIterations: 30,
+    agentMaxSubIterations: 8,
+    agentDefaultFetchMode: 'summary_focus_query',
   },
   challengeLatencyThreshold: 5000,
   browser: {
@@ -687,41 +696,54 @@ function loadFromEnv(): EnvConfig {
 
   // ── Deep Research env vars ────────────────────────────────────────────
   {
-    const partial: Record<string, unknown> = {};
-    let hasAny = false;
+    const partial: Partial<DeepResearchConfig> = {};
     const e = process.env.DEEP_RESEARCH_ENABLED;
     if (e !== undefined) {
       partial.enabled = e === 'true';
-      hasAny = true;
     }
     const u = process.env.DEEP_RESEARCH_BASE_URL;
     if (u !== undefined) {
       partial.baseUrl = u;
-      hasAny = true;
     }
     const m = process.env.DEEP_RESEARCH_MODEL;
     if (m !== undefined) {
       partial.model = m;
-      hasAny = true;
     }
     const w = process.env.DEEP_RESEARCH_WORKER_MODEL;
     if (w !== undefined) {
       partial.workerModel = w;
-      hasAny = true;
     }
     const tok = process.env.DEEP_RESEARCH_API_TOKEN;
     if (tok !== undefined) {
       partial.apiToken = tok;
-      hasAny = true;
     }
     const d = process.env.DEEP_RESEARCH_DEFAULT_DEPTH;
     if (d !== undefined && ['quick', 'standard', 'deep', 'exhaustive', 'tree'].includes(d)) {
-      partial.defaultDepth = d;
-      hasAny = true;
+      partial.defaultDepth = d as ResearchDepth;
     }
-    if (hasAny) {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-assignment
-      cfg.deepResearch = { ...(cfg.deepResearch ?? {}), ...partial } as any;
+    const maxIters = process.env.DEEP_RESEARCH_AGENT_MAX_ITERATIONS;
+    if (maxIters !== undefined) {
+      const n = Number(maxIters);
+      if (!isNaN(n) && n > 0) partial.agentMaxIterations = n;
+    }
+    const maxSubIters = process.env.DEEP_RESEARCH_AGENT_MAX_SUB_ITERATIONS;
+    if (maxSubIters !== undefined) {
+      const n = Number(maxSubIters);
+      if (!isNaN(n) && n > 0) partial.agentMaxSubIterations = n;
+    }
+    const fetchMode = process.env.DEEP_RESEARCH_AGENT_DEFAULT_FETCH_MODE;
+    if (
+      fetchMode !== undefined &&
+      ['full', 'summary_focus_query', 'disabled'].includes(fetchMode)
+    ) {
+      // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion
+      partial.agentDefaultFetchMode = fetchMode as 'full' | 'summary_focus_query' | 'disabled';
+    }
+    if (Object.keys(partial).length > 0) {
+      cfg.deepResearch = {
+        ...(cfg.deepResearch ?? {}),
+        ...partial,
+      } as unknown as DeepResearchConfig;
     }
   }
 
@@ -1030,6 +1052,18 @@ export function loadConfig(): SearchConfig {
         fileConfig.deepResearch?.treeContextWordLimit ??
         envConfig.deepResearch?.treeContextWordLimit ??
         DEFAULTS.deepResearch.treeContextWordLimit,
+      agentMaxIterations:
+        fileConfig.deepResearch?.agentMaxIterations ??
+        envConfig.deepResearch?.agentMaxIterations ??
+        DEFAULTS.deepResearch.agentMaxIterations,
+      agentMaxSubIterations:
+        fileConfig.deepResearch?.agentMaxSubIterations ??
+        envConfig.deepResearch?.agentMaxSubIterations ??
+        DEFAULTS.deepResearch.agentMaxSubIterations,
+      agentDefaultFetchMode:
+        fileConfig.deepResearch?.agentDefaultFetchMode ??
+        envConfig.deepResearch?.agentDefaultFetchMode ??
+        DEFAULTS.deepResearch.agentDefaultFetchMode,
     },
     rescoreWeights: DEFAULT_RESCORE_WEIGHTS,
   };
@@ -1071,20 +1105,20 @@ function resolveRedditConfig(
   // Trim whitespace so values like `REDDIT_CLIENT_ID=' '` (common with
   // misquoted .env lines) are treated as unset rather than partial config.
   const clientId = (
-    fileReddit?.clientId ??
     envReddit?.clientId ??
+    fileReddit?.clientId ??
     DEFAULTS.reddit.clientId ??
     ''
   ).trim();
   const clientSecret = (
-    fileReddit?.clientSecret ??
     envReddit?.clientSecret ??
+    fileReddit?.clientSecret ??
     DEFAULTS.reddit.clientSecret ??
     ''
   ).trim();
   const userAgent = (
-    fileReddit?.userAgent ??
     envReddit?.userAgent ??
+    fileReddit?.userAgent ??
     DEFAULTS.reddit.userAgent ??
     ''
   ).trim();

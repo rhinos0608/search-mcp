@@ -1,0 +1,546 @@
+/**
+ * AgentStrategy — LLM-driven ReAct agent for deep research.
+ *
+ * Uses THOUGHT/ACTION/ARGUMENTS/ANSWER format for tool-calling.
+ * Falls back to collector-based synthesis on loop exhaustion or LLM failure.
+ */
+
+import { curateEvidenceSources } from '../sourceQuality.js';
+import { type ResearchStateEngine } from '../state.js';
+import { randomUUID } from 'node:crypto';
+import { logger } from '../../logger.js';
+import type { ResearchStrategy, StrategyContext } from './types.js';
+import type { AgentTool, ToolResult } from './agentTools.js';
+import { buildAgentTools, describeTools } from './agentTools.js';
+import { CitationCollector } from '../citationCollector.js';
+import type { ResearchResult, ResearchReport, ResearchProgress } from '../types.js';
+
+// ── Constants ────────────────────────────────────────────────────────────
+
+const FALLBACK_SYNTHESIS_MAX_TOKENS = 4000;
+
+// ── Balanced-brace JSON extractor ───────────────────────────────────────
+
+/**
+ * Extracts the full JSON substring following "ARGUMENTS:" by tracking
+ * brace depth. Handles nested braces, strings with escapes, and quoted
+ * braces correctly. Returns the JSON string or null if not found.
+ */
+function extractJsonArg(text: string): string | null {
+  const idx = text.indexOf('ARGUMENTS:');
+  if (idx === -1) return null;
+  let i = idx + 'ARGUMENTS:'.length;
+  while (i < text.length) {
+    const c = text[i];
+    if (c === undefined || !/\s/.test(c)) break;
+    i++;
+  }
+  if (i >= text.length || text[i] !== '{') return null;
+  let depth = 0;
+  const start = i;
+  while (i < text.length) {
+    const ch = text[i];
+    if (ch === undefined) break;
+    if (ch === '{') depth++;
+    else if (ch === '}') {
+      depth--;
+      if (depth === 0) return text.slice(start, i + 1);
+    } else if (ch === '"') {
+      i++;
+      while (i < text.length) {
+        const qc = text[i];
+        if (qc === undefined || qc === '"') break;
+        if (qc === '\\') i++;
+        i++;
+      }
+    }
+    i++;
+  }
+  return null;
+}
+
+// ── Response parser ──────────────────────────────────────────────────────
+
+export interface ParsedResponse {
+  type: 'action' | 'answer' | 'error';
+  thought: string;
+  tool?: string;
+  args?: Record<string, unknown>;
+  content?: string;
+  message?: string;
+  raw?: string;
+}
+
+export function parseAgentResponse(text: string): ParsedResponse {
+  const thoughtMatch = /THOUGHT:\s*([\s\S]*?)(?=\n(?:ACTION|ANSWER|$))/i.exec(text);
+  const actionMatch = /ACTION:\s*(\S+)/i.exec(text);
+  const argsJson = extractJsonArg(text);
+  const answerMatch = /ANSWER:\s*([\s\S]*)/i.exec(text);
+
+  if (answerMatch) {
+    return {
+      type: 'answer',
+      content: (answerMatch[1] ?? '').trim(),
+      thought: thoughtMatch?.[1]?.trim() ?? '',
+      raw: text,
+    };
+  }
+
+  if (actionMatch && argsJson) {
+    let args: Record<string, unknown>;
+    try {
+      args = JSON.parse(argsJson) as Record<string, unknown>;
+    } catch {
+      return {
+        type: 'error',
+        message: 'Invalid JSON in ARGUMENTS. Use valid JSON: {"key": "value"}',
+        thought: thoughtMatch?.[1]?.trim() ?? '',
+        raw: text,
+      };
+    }
+    return {
+      type: 'action',
+      thought: thoughtMatch?.[1]?.trim() ?? '',
+      tool: (actionMatch[1] ?? '').trim(),
+      args,
+      raw: text,
+    };
+  }
+
+  if (actionMatch && !argsJson) {
+    return {
+      type: 'error',
+      message:
+        'ACTION specified but no ARGUMENTS found. Format: ACTION: tool_name\nARGUMENTS: {"key": "value"}',
+      thought: thoughtMatch?.[1]?.trim() ?? '',
+      raw: text,
+    };
+  }
+
+  return {
+    type: 'error',
+    message: 'Could not parse response. Use THOUGHT/ACTION/ARGUMENTS or ANSWER format.',
+    thought: thoughtMatch?.[1]?.trim() ?? '',
+    content: text,
+    raw: text,
+  };
+}
+
+// ── Agent history entry ──────────────────────────────────────────────────
+
+interface AgentHistoryEntry {
+  role: 'assistant' | 'tool' | 'system';
+  thought?: string | undefined;
+  action?: string | undefined;
+  args?: Record<string, unknown> | undefined;
+  tool?: string | undefined;
+  content?: string | undefined;
+  error?: string | undefined;
+}
+
+// ── AgentStrategy ────────────────────────────────────────────────────────
+
+export class AgentStrategy implements ResearchStrategy {
+  readonly name = 'agent';
+  readonly description =
+    'LLM-driven ReAct agent with tool-calling. Adapts research approach based on findings.';
+  readonly requiresLlm = true;
+
+  private maxIterations: number;
+  private tools: AgentTool[];
+  private collector: CitationCollector;
+  private history: AgentHistoryEntry[] = [];
+
+  constructor(ctx: StrategyContext, collector?: CitationCollector) {
+    this.maxIterations = ctx.config.agentMaxIterations;
+    this.collector = collector ?? new CitationCollector();
+    this.tools = buildAgentTools(ctx, this.collector);
+  }
+
+  async analyze(query: string, ctx: StrategyContext): Promise<ResearchResult> {
+    void ctx.onProgress?.(5, `Agent starting research: ${query.slice(0, 80)}`, 'agent_init', {
+      classification: 'explainer',
+      subQuestionCount: ctx.state.getSubQuestions().length,
+      sourceCount: 0,
+      findingCount: 0,
+    });
+
+    const systemPrompt = this.buildSystemPrompt();
+    let iteration = 0;
+    let finalAnswer: string | null = null;
+
+    while (iteration < this.maxIterations) {
+      if (ctx.abortSignal?.aborted) {
+        logger.info('Agent aborted');
+        break;
+      }
+      iteration++;
+
+      try {
+        const response = await this.callLlm(systemPrompt, query, ctx);
+        if (response === null) {
+          logger.warn({ iteration }, 'LLM call returned null, breaking loop');
+          break;
+        }
+
+        const parsed = parseAgentResponse(response);
+
+        if (parsed.type === 'answer') {
+          finalAnswer = parsed.content!;
+          logger.info({ iteration }, 'Agent produced final answer');
+          break;
+        }
+
+        if (parsed.type === 'action' && parsed.tool) {
+          const toolResult = await this.executeTool(parsed.tool, parsed.args ?? {});
+          this.history.push({
+            role: 'assistant',
+            thought: parsed.thought || undefined,
+            action: parsed.tool,
+            args: parsed.args,
+          });
+          this.history.push({
+            role: 'tool',
+            tool: parsed.tool,
+            content: toolResult.content.slice(0, 8000),
+          });
+
+          const progress = 5 + Math.round((iteration / this.maxIterations) * 85);
+          void ctx.onProgress?.(
+            progress,
+            `Agent step ${String(iteration)}/${String(this.maxIterations)}: ${parsed.tool}`,
+            'agent_step',
+            {
+              sourceCount: this.collector.count,
+              findingCount: ctx.state.findingCount(),
+            },
+          );
+          continue;
+        }
+
+        if (parsed.type === 'error') {
+          this.history.push({
+            role: 'assistant',
+            thought: parsed.thought || undefined,
+            content: response, // Keep raw response for synthesis & history
+            error: parsed.message,
+          });
+          logger.warn({ iteration, error: parsed.message }, 'Agent parse error');
+
+          // Record as observation in state diary to ensure it reaches final synthesis
+          if (response.trim().length > 50) {
+            ctx.state.appendDiary(`[Agent Observation - Iteration ${String(iteration)}]: ${response.trim()}`);
+          }
+        }
+      } catch (err) {
+        logger.error({ err, iteration }, 'Agent loop error');
+        this.history.push({
+          role: 'system',
+          error: `Tool error: ${err instanceof Error ? err.message : String(err)}`,
+        });
+      }
+    }
+
+    // ── Fallback synthesis ────────────────────────────────────────────
+    if (!finalAnswer) {
+      logger.info(
+        { iterations: iteration, sources: this.collector.count },
+        'Agent max iterations exceeded, falling back to synthesis',
+      );
+      finalAnswer = await this.synthesizeFallback(query, ctx);
+    }
+
+    const answerWithSources = this.formatFinalAnswer(finalAnswer);
+
+    // Sync collector sources to state to enable findings attribution
+    const citations = this.collector.getAll();
+    const sourceMap = new Map<number, string>(); // citation index -> state source id
+
+    for (const citation of citations) {
+      const existing = ctx.state.getSources().find((s) => s.url === citation.url);
+      if (existing) {
+        sourceMap.set(citation.index, existing.id);
+        continue;
+      }
+
+      let domain: string;
+      try {
+        domain = new URL(citation.url).hostname.replace(/^www\./, '');
+      } catch {
+        domain = citation.url;
+      }
+      const sourceId = ctx.state.addSource({
+        id: randomUUID().slice(0, 12),
+        title: citation.title,
+        url: citation.url,
+        sourceType: citation.sourceType as any,
+        domain,
+        accessDate: new Date().toISOString(),
+        isPrimary: false, // Will be updated by classifySourceTier if used
+        relevantSubQuestions: [],
+        extractionStatus: 'extracted',
+        subQuestionId: '',
+      });
+      sourceMap.set(citation.index, sourceId);
+    }
+
+    // Extract findings from final answer and populate state
+    this.extractFindingsFromAnswer(finalAnswer, ctx.state, sourceMap);
+
+    const sourceTypeCounts = new Map<string, number>();
+    for (const citation of citations) {
+      sourceTypeCounts.set(
+        citation.sourceType,
+        (sourceTypeCounts.get(citation.sourceType) ?? 0) + 1,
+      );
+    }
+
+    void ctx.onProgress?.(95, 'Agent research complete', 'agent_complete');
+
+    // Build ResearchResult
+    const report: ResearchReport = {
+      query,
+      classification: 'explainer',
+      depth: ctx.depth,
+      degradationMode: ctx.state.findingCount() === 0 ? ('source_note_synthesis' as const) : ('deep' as const),
+      executiveSummary: answerWithSources.slice(0, 500),
+      narrativeMarkdown: answerWithSources,
+      themes: ctx.state.getState().findings.length > 0 ? [{ title: 'Key Findings', narrative: 'Extracted results from agent research.', findings: ctx.state.getFindings().map(f => f.claim) }] : [],
+      contradictions: ctx.state.getState().contradictions,
+      uncertainties: ctx.state.getState().openQuestions,
+      sourceNotes: this.collector.count > 0 ? [this.collector.formatSourceList()] : [],
+      openQuestions: [],
+      limitations: ['Agent-driven research — limited by tool availability and iteration budget.'],
+      sourceCount: this.collector.count,
+      findingCount: ctx.state.findingCount(),
+      sourceTypeCount: sourceTypeCounts.size,
+      sourceDiversity: [...sourceTypeCounts.entries()].map(([type, count]) => ({ type, count })),
+      evidenceSources: curateEvidenceSources(ctx.state.getSources(), ctx.state.getFindings()).map((c, i) => ({
+        index: i + 1,
+        title: c.source.title,
+        url: c.source.url,
+        sourceType: c.source.sourceType,
+        tier: c.tier,
+        domain: c.source.domain,
+      })),
+    };
+
+    const timeline: ResearchProgress[] = [{ phase: 'complete' }];
+
+    return { report, timeline };
+  }
+
+  async close(): Promise<void> {
+    this.collector.reset();
+    this.history = [];
+  }
+
+  // ── Private ─────────────────────────────────────────────────────────
+
+  private buildSystemPrompt(): string {
+    const today = new Date().toISOString().slice(0, 10);
+    const toolDesc = describeTools(this.tools);
+
+    return `You are a thorough research assistant. Today's date: ${today}.
+
+CRITICAL RULES:
+1. You MUST search for information before answering. Do NOT answer from memory.
+2. Use tools to gather information from multiple sources.
+3. When you have enough information, provide a comprehensive ANSWER.
+
+RESPONSE FORMAT:
+To use a tool:
+THOUGHT: <your reasoning about what to do next>
+ACTION: <tool_name>
+ARGUMENTS: {"key": "value", ...}
+
+To provide your final answer:
+THOUGHT: <brief summary of what you found>
+ANSWER: <comprehensive answer with source citations like [1], [2]>
+
+Available tools:
+${toolDesc}
+
+Search strategy tips:
+- Start broad, then narrow down
+- Verify claims across multiple sources when possible
+- When you have 5+ quality sources, consider synthesizing your answer`;
+  }
+
+  private extractFindingsFromAnswer(
+    answer: string,
+    state: ResearchStateEngine,
+    sourceMap: Map<number, string>,
+  ): void {
+    // Simple sentence splitter that looks for citations [N]
+    // We regex for sentences containing [N]
+    const citationRegex = /\[(\d+)\]/g;
+    const sentences = answer.split(/(?<=[.!?])\s+/);
+
+    for (const sentence of sentences) {
+      const trimmed = sentence.trim();
+      if (!trimmed) continue;
+
+      const matches = [...trimmed.matchAll(citationRegex)];
+      if (matches.length === 0) continue;
+
+      const sourceIds = matches
+        .map((m) => sourceMap.get(parseInt(m[1] ?? '0', 10)))
+        .filter((id): id is string => !!id);
+
+      if (sourceIds.length === 0) continue;
+
+      state.addFinding({
+        claim: trimmed,
+        normalizedClaim: trimmed.toLowerCase(),
+        sourceIds,
+        subQuestionIds: [],
+        evidenceSummary: trimmed,
+        evidenceDirectness: 'direct' as const,
+        freshnessSensitive: false,
+        lastUpdated: new Date().toISOString(),
+        claimType: 'primary' as const,
+      });
+    }
+  }
+
+  private async callLlm(
+    systemPrompt: string,
+    query: string,
+    ctx: StrategyContext,
+  ): Promise<string | null> {
+    if (!ctx.llm) return null;
+
+    const messages: { role: 'system' | 'user' | 'assistant'; content: string }[] = [
+      { role: 'system', content: systemPrompt },
+    ];
+
+    // Add recent history (last 8 entries)
+    const recentHistory = this.history.slice(-8);
+    for (const entry of recentHistory) {
+      if (entry.role === 'assistant') {
+        if (entry.action) {
+          messages.push({
+            role: 'assistant',
+            content: `THOUGHT: ${entry.thought ?? ''}\nACTION: ${entry.action ?? ''}\nARGUMENTS: ${JSON.stringify(entry.args ?? {})}`,
+          });
+        } else if (entry.content) {
+          // Preserve unparsed/malformed assistant responses in history
+          messages.push({
+            role: 'assistant',
+            content: entry.content,
+          });
+        } else if (entry.thought) {
+          messages.push({
+            role: 'assistant',
+            content: `THOUGHT: ${entry.thought}`,
+          });
+        }
+      } else if (entry.role === 'tool') {
+        messages.push({
+          role: 'user',
+          content: `[Tool result from ${entry.tool ?? 'unknown'}]:\n${entry.content ?? ''}`,
+        });
+      } else if (entry.error) {
+        messages.push({
+          role: 'user',
+          content: `[Error]: ${entry.error}`,
+        });
+      }
+    }
+
+    // Add current prompt
+    if (this.history.length === 0) {
+      messages.push({
+        role: 'user',
+        content: `Research question: ${query}\n\nBegin by searching for information. Use the tools available to you.`,
+      });
+    } else {
+      messages.push({
+        role: 'user',
+        content: 'Continue your research. If you have enough information, provide your ANSWER.',
+      });
+    }
+
+    const resp = await ctx.llm.callOrchestrator({
+      messages,
+      temperature: 0.7,
+      maxTokens: 2000,
+      ...(ctx.abortSignal ? { signal: ctx.abortSignal } : {}),
+    });
+
+    if (!resp.success) {
+      logger.warn({ error: resp.error }, 'LLM call failed');
+      return null;
+    }
+
+    return resp.content;
+  }
+
+  private async executeTool(name: string, args: Record<string, unknown>): Promise<ToolResult> {
+    const tool = this.tools.find((t) => t.name === name);
+    if (!tool) {
+      const available = this.tools.map((t) => t.name).join(', ');
+      return {
+        content: `Unknown tool: ${name}. Available: ${available}`,
+        error: 'unknown tool',
+      };
+    }
+
+    logger.info({ tool: name, args }, 'Agent executing tool');
+    try {
+      return await tool.execute(args);
+    } catch (err) {
+      return {
+        content: `Tool ${name} failed: ${err instanceof Error ? err.message : String(err)}`,
+        error: 'tool error',
+      };
+    }
+  }
+
+  private async synthesizeFallback(query: string, ctx: StrategyContext): Promise<string> {
+    const sources = this.collector.formatForLlm();
+
+    // Include any intermediate insights from malformed responses or deep thoughts
+    const intermediateInsights = this.history
+      .filter((h) => h.role === 'assistant' && !h.action && (h.content || h.thought))
+      .map((h) => h.content || h.thought)
+      .join('\n\n');
+
+    if (!ctx.llm) {
+      return `Research could not be completed without an LLM. Found ${String(this.collector.count)} sources:\n\n${sources}${intermediateInsights ? `\n\nIntermediate insights:\n${intermediateInsights}` : ''}`;
+    }
+
+    const insightPrompt = intermediateInsights
+      ? `\n\nIntermediate research observations:\n${intermediateInsights}`
+      : '';
+
+    const resp = await ctx.llm.callOrchestrator({
+      messages: [
+        {
+          role: 'system',
+          content:
+            'You synthesize research findings into a comprehensive answer. Use source citations like [1], [2].',
+        },
+        {
+          role: 'user',
+          content: `Research question: ${query}\n\nCollected sources:\n${sources}${insightPrompt}\n\nSynthesize a comprehensive answer from these sources. Cite sources using [N] notation.`,
+        },
+      ],
+      temperature: 0.5,
+      maxTokens: FALLBACK_SYNTHESIS_MAX_TOKENS,
+    });
+
+    if (!resp.success || !resp.content) {
+      return `Research incomplete. Found ${String(this.collector.count)} sources but could not synthesize.\n\n${sources}`;
+    }
+
+    return resp.content;
+  }
+
+  private formatFinalAnswer(answer: string): string {
+    const sources = this.collector.formatSourceList();
+    if (!sources) return answer;
+    return `${answer}\n\n---\nSources:\n${sources}`;
+  }
+}

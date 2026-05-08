@@ -15,7 +15,7 @@
 | **Semantic RAG** | Crawl, YouTube, Reddit, Jobs, GitHub code with BM25+embedding+RRF |
 | **GitHub** | Family: `repo`, `file`, `tree`, `search`, `trending`, `code_search` |
 | **Video/Social** | `youtube` (search/transcript/semantic), `reddit` (search/comments/semantic), Twitter/X |
-| **Research** | `research` (academic/arxiv/hackernews/stackoverflow), `deep_research` (multi-phase LLM orchestration with job/poll protocol) |
+| **Research** | `research` (academic/arxiv/hackernews/stackoverflow/semantic_scholar), `deep_research` (agent/pipeline/tree via job-poll), `search_pubmed`, `search_wikipedia`, `fetch_focus` |
 | **Packages** | `packages` (npm/pypi) |
 | **Jobs** | SEEK, Indeed, Jora with structured extraction |
 | **Specialist** | Podcasts, Product Hunt, Health check |
@@ -82,6 +82,11 @@ docker compose up -d
 | `DEEP_RESEARCH_MODEL` | Orchestrator model (e.g. `gpt-4o`, `claude-sonnet-4`) |
 | `DEEP_RESEARCH_WORKER_MODEL` | Worker model (e.g. `gpt-4o-mini`, `llama3`) |
 | `DEEP_RESEARCH_DEFAULT_DEPTH` | Default depth profile: `quick`, `standard`, `deep`, `exhaustive`, `tree` |
+| `DEEP_RESEARCH_AGENT_MAX_ITERATIONS` | Max top-level agent ReAct steps (default `30`) |
+| `DEEP_RESEARCH_AGENT_MAX_SUB_ITERATIONS` | Max per-subtopic agent steps (default `8`) |
+| `DEEP_RESEARCH_AGENT_DEFAULT_FETCH_MODE` | Agent fetch mode (`full`, `summary_focus_query`, `disabled`) |
+| `PUBMED_EMAIL` | Contact email sent to NCBI E-utilities (recommended for `search_pubmed`) |
+| `PUBMED_API_KEY` | Optional PubMed API key for higher rate limits |
 
 ## Docker Deployment
 

@@ -228,6 +228,60 @@ export class StateAuditor {
          }
       }
 
+      // ── 8. Category mismatch ──────────────────────────────────────────────
+      // Heuristic: detect findings whose content suggests a different category
+      // than what they're filed under. e.g., TTT labeled as 'architecture'
+      // when it's really 'training_paradigm', DeepVerifier is 'inference_framework',
+      // Genie 3 is a 'world_model'.
+      const categoryRules: { pattern: RegExp; expectedCategory: string; description: string }[] = [
+         { pattern: /\b(TTT|test[- ]?time[- ]?train|train[- ]?time[- ]?train|TTT[- ]?E2E|TTT-MLP)\b/i, expectedCategory: 'training_paradigm', description: 'TTT/Test-Time-Train approaches are training/inference paradigms, not plain architectures' },
+         { pattern: /\b(DeepVerifier|verif[iy]|verification[- /]inference|self[- ]?verify)\b/i, expectedCategory: 'inference_framework', description: 'DeepVerifier/verification approaches are inference frameworks, not plain architectures' },
+         { pattern: /\b(Genie\s*3|world[- ]?model|learned[- ]?simulator|interactive[- ]?sim)\b/i, expectedCategory: 'world_model', description: 'Genie 3/world model approaches are world models, not plain architectures' },
+         { pattern: /\b(Mamba|SSM|state[- ]?space[- ]?model|linear[- ]?attention|RWKV|RetNet)\b/i, expectedCategory: 'architecture', description: 'SSM/linear alternatives are architecture topics' },
+         { pattern: /\b(LoRA|fine[- ]?tun|adapt|PEFT|QLoRA|low[- ]?rank)\b/i, expectedCategory: 'training_paradigm', description: 'Adaptation/fine-tuning approaches are training paradigms' },
+      ];
+
+      for (const f of findings) {
+         const claim = f.claim;
+         const sqTexts = f.subQuestionIds
+            .map((id) => subQuestions.find((sq) => sq.id === id)?.text ?? '')
+            .join(' ');
+         const context = `${claim} ${sqTexts}`;
+
+         for (const rule of categoryRules) {
+            if (rule.pattern.test(context)) {
+               // Check if this finding's sub-question classification matches
+               const sqClassifications = f.subQuestionIds
+                  .map((id) => subQuestions.find((sq) => sq.id === id)?.classification ?? '')
+                  .filter(Boolean);
+               const isMisaligned = sqClassifications.length > 0 &&
+                  !sqClassifications.some((c) =>
+                     c === rule.expectedCategory ||
+                     c.includes(rule.expectedCategory.split('_')[0] ?? ''));
+
+               if (isMisaligned || sqClassifications.length === 0) {
+                  issues.push({
+                     type: 'category_mismatch',
+                     severity: 'info',
+                     description: `Finding "${truncate(claim)}" appears to be about ${rule.expectedCategory.replace('_', '/')}, but is classified under ${sqClassifications.join(', ') || 'no classification'}. ${rule.description}`,
+                     findingId: f.id,
+                     suggestedCorrection: `Reclassify as '${rule.expectedCategory}'`,
+                  });
+               }
+               break; // Only flag once per finding
+            }
+         }
+      }
+
+      // ── 9. Zero-findings degradation ────────────────────────────────────
+      if (findings.length === 0 && sources.length > 0) {
+         issues.push({
+            type: 'zero_findings_degradation',
+            severity: 'warning',
+            description: `No findings were extracted despite ${String(sources.length)} sources being discovered. The report will be a source-note synthesis only — treat claims with lower confidence.`,
+         });
+      }
+
       // ── Assemble report ────────────────────────────────────────────────
 
       // Sort: errors first, then warnings, then info; stable by type within tier

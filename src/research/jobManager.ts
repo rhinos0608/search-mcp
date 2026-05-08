@@ -36,6 +36,7 @@ export interface ResearchJobParams {
    query: string;
    depth: ResearchDepth;
    maxTimeMs: number | undefined;
+   strategy?: string;
 }
 
 /** Bounded partial state available before research completes. */
@@ -46,6 +47,8 @@ export interface ResearchJobPartial {
    /** Total individual sources (not source types). */
    sourceTypeCount: number | undefined;
    findingCount: number | undefined;
+   gapLoopCount: number | undefined;
+   strategy?: string;
 }
 
 /** Snapshot returned by poll. Contains bounded partials, full result only when complete. */
@@ -53,6 +56,7 @@ export interface ResearchJobSnapshot {
    jobId: string;
    query: string;
    depth: ResearchDepth;
+   strategy: string | undefined;
    status: JobStatus;
    progress: number;
    phase: string;
@@ -90,6 +94,7 @@ export interface ResearchJobSummary {
    jobId: string;
    query: string;
    status: JobStatus;
+   strategy: string | undefined;
    progress: number;
    phase: string;
    createdAt: number;
@@ -110,6 +115,7 @@ interface InternalJob {
    jobId: string;
    query: string;
    depth: ResearchDepth;
+   strategy: string | undefined;
    /** Original max time at job creation (before any extensions). */
    originalMaxTimeMs: number;
    /** Current max time (may have been extended). */
@@ -154,6 +160,7 @@ interface InternalJob {
    resultFile: string | undefined;
 }
 
+
 // ── Job Manager ────────────────────────────────────────────────────────────────
 
 export class ResearchJobManager {
@@ -194,6 +201,7 @@ export class ResearchJobManager {
          jobId,
          query: params.query,
          depth: params.depth,
+         strategy: params.strategy,
          originalMaxTimeMs: maxTimeMs,
          maxTimeMs,
          status: 'queued',
@@ -224,7 +232,7 @@ export class ResearchJobManager {
       this.jobs.set(jobId, job);
       this.transitionRunning(job);
 
-      logger.info({ jobId, depth: params.depth }, 'Research job created');
+      logger.info({ jobId, depth: params.depth, strategy: params.strategy }, 'Research job created');
       return this.toSnapshot(job);
    }
 
@@ -245,6 +253,8 @@ export class ResearchJobManager {
       if (update.sourceCount !== undefined) job.sourceCount = update.sourceCount;
       if (update.sourceTypeCount !== undefined) job.sourceTypeCount = update.sourceTypeCount;
       if (update.findingCount !== undefined) job.findingCount = update.findingCount;
+      if (update.gapLoopCount !== undefined) job.gapLoopCount = update.gapLoopCount;
+      if (update.strategy !== undefined) job.strategy = update.strategy;
       job.updatedAt = Date.now();
    }
 
@@ -577,6 +587,7 @@ export class ResearchJobManager {
          jobId: job.jobId,
          query: job.query,
          depth: job.depth,
+         strategy: job.strategy,
          status: job.status,
          progress: job.progress,
          phase: job.phase,
@@ -611,6 +622,7 @@ export class ResearchJobManager {
                ? job.query.slice(0, QUERY_TRUNCATE_LENGTH - 3) + '...'
                : job.query,
          status: job.status,
+         strategy: job.strategy,
          progress: job.progress,
          phase: job.phase,
          createdAt: job.createdAt,
