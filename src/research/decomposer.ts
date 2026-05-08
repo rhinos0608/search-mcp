@@ -803,6 +803,19 @@ const VALID_SOURCE_TYPES = new Set<string>([
    'youtube',
 ]);
 
+/** Minimum sub-questions per query classification. */
+const MIN_SUBQUESTIONS_BY_CLASSIFICATION: Record<QueryClassification, number> = {
+  explainer: 3,
+  comparative: 3,
+  technical: 3,
+  "market-ecosystem": 3,
+  "literature-review": 3,
+  "current-events": 2,
+  "historical-timeline": 2,
+  "applied-practitioner": 2,
+  "decision-support": 2,
+};
+
 function normalizeClassification(raw: string): QueryClassification {
    return VALID_CLASSIFICATIONS.has(raw) ? (raw as QueryClassification) : 'explainer';
 }

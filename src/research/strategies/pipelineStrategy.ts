@@ -541,8 +541,7 @@ export class PipelineStrategy implements ResearchStrategy {
             generated.contradictions,
           );
           // Replace contradictions in state
-          const state = (ctx.state as any).getState();
-          state.contradictions = merged;
+          ctx.state.setContradictions(merged);
           logger.info(
             { added: generated.contradictions.length, total: merged.length },
             'Contradiction generator: evidence-pool contradictions added',

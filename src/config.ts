@@ -697,6 +697,7 @@ function loadFromEnv(): EnvConfig {
   // ── Deep Research env vars ────────────────────────────────────────────
   {
     const partial: Partial<DeepResearchConfig> = {};
+    let hasAny = false;
     const e = process.env.DEEP_RESEARCH_ENABLED;
     if (e !== undefined) {
       partial.enabled = e === 'true';
@@ -724,12 +725,18 @@ function loadFromEnv(): EnvConfig {
     const maxIters = process.env.DEEP_RESEARCH_AGENT_MAX_ITERATIONS;
     if (maxIters !== undefined) {
       const n = Number(maxIters);
-      if (!isNaN(n) && n > 0) partial.agentMaxIterations = n;
+      if (!isNaN(n) && n > 0) {
+        partial.agentMaxIterations = n;
+        hasAny = true;
+      }
     }
     const maxSubIters = process.env.DEEP_RESEARCH_AGENT_MAX_SUB_ITERATIONS;
     if (maxSubIters !== undefined) {
       const n = Number(maxSubIters);
-      if (!isNaN(n) && n > 0) partial.agentMaxSubIterations = n;
+      if (!isNaN(n) && n > 0) {
+        partial.agentMaxSubIterations = n;
+        hasAny = true;
+      }
     }
     const fetchMode = process.env.DEEP_RESEARCH_AGENT_DEFAULT_FETCH_MODE;
     if (
@@ -738,8 +745,9 @@ function loadFromEnv(): EnvConfig {
     ) {
       // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion
       partial.agentDefaultFetchMode = fetchMode as 'full' | 'summary_focus_query' | 'disabled';
+      hasAny = true;
     }
-    if (Object.keys(partial).length > 0) {
+    if (hasAny) {
       cfg.deepResearch = {
         ...(cfg.deepResearch ?? {}),
         ...partial,

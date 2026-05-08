@@ -30,7 +30,7 @@ function nowISO(): string {
  */
 
 /** Conjunction patterns that join distinct claims rather than amplify one claim. */
-const MULTI_CLAIM_CONJUNCTIONS = /\b(additionally|furthermore|moreover|in addition|separately|meanwhile|on the other hand|conversely|in contrast|alternatively|another (key|important|major|significant|notable))\b/i;
+const MULTI_CLAIM_CONJUNCTIONS = /\b(?:additionally|furthermore|moreover|in addition|separately|meanwhile|on the other hand|conversely|in contrast|alternatively|another (?:key|important|major|significant|notable))\b/i;
 
 /** Patterns that introduce new topics within a single finding. */
 // const TOPIC_SHIFT_PATTERNS = /\b(regarding|turning to|with respect to|as for|in terms of)\b/i;

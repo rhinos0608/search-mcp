@@ -57,13 +57,25 @@ function hasNonLatinChars(text: string): boolean {
  * Language-aware: uses Unicode-aware segmentation for non-Latin scripts.
  */
 function tokenize(text: string): string[] {
+  // For non-Latin scripts, use Unicode word boundaries
   if (hasNonLatinChars(text)) {
     const tokens: string[] = [];
-    for (const ch of text) {
-      if (/\p{L}/u.test(ch)) tokens.push(ch.toLowerCase());
+    // Use Intl.Segmenter for proper script-aware tokenization
+    try {
+      const segmenter = new Intl.Segmenter(undefined, { granularity: 'word' });
+      for (const segment of segmenter.segment(text)) {
+        const word = segment.segment.trim().toLowerCase();
+        if (word.length > 0) tokens.push(word);
+      }
+    } catch {
+      // Fallback: char-by-char
+      for (const ch of text) {
+        if (/\p{L}/u.test(ch)) tokens.push(ch.toLowerCase());
+      }
     }
     return tokens.filter((t) => t.length > 0);
   }
+  // For Latin script (English), use English stop words
   return text
     .toLowerCase()
     .split(/[^\w']+/)

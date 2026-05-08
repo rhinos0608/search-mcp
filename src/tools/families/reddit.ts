@@ -9,9 +9,9 @@
  *   comments  — Fetch a post's comment tree with clean post locator
  *   semantic  — Search + comments + RAG ranking (needs embedding sidecar)
  *
- * The `comments` action uses a nested discriminated union for post
- * identification instead of optional-parameter soup:
- *   post: { type: "url", url } | { type: "permalink", permalink } | { type: "id", subreddit, postId }
+ * The `comments` action accepts multiple input formats for the `post` field:
+ *   - Object form: { type: "url", url }, { type: "permalink", permalink }, { type: "id", subreddit, postId }
+ *   - Simple string: "/r/sub/comments/id", full URL, or "subreddit/postId" (auto-coerced)
  */
 
 import { z } from 'zod/v4';
@@ -32,7 +32,8 @@ const SORT_COMMENTS = z.enum(['confidence', 'top', 'new', 'controversial', 'old'
 const SORT_SEMANTIC = z.enum(['relevance', 'hot', 'new', 'top']);
 const TIMEFRAME = z.enum(['hour', 'day', 'week', 'month', 'year', 'all']);
 
-// ── Post locator (nested discriminated union) ──────────────────────────────
+// ── Post locator - accepts both simple string and full discriminated union ─────────────────
+// The union allows LLMs to pass simple strings that get auto-coerced.
 
 const postLocatorSchema = z.discriminatedUnion('type', [
    z.object({
@@ -55,6 +56,57 @@ const postLocatorSchema = z.discriminatedUnion('type', [
          .describe('Post ID (without t3_ prefix)'),
    }),
 ]);
+
+// Simple string post identifier - gets coerced to postLocatorSchema
+// Formats: "/r/sub/comments/id", "https://www.reddit.com/r/...", or "sub/id"
+// Also handles JSON strings like '{"permalink": "/r/..."}' from LLMs
+const simplePostLocator = z
+   .string()
+   .describe(
+      'Simple Reddit post identifier (auto-coerced). ' +
+      'Formats: permalink path ("/r/sub/comments/id"), full URL, or "subreddit/postId" form.',
+   )
+   .transform((val) => {
+      let input = val.trim();
+
+      // Handle double-encoded JSON string from LLMs: '{"permalink": "/r/..."}'
+      if (input.startsWith('{') && input.endsWith('}')) {
+         try {
+            const parsed = JSON.parse(input);
+            if (parsed.url) input = parsed.url;
+            else if (parsed.permalink) input = parsed.permalink;
+            else if (parsed.subreddit && parsed.postId) input = `${parsed.subreddit}/${parsed.postId}`;
+         } catch {
+            // Not JSON, continue with original value
+         }
+      }
+
+      // Detect format and convert to discriminated union
+      if (input.startsWith('http://') || input.startsWith('https://')) {
+         return { type: 'url' as const, url: input };
+      }
+      if (input.startsWith('/r/')) {
+         return { type: 'permalink' as const, permalink: input };
+      }
+      // Try "subreddit/postId" format
+      const parts = input.split('/');
+      if (parts.length === 2 && parts[0] && parts[1]) {
+         const [subreddit, postId] = parts;
+         // Validate subreddit name
+         if (/^[A-Za-z0-9_]{1,21}$/.test(subreddit) && /^[A-Za-z0-9]+$/.test(postId)) {
+            return { type: 'id' as const, subreddit, postId };
+         }
+      }
+      // Default to permalink (most common user input)
+      return { type: 'permalink' as const, permalink: input };
+   });
+
+// Combined: accepts either full object OR simple string (auto-coerced)
+const unifiedPostLocator = z
+   .union([postLocatorSchema, simplePostLocator])
+   .describe(
+      'Reddit post identifier. Accepts object form {type:"url",url:...} or simple string (permalink/URL/subreddit-postId).',
+   );
 
 // ── Action schemas ──────────────────────────────────────────────────────────
 
@@ -82,7 +134,13 @@ const searchSchema = z.object({
 
 const commentsSchema = z.object({
    action: z.literal('comments').describe('Fetch a Reddit post and its comment tree'),
-   post: postLocatorSchema.describe('How to identify the Reddit post'),
+   // Accept either 'post' (preferred) or 'url' (common LLM mistake) — normalize to post locator
+   post: unifiedPostLocator.optional(),
+   url: z
+      .string()
+      .url()
+      .optional()
+      .describe('Reddit post URL (alternative to post field, auto-converted to post locator)'),
    comment: z
       .string()
       .regex(/^[A-Za-z0-9]+$/)
@@ -197,11 +255,12 @@ const redditFamily: FamilyDefinition = {
          schema: commentsSchema,
          handler: async (args, _cfg) => {
             void _cfg;
-            const { post, comment, context, sort, depth, limit, showMore } = args as {
-               post:
+            const { post, url, comment, context, sort, depth, limit, showMore } = args as {
+               post?:
                | { type: 'url'; url: string }
                | { type: 'permalink'; permalink: string }
                | { type: 'id'; subreddit: string; postId: string };
+               url?: string;
                comment?: string;
                context?: number;
                sort: 'confidence' | 'top' | 'new' | 'controversial' | 'old' | 'qa';
@@ -210,17 +269,28 @@ const redditFamily: FamilyDefinition = {
                showMore: boolean;
             };
 
+            // Support 'url' as an alternative to 'post' (common LLM mistake)
+            let resolvedPost = post;
+            if (!resolvedPost && url) {
+               resolvedPost = { type: 'url' as const, url };
+            }
+            if (!resolvedPost) {
+               throw new Error(
+                  'Missing post identifier: provide either `post` (object with type+url/permalink/id) or `url` (full Reddit URL)',
+               );
+            }
+
             // Convert the discriminated post locator to the flat RedditThreadLocatorInput
             let locator: Record<string, string | undefined>;
-            switch (post.type) {
+            switch (resolvedPost.type) {
                case 'url':
-                  locator = { url: post.url };
+                  locator = { url: resolvedPost.url };
                   break;
                case 'permalink':
-                  locator = { permalink: post.permalink };
+                  locator = { permalink: resolvedPost.permalink };
                   break;
                case 'id':
-                  locator = { subreddit: post.subreddit, article: post.postId };
+                  locator = { subreddit: resolvedPost.subreddit, article: resolvedPost.postId };
                   break;
             }
 

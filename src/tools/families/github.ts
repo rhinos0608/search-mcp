@@ -35,14 +35,22 @@ import { registerFamily, type FamilyDefinition } from '../registry.js';
 
 const repoAction = z.object({
    action: z.literal('repo').describe('Fetch repository metadata and README'),
+   // Accept either owner+repo separate, or 'repository' as "owner/repo" string
    owner: z
       .string()
       .regex(/^[a-zA-Z0-9](?:[a-zA-Z0-9._-]*[a-zA-Z0-9])?$/)
+      .optional()
       .describe('GitHub username or organisation'),
    repo: z
       .string()
       .regex(/^[a-zA-Z0-9._-]{1,100}$/)
+      .optional()
       .describe('Repository name'),
+   repository: z
+      .string()
+      .regex(/^[a-zA-Z0-9](?:[a-zA-Z0-9._-]*[a-zA-Z0-9])?\/[a-zA-Z0-9._-]{1,100}$/u)
+      .optional()
+      .describe('Repository as "owner/repo" (alternative to owner+repo fields)'),
    includeReadme: z
       .boolean()
       .optional()
@@ -227,12 +235,30 @@ const githubFamily: FamilyDefinition = {
          schema: repoAction,
          handler: async (args, _cfg) => {
             void _cfg;
-            const { owner, repo, includeReadme } = args as {
-               owner: string;
-               repo: string;
+            const { owner, repo, repository, includeReadme } = args as {
+               owner?: string;
+               repo?: string;
+               repository?: string;
                includeReadme: boolean;
             };
-            const data = await getGitHubRepo(owner, repo, includeReadme);
+
+            // Support 'repository' as alternative to 'owner'/'repo'
+            let resolvedOwner = owner;
+            let resolvedRepo = repo;
+            if (!resolvedOwner && !resolvedRepo && repository) {
+               const parts = repository.split('/');
+               if (parts.length === 2) {
+                  resolvedOwner = parts[0];
+                  resolvedRepo = parts[1];
+               }
+            }
+            if (!resolvedOwner || !resolvedRepo) {
+               throw new Error(
+                  'Missing repository: provide `owner` + `repo` or `repository` (owner/repo form)',
+               );
+            }
+
+            const data = await getGitHubRepo(resolvedOwner, resolvedRepo, includeReadme);
             return data;
          },
       },

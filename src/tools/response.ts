@@ -13,7 +13,141 @@ import { isToolError } from '../errors.js';
 import type { ToolResult } from '../types.js';
 import type { RateLimitInfo } from '../rateLimit.js';
 
-// ── Branded wrapped response type ──────────────────────────────────────────
+// ── Large text field detection and hybrid serialization ───────────────────────────────
+
+/** Fields that commonly contain large text content > 8KB */
+const LARGE_TEXT_FIELDS = ['readme', 'content', 'fileContent', 'transcript', 'text', 'body', 'description', 'readmeContent'];
+
+/** Minimum byte size to trigger hybrid serialization */
+const LARGE_TEXT_THRESHOLD = 8_000;
+
+/**
+ * Type guard: checks if value is a non-null plain object (not array/primitive).
+ */
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+/**
+ * Gets a nested value from an object using dot/bracketed path.
+ * Handles paths like "user.bio" or "items[0].content".
+ */
+function getNestedValue(obj: unknown, path: string): unknown {
+  if (!path) return obj;
+  const normalized = path.replace(/\[(\d+)\]/g, '.$1');
+  const parts = normalized.split('.').filter(Boolean);
+  let current: unknown = obj;
+  for (const part of parts) {
+    if (current === null || typeof current !== 'object') return undefined;
+    current = (current as Record<string, unknown>)[part];
+  }
+  return current;
+}
+
+/**
+ * Deletes a nested key from an object, returning a deep clone without that key.
+ * Handles paths like "user.bio" or "items[0].content".
+ */
+function deleteNestedKey(obj: unknown, path: string): Record<string, unknown> {
+  const cloned = JSON.parse(JSON.stringify(obj ?? {})) as Record<string, unknown>;
+  if (!path) return cloned;
+
+  const normalized = path.replace(/\[(\d+)\]/g, '.$1');
+  const parts = normalized.split('.').filter(Boolean);
+  if (parts.length === 0) return cloned;
+
+  let current: unknown = cloned;
+  for (let i = 0; i < parts.length - 1; i++) {
+    if (current === null || typeof current !== 'object') return cloned;
+    const key = parts[i]!;
+    current = (current as Record<string, unknown>)[key];
+  }
+
+  if (current !== null && typeof current === 'object') {
+    delete (current as Record<string, unknown>)[parts[parts.length - 1]!];
+  }
+
+  return cloned;
+}
+
+/**
+ * Checks if a result contains large text fields that should be serialized separately.
+ * Returns all field paths to large text, or empty array if under threshold.
+ * Uses byte-based size check via estimateBytes.
+ */
+function findLargeTextFields(obj: unknown, path = ''): string[] {
+  const matches: string[] = [];
+
+  if (typeof obj !== 'object' || obj === null) return matches;
+
+  if (Array.isArray(obj)) {
+    for (let i = 0; i < obj.length; i++) {
+      matches.push(...findLargeTextFields(obj[i], path + '[' + i + ']'));
+    }
+    return matches;
+  }
+
+  for (const [key, value] of Object.entries(obj)) {
+    if (typeof value !== 'string') continue;
+
+    // Use byte-based check to match formatHybridResult
+    const byteSize = estimateBytes(value);
+    if (byteSize > LARGE_TEXT_THRESHOLD && LARGE_TEXT_FIELDS.some((f) => key.toLowerCase().includes(f.toLowerCase()))) {
+      matches.push(path ? `${path}.${key}` : key);
+    }
+  }
+  return matches;
+}
+
+function estimateBytes(str: string): number {
+  return new TextEncoder().encode(str).length;
+}
+
+/**
+ * Formats a tool result with hybrid serialization for large text fields.
+ * Large text is extracted and appended as raw Markdown, while metadata
+ * remains structured and indented for LLM readability.
+ * Supports multiple large text fields; each is extracted and appended sequentially.
+ */
+function formatHybridResult(result: ToolResult<unknown>): string {
+  // Guard: result.data must be a non-null plain object to extract fields
+  if (!isPlainObject(result.data)) {
+    return JSON.stringify(result, null, 2);
+  }
+
+  const data = result.data;
+
+  // Check if data contains any large text fields
+  const largeFieldPaths = findLargeTextFields(data);
+  if (largeFieldPaths.length === 0) {
+    return JSON.stringify(result, null, 2);
+  }
+
+  // Build metadata without the large text fields (clone once, then delete each)
+  let metadata = { ...result, data: { ...data } };
+  for (const fieldPath of largeFieldPaths) {
+    metadata.data = deleteNestedKey(metadata.data, fieldPath);
+  }
+
+  // Extract all large texts and build hybrid output
+  const sections: string[] = [];
+  for (const largeFieldPath of largeFieldPaths) {
+    const largeText = getNestedValue(data, largeFieldPath) as string;
+    if (!largeText || estimateBytes(largeText) < LARGE_TEXT_THRESHOLD) continue;
+
+    const fieldKey = largeFieldPath.split('.').pop() ?? largeFieldPath;
+    const sectionName = fieldKey === 'readmeContent' ? 'README' : fieldKey.toUpperCase();
+    sections.push(`\n--- ${sectionName} CONTENT ---\n${largeText}`);
+  }
+
+  if (sections.length === 0) {
+    return JSON.stringify(result, null, 2);
+  }
+
+  return `${JSON.stringify(metadata, null, 2)}${sections.join('')}`;
+}
+
+// ── End large text handling ────────────────────────────────────────────────────────────
 
 /**
  * A branded wrapper that signals to handleToolCall that the value
@@ -57,7 +191,26 @@ export function makeResult<T>(
 function sanitizeErrorMessage(err: unknown): string {
   const error = err instanceof Error ? err : new Error(String(err));
   // Strip stack traces — only return the first line (the message)
-  return error.message.split('\n')[0] ?? 'Unknown error';
+  const baseMessage = error.message.split('\n')[0] ?? 'Unknown error';
+  // Append recovery hints for common error patterns
+  const hints: Record<string, string> = {
+    'API rate limit exceeded': 'Action required: Fall back to webSearch tool, or wait before retrying.',
+    'rate limit exceeded': 'Action required: Fall back to webSearch tool, or wait before retrying.',
+    'Not Found': 'Action required: Verify the resource exists. For GitHub repos, check owner/repo spelling.',
+    'Not found': 'Action required: Verify the resource exists. For GitHub repos, check owner/repo spelling.',
+    'Authentication required': 'Action required: Set required API token in config, or use a different tool.',
+    'Unauthorized': 'Action required: Set required API token in config, or use a different tool.',
+    'ENOTFOUND': 'Action required: Check the URL/domain is correct and reachable.',
+    'ECONNREFUSED': 'Action required: Service may be down. Try again later or use alternative tool.',
+    'timeout': 'Action required: Resource may be slow/unresponsive. Try again with smaller parameters.',
+    'Too Many Requests': 'Action required: Wait before retrying, or reduce request frequency.',
+  };
+  for (const [pattern, hint] of Object.entries(hints)) {
+    if (baseMessage.toLowerCase().includes(pattern.toLowerCase())) {
+      return `${baseMessage} Hint: ${hint}`;
+    }
+  }
+  return baseMessage;
 }
 
 export function errorResponse(err: unknown): {
@@ -75,7 +228,7 @@ export function errorResponse(err: unknown): {
     content: [
       {
         type: 'text' as const,
-        text: JSON.stringify(payload),
+        text: JSON.stringify(payload, null, 2),
       },
     ],
     isError: true,
@@ -85,11 +238,13 @@ export function errorResponse(err: unknown): {
 export function successResponse<T>(result: ToolResult<T>): {
   content: { type: 'text'; text: string }[];
 } {
+  // Use hybrid serialization for large text fields (> 8KB), default to indented JSON
+  const formatted = formatHybridResult(result as ToolResult<unknown>);
   return {
     content: [
       {
         type: 'text' as const,
-        text: JSON.stringify(result),
+        text: formatted,
       },
     ],
   };

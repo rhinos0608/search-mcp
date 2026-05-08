@@ -43,9 +43,16 @@ const searchSchema = z.object({
 
 const transcriptSchema = z.object({
    action: z.literal('transcript').describe('Get the transcript/captions for a video'),
+   // Accept either videoId (ID only) or url (full YouTube URL) - both work
    videoId: z
       .string()
-      .describe('YouTube video ID (the part after ?v=) or a full youtube.com / youtu.be URL'),
+      .optional()
+      .describe('YouTube video ID (the part after ?v=)'),
+   url: z
+      .string()
+      .url()
+      .optional()
+      .describe('Full YouTube URL (https://youtube.com/watch?v=... or youtu.be/...)'),
    language: z
       .string()
       .optional()
@@ -137,8 +144,33 @@ const youtubeFamily: FamilyDefinition = {
          description: 'Get the transcript/captions for a YouTube video',
          schema: transcriptSchema,
          handler: async (args) => {
-            const { videoId, language } = args as { videoId: string; language: string };
-            return getYouTubeTranscript(videoId, language);
+            const { videoId, url, language } = args as {
+               videoId?: string;
+               url?: string;
+               language: string;
+            };
+
+            // Support 'url' as alternative to 'videoId'
+            let resolvedVideoId = videoId;
+            if (!resolvedVideoId && url) {
+               // Extract video ID from URL
+               try {
+                  const parsed = new URL(url);
+                  if (parsed.hostname === 'youtu.be') {
+                     resolvedVideoId = parsed.pathname.slice(1);
+                  } else {
+                     resolvedVideoId = parsed.searchParams.get('v') ?? undefined;
+                  }
+               } catch {
+                  // Invalid URL, leave undefined
+               }
+            }
+            if (!resolvedVideoId) {
+               throw new Error(
+                  'Missing video identifier: provide either `videoId` (ID only) or `url` (full YouTube URL)',
+               );
+            }
+            return getYouTubeTranscript(resolvedVideoId, language);
          },
          // No configIssue — transcript is always available (free API)
       },

@@ -47,10 +47,10 @@ function extractYears(text: string): number[] {
   return [...new Set(years)];
 }
 
-function arraysEqual(a: number[] | string[], b: number[] | string[]): boolean {
+function arraysEqual<T>(a: T[], b: T[]): boolean {
   if (a.length !== b.length) return false;
-  const setA = new Set(a);
-  return b.every((v) => setA.has(v));
+  const set = new Set(a);
+  return b.every((v) => set.has(v));
 }
 
 /** Extract version-like patterns (e.g., "v3", "version 4", "GPT-4", "Claude 3.5"). */
@@ -63,20 +63,21 @@ function extractVersions(text: string): string[] {
     /\b(Gemini\s+\d+(?:\.\d+)?)\b/gi,
     /\b(Llama\s+\d+(?:\.\d+)?)\b/gi,
     /\b(Stable\s+Diffusion\s+\d+(?:\.\d+)?)\b/gi,
-    /\biOS\s+\d+\b/gi,
-    /\bandroid\s+\d+(?:\.\d+)*\b/gi,
-    /\bReact\s+\d+\b/gi,
-    /\bNode\.?js\s+\d+\b/gi,
-    /\bPython\s+\d+(?:\.\d+)*\b/gi,
-    /\bTypeScript\s+\d+(?:\.\d+)*\b/gi,
-    /\bKubernetes\s+\d+(?:\.\d+)*\b/gi,
-    /\bDocker\s+\d+(?:\.\d+)*\b/gi,
+    /\biOS\s+(\d+(?:\.\d+)*)\b/gi,
+    /\bandroid\s+(\d+(?:\.\d+)*)\b/gi,
+    /\bReact\s+(\d+(?:\.\d+)*)\b/gi,
+    /\bNode\.?js\s+(\d+(?:\.\d+)*)\b/gi,
+    /\bPython\s+(\d+(?:\.\d+)*)\b/gi,
+    /\bTypeScript\s+(\d+(?:\.\d+)*)\b/gi,
+    /\bKubernetes\s+(\d+(?:\.\d+)*)\b/gi,
+    /\bDocker\s+(\d+(?:\.\d+)*)\b/gi,
   ];
   const versions: string[] = [];
   for (const pattern of versionPatterns) {
     let match: RegExpExecArray | null;
     while ((match = pattern.exec(text)) !== null) {
-      if (match[1]) versions.push(match[1].toLowerCase());
+      // Use capture group if present, otherwise use full match
+      versions.push((match[1] ?? match[0]).toLowerCase());
     }
   }
   return [...new Set(versions)];
@@ -201,18 +202,17 @@ export function generateFromEvidencePool(
         const b = yearSets[j];
         if (!a || !b) continue;
         if (a.years.length > 0 && b.years.length > 0 && !arraysEqual(a.years, b.years)) {
-            // Same topic, different years → contradiction
-            contradictions.push({
-              id: makeId(),
-              claimA: a.finding.claim,
-              claimB: b.finding.claim,
-              sourceIdsA: [...a.finding.sourceIds],
-              sourceIdsB: [...b.finding.sourceIds],
-              contradictionType: 'time_version_mismatch',
-              resolutionStatus: 'unresolved',
-              likelyExplanation: `Claims about "${topic}" mention different years (${a.years.join(', ')} vs ${b.years.join(', ')}). This may reflect changes over time or conflicting reports.`,
-            });
-          }
+          // Same topic, different years → contradiction
+          contradictions.push({
+            id: makeId(),
+            claimA: a.finding.claim,
+            claimB: b.finding.claim,
+            sourceIdsA: [...a.finding.sourceIds],
+            sourceIdsB: [...b.finding.sourceIds],
+            contradictionType: 'time_version_mismatch',
+            resolutionStatus: 'unresolved',
+            likelyExplanation: `Claims about "${topic}" mention different years (${a.years.join(', ')} vs ${b.years.join(', ')}). This may reflect changes over time or conflicting reports.`,
+          });
         }
       }
     }
@@ -225,17 +225,16 @@ export function generateFromEvidencePool(
         const b = versionSets[j];
         if (!a || !b) continue;
         if (a.versions.length > 0 && b.versions.length > 0 && !arraysEqual(a.versions, b.versions)) {
-            contradictions.push({
-              id: makeId(),
-              claimA: a.finding.claim,
-              claimB: b.finding.claim,
-              sourceIdsA: [...a.finding.sourceIds],
-              sourceIdsB: [...b.finding.sourceIds],
-              contradictionType: 'time_version_mismatch',
-              resolutionStatus: 'unresolved',
-              likelyExplanation: `Claims about "${topic}" reference different versions (${a.versions.join(', ')} vs ${b.versions.join(', ')}). These may describe different releases or iterations.`,
-            });
-          }
+          contradictions.push({
+            id: makeId(),
+            claimA: a.finding.claim,
+            claimB: b.finding.claim,
+            sourceIdsA: [...a.finding.sourceIds],
+            sourceIdsB: [...b.finding.sourceIds],
+            contradictionType: 'time_version_mismatch',
+            resolutionStatus: 'unresolved',
+            likelyExplanation: `Claims about "${topic}" reference different versions (${a.versions.join(', ')} vs ${b.versions.join(', ')}). These may describe different releases or iterations.`,
+          });
         }
       }
     }
