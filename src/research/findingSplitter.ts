@@ -30,14 +30,16 @@ function nowISO(): string {
  */
 
 /** Conjunction patterns that join distinct claims rather than amplify one claim. */
-const MULTI_CLAIM_CONJUNCTIONS = /\b(?:additionally|furthermore|moreover|in addition|separately|meanwhile|on the other hand|conversely|in contrast|alternatively|another (?:key|important|major|significant|notable))\b/i;
+const MULTI_CLAIM_CONJUNCTIONS =
+  /\b(?:additionally|furthermore|moreover|in addition|separately|meanwhile|on the other hand|conversely|in contrast|alternatively|another (?:key|important|major|significant|notable))\b/i;
 
 /** Patterns that introduce new topics within a single finding. */
 // const TOPIC_SHIFT_PATTERNS = /\b(regarding|turning to|with respect to|as for|in terms of)\b/i;
 
 /** Patterns for "and" connecting distinct subjects (not just attributes of same subject). */
 // Heuristic: if "and" connects two distinct noun phrases about different things
-const DISTINCT_AND_PATTERN = /(\w+(?:\s+\w+){0,3})\s+(?:is|are|was|were|has|have|does|do)\s+.+?\s+and\s+(\w+(?:\s+\w+){0,3})\s+(?:is|are|was|were|has|have|does|do)\s+/i;
+const DISTINCT_AND_PATTERN =
+  /(\w+(?:\s+\w+){0,3})\s+(?:is|are|was|were|has|have|does|do)\s+.+?\s+and\s+(\w+(?:\s+\w+){0,3})\s+(?:is|are|was|were|has|have|does|do)\s+/i;
 
 /**
  * Check if a finding has a sentence that acts as a distinct, separable claim.
@@ -116,7 +118,10 @@ export function splitFinding(finding: Finding): SplitResult {
       const splitClaim = multiSentence.sentences[i];
       if (!splitClaim || splitClaim.length < 20) continue;
 
-      const normalized = splitClaim.toLowerCase().replace(/[^\w\s]/g, '').trim();
+      const normalized = splitClaim
+        .toLowerCase()
+        .replace(/[^\w\s]/g, '')
+        .trim();
 
       splits.push({
         claim: splitClaim,
@@ -155,7 +160,10 @@ export function splitFinding(finding: Finding): SplitResult {
         for (let i = 1; i < segments.length; i++) {
           const seg = segments[i]?.trim();
           if (!seg || seg.length < 20) continue;
-          const normalized = seg.toLowerCase().replace(/[^\w\s]/g, '').trim();
+          const normalized = seg
+            .toLowerCase()
+            .replace(/[^\w\s]/g, '')
+            .trim();
 
           splits.push({
             claim: seg,
@@ -201,11 +209,17 @@ export function splitFinding(finding: Finding): SplitResult {
           'findingSplitter: detected distinct-subject "and" pattern',
         );
         const beforeAnd = claim.split(/\s+and\s+/)[0];
-        const afterAnd = claim.split(/\s+and\s+/).slice(1).join(' and ');
+        const afterAnd = claim
+          .split(/\s+and\s+/)
+          .slice(1)
+          .join(' and ');
         if (beforeAnd && afterAnd && beforeAnd.length > 30 && afterAnd.length > 20) {
           splits.push({
             claim: afterAnd,
-            normalizedClaim: afterAnd.toLowerCase().replace(/[^\w\s]/g, '').trim(),
+            normalizedClaim: afterAnd
+              .toLowerCase()
+              .replace(/[^\w\s]/g, '')
+              .trim(),
             subQuestionIds: [...subQuestionIds],
             sourceIds: [...sourceIds],
             evidenceSummary: evidenceSummary,
@@ -226,7 +240,15 @@ export function splitFinding(finding: Finding): SplitResult {
   // The original finding gets updated to note it was a source for splits if any were created
   const originalModified = {
     ...finding,
-    ...(splits.length > 0 ? { caveats: (finding.caveats ? finding.caveats + ' ' : '') + '[Multi-claim: split into ' + String(splits.length) + ' atomic finding(s)]' } : {}),
+    ...(splits.length > 0
+      ? {
+          caveats:
+            (finding.caveats ? finding.caveats + ' ' : '') +
+            '[Multi-claim: split into ' +
+            String(splits.length) +
+            ' atomic finding(s)]',
+        }
+      : {}),
   };
 
   // Remove id/createdAt for the return type
@@ -245,9 +267,7 @@ export function splitFinding(finding: Finding): SplitResult {
  * Returns a map: original finding ID → replacement finding data (or updated original).
  * Plus an array of new split findings to add.
  */
-export function processAndSplitFindings(
-  findings: Finding[],
-): {
+export function processAndSplitFindings(findings: Finding[]): {
   /** Updated findings: map of original finding ID → new finding data (with any modifications). */
   updated: Map<string, Omit<Finding, 'id' | 'createdAt'>>;
   /** New split findings to add to state, with their splitFromId set. */

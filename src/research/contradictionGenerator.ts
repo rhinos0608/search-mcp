@@ -29,7 +29,50 @@ function extractClaimTopic(claim: string): string {
   const words = claim
     .toLowerCase()
     .split(/[^\w']+/)
-    .filter((w) => w.length > 3 && !['this', 'that', 'these', 'those', 'with', 'from', 'which', 'their', 'have', 'been', 'were', 'they', 'what', 'about', 'would', 'could', 'should', 'there', 'being', 'while', 'where', 'after', 'before', 'other', 'such', 'more', 'very', 'also', 'than', 'then', 'when', 'into', 'over', 'most', 'some', 'each', 'both', 'through'].includes(w));
+    .filter(
+      (w) =>
+        w.length > 3 &&
+        ![
+          'this',
+          'that',
+          'these',
+          'those',
+          'with',
+          'from',
+          'which',
+          'their',
+          'have',
+          'been',
+          'were',
+          'they',
+          'what',
+          'about',
+          'would',
+          'could',
+          'should',
+          'there',
+          'being',
+          'while',
+          'where',
+          'after',
+          'before',
+          'other',
+          'such',
+          'more',
+          'very',
+          'also',
+          'than',
+          'then',
+          'when',
+          'into',
+          'over',
+          'most',
+          'some',
+          'each',
+          'both',
+          'through',
+        ].includes(w),
+    );
   return words.slice(0, 4).join(' ');
 }
 
@@ -41,7 +84,7 @@ function extractYears(text: string): number[] {
   const years: number[] = [];
   let match: RegExpExecArray | null;
   while ((match = yearPattern.exec(text)) !== null) {
-    const y = parseInt(match[1] as string, 10);
+    const y = parseInt(match[1] ?? '0', 10);
     if (y >= 2020 && y <= 2040) years.push(y);
   }
   return [...new Set(years)];
@@ -101,7 +144,9 @@ function extractMetrics(text: string): { value: number; unit: string; context: s
   for (const pattern of patterns) {
     let match: RegExpExecArray | null;
     while ((match = pattern.exec(text)) !== null) {
-      const value = parseFloat(match[1] as string);
+      const valMatch = match[1];
+      if (!valMatch) continue;
+      const value = parseFloat(valMatch);
       const unit = (match[2] ?? 'count').toLowerCase();
       // Find surrounding context
       const idx = text.toLowerCase().indexOf(match[0].toLowerCase());
@@ -116,7 +161,8 @@ function extractMetrics(text: string): { value: number; unit: string; context: s
 
 // ── Future/speculative detection ─────────────────────────────────────────────
 
-const FUTURE_PATTERNS = /\b(will\s+|expected\s+to\s+|projected\s+|predicted\s+|forecast(?:ed)?\s+|planned\s+|anticipated\s+|upcoming\s+|future\s+|roadmap\s+|in\s+the\s+(?:coming|next|future)\s+|by\s+20\d{2}\s+)\b/i;
+const FUTURE_PATTERNS =
+  /\b(will\s+|expected\s+to\s+|projected\s+|predicted\s+|forecast(?:ed)?\s+|planned\s+|anticipated\s+|upcoming\s+|future\s+|roadmap\s+|in\s+the\s+(?:coming|next|future)\s+|by\s+20\d{2}\s+)\b/i;
 
 // SPECULATIVE_PATTERNS reserved for future scoring
 // const SPECULATIVE_PATTERNS = /\b(may\s+|might\s+|could\s+|potentially\s+|possibly\s+|presumably\s+|arguably\s+|in theory\b|theoretically\s+|it\s+remains\s+to\s+be\s+seen|it\s+is\s+unclear|remains\s+uncertain)\b/i;
@@ -136,9 +182,11 @@ function extractReleaseDates(text: string): { year: number; label: string }[] {
   for (const pattern of RELEASE_DATE_PATTERNS) {
     let match: RegExpExecArray | null;
     while ((match = pattern.exec(text)) !== null) {
-      const year = parseInt(match[1] as string, 10);
+      const yearMatch = match[1];
+      if (!yearMatch) continue;
+      const year = parseInt(yearMatch, 10);
       if (year >= 2020 && year <= 2040) {
-        const label = (match[0] as string).toLowerCase();
+        const label = match[0].toLowerCase();
         dates.push({ year, label });
       }
     }
@@ -224,7 +272,11 @@ export function generateFromEvidencePool(
         const a = versionSets[i];
         const b = versionSets[j];
         if (!a || !b) continue;
-        if (a.versions.length > 0 && b.versions.length > 0 && !arraysEqual(a.versions, b.versions)) {
+        if (
+          a.versions.length > 0 &&
+          b.versions.length > 0 &&
+          !arraysEqual(a.versions, b.versions)
+        ) {
           contradictions.push({
             id: makeId(),
             claimA: a.finding.claim,
@@ -297,8 +349,18 @@ export function generateFromEvidencePool(
         // Tier gap > 0.5 means one is high quality and one is low quality
         if (Math.abs(a.maxTier - b.maxTier) > 0.5 || Math.abs(a.minTier - b.minTier) > 0.5) {
           // Check if findings actually disagree (not just same claim from different tiers)
-          const aWords = new Set(a.finding.claim.toLowerCase().split(/\s+/).filter((w) => w.length > 3));
-          const bWords = new Set(b.finding.claim.toLowerCase().split(/\s+/).filter((w) => w.length > 3));
+          const aWords = new Set(
+            a.finding.claim
+              .toLowerCase()
+              .split(/\s+/)
+              .filter((w) => w.length > 3),
+          );
+          const bWords = new Set(
+            b.finding.claim
+              .toLowerCase()
+              .split(/\s+/)
+              .filter((w) => w.length > 3),
+          );
           let overlap = 0;
           for (const w of aWords) {
             if (bWords.has(w)) overlap++;
@@ -316,7 +378,7 @@ export function generateFromEvidencePool(
               sourceIdsB: [...b.finding.sourceIds],
               contradictionType: 'vendor_vs_independent',
               resolutionStatus: 'unresolved',
-              likelyExplanation: `Claims about "${topic}" come from sources with significantly different quality tiers (tier ${String(a.maxTier.toFixed(1))} vs tier ${String(b.maxTier.toFixed(1))}). Lower-tier sources may be less reliable.`,
+              likelyExplanation: `Claims about "${topic}" come from sources with significantly different quality tiers (tier ${a.maxTier.toFixed(1)} vs tier ${b.maxTier.toFixed(1)}). Lower-tier sources may be less reliable.`,
             });
           }
         }
@@ -328,7 +390,7 @@ export function generateFromEvidencePool(
   const speculativeFindings = findings.filter((f) => f.evidenceDirectness === 'speculative');
   if (speculativeFindings.length > 0) {
     uncertainties.push(
-      `${String(speculativeFindings.length)} finding(s) are marked as speculative (evidence is opinion, prediction, or hypothetical). Treat these as unconfirmed: "${speculativeFindings[0]?.claim.slice(0, 80)}..."`,
+      `${String(speculativeFindings.length)} finding(s) are marked as speculative (evidence is opinion, prediction, or hypothetical). Treat these as unconfirmed: "${speculativeFindings[0]?.claim.slice(0, 80) ?? ''}..."`,
     );
   }
 

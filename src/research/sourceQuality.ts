@@ -64,9 +64,11 @@ const REFERENCE_PATTERNS: RegExp[] = [
 /**
  * Numbers with data-oriented units — suggests data/benchmark presence.
  */
-const DATA_UNIT_RE = /(\d+(?:\.\d+)?)\s*(%|dollars?|\$|€|£|ms|GB|MB|TB|GHz|MHz|km\/h|mph|FPS|fps|px|em|rem|vh|vw|bps|kbps|mbps|gib|mib)/i;
+const DATA_UNIT_RE =
+  /(\d+(?:\.\d+)?)\s*(%|dollars?|\$|€|£|ms|GB|MB|TB|GHz|MHz|km\/h|mph|FPS|fps|px|em|rem|vh|vw|bps|kbps|mbps|gib|mib)/i;
 
-const BENCHMARK_RE = /\b(benchmark|performance\s+test|load\s+test|stress\s+test)\b|\d+%\s+(?:faster|slower|better|worse)|scored?\s+\d+/i;
+const BENCHMARK_RE =
+  /\b(benchmark|performance\s+test|load\s+test|stress\s+test)\b|\d+%\s+(?:faster|slower|better|worse)|scored?\s+\d+/i;
 
 const ATTRIBUTION_PATTERNS: RegExp[] = [
   /according\s+to/i,
@@ -80,14 +82,68 @@ const ATTRIBUTION_PATTERNS: RegExp[] = [
 ];
 
 const COMMON_WORDS = new Set([
-  'the', 'this', 'that', 'with', 'from', 'what', 'how', 'why', 'when',
-  'where', 'your', 'our', 'their', 'about', 'will', 'have', 'been',
-  'some', 'which', 'into', 'than', 'then', 'also', 'only', 'just',
-  'more', 'very', 'here', 'there', 'they', 'were', 'been', 'like',
-  'does', 'make', 'made', 'much', 'many', 'each', 'every', 'them',
-  'would', 'could', 'should', 'shall', 'might', 'being', 'doing',
-  'after', 'before', 'between', 'under', 'over', 'such', 'other',
-  'while', 'where', 'there', 'their', 'these', 'those', 'must',
+  'the',
+  'this',
+  'that',
+  'with',
+  'from',
+  'what',
+  'how',
+  'why',
+  'when',
+  'where',
+  'your',
+  'our',
+  'their',
+  'about',
+  'will',
+  'have',
+  'been',
+  'some',
+  'which',
+  'into',
+  'than',
+  'then',
+  'also',
+  'only',
+  'just',
+  'more',
+  'very',
+  'here',
+  'there',
+  'they',
+  'were',
+  'been',
+  'like',
+  'does',
+  'make',
+  'made',
+  'much',
+  'many',
+  'each',
+  'every',
+  'them',
+  'would',
+  'could',
+  'should',
+  'shall',
+  'might',
+  'being',
+  'doing',
+  'after',
+  'before',
+  'between',
+  'under',
+  'over',
+  'such',
+  'other',
+  'while',
+  'where',
+  'there',
+  'their',
+  'these',
+  'those',
+  'must',
 ]);
 
 // ── Internal helpers ─────────────────────────────────────────────────────────
@@ -284,14 +340,12 @@ function assessPromotional(
     // Collect potential brand terms from title and domain
     const brandTerms: string[] = [];
     if (title) {
-      const titleWords = title.split(/\s+/).filter(
-        (w) => w.length > 3 && !COMMON_WORDS.has(w.toLowerCase()),
-      );
+      const titleWords = title
+        .split(/\s+/)
+        .filter((w) => w.length > 3 && !COMMON_WORDS.has(w.toLowerCase()));
       if (titleWords.length > 0) {
         // Most brand-like word from the title (longest significant word)
-        brandTerms.push(
-          titleWords.reduce((a, b) => (a.length >= b.length ? a : b)),
-        );
+        brandTerms.push(titleWords.reduce((a, b) => (a.length >= b.length ? a : b)));
       }
     }
     const domainWord = extractDomainWord(url);
@@ -301,9 +355,7 @@ function assessPromotional(
 
     for (const term of brandTerms) {
       const lowerTerm = term.toLowerCase();
-      const brandCount = headings.filter((h) =>
-        h.toLowerCase().includes(lowerTerm),
-      ).length;
+      const brandCount = headings.filter((h) => h.toLowerCase().includes(lowerTerm)).length;
       if (brandCount > 5) {
         signals.push(
           `excessive_brand_mentions: "${term}" appears ${String(brandCount)}x in headings`,
@@ -414,8 +466,7 @@ function determineReadingLevel(
   hasCitations: boolean,
 ): 'surface' | 'intermediate' | 'deep' {
   const isSurface = wordCount < 500 || headingCount < 3 || isPromotional;
-  const isDeep =
-    wordCount > 2000 && headingCount > 8 && hasData && hasCitations && !isPromotional;
+  const isDeep = wordCount > 2000 && headingCount > 8 && hasData && hasCitations && !isPromotional;
 
   if (isDeep) return 'deep';
   if (isSurface) return 'surface';
@@ -497,11 +548,7 @@ export function assessContentQuality(
   const isNavHeavy = linkDensity > 0.3 || navRows > 3;
 
   // ── Promotional ────────────────────────────────────────────────────────
-  const { isPromotional, signals: promotionalSignals } = assessPromotional(
-    markdown,
-    url,
-    title,
-  );
+  const { isPromotional, signals: promotionalSignals } = assessPromotional(markdown, url, title);
 
   // ── Content depth ──────────────────────────────────────────────────────
   const { wordCount, headingCount, contentDepth } = assessDepth(markdown);
@@ -515,8 +562,7 @@ export function assessContentQuality(
   // ── Substantive ────────────────────────────────────────────────────────
   // A page is substantive if it has enough depth and is not promotional.
   // Navigation-heavy and paywalled pages are also not substantive.
-  const isSubstantive =
-    contentDepth >= 0.4 && !isPromotional && !isNavHeavy && !paywalled;
+  const isSubstantive = contentDepth >= 0.4 && !isPromotional && !isNavHeavy && !paywalled;
 
   // ── Reading level ──────────────────────────────────────────────────────
   const readingLevel = determineReadingLevel(
@@ -549,9 +595,7 @@ export function assessContentQuality(
     hasCitations,
     readingLevel,
     summary,
-    ...(isPromotional && promotionalSignals.length > 0
-      ? { promotionalSignals }
-      : {}),
+    ...(isPromotional && promotionalSignals.length > 0 ? { promotionalSignals } : {}),
   };
 }
 
@@ -613,12 +657,12 @@ const TIER4_DOMAIN_PATTERNS: RegExp[] = [
  * Event calendars, homepages, SEO landing pages.
  */
 const LOW_QUALITY_PATH_PATTERNS: RegExp[] = [
-  /^\/$/,                        // bare homepage
-  /\/events?\//i,                // event pages
-  /\/calendar/i,                 // event calendars
-  /\/pricing/i,                  // pricing pages
-  /\/about/i,                    // about pages
-  /\/contact/i,                  // contact pages
+  /^\/$/, // bare homepage
+  /\/events?\//i, // event pages
+  /\/calendar/i, // event calendars
+  /\/pricing/i, // pricing pages
+  /\/about/i, // about pages
+  /\/contact/i, // contact pages
   /\/(?:tag|category|archive)\//i, // SEO category pages
 ];
 
@@ -659,19 +703,36 @@ export function classifySourceTier(source: SourceEntry): SourceQualityTier {
     for (const pat of LOW_QUALITY_PATH_PATTERNS) {
       if (pat.test(u.pathname)) return 4;
     }
-  } catch { /* ignore */ }
+  } catch {
+    /* ignore */
+  }
 
   // Tier 4: Promotional content from quality assessment
   if (source.qualityScore !== undefined && source.qualityScore < 0.3) return 4;
 
   // Tier 3: Source types that are inherently community-level
-  if (source.sourceType === 'reddit' || source.sourceType === 'youtube' || source.sourceType === 'podcast') return 3;
+  if (
+    source.sourceType === 'reddit' ||
+    source.sourceType === 'youtube' ||
+    source.sourceType === 'podcast'
+  )
+    return 3;
 
   // Tier 2: Established news sources, HN, StackOverflow
-  if (source.sourceType === 'news' || source.sourceType === 'hackernews' || source.sourceType === 'stackoverflow') return 2;
+  if (
+    source.sourceType === 'news' ||
+    source.sourceType === 'hackernews' ||
+    source.sourceType === 'stackoverflow'
+  )
+    return 2;
 
   // Tier 2: Web with high quality score
-  if (source.sourceType === 'web' && source.qualityScore !== undefined && source.qualityScore >= 0.6) return 2;
+  if (
+    source.sourceType === 'web' &&
+    source.qualityScore !== undefined &&
+    source.qualityScore >= 0.6
+  )
+    return 2;
 
   // Tier 3: Generic web with moderate quality
   if (source.sourceType === 'web') return 3;
@@ -744,5 +805,7 @@ export function isTier4Domain(url: string): boolean {
   try {
     const domain = new URL(url).hostname.toLowerCase();
     return TIER4_DOMAIN_PATTERNS.some((p) => p.test(domain));
-  } catch { return false; }
+  } catch {
+    return false;
+  }
 }

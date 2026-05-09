@@ -161,10 +161,7 @@ async function checkWayback(
  * - 404 + no Wayback snapshot            → LIKELY_HALLUCINATED
  * - Other 4xx/5xx / network errors       → UNKNOWN
  */
-export async function checkUrl(
-  url: string,
-  options?: CheckUrlOptions,
-): Promise<UrlHealthResult> {
+export async function checkUrl(url: string, options?: CheckUrlOptions): Promise<UrlHealthResult> {
   const timeoutMs = options?.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const checkedAt = nowISO();
 
