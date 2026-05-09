@@ -12,48 +12,48 @@ import type { BrowserSessionConfig } from '../browser/types.js';
 // ── Research phases ───────────────────────────────────────────────────────────
 
 export type ResearchPhase =
-   | 'idle'
-   | 'decomposition'
-   | 'taxonomy_revision'
-   | 'discovery'
-   | 'extraction'
-   | 'gap_analysis'
-   | 'audit'
-   | 'synthesis'
-   | 'complete'
-   | 'tree_research';
+  | 'idle'
+  | 'decomposition'
+  | 'taxonomy_revision'
+  | 'discovery'
+  | 'extraction'
+  | 'gap_analysis'
+  | 'audit'
+  | 'synthesis'
+  | 'complete'
+  | 'tree_research';
 
 // ── Query types ───────────────────────────────────────────────────────────────
 
 export type QueryClassification =
-   | 'explainer'
-   | 'comparative'
-   | 'technical'
-   | 'applied-practitioner'
-   | 'current-events'
-   | 'historical-timeline'
-   | 'market-ecosystem'
-   | 'literature-review'
-   | 'decision-support';
+  | 'explainer'
+  | 'comparative'
+  | 'technical'
+  | 'applied-practitioner'
+  | 'current-events'
+  | 'historical-timeline'
+  | 'market-ecosystem'
+  | 'literature-review'
+  | 'decision-support';
 
 // ── Sources ───────────────────────────────────────────────────────────────────
 
 export type SourceType =
-   | 'academic'
-   | 'web'
-   | 'github'
-   | 'reddit'
-   | 'hackernews'
-   | 'stackoverflow'
-   | 'documentation'
-   | 'news'
-   | 'patent'
-   | 'pubmed'
-   | 'wikipedia'
-   | 'podcast'
-   | 'producthunt'
-   | 'youtube'
-   | 'browser-interactive';
+  | 'academic'
+  | 'web'
+  | 'github'
+  | 'reddit'
+  | 'hackernews'
+  | 'stackoverflow'
+  | 'documentation'
+  | 'news'
+  | 'patent'
+  | 'pubmed'
+  | 'wikipedia'
+  | 'podcast'
+  | 'producthunt'
+  | 'youtube'
+  | 'browser-interactive';
 
 /**
  * Source quality tier used for synthesis gating.
@@ -70,16 +70,16 @@ export type SourceQualityTier = 1 | 2 | 3 | 4;
  * "architecture" when it is really a "training/inference paradigm").
  */
 export type FindingCategory =
-   | 'architecture'
-   | 'training_paradigm'
-   | 'inference_framework'
-   | 'world_model'
-   | 'evaluation_method'
-   | 'application'
-   | 'community_reaction'
-   | 'benchmark'
-   | 'definition'
-   | 'other';
+  | 'architecture'
+  | 'training_paradigm'
+  | 'inference_framework'
+  | 'world_model'
+  | 'evaluation_method'
+  | 'application'
+  | 'community_reaction'
+  | 'benchmark'
+  | 'definition'
+  | 'other';
 
 export type ExtractionStatus = 'pending' | 'extracted' | 'failed';
 
@@ -90,44 +90,44 @@ export type SourceUsageStatus = 'searched' | 'selected' | 'read' | 'used' | 'dis
 
 /** Why a source was discarded (examined but contributed no findings). */
 export type DiscardReason =
-   | 'duplicate'
-   | 'stale'
-   | 'low_relevance'
-   | 'thin_content'
-   | 'extraction_failed'
-   | 'bot_challenge'
-   | 'paywall'
-   | 'no_findings'
-   | 'unsupported'
-   | 'budget_exceeded';
+  | 'duplicate'
+  | 'stale'
+  | 'low_relevance'
+  | 'thin_content'
+  | 'extraction_failed'
+  | 'bot_challenge'
+  | 'paywall'
+  | 'no_findings'
+  | 'unsupported'
+  | 'budget_exceeded';
 
 export interface SourceEntry {
-   id: string;
-   title: string;
-   url: string;
-   author?: string;
-   organization?: string;
-   publishedDate?: string;
-   accessDate: string;
-   sourceType: SourceType;
-   domain: string;
-   isPrimary: boolean;
-   relevantSubQuestions: string[];
-   extractionStatus: ExtractionStatus;
-   limitations?: string;
-   subQuestionId: string;
-   /** Phase 2: Current usage status in the research lifecycle. */
-   usageStatus?: SourceUsageStatus;
-   /** Phase 2: Reason for discard when usageStatus is 'discarded'. */
-   discardReason?: DiscardReason;
-   /** Phase 2: Quality score (0-1) from content assessment. */
-   qualityScore?: number;
-   /** Phase 2: Relevance score (0-1) to the research question. */
-   relevanceScore?: number;
-   /** Phase 2: Freshness score (0-1) based on recency. */
-   freshnessScore?: number;
-   /** Phase 2: Which worker agent first discovered this source. */
-   workerId?: string;
+  id: string;
+  title: string;
+  url: string;
+  author?: string;
+  organization?: string;
+  publishedDate?: string;
+  accessDate: string;
+  sourceType: SourceType;
+  domain: string;
+  isPrimary: boolean;
+  relevantSubQuestions: string[];
+  extractionStatus: ExtractionStatus;
+  limitations?: string;
+  subQuestionId: string;
+  /** Phase 2: Current usage status in the research lifecycle. */
+  usageStatus?: SourceUsageStatus;
+  /** Phase 2: Reason for discard when usageStatus is 'discarded'. */
+  discardReason?: DiscardReason;
+  /** Phase 2: Quality score (0-1) from content assessment. */
+  qualityScore?: number;
+  /** Phase 2: Relevance score (0-1) to the research question. */
+  relevanceScore?: number;
+  /** Phase 2: Freshness score (0-1) based on recency. */
+  freshnessScore?: number;
+  /** Phase 2: Which worker agent first discovered this source. */
+  workerId?: string;
 }
 
 /**
@@ -135,393 +135,371 @@ export interface SourceEntry {
  * Replaces raw compacted content blocks with summarized, attributed content.
  */
 export interface SourceSummary {
-   url: string;
-   title: string;
-   sourceType: SourceType;
-   domain: string;
-   publishedDate?: string;
-   /** 2-3 sentence summary of key information relevant to the research question. */
-   summary: string;
-   /** 3-5 verbatim excerpts from the source most relevant to the research question. */
-   keyExcerpts: string[];
-   /** Quality assessment (0-1) based on content depth and relevance. */
-   qualityScore?: number;
+  url: string;
+  title: string;
+  sourceType: SourceType;
+  domain: string;
+  publishedDate?: string;
+  /** 2-3 sentence summary of key information relevant to the research question. */
+  summary: string;
+  /** 3-5 verbatim excerpts from the source most relevant to the research question. */
+  keyExcerpts: string[];
+  /** Quality assessment (0-1) based on content depth and relevance. */
+  qualityScore?: number;
 }
 
 // ── Findings ──────────────────────────────────────────────────────────────────
 
-
-
 export type EvidenceDirectness =
-   | 'direct'
-   | 'near-direct'
-   | 'secondary'
-   | 'anecdotal'
-   | 'speculative';
+  | 'direct'
+  | 'near-direct'
+  | 'secondary'
+  | 'anecdotal'
+  | 'speculative';
 
 export type ClaimType = 'primary' | 'secondary' | 'anecdotal';
 
 export interface Finding {
-   id: string;
-   claim: string;
-   normalizedClaim: string;
-   subQuestionIds: string[];
-   sourceIds: string[];
-   evidenceSummary: string;
-   evidenceExcerpt?: string;
-   evidenceDirectness: EvidenceDirectness;
-   caveats?: string;
-   scope?: string;
-   freshnessSensitive: boolean;
-   lastUpdated: string;
-   claimType: ClaimType;
-   /** Explicit category label for audit accuracy (architecture, training_paradigm, world_model, etc.). */
-   category?: FindingCategory;
-   /** Source quality tier of the best source backing this finding. */
-   bestSourceTier?: SourceQualityTier;
-   createdAt: string;
-   /** Post-extraction relevance score (0-1) against the original research query. */
-   relevanceScore?: number;
-   /** Human-readable explanation for the relevance score. */
-   relevanceReason?: string;
-   /** If this finding was split from a multi-claim parent, the parent finding's ID. */
-   splitFromId?: string;
-   /** Source perspective: who is making this claim? */
-   perspective?: Perspective;
-   /** Whether the source has a potential conflict of interest. */
-   conflictOfInterest?: boolean;
-   /** Epistemic status of this claim within the broader literature. */
-   epistemicStatus?: EpistemicStatus;
+  id: string;
+  claim: string;
+  normalizedClaim: string;
+  subQuestionIds: string[];
+  sourceIds: string[];
+  evidenceSummary: string;
+  evidenceExcerpt?: string;
+  evidenceDirectness: EvidenceDirectness;
+  caveats?: string;
+  scope?: string;
+  freshnessSensitive: boolean;
+  lastUpdated: string;
+  claimType: ClaimType;
+  /** Explicit category label for audit accuracy (architecture, training_paradigm, world_model, etc.). */
+  category?: FindingCategory;
+  /** Source quality tier of the best source backing this finding. */
+  bestSourceTier?: SourceQualityTier;
+  createdAt: string;
+  /** Post-extraction relevance score (0-1) against the original research query. */
+  relevanceScore?: number;
+  /** Human-readable explanation for the relevance score. */
+  relevanceReason?: string;
+  /** If this finding was split from a multi-claim parent, the parent finding's ID. */
+  splitFromId?: string;
+  /** Source perspective: who is making this claim? */
+  perspective?: Perspective;
+  /** Whether the source has a potential conflict of interest. */
+  conflictOfInterest?: boolean;
+  /** Epistemic status of this claim within the broader literature. */
+  epistemicStatus?: EpistemicStatus;
 }
 
 // ── Source-perspective metadata ────────────────────────────────────────────────
 
 export type Perspective =
-   | 'vendor'
-   | 'academic'
-   | 'practitioner'
-   | 'official'
-   | 'community'
-   | 'media'
-   | 'unknown';
+  | 'vendor'
+  | 'academic'
+  | 'practitioner'
+  | 'official'
+  | 'community'
+  | 'media'
+  | 'unknown';
 
-export type EpistemicStatus =
-   | 'consensus'
-   | 'contested'
-   | 'emerging'
-   | 'speculative'
-   | 'unknown';
+export type EpistemicStatus = 'consensus' | 'contested' | 'emerging' | 'speculative' | 'unknown';
 
 // ── Contradictions ────────────────────────────────────────────────────────────
 
 export type ContradictionType =
-   | 'factual_disagreement'
-   | 'benchmark_disagreement'
-   | 'terminology_mismatch'
-   | 'time_version_mismatch'
-   | 'scope_mismatch'
-   | 'implementation_specific'
-   | 'opinion_tradeoff'
-   | 'vendor_vs_independent'
-   | 'academic_vs_practitioner';
+  | 'factual_disagreement'
+  | 'benchmark_disagreement'
+  | 'terminology_mismatch'
+  | 'time_version_mismatch'
+  | 'scope_mismatch'
+  | 'implementation_specific'
+  | 'opinion_tradeoff'
+  | 'vendor_vs_independent'
+  | 'academic_vs_practitioner';
 
 export type ContradictionStatus =
-   | 'unresolved'
-   | 'partially_resolved'
-   | 'resolved'
-   | 'apparent_only';
+  | 'unresolved'
+  | 'partially_resolved'
+  | 'resolved'
+  | 'apparent_only';
 
 export interface Contradiction {
-   id: string;
-   claimA: string;
-   claimB: string;
-   sourceIdsA: string[];
-   sourceIdsB: string[];
-   contradictionType: ContradictionType;
-   likelyExplanation?: string;
-   resolutionStatus: ContradictionStatus;
-   followUpSearchRecommended?: string;
+  id: string;
+  claimA: string;
+  claimB: string;
+  sourceIdsA: string[];
+  sourceIdsB: string[];
+  contradictionType: ContradictionType;
+  likelyExplanation?: string;
+  resolutionStatus: ContradictionStatus;
+  followUpSearchRecommended?: string;
 }
 
 // ── Gaps ──────────────────────────────────────────────────────────────────────
 
 export type GapCategory =
-   | 'unanswered_sub_question'
-   | 'low_confidence'
-   | 'unresolvable_contradiction'
-   | 'missing_source_type'
-   | 'missing_recency'
-   | 'overrepresented_viewpoint'
-   | 'thin_coverage'
-   | 'low_content_depth'
-   | 'single_source_dependency'
-   | 'promotional_bias';
+  | 'unanswered_sub_question'
+  | 'low_confidence'
+  | 'unresolvable_contradiction'
+  | 'missing_source_type'
+  | 'missing_recency'
+  | 'overrepresented_viewpoint'
+  | 'thin_coverage'
+  | 'low_content_depth'
+  | 'single_source_dependency'
+  | 'promotional_bias';
 
 export type GapStatus =
-   | 'open'
-   | 'in_progress'
-   | 'partially_resolved'
-   | 'resolved'
-   | 'deferred'
-   | 'unresolvable';
+  | 'open'
+  | 'in_progress'
+  | 'partially_resolved'
+  | 'resolved'
+  | 'deferred'
+  | 'unresolvable';
 
 export interface GapRecord {
-   id: string;
-   category: GapCategory;
-   description: string;
-   subQuestionId?: string;
-   relatedFindingId?: string;
-   relatedContradictionId?: string;
-   status: GapStatus;
-   suggestedActions: string[];
-   priority: number;
+  id: string;
+  category: GapCategory;
+  description: string;
+  subQuestionId?: string;
+  relatedFindingId?: string;
+  relatedContradictionId?: string;
+  status: GapStatus;
+  suggestedActions: string[];
+  priority: number;
 }
 
-
 export interface ResolvedGap {
-   id: string;
-   question: string;
-   parentQuestion?: string;
-   answer?: string;
-   resolvedAt: string;
+  id: string;
+  question: string;
+  parentQuestion?: string;
+  answer?: string;
+  resolvedAt: string;
 }
 
 export interface SearchCluster {
-   insight: string;
-   question: string;
-   urls: string[];
+  insight: string;
+  question: string;
+  urls: string[];
 }
 
 // ── New: FailureMode (operational replacement for old FailureAnalysis) ────────
 
 export interface FailureAnalysis {
-   recap: string;
-   blame: string;
-   improvement: string;
+  recap: string;
+  blame: string;
+  improvement: string;
 }
 
 // ── New: GapTarget (typed agenda item with lifecycle) ─────────────────────────-
 
-export type GapTargetStatus =
-   | 'open'
-   | 'active'
-   | 'resolved'
-   | 'abandoned'
-   | 'duplicate';
+export type GapTargetStatus = 'open' | 'active' | 'resolved' | 'abandoned' | 'duplicate';
 
 export type GapTargetSource =
-   | 'decomposition'
-   | 'gap_analysis'
-   | 'failure_analysis'
-   | 'citation_chase';
+  | 'decomposition'
+  | 'gap_analysis'
+  | 'failure_analysis'
+  | 'citation_chase';
 
 export interface GapTarget {
-   id: string;
-   question: string;
-   normalizedQuestion: string;
-   parentId?: string;
-   parentQuestion?: string;
-   status: GapTargetStatus;
-   priority: number;
-   attempts: number;
-   createdAtStep: number;
-   lastTriedAtStep?: number;
-   source: GapTargetSource;
-   failureReason?: string;
-   resolution?: {
-      answer: string;
-      evidenceSummary: string;
-   };
+  id: string;
+  question: string;
+  normalizedQuestion: string;
+  parentId?: string;
+  parentQuestion?: string;
+  status: GapTargetStatus;
+  priority: number;
+  attempts: number;
+  createdAtStep: number;
+  lastTriedAtStep?: number;
+  source: GapTargetSource;
+  failureReason?: string;
+  resolution?: {
+    answer: string;
+    evidenceSummary: string;
+  };
 }
-
 
 // ── New: EvaluationResult (canonical evaluation consumed by Agenda, Gates, FailureAnalysis, Synthesis) ─
 
 export interface EvaluationResult {
-   pass: boolean;
-   score: number;
-   missingDimensions: string[];
-   unsupportedClaims: string[];
-   contradictions: string[];
-   requiredNextEvidence: string[];
-   reason: string;
+  pass: boolean;
+  score: number;
+  missingDimensions: string[];
+  unsupportedClaims: string[];
+  contradictions: string[];
+  requiredNextEvidence: string[];
+  reason: string;
 }
 
 // ── New: Gate / ActionType (computed per iteration) ────────────────────────────
 
 export type ResearchAction =
-   | 'answer'
-   | 'decompose'
-   | 'discover'
-   | 'extract'
-   | 'fill_gaps'
-   | 'generate_queries'
-   | 'contradiction_scan'
-   | 'audit'
-   | 'synthesize'
-   | 'complete';
+  | 'answer'
+  | 'decompose'
+  | 'discover'
+  | 'extract'
+  | 'fill_gaps'
+  | 'generate_queries'
+  | 'contradiction_scan'
+  | 'audit'
+  | 'synthesize'
+  | 'complete';
 
 export interface Gate {
-   action: ResearchAction;
-   allowed: boolean;
-   reason?: string;
+  action: ResearchAction;
+  allowed: boolean;
+  reason?: string;
 }
 
 // ── New: KnowledgeItem (intermediate between findings and LLM context) ─────────
 
-export type KnowledgeType =
-   | 'finding'
-   | 'gap_resolution'
-   | 'contradiction'
-   | 'serp_hypothesis';
+export type KnowledgeType = 'finding' | 'gap_resolution' | 'contradiction' | 'serp_hypothesis';
 
 export interface KnowledgeItem {
-   id: string;
-   question: string;
-   answer: string;
-   references: string[];
-   type: KnowledgeType;
-   sourceFindingIds: string[];
-   createdAtStep: number;
+  id: string;
+  question: string;
+  answer: string;
+  references: string[];
+  type: KnowledgeType;
+  sourceFindingIds: string[];
+  createdAtStep: number;
 }
 
 // ── New: TraceEvent (unified diary/progress/timeline event) ────────────────────
 
 export type TraceAction =
-   | 'search'
-   | 'visit'
-   | 'extract'
-   | 'evaluate'
-   | 'answer_attempt'
-   | 'gap_added'
-   | 'gap_resolved'
-   | 'audit'
-   | 'warning'
-   | 'synthesize';
+  | 'search'
+  | 'visit'
+  | 'extract'
+  | 'evaluate'
+  | 'answer_attempt'
+  | 'gap_added'
+  | 'gap_resolved'
+  | 'audit'
+  | 'warning'
+  | 'synthesize';
 
 export interface TraceEvent {
-   step: number;
-   phase: string;
-   action: TraceAction;
-   targetId?: string;
-   sourceIds?: string[];
-   findingIds?: string[];
-   result?: string;
-   gateChanges?: string[];
-   timestamp: string;
+  step: number;
+  phase: string;
+  action: TraceAction;
+  targetId?: string;
+  sourceIds?: string[];
+  findingIds?: string[];
+  result?: string;
+  gateChanges?: string[];
+  timestamp: string;
 }
 
 // ── New: SearchAttempt (tracked for adaptive strategy) ─────────────────────────
 
 export interface SearchAttempt {
-   subQuestionId: string;
-   queries: string[];
-   backends: SourceType[];
-   resultCount: number;
-   timestamp: string;
+  subQuestionId: string;
+  queries: string[];
+  backends: SourceType[];
+  resultCount: number;
+  timestamp: string;
 }
 
-
-
-
-
 export interface LanguageProfile {
-   code: string;
-   style: string;
+  code: string;
+  style: string;
 }
 // ── Claim graph (lightweight) ─────────────────────────────────────────────────
 
 export type ClaimEdgeType =
-   | 'supports'
-   | 'contradicts'
-   | 'qualifies'
-   | 'is_example_of'
-   | 'depends_on';
+  | 'supports'
+  | 'contradicts'
+  | 'qualifies'
+  | 'is_example_of'
+  | 'depends_on';
 
 export interface ClaimEdge {
-   sourceFindingId: string;
-   targetFindingId: string;
-   edgeType: ClaimEdgeType;
-   description?: string;
+  sourceFindingId: string;
+  targetFindingId: string;
+  edgeType: ClaimEdgeType;
+  description?: string;
 }
 
 // ── Browser interactive extraction plans ──────────────────────────────────────
 
 /** Plan for interactive browser extraction (login walls, SPAs, bot challenges). */
 export interface InteractiveExtractionPlan {
-   /** Sequence of browser actions to execute before extraction. */
-   actions: InteractiveAction[];
-   /** Extraction strategy after actions complete. */
-   extraction: {
-      /** NL instruction for what to extract (requires LLM). */
-      instruction?: string;
-      /** CSS selector scoping the content area. */
-      selector?: string;
-   };
-   /** Max time for the plan execution in ms. */
-   maxTimeMs?: number;
+  /** Sequence of browser actions to execute before extraction. */
+  actions: InteractiveAction[];
+  /** Extraction strategy after actions complete. */
+  extraction: {
+    /** NL instruction for what to extract (requires LLM). */
+    instruction?: string;
+    /** CSS selector scoping the content area. */
+    selector?: string;
+  };
+  /** Max time for the plan execution in ms. */
+  maxTimeMs?: number;
 }
 
 /** A single browser action in an extraction plan. */
 export interface InteractiveAction {
-   type: 'navigate' | 'click' | 'type' | 'wait' | 'evaluate' | 'scroll' | 'screenshot' | 'select';
-   /** Target ref (from snapshot), CSS selector, or text to match. */
-   target?: string;
-   /** Value for type/select actions. */
-   value?: string;
-   /** Timeout per action in ms. */
-   timeout?: number;
+  type: 'navigate' | 'click' | 'type' | 'wait' | 'evaluate' | 'scroll' | 'screenshot' | 'select';
+  /** Target ref (from snapshot), CSS selector, or text to match. */
+  target?: string;
+  /** Value for type/select actions. */
+  value?: string;
+  /** Timeout per action in ms. */
+  timeout?: number;
 }
 
 // ── Sub-questions ─────────────────────────────────────────────────────────────
 
 export type SubQuestionStatus =
-   | 'pending'
-   | 'in_progress'
-   | 'sufficient'
-   | 'low_confidence'
-   | 'contradictory'
-   | 'unresolvable';
+  | 'pending'
+  | 'in_progress'
+  | 'sufficient'
+  | 'low_confidence'
+  | 'contradictory'
+  | 'unresolvable';
 
 export interface SubQuestion {
-   id: string;
-   text: string;
-   classification: QueryClassification;
-   evidenceType: string;
-   preferredSources: SourceType[];
-   freshnessRequirement: string;
-   /** Phase 6: Intent for freshness scoring — controls how recency is valued. */
-   freshnessIntent?: 'recent' | 'historical' | 'any';
-   failureModes: string[];
-   budgetPriority: number;
-   status: SubQuestionStatus;
-   /** Whether this sub-question requires authenticated access (login-walled content). */
-   requiresAuth?: boolean;
-   /** Plan for interactive browser extraction if the page has bot detection. */
-   extractionPlan?: InteractiveExtractionPlan;
+  id: string;
+  text: string;
+  classification: QueryClassification;
+  evidenceType: string;
+  preferredSources: SourceType[];
+  freshnessRequirement: string;
+  /** Phase 6: Intent for freshness scoring — controls how recency is valued. */
+  freshnessIntent?: 'recent' | 'historical' | 'any';
+  failureModes: string[];
+  budgetPriority: number;
+  status: SubQuestionStatus;
+  /** Whether this sub-question requires authenticated access (login-walled content). */
+  requiresAuth?: boolean;
+  /** Plan for interactive browser extraction if the page has bot detection. */
+  extractionPlan?: InteractiveExtractionPlan;
 }
 
 // ── Discovery ─────────────────────────────────────────────────────────────────
 
 export interface SourceCandidate {
-   title: string;
-   url: string;
-   snippet: string;
-   sourceType: SourceType;
-   estimatedQuality: number;
-   estimatedRelevance: number;
-   freshness: string;
-   reasonForInclusion: string;
-   subQuestionId: string;
+  title: string;
+  url: string;
+  snippet: string;
+  sourceType: SourceType;
+  estimatedQuality: number;
+  estimatedRelevance: number;
+  freshness: string;
+  reasonForInclusion: string;
+  subQuestionId: string;
 }
 
 export interface ScoredCandidate extends SourceCandidate {
-   freqBoost: number;
-   authorityBoost: number;
-   diversityScore: number;
-   totalScore: number;
-   readPriorityScore: number;
-   evidenceWeight: number;
+  freqBoost: number;
+  authorityBoost: number;
+  diversityScore: number;
+  totalScore: number;
+  readPriorityScore: number;
+  evidenceWeight: number;
 }
 
 // ── Budget ────────────────────────────────────────────────────────────────────
@@ -529,432 +507,560 @@ export interface ScoredCandidate extends SourceCandidate {
 export type ResearchDepth = 'quick' | 'standard' | 'deep' | 'exhaustive' | 'tree';
 
 export interface BudgetProfile {
-   depth: ResearchDepth;
-   maxSources: number;
-   maxExtractions: number;
-   maxGapLoops: number;
-   maxToolCalls: number;
-   maxTokens: number;
-   maxTimeMs: number;
-   maxStateEntries: number;
+  depth: ResearchDepth;
+  maxSources: number;
+  maxExtractions: number;
+  maxGapLoops: number;
+  /** Minimum gap-loop sanity passes before early-stop heuristics may halt. */
+  minGapLoops: number;
+  maxToolCalls: number;
+  maxTokens: number;
+  maxTimeMs: number;
+  maxStateEntries: number;
 }
 
 export interface TreeProfile {
-   treeBreadth: number;
-   treeDepth: number;
-   treeConcurrency: number;
-   treeContextWordLimit: number;
+  treeBreadth: number;
+  treeDepth: number;
+  treeConcurrency: number;
+  treeContextWordLimit: number;
 }
 
 export interface TreeLearning {
-   learning: string;
-   citation?: string;
-   sourceUrl?: string;
+  learning: string;
+  citation?: string;
+  sourceUrl?: string;
 }
 
 export interface TreeResearchResult {
-   learnings: string[];
-   allLearnings: TreeLearning[];
-   visitedUrls: string[];
-   citations: Record<string, string>;
-   context: string[];
-   sources: SourceEntry[];
-   researchQuestions: { query: string; researchGoal: string }[];
+  learnings: string[];
+  allLearnings: TreeLearning[];
+  visitedUrls: string[];
+  citations: Record<string, string>;
+  context: string[];
+  sources: SourceEntry[];
+  researchQuestions: { query: string; researchGoal: string }[];
 }
 
 export interface BudgetState {
-   toolCallsUsed: number;
-   tokensUsed: number;
-   extractionsUsed: number;
-   gapLoopsUsed: number;
-   startTime: number;
-   maxToolCalls: number;
-   maxTokens: number;
-   maxExtractions: number;
-   maxGapLoops: number;
-   stateEntriesUsed: number;
-   maxStateEntries: number;
-   stepCosts: Record<string, number>;
-   maxTimeMs: number;
-   /** Per-gap-loop findings count for confidence plateau detection. */
-   findingsAddedPerLoop: number[];
+  toolCallsUsed: number;
+  tokensUsed: number;
+  extractionsUsed: number;
+  gapLoopsUsed: number;
+  startTime: number;
+  maxToolCalls: number;
+  maxTokens: number;
+  maxExtractions: number;
+  maxGapLoops: number;
+  stateEntriesUsed: number;
+  maxStateEntries: number;
+  stepCosts: Record<string, number>;
+  maxTimeMs: number;
+  /** Per-gap-loop findings count for confidence plateau detection. */
+  findingsAddedPerLoop: number[];
 }
 
 // ── Taxonomy ──────────────────────────────────────────────────────────────────
 
 export interface ResearchTaxonomy {
-   originalQuery: string;
-   subQuestions: SubQuestion[];
-   revised: boolean;
-   revisionHistory: string[];
+  originalQuery: string;
+  subQuestions: SubQuestion[];
+  revised: boolean;
+  revisionHistory: string[];
 }
 
 export interface ResearchFlags {
-   taxonomyRevised: boolean;
-   audited: boolean;
-   loopCount: number;
+  taxonomyRevised: boolean;
+  audited: boolean;
+  loopCount: number;
 }
 
 export interface ResearchState {
-   query: string;
-   taxonomy: ResearchTaxonomy;
-   subQuestions: SubQuestion[];
-   sources: SourceEntry[];
-   findings: Finding[];
-   contradictions: Contradiction[];
-   openQuestions: string[];
-   gaps: GapRecord[];
-   claimGraph: ClaimEdge[];
-   currentPhase: ResearchPhase;
-   budget: BudgetState;
-   flags: ResearchFlags;
-   gapTargets: string[];
-   allQuestions: string[];
-   resolvedGaps: ResolvedGap[];
-   searchClusters: SearchCluster[];
-   diary: string[];
-   language?: LanguageProfile;
-   searchAttempts: SearchAttempt[];
-   /** V5.0.0: Worker agent reports keyed by report ID. */
-   workerReports: Record<string, WorkerReport>;
-   /** V5.0.0: Content quality assessments keyed by URL. */
-   contentQuality: Record<string, ContentQualityAssessment>;
-   /** V5.0.0: Per-sub-question coverage metrics. */
-   subQuestionCoverage: SubQuestionCoverage[];
+  query: string;
+  taxonomy: ResearchTaxonomy;
+  subQuestions: SubQuestion[];
+  sources: SourceEntry[];
+  findings: Finding[];
+  contradictions: Contradiction[];
+  openQuestions: string[];
+  gaps: GapRecord[];
+  claimGraph: ClaimEdge[];
+  currentPhase: ResearchPhase;
+  budget: BudgetState;
+  flags: ResearchFlags;
+  gapTargets: string[];
+  allQuestions: string[];
+  resolvedGaps: ResolvedGap[];
+  searchClusters: SearchCluster[];
+  diary: string[];
+  language?: LanguageProfile;
+  searchAttempts: SearchAttempt[];
+  /** V5.0.0: Worker agent reports keyed by report ID. */
+  workerReports: Record<string, WorkerReport>;
+  /** V5.0.0: Content quality assessments keyed by URL. */
+  contentQuality: Record<string, ContentQualityAssessment>;
+  /** V5.0.0: Per-sub-question coverage metrics. */
+  subQuestionCoverage: SubQuestionCoverage[];
 }
 
 // ── Intent tracking ──────────────────────────────────────────────────────────
 
-
-
 // ── Progress (progressive rendering) ──────────────────────────────────────────
 
 export type ResearchProgress =
-   | {
+  | {
       phase: 'decomposition';
       plan: { classification: QueryClassification; subQuestions: SubQuestion[] };
-   }
-   | { phase: 'discovery'; sources: { subQuestionId: string; count: number }[] }
-   | { phase: 'extraction'; completed: number; total: number }
-   | { phase: 'findings'; findings: Finding[] }
-   | { phase: 'taxonomy_revision'; taxonomy: ResearchTaxonomy }
-   | { phase: 'contradictions'; contradictions: Contradiction[] }
-   | { phase: 'gap_analysis'; gaps: GapRecord[] }
-   | { phase: 'synthesis'; outline: string }
-   | { phase: 'limitations'; limitations: string[] }
-   | { phase: 'complete' }
-   | { phase: 'action'; actionType: string; detail: string; timestamp: string };
+    }
+  | { phase: 'discovery'; sources: { subQuestionId: string; count: number }[] }
+  | { phase: 'extraction'; completed: number; total: number }
+  | { phase: 'findings'; findings: Finding[] }
+  | { phase: 'taxonomy_revision'; taxonomy: ResearchTaxonomy }
+  | { phase: 'contradictions'; contradictions: Contradiction[] }
+  | { phase: 'gap_analysis'; gaps: GapRecord[] }
+  | { phase: 'synthesis'; outline: string }
+  | { phase: 'limitations'; limitations: string[] }
+  | { phase: 'complete' }
+  | { phase: 'action'; actionType: string; detail: string; timestamp: string };
 
 // ── Output ────────────────────────────────────────────────────────────────────
 
 export interface ResearchReport {
-   query: string;
-   classification: QueryClassification;
-   depth: ResearchDepth;
-   /** 'deep' = normal deep research with extracted findings.
-    * 'source_note_synthesis' = no findings were extracted; report is based on source notes/snippets only.
-    * 'extraction_fallback' = extraction was re-attempted after initial zero-finding result. */
-   degradationMode?: 'deep' | 'source_note_synthesis' | 'extraction_fallback';
-   executiveSummary: string;
-   /** Full narrative report in markdown — the primary output. */
-   narrativeMarkdown: string;
-   themes: {
-      title: string;
-      narrative: string;
-      findings?: string[];
-      sourceCitations?: { id: string; url: string; title: string }[];
-   }[];
-   contradictions: Contradiction[];
-   uncertainties: string[];
-   sourceNotes: string[];
-   openQuestions: string[];
-   recommendations?: string;
-   limitations: string[];
-   sourceCount: number;
-   findingCount: number;
-   /** Count of distinct source types (corpuses) across all sources. */
-   sourceTypeCount: number;
-   /** Breakdown of sources by type: [{ type, count }]. */
-   sourceDiversity: { type: string; count: number }[];
-   /** Curated evidence sources cited in the narrative (quality-gated, primary-preferring. Tier 1-3 always included; tier 4 only if backing a finding). */
-   evidenceSources: { index: number; title: string; url: string; sourceType: SourceType; tier: SourceQualityTier; domain: string }[];
-   /** Per-sub-question coverage summary for gap detection. */
-   subQuestionCoverage?: SubQuestionCoverage[];
+  query: string;
+  classification: QueryClassification;
+  depth: ResearchDepth;
+  /** 'deep' = normal deep research with extracted findings.
+   * 'source_note_synthesis' = no findings were extracted; report is based on source notes/snippets only.
+   * 'extraction_fallback' = extraction was re-attempted after initial zero-finding result. */
+  degradationMode?: 'deep' | 'source_note_synthesis' | 'extraction_fallback';
+  executiveSummary: string;
+  /** Full narrative report in markdown — the primary output. */
+  narrativeMarkdown: string;
+  themes: {
+    title: string;
+    narrative: string;
+    findings?: string[];
+    sourceCitations?: { id: string; url: string; title: string }[];
+  }[];
+  contradictions: Contradiction[];
+  uncertainties: string[];
+  sourceNotes: string[];
+  openQuestions: string[];
+  recommendations?: string;
+  limitations: string[];
+  sourceCount: number;
+  findingCount: number;
+  /** Count of distinct source types (corpuses) across all sources. */
+  sourceTypeCount: number;
+  /** Breakdown of sources by type: [{ type, count }]. */
+  sourceDiversity: { type: string; count: number }[];
+  /** Curated evidence sources cited in the narrative (quality-gated, primary-preferring. Tier 1-3 always included; tier 4 only if backing a finding). */
+  evidenceSources: {
+    index: number;
+    title: string;
+    url: string;
+    sourceType: SourceType;
+    tier: SourceQualityTier;
+    domain: string;
+  }[];
+  /** Per-sub-question coverage summary for gap detection. */
+  subQuestionCoverage?: SubQuestionCoverage[];
 }
 
 export interface ResearchResult {
-   report: ResearchReport;
-   timeline: ResearchProgress[];
+  report: ResearchReport;
+  timeline: ResearchProgress[];
 }
 // ── Compact output (V4.2.0 — result compaction for MCP transport) ─────────────────
 
 export interface CompactFinding {
-   id: string;
-   claim: string;
-   evidenceSummary: string;
-   evidenceExcerpt?: string;
-   evidenceDirectness: EvidenceDirectness;
-   sourceCount: number;
-   claimType: ClaimType;
-   subQuestionIds: string[];
+  id: string;
+  claim: string;
+  evidenceSummary: string;
+  evidenceExcerpt?: string;
+  evidenceDirectness: EvidenceDirectness;
+  sourceCount: number;
+  claimType: ClaimType;
+  subQuestionIds: string[];
 }
 
 export interface CompactContradiction {
-   id: string;
-   claimA: string;
-   claimB: string;
-   contradictionType: ContradictionType;
-   resolutionStatus: ContradictionStatus;
+  id: string;
+  claimA: string;
+  claimB: string;
+  contradictionType: ContradictionType;
+  resolutionStatus: ContradictionStatus;
 }
 
 export interface CompactStatistics {
-   sourceCount: number;
-   /** Count of distinct source types (corpuses). */
-   sourceTypeCount: number;
-   /** Breakdown of sources by type: [{ type, count }]. */
-   sourceDiversity: { type: string; count: number }[];
-   totalFindingCount: number;
-   includedFindingCount: number;
-   droppedByCapCount: number;
-   contradictionCount: number;
-   timelinePhaseCount: number;
-   totalBytes?: number;
-   furtherTruncated?: boolean;
+  sourceCount: number;
+  /** Count of distinct source types (corpuses). */
+  sourceTypeCount: number;
+  /** Breakdown of sources by type: [{ type, count }]. */
+  sourceDiversity: { type: string; count: number }[];
+  totalFindingCount: number;
+  includedFindingCount: number;
+  droppedByCapCount: number;
+  contradictionCount: number;
+  timelinePhaseCount: number;
+  totalBytes?: number;
+  furtherTruncated?: boolean;
 }
 
 export interface CompactResearchResult {
-   query: string;
-   classification: QueryClassification;
-   depth: ResearchDepth;
-   executiveSummary: string;
-   findings: CompactFinding[];
-   contradictions: CompactContradiction[];
-   uncertainties: string[];
-   openQuestions: string[];
-   limitations: string[];
-   recommendations?: string;
-   statistics: CompactStatistics;
-   fullResultFile: string | null;
-   warning?: string;
+  query: string;
+  classification: QueryClassification;
+  depth: ResearchDepth;
+  executiveSummary: string;
+  findings: CompactFinding[];
+  contradictions: CompactContradiction[];
+  uncertainties: string[];
+  openQuestions: string[];
+  limitations: string[];
+  recommendations?: string;
+  statistics: CompactStatistics;
+  fullResultFile: string | null;
+  warning?: string;
 }
 
 export interface CompactionOptions {
-   maxFindingsPerTheme?: number;
-   maxExcerptChars?: number;
-   softSizeLimit?: number;
-   hardSizeLimit?: number;
-   maxSummaryChars?: number;
-   fileBaseDir?: string;
+  maxFindingsPerTheme?: number;
+  maxExcerptChars?: number;
+  softSizeLimit?: number;
+  hardSizeLimit?: number;
+  maxSummaryChars?: number;
+  fileBaseDir?: string;
 }
 
 // ── Audit ─────────────────────────────────────────────────────────────────────
 
 export interface AuditIssue {
-   type: string;
-   severity: 'error' | 'warning' | 'info';
-   description: string;
-   findingId?: string;
-   sourceId?: string;
-   /** Suggested correction for category mismatch issues. */
-   suggestedCorrection?: string;
+  type: string;
+  severity: 'error' | 'warning' | 'info';
+  description: string;
+  findingId?: string;
+  sourceId?: string;
+  /** Suggested correction for category mismatch issues. */
+  suggestedCorrection?: string;
 }
 
 export interface AuditReport {
-   passed: boolean;
-   issues: AuditIssue[];
-   stats: {
-      totalClaims: number;
-      unsourcedClaims: number;
-      unresolvedContradictions: number;
-      mergedDuplicates: number;
-      sourceDiversity: { type: string; count: number }[];
-      taxonomyDrift: boolean;
-   };
-   timestamp: string;
+  passed: boolean;
+  issues: AuditIssue[];
+  stats: {
+    totalClaims: number;
+    unsourcedClaims: number;
+    unresolvedContradictions: number;
+    mergedDuplicates: number;
+    sourceDiversity: { type: string; count: number }[];
+    taxonomyDrift: boolean;
+  };
+  timestamp: string;
 }
 
 // ── V5.0.0: Worker Agents & Content Quality ──────────────────────────────────
 
 /** Content quality assessment for a fetched page. */
 export interface ContentQualityAssessment {
-   /** Whether the page has substantive analytical content (not just marketing/nav). */
-   isSubstantive: boolean;
-   /** 0-1 score based on word count, heading structure, data/table presence. */
-   contentDepth: number;
-   /** Detected marketing/promotional content. */
-   isPromotional: boolean;
-   /** Contains tables, code blocks, benchmarks, or structured data. */
-   hasData: boolean;
-   /** Cites other sources (inline links, references section). */
-   hasCitations: boolean;
-   /** Reading depth level. */
-   readingLevel: 'surface' | 'intermediate' | 'deep';
-   /** Human-readable summary of quality assessment. */
-   summary: string;
-   /** Specific signals that triggered promotional detection. */
-   promotionalSignals?: string[];
+  /** Whether the page has substantive analytical content (not just marketing/nav). */
+  isSubstantive: boolean;
+  /** 0-1 score based on word count, heading structure, data/table presence. */
+  contentDepth: number;
+  /** Detected marketing/promotional content. */
+  isPromotional: boolean;
+  /** Contains tables, code blocks, benchmarks, or structured data. */
+  hasData: boolean;
+  /** Cites other sources (inline links, references section). */
+  hasCitations: boolean;
+  /** Reading depth level. */
+  readingLevel: 'surface' | 'intermediate' | 'deep';
+  /** Human-readable summary of quality assessment. */
+  summary: string;
+  /** Specific signals that triggered promotional detection. */
+  promotionalSignals?: string[];
 }
 
 /** Per-sub-question coverage metrics for gap analysis. */
 export interface SubQuestionCoverage {
-   subQuestionId: string;
-   subQuestionText: string;
-   sourceCount: number;
-   uniqueDomainCount: number;
-   findingCount: number;
-   averageContentDepth: number;
-   hasPromotionalSources: boolean;
-   sourceTypes: SourceType[];
-   status: 'adequate' | 'thin' | 'risky' | 'uncovered';
+  subQuestionId: string;
+  subQuestionText: string;
+  sourceCount: number;
+  uniqueDomainCount: number;
+  findingCount: number;
+  averageContentDepth: number;
+  hasPromotionalSources: boolean;
+  sourceTypes: SourceType[];
+  status: 'adequate' | 'thin' | 'risky' | 'uncovered';
 }
 
 /** A worker agent's investigation report for one research question. */
 export interface WorkerReport {
-   /** Unique report ID. */
-   id: string;
-   /** The question the worker was assigned. */
-   question: string;
-   /** Parent sub-question ID if this was a follow-up thread. */
-   parentSubQuestionId?: string;
-   /** Structured findings extracted by the worker. */
-   findings: WorkerFinding[];
-   /** Sources the worker visited and analyzed. */
-   sources: WorkerSource[];
-   /** Interesting sub-threads the worker identified for further investigation. */
-   subThreads: SubThread[];
-   /** Quality assessments for each visited source. */
-   contentQuality: Record<string, ContentQualityAssessment>;
-   /** Narrative summary written by the worker. */
-   narrativeSummary: string;
-   /** Search queries the worker used. */
-   searchQueries: string[];
-   /** Trail of LLM reflection decisions made during investigation. */
-   reflectionTrail?: string[];
-   /** Total tokens consumed by this worker. */
-   tokensUsed: number;
-   /** Elapsed time in ms. */
-   elapsedMs: number;
+  /** Unique report ID. */
+  id: string;
+  /** The question the worker was assigned. */
+  question: string;
+  /** Parent sub-question ID if this was a follow-up thread. */
+  parentSubQuestionId?: string;
+  /** Structured findings extracted by the worker. */
+  findings: WorkerFinding[];
+  /** Sources the worker visited and analyzed. */
+  sources: WorkerSource[];
+  /** Interesting sub-threads the worker identified for further investigation. */
+  subThreads: SubThread[];
+  /** Quality assessments for each visited source. */
+  contentQuality: Record<string, ContentQualityAssessment>;
+  /** Narrative summary written by the worker. */
+  narrativeSummary: string;
+  /** Search queries the worker used. */
+  searchQueries: string[];
+  /** Trail of LLM reflection decisions made during investigation. */
+  reflectionTrail?: string[];
+  /** Total tokens consumed by this worker. */
+  tokensUsed: number;
+  /** Elapsed time in ms. */
+  elapsedMs: number;
 }
 
 /** Confidence level for a finding's source citation mapping. */
 export type CitationConfidence =
-   | 'explicit'    // LLM provided structured sourceIndices for this finding
-   | 'inferred'    // Resolved via secondary method (regex, similarity)
-   | 'unattributed'; // No source could be determined
+  | 'explicit' // LLM provided structured sourceIndices for this finding
+  | 'inferred' // Resolved via secondary method (regex, similarity)
+  | 'unattributed'; // No source could be determined
 
 /** A single finding from a worker agent. */
 export interface WorkerFinding {
-   /** Unique finding ID. */
-   id: string;
-   /** The claim text. */
-   claim: string;
-   /** Evidence excerpt from the source. */
-   evidence: string;
-   /** Source URLs backing this claim. */
-   sourceUrls: string[];
-   /** How confident we are that the sourceUrls correctly map to this claim. */
-   citationConfidence: CitationConfidence;
-   /** Caveats or limitations the worker noted. */
-   caveats?: string;
+  /** Unique finding ID. */
+  id: string;
+  /** The claim text. */
+  claim: string;
+  /** Evidence excerpt from the source. */
+  evidence: string;
+  /** Source URLs backing this claim. */
+  sourceUrls: string[];
+  /** How confident we are that the sourceUrls correctly map to this claim. */
+  citationConfidence: CitationConfidence;
+  /** Caveats or limitations the worker noted. */
+  caveats?: string;
 }
 
 /** A source the worker visited and assessed. */
 export interface WorkerSource {
-   /** Source URL. */
-   url: string;
-   /** Page title. */
-   title: string;
-   /** Source type. */
-   sourceType: SourceType;
-   /** Domain. */
-   domain: string;
-   /** Content quality assessment. */
-   quality: ContentQualityAssessment;
-   /** Why the worker chose this source. */
-   relevanceRationale: string;
-   /** Publication date if known. */
-   publishedDate?: string;
-   /** Phase 2: Current usage status in the research lifecycle. */
-   usageStatus?: SourceUsageStatus;
-   /** Phase 2: Reason for discard when usageStatus is 'discarded'. */
-   discardReason?: DiscardReason;
-   /** Phase 2: Quality score (0-1) from content assessment. */
-   qualityScore?: number;
-   /** Phase 2: Relevance score (0-1) to the research question. */
-   relevanceScore?: number;
-   /** Phase 2: Freshness score (0-1) based on recency. */
-   freshnessScore?: number;
-   /** Phase 2: Which worker agent first discovered this source. */
-   workerId?: string;
+  /** Source URL. */
+  url: string;
+  /** Page title. */
+  title: string;
+  /** Source type. */
+  sourceType: SourceType;
+  /** Domain. */
+  domain: string;
+  /** Content quality assessment. */
+  quality: ContentQualityAssessment;
+  /** Why the worker chose this source. */
+  relevanceRationale: string;
+  /** Publication date if known. */
+  publishedDate?: string;
+  /** Phase 2: Current usage status in the research lifecycle. */
+  usageStatus?: SourceUsageStatus;
+  /** Phase 2: Reason for discard when usageStatus is 'discarded'. */
+  discardReason?: DiscardReason;
+  /** Phase 2: Quality score (0-1) from content assessment. */
+  qualityScore?: number;
+  /** Phase 2: Relevance score (0-1) to the research question. */
+  relevanceScore?: number;
+  /** Phase 2: Freshness score (0-1) based on recency. */
+  freshnessScore?: number;
+  /** Phase 2: Which worker agent first discovered this source. */
+  workerId?: string;
 }
 
 /** A sub-thread identified by a worker for further investigation. */
 export interface SubThread {
-   /** The follow-up question the worker suggests. */
-   question: string;
-   /** Why this thread is worth chasing. */
-   rationale: string;
-   /** Priority (1 = highest, 5 = lowest). */
-   priority: number;
-   /** Suggested source types to search. */
-   suggestedSourceTypes: SourceType[];
+  /** The follow-up question the worker suggests. */
+  question: string;
+  /** Why this thread is worth chasing. */
+  rationale: string;
+  /** Priority (1 = highest, 5 = lowest). */
+  priority: number;
+  /** Suggested source types to search. */
+  suggestedSourceTypes: SourceType[];
 }
 
 /** Tool interface exposed to worker agents. */
 export interface ResearchTools {
-   webSearch(query: string, limit?: number): Promise<{ title: string; url: string; description: string; age?: string; extraSnippet?: string; deepLinks?: { title: string; url: string }[] }[]>;
-   webCrawl(url: string, maxPages?: number): Promise<{ title: string; url: string; markdown: string }[]>;
-   webRead(url: string): Promise<{ title: string; url: string; markdown: string }>;
-   academicSearch(query: string, limit?: number): Promise<{ title: string; url: string; abstract?: string; year?: number }[]>;
-   githubSearch(query: string, limit?: number): Promise<{ fullName: string; htmlUrl: string; description: string }[]>;
-   redditSearch(query: string, limit?: number): Promise<{ title: string; url: string; selftext?: string; created_utc?: number; permalink: string }[]>;
-   hackernewsSearch(query: string, limit?: number): Promise<{ title: string; url: string; text?: string }[]>;
+  webSearch(
+    query: string,
+    limit?: number,
+  ): Promise<
+    {
+      title: string;
+      url: string;
+      description: string;
+      age?: string;
+      extraSnippet?: string;
+      deepLinks?: { title: string; url: string }[];
+    }[]
+  >;
+  webCrawl(
+    url: string,
+    maxPages?: number,
+  ): Promise<{ title: string; url: string; markdown: string }[]>;
+  webRead(url: string): Promise<{ title: string; url: string; markdown: string }>;
+  academicSearch(
+    query: string,
+    limit?: number,
+  ): Promise<{ title: string; url: string; abstract?: string; year?: number }[]>;
+  githubSearch(
+    query: string,
+    limit?: number,
+  ): Promise<{ fullName: string; htmlUrl: string; description: string }[]>;
+  redditSearch(
+    query: string,
+    limit?: number,
+  ): Promise<
+    { title: string; url: string; selftext?: string; created_utc?: number; permalink: string }[]
+  >;
+  hackernewsSearch(
+    query: string,
+    limit?: number,
+  ): Promise<{ title: string; url: string; text?: string }[]>;
 
-   // ── YouTube ─────────────────────────────────────────────────────────────
-   /** Search YouTube videos. */
-   youtubeSearch(query: string, limit?: number): Promise<{ title: string; videoId: string; channelTitle: string; publishedAt: string; url: string }[]>;
-   /** Fetch transcript for a YouTube video. */
-   youtubeTranscript(videoId: string, language?: string): Promise<{ text: string; duration: number; offset: number }[]>;
+  // ── YouTube ─────────────────────────────────────────────────────────────
+  /** Search YouTube videos. */
+  youtubeSearch(
+    query: string,
+    limit?: number,
+  ): Promise<
+    { title: string; videoId: string; channelTitle: string; publishedAt: string; url: string }[]
+  >;
+  /** Fetch transcript for a YouTube video. */
+  youtubeTranscript(
+    videoId: string,
+    language?: string,
+  ): Promise<{ text: string; duration: number; offset: number }[]>;
 
-   // ── Reddit comments ─────────────────────────────────────────────────────
-   /** Fetch comment tree for a Reddit thread. */
-   redditComments(url: string, limit?: number): Promise<{ post: { title: string; selftext: string }; comments: { body: string; author: string; permalink: string; depth: number }[] }>;
+  // ── Reddit comments ─────────────────────────────────────────────────────
+  /** Fetch comment tree for a Reddit thread. */
+  redditComments(
+    url: string,
+    limit?: number,
+  ): Promise<{
+    post: { title: string; selftext: string };
+    comments: { body: string; author: string; permalink: string; depth: number }[];
+  }>;
 
-   // ── Semantic search tools ───────────────────────────────────────────────
-   /** Semantic YouTube: search + transcripts + rank by query relevance. */
-   semanticYoutube(query: string, options?: { maxVideos?: number; channel?: string; topK?: number }): Promise<{ chunks: { text: string; videoId: string; title: string; score: number; url: string }[]; videoCount: number; failedTranscripts: number; warnings: string[] }>;
+  // ── Semantic search tools ───────────────────────────────────────────────
+  /** Semantic YouTube: search + transcripts + rank by query relevance. */
+  semanticYoutube(
+    query: string,
+    options?: { maxVideos?: number; channel?: string; topK?: number },
+  ): Promise<{
+    chunks: { text: string; videoId: string; title: string; score: number; url: string }[];
+    videoCount: number;
+    failedTranscripts: number;
+    warnings: string[];
+  }>;
 
-   /** Semantic Reddit: search + comments + rank by query relevance. */
-   semanticReddit(query: string, options?: { subreddit?: string; maxPosts?: number; topK?: number }): Promise<{ chunks: { text: string; postTitle: string; score: number; url: string }[]; postCount: number; failedPosts: number; warnings: string[] }>;
+  /** Semantic Reddit: search + comments + rank by query relevance. */
+  semanticReddit(
+    query: string,
+    options?: { subreddit?: string; maxPosts?: number; topK?: number },
+  ): Promise<{
+    chunks: { text: string; postTitle: string; score: number; url: string }[];
+    postCount: number;
+    failedPosts: number;
+    warnings: string[];
+  }>;
 
-   /** Semantic GitHub code search within a repo. */
-   semanticGitHubCode(query: string, repo: string, options?: { language?: string; maxFiles?: number; topK?: number }): Promise<{ results: { path: string; url: string; language: string; symbolName?: string; text?: string; score: number }[]; warnings: string[] }>;
+  /** Semantic GitHub code search within a repo. */
+  semanticGitHubCode(
+    query: string,
+    repo: string,
+    options?: { language?: string; maxFiles?: number; topK?: number },
+  ): Promise<{
+    results: {
+      path: string;
+      url: string;
+      language: string;
+      symbolName?: string;
+      text?: string;
+      score: number;
+    }[];
+    warnings: string[];
+  }>;
 
-   /** Semantic crawl: crawl a URL and retrieve chunks relevant to query. */
-   semanticCrawl(url: string, query: string, options?: { maxPages?: number; topK?: number }): Promise<{ chunks: { text: string; url: string; section: string; score: number }[]; pagesCrawled: number; warnings: string[] }>;
+  /** Semantic crawl: crawl a URL and retrieve chunks relevant to query. */
+  semanticCrawl(
+    url: string,
+    query: string,
+    options?: { maxPages?: number; topK?: number },
+  ): Promise<{
+    chunks: { text: string; url: string; section: string; score: number }[];
+    pagesCrawled: number;
+    warnings: string[];
+  }>;
 
-   // ── Medical/Reference ──────────────────────────────────────────────────
-   /** Search PubMed for medical/scientific literature. */
-   pubmedSearch(query: string, limit?: number): Promise<{ title: string; link: string; snippet: string; publishedDate?: string | undefined; authors?: string[] | undefined; journal?: string | undefined }[]>;
-   /** Search Wikipedia for general knowledge. */
-   wikipediaSearch(query: string, language?: string): Promise<{ title: string; link: string; snippet: string; pageId?: number | undefined; language?: string | undefined }[]>;
+  // ── Medical/Reference ──────────────────────────────────────────────────
+  /** Search PubMed for medical/scientific literature. */
+  pubmedSearch(
+    query: string,
+    limit?: number,
+  ): Promise<
+    {
+      title: string;
+      link: string;
+      snippet: string;
+      publishedDate?: string | undefined;
+      authors?: string[] | undefined;
+      journal?: string | undefined;
+    }[]
+  >;
+  /** Search Wikipedia for general knowledge. */
+  wikipediaSearch(
+    query: string,
+    language?: string,
+  ): Promise<
+    {
+      title: string;
+      link: string;
+      snippet: string;
+      pageId?: number | undefined;
+      language?: string | undefined;
+    }[]
+  >;
 
-   // ── Developer Q&A ────────────────────────────────────────────────────────
-   /** Search Stack Overflow / Stack Exchange for technical Q&A. */
-   stackoverflowSearch(query: string, limit?: number): Promise<{ title: string; link: string; bodySnippet: string; answerCount: number; score: number; tags: string[]; isAnswered: boolean }[]>;
+  // ── Developer Q&A ────────────────────────────────────────────────────────
+  /** Search Stack Overflow / Stack Exchange for technical Q&A. */
+  stackoverflowSearch(
+    query: string,
+    limit?: number,
+  ): Promise<
+    {
+      title: string;
+      link: string;
+      bodySnippet: string;
+      answerCount: number;
+      score: number;
+      tags: string[];
+      isAnswered: boolean;
+    }[]
+  >;
 
-   // ── Browser interactive extraction ──────────────────────────────────
-   /** Create a browser session for interactive extraction. */
-   browserSession: (config: BrowserSessionConfig) => Promise<{ sessionId: string }>;
+  // ── Browser interactive extraction ──────────────────────────────────
+  /** Create a browser session for interactive extraction. */
+  browserSession: (config: BrowserSessionConfig) => Promise<{ sessionId: string }>;
 
-   /** Extract content interactively (login walls, SPAs, bot challenges). */
-   browserExtract: (sessionId: string, url: string, plan: InteractiveExtractionPlan) => Promise<{
-      content: string;
-      findings: Finding[];
-      sources: SourceEntry[];
-      screenshots?: string[];
-   }>;
+  /** Extract content interactively (login walls, SPAs, bot challenges). */
+  browserExtract: (
+    sessionId: string,
+    url: string,
+    plan: InteractiveExtractionPlan,
+  ) => Promise<{
+    content: string;
+    findings: Finding[];
+    sources: SourceEntry[];
+    screenshots?: string[];
+  }>;
 
-   /** Close the browser session. */
-   browserClose: (sessionId: string) => Promise<void>;
+  /** Close the browser session. */
+  browserClose: (sessionId: string) => Promise<void>;
 }
