@@ -158,11 +158,7 @@ const pubmedAction = z.object({
 const wikipediaAction = z.object({
   action: z.literal('wikipedia').describe('Search Wikipedia for background knowledge'),
   query: z.string().describe('The search query string'),
-  language: z
-    .string()
-    .optional()
-    .default('en')
-    .describe('Language code (e.g. "en", "es", "fr")'),
+  language: z.string().optional().default('en').describe('Language code (e.g. "en", "es", "fr")'),
 });
 
 // ── Family definition ───────────────────────────────────────────────────────
@@ -296,7 +292,7 @@ export function registerResearchTool(server: McpServer, cfg: SearchConfig): void
 
 export function researchCapabilities(cfg: SearchConfig) {
   return researchFamily.actions.map((a) => ({
-    name: `research_${a.name}`,
+    name: `research.${a.name}`,
     available: a.configIssue ? a.configIssue(cfg) === null : true,
     issue: a.configIssue ? a.configIssue(cfg) : null,
   }));

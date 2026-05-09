@@ -478,7 +478,7 @@ export async function getGitHubRepoFile(
   // GitHub returns an array for directories; a dict for files
   if (Array.isArray(body)) {
     throw validationError(
-      `Path is a directory, not a file. Use github_repo_tree to list directories.`,
+      `Path is a directory, not a file. Use github.tree to list directories.`,
       { statusCode: 400, backend: 'github' },
     );
   }

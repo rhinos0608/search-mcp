@@ -40,6 +40,7 @@ export async function fetchFocus(
   const llm = new DeepResearchLlmClient(
     {
       baseUrl: cfg.deepResearch.baseUrl,
+      workerBaseUrl: cfg.deepResearch.workerBaseUrl,
       model: cfg.deepResearch.model,
       workerModel: cfg.deepResearch.workerModel || cfg.deepResearch.model,
       ...(cfg.deepResearch.apiToken ? { apiToken: cfg.deepResearch.apiToken } : {}),

@@ -68,10 +68,7 @@ export function normalizeEmbeddingResponse(
         !('embedding' in first) ||
         !Array.isArray((first as Record<string, unknown>).embedding)
       ) {
-        const firstItemKeys =
-          first !== null && typeof first === 'object'
-            ? Object.keys(first)
-            : [];
+        const firstItemKeys = first !== null && typeof first === 'object' ? Object.keys(first) : [];
         throw parseError(
           `OpenAI-compatible response has data array but data[0].embedding is missing; ` +
             `data[0] keys=[${firstItemKeys.join(',')}]`,

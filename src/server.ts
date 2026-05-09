@@ -1106,7 +1106,7 @@ export function createServer(): McpServer {
         description:
           'Fetch a web page and extract only the spans relevant to a specific question. Requires Crawl4AI and the deep research LLM config.',
         inputSchema: {
-          url: z.string().url().describe('The URL to fetch'),
+          url: z.url().describe('The URL to fetch'),
           focus: z.string().min(1).describe('The specific information to extract from the page'),
         },
       },

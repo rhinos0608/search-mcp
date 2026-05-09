@@ -16,7 +16,16 @@ import type { RateLimitInfo } from '../rateLimit.js';
 // ── Large text field detection and hybrid serialization ───────────────────────────────
 
 /** Fields that commonly contain large text content > 8KB */
-const LARGE_TEXT_FIELDS = ['readme', 'content', 'fileContent', 'transcript', 'text', 'body', 'description', 'readmeContent'];
+const LARGE_TEXT_FIELDS = [
+  'readme',
+  'content',
+  'fileContent',
+  'transcript',
+  'text',
+  'body',
+  'description',
+  'readmeContent',
+];
 
 /** Minimum byte size to trigger hybrid serialization */
 const LARGE_TEXT_THRESHOLD = 8_000;
@@ -59,12 +68,17 @@ function deleteNestedKey(obj: unknown, path: string): Record<string, unknown> {
   let current: unknown = cloned;
   for (let i = 0; i < parts.length - 1; i++) {
     if (current === null || typeof current !== 'object') return cloned;
-    const key = parts[i]!;
+    const key = parts[i];
+    if (key === undefined) return cloned;
     current = (current as Record<string, unknown>)[key];
   }
 
   if (current !== null && typeof current === 'object') {
-    delete (current as Record<string, unknown>)[parts[parts.length - 1]!];
+    const lastKey = parts[parts.length - 1];
+    if (lastKey !== undefined) {
+      const target = current as Record<string, unknown>;
+      Reflect.deleteProperty(target, lastKey);
+    }
   }
 
   return cloned;
@@ -81,18 +95,24 @@ function findLargeTextFields(obj: unknown, path = ''): string[] {
   if (typeof obj !== 'object' || obj === null) return matches;
 
   if (Array.isArray(obj)) {
-    for (let i = 0; i < obj.length; i++) {
-      matches.push(...findLargeTextFields(obj[i], path + '[' + i + ']'));
+    const arr = obj as unknown[];
+    for (let i = 0; i < arr.length; i++) {
+      const item = arr[i];
+      matches.push(...findLargeTextFields(item, `${path}[${String(i)}]`));
     }
     return matches;
   }
+
 
   for (const [key, value] of Object.entries(obj)) {
     if (typeof value !== 'string') continue;
 
     // Use byte-based check to match formatHybridResult
     const byteSize = estimateBytes(value);
-    if (byteSize > LARGE_TEXT_THRESHOLD && LARGE_TEXT_FIELDS.some((f) => key.toLowerCase().includes(f.toLowerCase()))) {
+    if (
+      byteSize > LARGE_TEXT_THRESHOLD &&
+      LARGE_TEXT_FIELDS.some((f) => key.toLowerCase().includes(f.toLowerCase()))
+    ) {
       matches.push(path ? `${path}.${key}` : key);
     }
   }
@@ -124,7 +144,7 @@ function formatHybridResult(result: ToolResult<unknown>): string {
   }
 
   // Build metadata without the large text fields (clone once, then delete each)
-  let metadata = { ...result, data: { ...data } };
+  const metadata = { ...result, data: { ...data } };
   for (const fieldPath of largeFieldPaths) {
     metadata.data = deleteNestedKey(metadata.data, fieldPath);
   }
@@ -194,15 +214,20 @@ function sanitizeErrorMessage(err: unknown): string {
   const baseMessage = error.message.split('\n')[0] ?? 'Unknown error';
   // Append recovery hints for common error patterns
   const hints: Record<string, string> = {
-    'API rate limit exceeded': 'Action required: Fall back to webSearch tool, or wait before retrying.',
+    'API rate limit exceeded':
+      'Action required: Fall back to webSearch tool, or wait before retrying.',
     'rate limit exceeded': 'Action required: Fall back to webSearch tool, or wait before retrying.',
-    'Not Found': 'Action required: Verify the resource exists. For GitHub repos, check owner/repo spelling.',
-    'Not found': 'Action required: Verify the resource exists. For GitHub repos, check owner/repo spelling.',
-    'Authentication required': 'Action required: Set required API token in config, or use a different tool.',
-    'Unauthorized': 'Action required: Set required API token in config, or use a different tool.',
-    'ENOTFOUND': 'Action required: Check the URL/domain is correct and reachable.',
-    'ECONNREFUSED': 'Action required: Service may be down. Try again later or use alternative tool.',
-    'timeout': 'Action required: Resource may be slow/unresponsive. Try again with smaller parameters.',
+    'Not Found':
+      'Action required: Verify the resource exists. For GitHub repos, check owner/repo spelling.',
+    'Not found':
+      'Action required: Verify the resource exists. For GitHub repos, check owner/repo spelling.',
+    'Authentication required':
+      'Action required: Set required API token in config, or use a different tool.',
+    Unauthorized: 'Action required: Set required API token in config, or use a different tool.',
+    ENOTFOUND: 'Action required: Check the URL/domain is correct and reachable.',
+    ECONNREFUSED: 'Action required: Service may be down. Try again later or use alternative tool.',
+    timeout:
+      'Action required: Resource may be slow/unresponsive. Try again with smaller parameters.',
     'Too Many Requests': 'Action required: Wait before retrying, or reduce request frequency.',
   };
   for (const [pattern, hint] of Object.entries(hints)) {
@@ -239,7 +264,7 @@ export function successResponse<T>(result: ToolResult<T>): {
   content: { type: 'text'; text: string }[];
 } {
   // Use hybrid serialization for large text fields (> 8KB), default to indented JSON
-  const formatted = formatHybridResult(result as ToolResult<unknown>);
+  const formatted = formatHybridResult(result);
   return {
     content: [
       {
