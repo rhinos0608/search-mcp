@@ -19,6 +19,7 @@ import type { DeepResearchConfig } from '../config.js';
 
 export interface OrchestratorLlmConfig {
   baseUrl: string;
+  workerBaseUrl?: string;
   model: string;
   workerModel: string;
   apiToken?: string;
@@ -49,6 +50,7 @@ const DEFAULT_CONFIG: Required<DeepResearchConfig> = {
   maxTokens: 500_000,
   maxTimeMs: 300_000,
   baseUrl: '',
+  workerBaseUrl: '',
   model: '',
   workerModel: '',
   apiToken: '',
@@ -59,6 +61,7 @@ const DEFAULT_CONFIG: Required<DeepResearchConfig> = {
   agentMaxIterations: 30,
   agentMaxSubIterations: 8,
   agentDefaultFetchMode: 'summary_focus_query',
+  autoSave: true,
 };
 
 function normalizeConfig(cfg?: Partial<DeepResearchConfig>): Required<DeepResearchConfig> {
@@ -71,6 +74,7 @@ function normalizeConfig(cfg?: Partial<DeepResearchConfig>): Required<DeepResear
     maxTokens: cfg.maxTokens ?? DEFAULT_CONFIG.maxTokens,
     maxTimeMs: cfg.maxTimeMs ?? DEFAULT_CONFIG.maxTimeMs,
     baseUrl: cfg.baseUrl ?? DEFAULT_CONFIG.baseUrl,
+    workerBaseUrl: cfg.workerBaseUrl ?? DEFAULT_CONFIG.workerBaseUrl,
     model: cfg.model ?? DEFAULT_CONFIG.model,
     workerModel: cfg.workerModel ?? DEFAULT_CONFIG.workerModel,
     apiToken: cfg.apiToken ?? DEFAULT_CONFIG.apiToken,
@@ -81,6 +85,7 @@ function normalizeConfig(cfg?: Partial<DeepResearchConfig>): Required<DeepResear
     agentMaxIterations: cfg.agentMaxIterations ?? DEFAULT_CONFIG.agentMaxIterations,
     agentMaxSubIterations: cfg.agentMaxSubIterations ?? DEFAULT_CONFIG.agentMaxSubIterations,
     agentDefaultFetchMode: cfg.agentDefaultFetchMode ?? DEFAULT_CONFIG.agentDefaultFetchMode,
+    autoSave: cfg.autoSave ?? DEFAULT_CONFIG.autoSave,
   };
 }
 
@@ -141,6 +146,9 @@ export class ResearchOrchestrator {
     return new DeepResearchLlmClient(
       {
         baseUrl: llmConfig.baseUrl,
+        ...(llmConfig.workerBaseUrl !== undefined
+          ? { workerBaseUrl: llmConfig.workerBaseUrl }
+          : {}),
         model: llmConfig.model,
         workerModel: llmConfig.workerModel,
         ...(llmConfig.apiToken !== undefined ? { apiToken: llmConfig.apiToken } : {}),
@@ -223,10 +231,33 @@ export class ResearchOrchestrator {
 
     try {
       this._currentStrategy = strategyRegistry.create(strategyName, ctx);
-      const result = await this._currentStrategy.analyze(query, ctx);
+      let result = await this._currentStrategy.analyze(query, ctx);
+
+      // ── Agent → pipeline fallback when LLM was unusable ──────────────
+      if (
+        strategyName === 'agent' &&
+        result.report.sourceCount === 0 &&
+        result.report.findingCount === 0 &&
+        strategyRegistry.has('pipeline')
+      ) {
+        logger.info(
+          { originalStrategy: strategyName },
+          'Agent produced no results (LLM failure), falling back to pipeline strategy',
+        );
+        await this._currentStrategy.close?.();
+        this._currentStrategy = strategyRegistry.create('pipeline', ctx);
+        this._currentStrategyName = 'pipeline';
+        await this.reportProgress(
+          10,
+          'Falling back to deterministic pipeline (LLM unavailable)',
+          'pipeline_fallback',
+        );
+        result = await this._currentStrategy.analyze(query, ctx);
+      }
+
       return result;
     } catch (err) {
-      logger.error({ err, strategy: strategyName }, 'Strategy execution failed');
+      logger.error({ err, strategy: this._currentStrategyName }, 'Strategy execution failed');
       throw err;
     } finally {
       if (this._currentStrategy?.close) {

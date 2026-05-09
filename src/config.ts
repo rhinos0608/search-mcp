@@ -177,8 +177,10 @@ export interface DeepResearchConfig {
   maxToolCalls: number;
   maxTokens: number;
   maxTimeMs: number;
-  /** OpenAI-compatible base URL for the LLM used by deep research. */
+  /** OpenAI-compatible base URL for the orchestrator LLM. */
   baseUrl: string;
+  /** Optional separate base URL for the worker LLM. Falls back to baseUrl if not set. */
+  workerBaseUrl: string;
   /** Main orchestrator model (mid-tier: planning, gap analysis, synthesis). */
   model: string;
   /** Worker model (cheap: search, extraction notes, classification). */
@@ -195,6 +197,8 @@ export interface DeepResearchConfig {
   agentMaxSubIterations: number;
   /** Default fetch mode: full | summary_focus_query | disabled (default summary_focus_query). */
   agentDefaultFetchMode: string;
+  /** Automatically save results to disk when research completes (unless optOut is set). Default: true. */
+  autoSave: boolean;
 }
 
 export type BrowserMode = 'stealth' | 'user' | 'profile';
@@ -300,6 +304,7 @@ const DEFAULTS: Omit<SearchConfig, 'rescoreWeights'> = {
     maxTokens: 500_000,
     maxTimeMs: 300_000,
     baseUrl: '',
+    workerBaseUrl: '',
     model: '',
     workerModel: '',
     apiToken: '',
@@ -310,6 +315,7 @@ const DEFAULTS: Omit<SearchConfig, 'rescoreWeights'> = {
     agentMaxIterations: 30,
     agentMaxSubIterations: 8,
     agentDefaultFetchMode: 'summary_focus_query',
+    autoSave: true,
   },
   challengeLatencyThreshold: 5000,
   browser: {
@@ -705,22 +711,32 @@ function loadFromEnv(): EnvConfig {
     const u = process.env.DEEP_RESEARCH_BASE_URL;
     if (u !== undefined) {
       partial.baseUrl = u;
+      hasAny = true;
+    }
+    const wu = process.env.DEEP_RESEARCH_WORKER_BASE_URL;
+    if (wu !== undefined) {
+      partial.workerBaseUrl = wu;
+      hasAny = true;
     }
     const m = process.env.DEEP_RESEARCH_MODEL;
     if (m !== undefined) {
       partial.model = m;
+      hasAny = true;
     }
     const w = process.env.DEEP_RESEARCH_WORKER_MODEL;
     if (w !== undefined) {
       partial.workerModel = w;
+      hasAny = true;
     }
     const tok = process.env.DEEP_RESEARCH_API_TOKEN;
     if (tok !== undefined) {
       partial.apiToken = tok;
+      hasAny = true;
     }
     const d = process.env.DEEP_RESEARCH_DEFAULT_DEPTH;
     if (d !== undefined && ['quick', 'standard', 'deep', 'exhaustive', 'tree'].includes(d)) {
       partial.defaultDepth = d as ResearchDepth;
+      hasAny = true;
     }
     const maxIters = process.env.DEEP_RESEARCH_AGENT_MAX_ITERATIONS;
     if (maxIters !== undefined) {
@@ -1032,6 +1048,10 @@ export function loadConfig(): SearchConfig {
         fileConfig.deepResearch?.baseUrl ??
         envConfig.deepResearch?.baseUrl ??
         DEFAULTS.deepResearch.baseUrl,
+      workerBaseUrl:
+        fileConfig.deepResearch?.workerBaseUrl ??
+        envConfig.deepResearch?.workerBaseUrl ??
+        DEFAULTS.deepResearch.workerBaseUrl,
       model:
         fileConfig.deepResearch?.model ??
         envConfig.deepResearch?.model ??
@@ -1072,6 +1092,10 @@ export function loadConfig(): SearchConfig {
         fileConfig.deepResearch?.agentDefaultFetchMode ??
         envConfig.deepResearch?.agentDefaultFetchMode ??
         DEFAULTS.deepResearch.agentDefaultFetchMode,
+      autoSave:
+        fileConfig.deepResearch?.autoSave ??
+        envConfig.deepResearch?.autoSave ??
+        DEFAULTS.deepResearch.autoSave,
     },
     rescoreWeights: DEFAULT_RESCORE_WEIGHTS,
   };
