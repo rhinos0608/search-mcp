@@ -35,6 +35,7 @@ Replace `state.gapTargets: string[]` usage with `Agenda` class.
 **Changes**:
 
 1. **Create `Agenda` instance** in `ResearchOrchestrator` constructor:
+
 ```typescript
 private agenda: Agenda;
 
@@ -45,6 +46,7 @@ constructor(drCfg, llmConfig) {
 ```
 
 2. **Seed agenda from decomposition**: After decomposition creates sub-questions, enqueue each as a `GapTarget`:
+
 ```typescript
 for (const sq of subQuestions) {
   this.agenda.enqueue({
@@ -56,6 +58,7 @@ for (const sq of subQuestions) {
 ```
 
 3. **Replace the EDA loop's gap iteration**: Instead of processing all sub-questions in batch, get one active target:
+
 ```typescript
 const target = this.agenda.nextTarget(step);
 if (!target) {
@@ -66,6 +69,7 @@ this.agenda.activate(target.id);
 ```
 
 4. **Update after extraction/discovery**: When a target is sufficiently answered:
+
 ```typescript
 this.agenda.resolve(target.id, {
   answer: summary,
@@ -75,6 +79,7 @@ this.agenda.resolve(target.id, {
 ```
 
 5. **On evaluation failure**: Defer or abandon:
+
 ```typescript
 if (evaluation.pass === false && !agenda.attemptsRemaining(target.id)) {
   agenda.abandon(target.id, `Exhausted ${MAX_ATTEMPTS} attempts`);
@@ -84,6 +89,7 @@ if (evaluation.pass === false && !agenda.attemptsRemaining(target.id)) {
 ```
 
 6. **Enqueue new gaps from gap analysis**: When gap analysis identifies new dimensions:
+
 ```typescript
 for (const gap of newGaps) {
   agenda.enqueue({
@@ -104,6 +110,7 @@ Replace scattered `gates.allowX` boolean assignments with a single `computeGates
 **Changes**:
 
 1. **In the EDA loop body**, compute gates before LLM decision:
+
 ```typescript
 const gates = computeGates({
   state: this.stateEngine.getState(),
@@ -127,11 +134,13 @@ const gates = computeGates({
 **Changes**:
 
 1. **Create `Trace` instance** in `ResearchOrchestrator`:
+
 ```typescript
 private trace: Trace = new Trace();
 ```
 
 2. **Append events at key loop boundaries**:
+
 - After discovery: `trace.append({ step, phase: 'discovery', action: 'search', result: '...' })`
 - After extraction: `trace.append({ step, phase: 'extraction', action: 'extract', ... })`
 - After evaluation: `trace.append({ step, phase: 'gap_analysis', action: 'evaluate', ... })`
@@ -141,6 +150,7 @@ private trace: Trace = new Trace();
 3. **Replace `state.diary` writes** with `trace.append()` calls. Leave `state.diary` as-is for backward compat; it can be removed in Sprint 4.
 
 4. **Replace manual `ResearchProgress[]` construction** with `trace.publicTimeline()` for the output:
+
 ```typescript
 result.timeline = this.trace.publicTimeline();
 ```
@@ -152,16 +162,19 @@ result.timeline = this.trace.publicTimeline();
 **Changes**:
 
 1. **Create `KnowledgeBase` instance**:
+
 ```typescript
 private knowledge: KnowledgeBase = new KnowledgeBase();
 ```
 
 2. **After extraction phase**, ingest findings:
+
 ```typescript
 this.knowledge.ingestFindings(state.findings, this.agenda.getStep());
 ```
 
 3. **When a gap target is resolved**, ingest:
+
 ```typescript
 this.knowledge.ingestGapResolution(target, this.agenda.getStep());
 ```
@@ -173,17 +186,19 @@ this.knowledge.ingestGapResolution(target, this.agenda.getStep());
 **Changes**:
 
 1. **In `DiscoveryEngine`**, after collecting candidates, apply ranking:
+
 ```typescript
 const scores = rankSource(source, frequency);
 const ranked = candidates
-  .map(c => ({ ...c, readPriority: rankSource(c).readPriorityScore }))
+  .map((c) => ({ ...c, readPriority: rankSource(c).readPriorityScore }))
   .sort((a, b) => b.readPriority - a.readPriority);
 ```
 
 2. **Apply max-per-hostname** filter before returning:
+
 ```typescript
 const hostnameCounts = new Map<string, number>();
-return ranked.filter(c => {
+return ranked.filter((c) => {
   const hostname = new URL(c.url).hostname;
   const count = (hostnameCounts.get(hostname) ?? 0) + 1;
   hostnameCounts.set(hostname, count);
@@ -198,6 +213,7 @@ return ranked.filter(c => {
 **Changes to `ORCHESTRATOR_DECIDE`**:
 
 Add gate context to the prompt:
+
 ```
 Available actions and their current status:
 - answer: {allowed} — {reason}
@@ -267,6 +283,7 @@ Output JSON:
 ### 2b. Backend-Neutral Recency (types.ts + discovery.ts)
 
 Add `RecencySpec` to types:
+
 ```typescript
 export interface RecencySpec {
   mode: 'any' | 'recent' | 'date_range';
@@ -276,6 +293,7 @@ export interface RecencySpec {
 ```
 
 Add adapter functions in `discovery.ts` that translate `RecencySpec` to backend-specific params:
+
 - Exa: `startPublishedDate` / `endPublishedDate`
 - Brave: `freshness` (day/week/month/year)
 - SearXNG: `time_range`
@@ -284,6 +302,7 @@ Add adapter functions in `discovery.ts` that translate `RecencySpec` to backend-
 ### 2c. Intent Tracking in Discovery (discovery.ts + types.ts)
 
 Track which intents have been tried per sub-question:
+
 ```typescript
 interface IntentCoverage {
   subQuestionId: string;
@@ -296,6 +315,7 @@ When LLM generates new queries, filter out already-attempted intents.
 ### 2d. Dual-Score Ranking in Synthesis (synthesizer.ts or llm/synthesis.ts)
 
 During synthesis, when computing confidence, incorporate `evidenceWeight` from `SourceRanking`:
+
 ```typescript
 const evidenceWeight = rankSource(source).evidenceWeight;
 // Weight findings by their sources' evidence weight
@@ -331,12 +351,13 @@ const weightedConfidence = finding.confidence * averageEvidenceWeight(finding.so
 export interface GapAttempt {
   answer: string;
   evaluation: EvaluationResult;
-  evidenceDelta: number;  // new sources/findings added this attempt
+  evidenceDelta: number; // new sources/findings added this attempt
   step: number;
 }
 ```
 
 Add to `GapTarget`:
+
 ```typescript
 attemptsList?: GapAttempt[];
 ```
@@ -346,6 +367,7 @@ Update `Agenda.activate()` to push a new attempt slot. Update `Agenda.resolve()`
 ### 3b. Failure Analysis in Orchestrator (orchestrator.ts)
 
 When evaluation fails:
+
 1. Check `attemptsRemaining()`
 2. If remaining: `defer()` with failure mode
 3. If exhausted: `abandon()` with failure mode
@@ -366,6 +388,7 @@ function classifyFailure(evaluation: EvaluationResult): FailureMode {
 ### 3c. Missing-Dimension Enqueueing (orchestrator.ts)
 
 When failure analysis identifies missing dimensions, enqueue them as new gap targets:
+
 ```typescript
 for (const dim of evaluation.missingDimensions) {
   this.agenda.enqueue({
@@ -499,7 +522,7 @@ interface SearchCluster {
   insight: string;
   followupQuestion: string;
   sourceIds: string[];
-  confidence: number;  // low — based on snippets only
+  confidence: number; // low — based on snippets only
   createdAtStep: number;
 }
 ```
@@ -527,6 +550,7 @@ function detectLanguage(text: string): string {
 Store in `state.language`.
 
 When generating search queries, if language is non-English, optionally generate English variants:
+
 ```typescript
 if (language !== 'en') {
   queries.push(translatedEnglishQuery);
@@ -552,22 +576,22 @@ Set answer language in synthesis context.
 
 ## Effort Summary
 
-| Sprint | New Files | Modified Files | Est. LOC | Risk | Value |
-|--------|-----------|---------------|----------|------|-------|
-| 1 | 0 | 6 | ~400 | Medium | Highest — loop behavior improvement |
-| 2 | 0 | 6 | ~350 | Medium | High — source quality |
-| 3 | 0 | 5 | ~300 | Medium | High — strategic adaptation |
-| 4 | 0 | 4 | ~250 | Low | Medium — context quality |
-| 5 | 0 | 4 | ~200 | Low | Low — polish |
-| **Total** | **0** | **~8** | **~1,500** | — | — |
+| Sprint    | New Files | Modified Files | Est. LOC   | Risk   | Value                               |
+| --------- | --------- | -------------- | ---------- | ------ | ----------------------------------- |
+| 1         | 0         | 6              | ~400       | Medium | Highest — loop behavior improvement |
+| 2         | 0         | 6              | ~350       | Medium | High — source quality               |
+| 3         | 0         | 5              | ~300       | Medium | High — strategic adaptation         |
+| 4         | 0         | 4              | ~250       | Low    | Medium — context quality            |
+| 5         | 0         | 4              | ~200       | Low    | Low — polish                        |
+| **Total** | **0**     | **~8**         | **~1,500** | —      | —                                   |
 
 ## Risk Mitigation
 
-| Risk | Mitigation |
-|------|-----------|
-| Agenda lifecycle bugs | Unit tests for each transition; integration test with orchestrator |
-| Gate computation wrong | Property-based tests for edge cases (exhausted budget, 0 sources) |
-| Query rewriting too expensive | Budget-aware gates block generation when low on tool calls |
-| Citation chasing infinite loop | Max 2 levels deep; new citations only from unvisited URLs |
-| Context window growth | Token-bounded knowledge selection; bounded diary; compact trace |
-| LLM ignores gate constraints | Post-decision validation: if LLM picks blocked action, reject and force re-decide with explicit feedback |
+| Risk                           | Mitigation                                                                                               |
+| ------------------------------ | -------------------------------------------------------------------------------------------------------- |
+| Agenda lifecycle bugs          | Unit tests for each transition; integration test with orchestrator                                       |
+| Gate computation wrong         | Property-based tests for edge cases (exhausted budget, 0 sources)                                        |
+| Query rewriting too expensive  | Budget-aware gates block generation when low on tool calls                                               |
+| Citation chasing infinite loop | Max 2 levels deep; new citations only from unvisited URLs                                                |
+| Context window growth          | Token-bounded knowledge selection; bounded diary; compact trace                                          |
+| LLM ignores gate constraints   | Post-decision validation: if LLM picks blocked action, reject and force re-decide with explicit feedback |

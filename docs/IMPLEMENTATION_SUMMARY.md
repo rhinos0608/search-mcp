@@ -14,6 +14,7 @@ providing multimodal document extraction for complex documents.
 ## Implemented Components
 
 ### 1. Python Bridge Service (440 lines)
+
 **File:** `services/rag-anything-bridge/src/main.py`
 
 - FastAPI-based HTTP service
@@ -24,7 +25,9 @@ providing multimodal document extraction for complex documents.
 - Health checks and monitoring
 
 ### 2. Parser Router (600+ lines)
+
 **Files:**
+
 - `services/rag-anything-bridge/src/parsers/parser_router.py`
 - `services/rag-anything-bridge/src/parsers/__init__.py`
 
@@ -35,7 +38,9 @@ providing multimodal document extraction for complex documents.
 - Extensible base parser architecture
 
 ### 3. Content Processors (925 lines)
+
 **Files:**
+
 - `services/rag-anything-bridge/src/processors/content_processor.py`
 - `services/rag-anything-bridge/src/processors/__init__.py`
 
@@ -47,7 +52,9 @@ providing multimodal document extraction for complex documents.
 - Metadata enrichment
 
 ### 4. Cache & Storage Managers (900+ lines)
+
 **Files:**
+
 - `services/rag-anything-bridge/src/utils/cache.py`
 - `services/rag-anything-bridge/src/utils/storage.py`
 - `services/rag-anything-bridge/src/utils/__init__.py`
@@ -60,6 +67,7 @@ providing multimodal document extraction for complex documents.
 - Storage backend abstraction (local now, S3-ready)
 
 ### 5. TypeScript Client (331 lines)
+
 **File:** `src/utils/ragAnythingClient.ts`
 
 - Full TypeScript type definitions
@@ -71,6 +79,7 @@ providing multimodal document extraction for complex documents.
 - Singleton instance for convenience
 
 ### 6. Quality Detection & Escalation (237 lines)
+
 **File:** `src/utils/extractionQuality.ts`
 
 - Configurable quality thresholds
@@ -85,7 +94,9 @@ providing multimodal document extraction for complex documents.
 - Detailed quality scoring
 
 ### 7. Docker Configuration
+
 **Files:**
+
 - `services/rag-anything-bridge/Dockerfile`
 - `services/rag-anything-bridge/docker-compose.yml`
 
@@ -99,6 +110,7 @@ providing multimodal document extraction for complex documents.
   - Grafana for dashboards
 
 ### 8. Documentation (254 lines)
+
 **File:** `docs/RAG_ANYTHING_INTEGRATION.md`
 
 - Complete architecture overview
@@ -111,17 +123,17 @@ providing multimodal document extraction for complex documents.
 
 ## Code Statistics
 
-| Component | Lines | Files |
-|-----------|-------|-------|
-| Python Bridge | 440 | 1 |
-| Parser Router | 600 | 2 |
-| Content Processors | 925 | 2 |
-| Cache & Storage | 900 | 3 |
-| TypeScript Client | 331 | 1 |
-| Quality Detection | 237 | 1 |
-| Docker Config | ~200 | 2 |
-| Documentation | 254 | 1 |
-| **Total** | **~4,087** | **16** |
+| Component          | Lines      | Files  |
+| ------------------ | ---------- | ------ |
+| Python Bridge      | 440        | 1      |
+| Parser Router      | 600        | 2      |
+| Content Processors | 925        | 2      |
+| Cache & Storage    | 900        | 3      |
+| TypeScript Client  | 331        | 1      |
+| Quality Detection  | 237        | 1      |
+| Docker Config      | ~200       | 2      |
+| Documentation      | 254        | 1      |
+| **Total**          | **~4,087** | **16** |
 
 ## Deployment Checklist
 
@@ -155,6 +167,7 @@ curl -X POST http://localhost:8000/extract \
 ## Version History
 
 ### v3.1.5 (2026-04-26)
+
 - Initial production release of RAG-Anything integration
 - Multi-parser architecture (Docling, PaddleOCR, MinerU)
 - Content extraction with quality detection
@@ -169,9 +182,9 @@ This implementation was completed as part of the search-mcp v3.1.5 release.
 ---
 
 **Next Steps:**
+
 1. Deploy to staging environment
 2. Run integration tests with real documents
 3. Monitor performance metrics
 4. Collect feedback from users
 5. Plan Phase 2 enhancements (full multimodal RAG)
-

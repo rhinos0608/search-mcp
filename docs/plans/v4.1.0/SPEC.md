@@ -14,17 +14,17 @@ The core change is architectural: move from "phase pipeline with gap patches" to
 
 ### Key Gaps Addressed
 
-| Gap | Current Behavior | Target Behavior |
-|-----|-----------------|-----------------|
-| **Synthesis quality** | JSON bullet points (`findings: string[]`) | Flowing prose with inline `[N]` citation markers |
-| **Gap lifecycle** | `gapTargets: string[]` — untyped, no lifecycle | Typed `GapTarget` with activation/resolution/defer/abandon |
-| **Action selection** | Scattered mutable booleans (`gates.allowX = false`) | `computeGates()` from state/budget/evaluation each iteration |
-| **Search persistence** | Same sub-questions re-queried on failure | Alternative queries, backend pivoting, failure mode tracking |
-| **Citation chasing** | Not done | Extraction flags citations, schedules follow-up discovery |
-| **Source ranking** | Implicit single score | Dual scores: read-priority vs evidence-weight |
-| **Knowledge injection** | Raw findings dumped into LLM context | Selected, compressed `KnowledgeItem` with token budget |
-| **Trace/Diary/Progress** | Two drifting systems (diary in state, progress in progress.ts) | Unified `TraceEvent` substrate |
-| **Output format** | Structured JSON + bullet points | Narrative prose with inline citations, structured fields for confidence/contradictions |
+| Gap                      | Current Behavior                                               | Target Behavior                                                                        |
+| ------------------------ | -------------------------------------------------------------- | -------------------------------------------------------------------------------------- |
+| **Synthesis quality**    | JSON bullet points (`findings: string[]`)                      | Flowing prose with inline `[N]` citation markers                                       |
+| **Gap lifecycle**        | `gapTargets: string[]` — untyped, no lifecycle                 | Typed `GapTarget` with activation/resolution/defer/abandon                             |
+| **Action selection**     | Scattered mutable booleans (`gates.allowX = false`)            | `computeGates()` from state/budget/evaluation each iteration                           |
+| **Search persistence**   | Same sub-questions re-queried on failure                       | Alternative queries, backend pivoting, failure mode tracking                           |
+| **Citation chasing**     | Not done                                                       | Extraction flags citations, schedules follow-up discovery                              |
+| **Source ranking**       | Implicit single score                                          | Dual scores: read-priority vs evidence-weight                                          |
+| **Knowledge injection**  | Raw findings dumped into LLM context                           | Selected, compressed `KnowledgeItem` with token budget                                 |
+| **Trace/Diary/Progress** | Two drifting systems (diary in state, progress in progress.ts) | Unified `TraceEvent` substrate                                                         |
+| **Output format**        | Structured JSON + bullet points                                | Narrative prose with inline citations, structured fields for confidence/contradictions |
 
 ---
 
@@ -48,13 +48,13 @@ until: budget exhausted OR no open targets remain
 
 ### Five Supporting Systems
 
-| System | Module | Owns |
-|--------|--------|------|
-| **Agenda** | `agenda.ts` | Gap lifecycle: open → active → resolved/abandoned. Max N attempts, dedup, cycle detection. |
-| **ActionGates** | `actionGates.ts` | `computeGates()` from state/budget/failures. Budget-aware. Reset per gap, not globally. |
-| **Knowledge** | `knowledge.ts` | `KnowledgeItem` selection + compression. Bounded by token budget. `serp_hypothesis` not promoted without extraction. |
-| **Trace** | `trace.ts` | One event substrate for diary + progress + timeline. Factual only (no hidden reasoning). MCP-safe public timeline. |
-| **SourceRanking** | `sourceRanking.ts` | Dual scores: read-priority (what to read next) vs evidence-weight (how much to trust). Frequency ≠ truth. |
+| System            | Module             | Owns                                                                                                                 |
+| ----------------- | ------------------ | -------------------------------------------------------------------------------------------------------------------- |
+| **Agenda**        | `agenda.ts`        | Gap lifecycle: open → active → resolved/abandoned. Max N attempts, dedup, cycle detection.                           |
+| **ActionGates**   | `actionGates.ts`   | `computeGates()` from state/budget/failures. Budget-aware. Reset per gap, not globally.                              |
+| **Knowledge**     | `knowledge.ts`     | `KnowledgeItem` selection + compression. Bounded by token budget. `serp_hypothesis` not promoted without extraction. |
+| **Trace**         | `trace.ts`         | One event substrate for diary + progress + timeline. Factual only (no hidden reasoning). MCP-safe public timeline.   |
+| **SourceRanking** | `sourceRanking.ts` | Dual scores: read-priority (what to read next) vs evidence-weight (how much to trust). Frequency ≠ truth.            |
 
 ### Canonical Types
 
@@ -81,14 +81,17 @@ FailureMode:
 ## 3. Sprint Breakdown
 
 ### Sprint 0: Substrate (Done)
+
 5 new modules + 6 modified files. Foundation for all subsequent sprints.
 
 **Delivered**: `agenda.ts`, `actionGates.ts`, `trace.ts`, `knowledge.ts`, `sourceRanking.ts` + updated types, prompts, synthesizer, state.
 
 ### Sprint 1: Working Loop with Gates + Agenda
+
 Replace the existing EDA loop's gap management and action selection.
 
 **Changes**:
+
 - Wire `Agenda` into `ResearchOrchestrator` — replace `gapTargets: string[]` with `Agenda.nextTarget()/activate()/resolve()/defer()/abandon()`
 - Wire `computeGates()` into the EDA loop — replace scattered `gates.allowX` booleans
 - Refactor EDA loop to operate on ONE active target at a time (not batch all sub-questions)
@@ -103,9 +106,11 @@ Replace the existing EDA loop's gap management and action selection.
 **Files touched**: `orchestrator.ts`, `state.ts`, `discovery.ts`, `gapAnalysis.ts`, `llm/prompts.ts`, `llm/chat.ts`
 
 ### Sprint 2: Query Rewriting + Source Ranking (P4 + P9)
+
 Improve source quality through intentional query generation and dual-score ranking.
 
 **Changes**:
+
 - Rich query generation: LLM generates alternate phrasings, backend-specific targets, recency constraints
 - Backend-neutral `recency` metadata (not Google `tbs`)
 - `DiscoveryEngine` accepts explicit query lists from LLM-generated strategies
@@ -118,9 +123,11 @@ Improve source quality through intentional query generation and dual-score ranki
 **Files touched**: `discovery.ts`, `sourceRanking.ts`, `types.ts`, `orchestrator.ts`, `llm/prompts.ts`, `config.ts`
 
 ### Sprint 3: Failure Analysis + Gaps Complete (P6 + P1 completion)
+
 Add failure analysis to gap targets, retry limits, abandonment logic.
 
 **Changes**:
+
 - `GapAttempt` metadata on gap targets (answer, evaluation, evidenceDelta, step)
 - `FailureMode` typed analysis attached to failed evaluations
 - Retry limits: no target attempted > N times without new evidence
@@ -134,9 +141,11 @@ Add failure analysis to gap targets, retry limits, abandonment logic.
 **Files touched**: `agenda.ts`, `actionGates.ts`, `orchestrator.ts`, `state.ts`, `types.ts`, `trace.ts`
 
 ### Sprint 4: Knowledge + Trace + Synthesis (P3 + P7 + P10)
+
 Unified trace rendering, knowledge conversation injection, and prose synthesis.
 
 **Changes**:
+
 - `KnowledgeBase.renderAsConversation()` produces bounded user/assistant pairs for LLM context
 - `ORCHESTRATOR_SYNTHESIS` already updated (Sprint 0) — now the LLM actually receives knowledge items
 - `buildStateSummary()` includes compressed knowledge messages (top-K, token-budget bounded)
@@ -150,9 +159,11 @@ Unified trace rendering, knowledge conversation injection, and prose synthesis.
 **Files touched**: `knowledge.ts`, `trace.ts`, `llm/synthesis.ts`, `llm/prompts.ts`, `orchestrator.ts`, `progress.ts`
 
 ### Sprint 5: Clustering + Language Detection (P5 + P8)
+
 Cross-backend SERP clustering and multilingual support.
 
 **Changes**:
+
 - `SearchCluster` as discovery artifact (separate from SourceEntry)
 - SERP insight stored as `serp_hypothesis` KnowledgeItem — NOT promoted to finding without extraction
 - Language detection on input query → set answer language
@@ -187,6 +198,7 @@ Each sprint adds LLM calls. Budget-aware gates control this:
 - **Sprint 5**: +0-1 LLM call per query (language detection)
 
 The `computeGates()` function enforces:
+
 - Block `discover` when source backlog > extract capacity
 - Block `extract` when remaining budget too low
 - Force `synthesize` when near exhaustion
@@ -196,10 +208,10 @@ The `computeGates()` function enforces:
 
 ## 6. Testing Strategy
 
-| Sprint | Test Focus |
-|--------|-----------|
-| 1 | Agenda lifecycle (activate/resolve/defer/abandon), gate computation edge cases |
-| 2 | Query diversity (no duplicate intents), ranking correctness (readPriority vs evidenceWeight) |
-| 3 | Retry limits, abandonment triggers, missing-dimension enqueueing |
-| 4 | Knowledge token-budget enforcement, trace→diary rendering, public timeline completeness |
-| 5 | Language detection accuracy, SERP hypothesis isolation |
+| Sprint | Test Focus                                                                                   |
+| ------ | -------------------------------------------------------------------------------------------- |
+| 1      | Agenda lifecycle (activate/resolve/defer/abandon), gate computation edge cases               |
+| 2      | Query diversity (no duplicate intents), ranking correctness (readPriority vs evidenceWeight) |
+| 3      | Retry limits, abandonment triggers, missing-dimension enqueueing                             |
+| 4      | Knowledge token-budget enforcement, trace→diary rendering, public timeline completeness      |
+| 5      | Language detection accuracy, SERP hypothesis isolation                                       |
