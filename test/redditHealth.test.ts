@@ -43,22 +43,22 @@ afterEach(() => {
    resetTrackers();
 });
 
-test('configHealth lists reddit_search and reddit_comments as healthy', () => {
+test('configHealth lists reddit.search and reddit.comments as healthy', () => {
    const cfg = loadConfig();
    const health = configHealth(cfg);
 
-   assert.ok(health['reddit_search'], 'reddit_search should appear in config health');
-   assert.ok(health['reddit_comments'], 'reddit_comments should appear in config health');
-   assert.equal(health['reddit_search']?.status, 'healthy');
-   assert.equal(health['reddit_comments']?.status, 'healthy');
+   assert.ok(health['reddit.search'], 'reddit.search should appear in config health');
+   assert.ok(health['reddit.comments'], 'reddit.comments should appear in config health');
+   assert.equal(health['reddit.search']?.status, 'healthy');
+   assert.equal(health['reddit.comments']?.status, 'healthy');
 });
 
 test('runHealthProbes: no Reddit OAuth configured is healthy and reports reddit_oauth "not configured"', async () => {
    const cfg = loadConfig();
    const report = await runHealthProbes(cfg);
 
-   assert.equal(report.tools['reddit_search']?.status, 'healthy');
-   assert.equal(report.tools['reddit_comments']?.status, 'healthy');
+   assert.equal(report.tools['reddit.search']?.status, 'healthy');
+   assert.equal(report.tools['reddit.comments']?.status, 'healthy');
 
    const oauth = report.tools.reddit_oauth;
    assert.ok(oauth, 'reddit_oauth entry should be present in the health report');
@@ -88,8 +88,8 @@ test('runHealthProbes: both Reddit OAuth creds set reports reddit_oauth "configu
    assert.equal(oauth.status, 'healthy');
    assert.match(oauth.message, /oauth\.reddit\.com/i);
    assert.doesNotMatch(oauth.message, /not configured/i);
-   assert.equal(report.tools['reddit_search']?.status, 'healthy');
-   assert.equal(report.tools['reddit_comments']?.status, 'healthy');
+   assert.equal(report.tools['reddit.search']?.status, 'healthy');
+   assert.equal(report.tools['reddit.comments']?.status, 'healthy');
 });
 
 test('runHealthProbes: partial Reddit OAuth (only CLIENT_ID) reports degraded with remediation', async () => {
@@ -130,17 +130,17 @@ test('runHealthProbes: partial Reddit OAuth (only CLIENT_SECRET) reports degrade
    );
 });
 
-test('runHealthProbes: reddit_search and reddit_comments are rate_limited when the shared reddit tracker has remaining=0', async () => {
+test('runHealthProbes: reddit.search and reddit.comments are rate_limited when the shared reddit tracker has remaining=0', async () => {
    const cfg = loadConfig();
 
    getTracker('reddit').recordLimitHit(60_000);
 
    const report = await runHealthProbes(cfg);
 
-   assert.equal(report.tools['reddit_search']?.status, 'rate_limited');
+   assert.equal(report.tools['reddit.search']?.status, 'rate_limited');
    assert.equal(
-      report.tools['reddit_comments']?.status,
+      report.tools['reddit.comments']?.status,
       'rate_limited',
-      'reddit_comments must be mapped to the shared reddit rate-limit tracker',
+      'reddit.comments must be mapped to the shared reddit rate-limit tracker',
    );
 });

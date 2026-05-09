@@ -146,21 +146,21 @@ test('parseGitHubSearchHeaders returns RateLimitInfo with backend github_search'
 // ── Health: GitHub consolidated actions are mapped ─────────────────────────
 
 test('RATE_LIMIT_TOOL_MAP includes github.repo and github.tree mapping to github', () => {
-   const repoEntry = RATE_LIMIT_TOOL_MAP.find(([tool]) => tool === 'github_repo');
+   const repoEntry = RATE_LIMIT_TOOL_MAP.find(([tool]) => tool === 'github.repo');
    assert.ok(repoEntry, 'RATE_LIMIT_TOOL_MAP should have an entry for github.repo');
    assert.equal(repoEntry[1], 'github', 'github.repo should map to github backend');
 
-   const treeEntry = RATE_LIMIT_TOOL_MAP.find(([tool]) => tool === 'github_tree');
+   const treeEntry = RATE_LIMIT_TOOL_MAP.find(([tool]) => tool === 'github.tree');
    assert.ok(treeEntry, 'RATE_LIMIT_TOOL_MAP should have an entry for github.tree');
    assert.equal(treeEntry[1], 'github', 'github.tree should map to github backend');
 
-   const fileEntry = RATE_LIMIT_TOOL_MAP.find(([tool]) => tool === 'github_file');
+   const fileEntry = RATE_LIMIT_TOOL_MAP.find(([tool]) => tool === 'github.file');
    assert.ok(fileEntry, 'RATE_LIMIT_TOOL_MAP should have an entry for github.file');
    assert.equal(fileEntry[1], 'github', 'github.file should map to github backend');
 });
 
 test('RATE_LIMIT_TOOL_MAP includes github.search to github_search', () => {
-   const entry = RATE_LIMIT_TOOL_MAP.find(([tool]) => tool === 'github_search');
+   const entry = RATE_LIMIT_TOOL_MAP.find(([tool]) => tool === 'github.search');
    assert.ok(entry, 'RATE_LIMIT_TOOL_MAP should have an entry for github.search');
    assert.equal(entry[1], 'github_search', 'github.search should map to github_search backend');
 });
@@ -171,9 +171,9 @@ test('configHealth returns healthy status for github.repo, github.file, github.t
    const cfg = loadConfig();
    const health = configHealth(cfg);
 
-   assert.equal(health['github_repo']?.status, 'healthy', 'github.repo should be healthy');
-   assert.equal(health['github_file']?.status, 'healthy', 'github.file should be healthy');
-   assert.equal(health['github_tree']?.status, 'healthy', 'github.tree should be healthy');
+   assert.equal(health['github.repo']?.status, 'healthy', 'github.repo should be healthy');
+   assert.equal(health['github.file']?.status, 'healthy', 'github.file should be healthy');
+   assert.equal(health['github.tree']?.status, 'healthy', 'github.tree should be healthy');
 });
 
 // ── Health: getNetworkProbes returns probe for github tools ─────────────────
@@ -181,11 +181,11 @@ test('configHealth returns healthy status for github.repo, github.file, github.t
 test('getNetworkProbes returns probes for all github actions', () => {
    const cfg = loadConfig();
    const probes = getNetworkProbes(cfg);
-   const githubProbe = probes.find((p) => p.tools.includes('github_repo'));
+   const githubProbe = probes.find((p) => p.tools.includes('github.repo'));
    assert.ok(githubProbe, 'getNetworkProbes should return a probe for github.repo');
 
    // Verify all GitHub actions are in the probe
-   const githubActions = ['github_repo', 'github_tree', 'github_file', 'github_search'];
+   const githubActions = ['github.repo', 'github.tree', 'github.file', 'github.search'];
    for (const action of githubActions) {
       assert.ok(
          githubProbe.tools.includes(action),

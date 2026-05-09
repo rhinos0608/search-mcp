@@ -71,3 +71,15 @@ test('QueryDecomposer sub-question generation', () => {
    assert.ok(result.subQuestions.length >= 5, 'Should generate at least 5 sub-questions for explainer');
    assert.ok(result.subQuestions.some(sq => sq.text.includes('fusion energy')), 'Sub-questions should contain the topic');
 });
+
+test('QueryDecomposer seeds institution risk facets for controversial organization topics', () => {
+   const decomposer = new QueryDecomposer();
+
+   const result = decomposer.decompose('Deep research briefing on Scientology history, legal controversies, and current status');
+   const questionText = result.subQuestions.map((sq) => sq.text.toLowerCase()).join('\n');
+
+   assert.match(questionText, /membership|scale/);
+   assert.match(questionText, /finance|financial|real estate/);
+   assert.match(questionText, /legal|litigation|regulatory/);
+   assert.match(questionText, /front groups|affiliates|cover names/);
+});

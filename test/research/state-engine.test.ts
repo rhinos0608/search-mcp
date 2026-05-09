@@ -134,3 +134,63 @@ test('ResearchStateEngine computes coverage', () => {
    assert.strictEqual(coverage[0]!.sourceCount, 1);
    assert.strictEqual(coverage[0]!.status, 'thin'); // 1 source is thin
 });
+
+test('ResearchStateEngine post-processing merges near-duplicate repeated policy definitions', () => {
+   const { state } = setupState();
+
+   state.addFinding({
+      claim: 'Scientology Fair Game policy defined enemies as people who may be tricked, sued, lied to, or destroyed.',
+      normalizedClaim: 'scientology fair game policy defined enemies as people who may be tricked sued lied to or destroyed',
+      subQuestionIds: ['sq-policy'],
+      sourceIds: ['s1'],
+      evidenceSummary: 'Evidence 1',
+      evidenceDirectness: 'direct',
+      freshnessSensitive: false,
+      lastUpdated: new Date().toISOString(),
+      claimType: 'primary'
+   });
+
+   state.addFinding({
+      claim: 'The Fair Game doctrine said Scientology opponents could be deprived of property, injured, tricked, sued, lied to, or destroyed.',
+      normalizedClaim: 'the fair game doctrine said scientology opponents could be deprived of property injured tricked sued lied to or destroyed',
+      subQuestionIds: ['sq-policy'],
+      sourceIds: ['s2'],
+      evidenceSummary: 'Evidence 2',
+      evidenceDirectness: 'direct',
+      freshnessSensitive: false,
+      lastUpdated: new Date().toISOString(),
+      claimType: 'primary'
+   });
+
+   state.addFinding({
+      claim: 'Fair Game allowed a Scientology enemy to be tricked, lied to, sued, or destroyed without discipline by the Church.',
+      normalizedClaim: 'fair game allowed a scientology enemy to be tricked lied to sued or destroyed without discipline by the church',
+      subQuestionIds: ['sq-policy'],
+      sourceIds: ['s4'],
+      evidenceSummary: 'Evidence 4',
+      evidenceDirectness: 'direct',
+      freshnessSensitive: false,
+      lastUpdated: new Date().toISOString(),
+      claimType: 'primary'
+   });
+
+   state.addFinding({
+      claim: 'Lisa McPherson died after seventeen days in the care of Scientology staff in Clearwater, leading to criminal charges that were later dropped and a civil settlement.',
+      normalizedClaim: 'lisa mcpherson died after seventeen days in the care of scientology staff in clearwater leading to criminal charges that were later dropped and a civil settlement',
+      subQuestionIds: ['sq-mcpherson'],
+      sourceIds: ['s3'],
+      evidenceSummary: 'Evidence 3',
+      evidenceDirectness: 'direct',
+      freshnessSensitive: false,
+      lastUpdated: new Date().toISOString(),
+      claimType: 'primary'
+   });
+
+   const result = state.postProcessFindings();
+
+   assert.equal(result.merged, 2);
+   assert.equal(state.findingCount(), 2);
+   const fairGame = state.getFindings().find((f) => f.claim.includes('Fair Game'));
+   assert.ok(fairGame);
+   assert.deepEqual(new Set(fairGame!.sourceIds), new Set(['s1', 's2', 's4']));
+});

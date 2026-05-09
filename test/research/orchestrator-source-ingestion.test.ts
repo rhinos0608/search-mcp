@@ -6,7 +6,7 @@
  */
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { ResearchStateEngine } from '../../src/research/state.js';
+import { BudgetTracker, ResearchStateEngine, resolveBudgetProfile } from '../../src/research/state.js';
 import type {
    WorkerReport,
    WorkerFinding,
@@ -144,12 +144,17 @@ function simulateIngestWorkerReports(
    };
 }
 
+function setupState(): { state: ResearchStateEngine; budget: BudgetTracker } {
+   const budget = new BudgetTracker(resolveBudgetProfile('standard'));
+   const state = new ResearchStateEngine(budget);
+   state.initialize('Test query', budget);
+   return { state, budget };
+}
+
 // ── Test: Source type preservation ─────────────────────────────────────────
 
 test('Phase1: source type preservation — academic, reddit, hackernews, web sources preserve their types', () => {
-   const budget = { recordTokens: () => true, snapshot: () => ({ toolCallsUsed: 0, tokensUsed: 0, extractionsUsed: 0, gapLoopsUsed: 0, startTime: Date.now(), maxToolCalls: 100, maxTokens: 300000, maxExtractions: 15, maxGapLoops: 2, stepCosts: {}, maxTimeMs: 300000 }), recordStepCost: () => { }, getStepCosts: () => ({}) };
-   const state = new ResearchStateEngine(budget as any);
-   state.initialize('Test query', budget as any);
+   const { state } = setupState();
 
    const report = makeWorkerReport({
       parentSubQuestionId: 'sq-1',
@@ -205,9 +210,7 @@ test('Phase1: source type preservation — academic, reddit, hackernews, web sou
 // ── Test: Multi-source finding links all URLs ──────────────────────────────
 
 test('Phase1: multi-source finding links all sourceUrls, not just the first', () => {
-   const budget = { recordTokens: () => true, snapshot: () => ({ toolCallsUsed: 0, tokensUsed: 0, extractionsUsed: 0, gapLoopsUsed: 0, startTime: Date.now(), maxToolCalls: 100, maxTokens: 300000, maxExtractions: 15, maxGapLoops: 2, stepCosts: {}, maxTimeMs: 300000 }), recordStepCost: () => { }, getStepCosts: () => ({}) };
-   const state = new ResearchStateEngine(budget as any);
-   state.initialize('Test query', budget as any);
+   const { state } = setupState();
 
    const report = makeWorkerReport({
       parentSubQuestionId: 'sq-1',
@@ -259,9 +262,7 @@ test('Phase1: multi-source finding links all sourceUrls, not just the first', ()
 // ── Test: Source from report.sources with no findings still ingested ──────
 
 test('Phase1: sources in WorkerReport.sources are ingested even without findings', () => {
-   const budget = { recordTokens: () => true, snapshot: () => ({ toolCallsUsed: 0, tokensUsed: 0, extractionsUsed: 0, gapLoopsUsed: 0, startTime: Date.now(), maxToolCalls: 100, maxTokens: 300000, maxExtractions: 15, maxGapLoops: 2, stepCosts: {}, maxTimeMs: 300000 }), recordStepCost: () => { }, getStepCosts: () => ({}) };
-   const state = new ResearchStateEngine(budget as any);
-   state.initialize('Test query', budget as any);
+   const { state } = setupState();
 
    // Worker visited 3 sources but only found claims in 1
    const report = makeWorkerReport({
@@ -294,9 +295,7 @@ test('Phase1: sources in WorkerReport.sources are ingested even without findings
 // ── Test: Duplicate URL dedup across reports ───────────────────────────────
 
 test('Phase1: duplicate URLs across worker reports are deduplicated', () => {
-   const budget = { recordTokens: () => true, snapshot: () => ({ toolCallsUsed: 0, tokensUsed: 0, extractionsUsed: 0, gapLoopsUsed: 0, startTime: Date.now(), maxToolCalls: 100, maxTokens: 300000, maxExtractions: 15, maxGapLoops: 2, stepCosts: {}, maxTimeMs: 300000 }), recordStepCost: () => { }, getStepCosts: () => ({}) };
-   const state = new ResearchStateEngine(budget as any);
-   state.initialize('Test query', budget as any);
+   const { state } = setupState();
 
    const sharedUrl = 'https://shared-source.com/article';
 

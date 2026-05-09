@@ -30,7 +30,7 @@ function getRegisteredTool(
 
 test('reddit family actions are registered on the MCP server', () => {
    const server = createServer();
-   const entry = getRegisteredTool(server, 'reddit_search');
+   const entry = getRegisteredTool(server, 'reddit');
 
    assert.ok(entry.description !== undefined && entry.description.length > 0);
    assert.ok(entry.inputSchema !== undefined);
@@ -38,7 +38,7 @@ test('reddit family actions are registered on the MCP server', () => {
 
 test('reddit.comments accepts a valid url post locator', () => {
    const server = createServer();
-   const entry = getRegisteredTool(server, 'reddit_comments');
+   const entry = getRegisteredTool(server, 'reddit');
    assert.ok(entry.inputSchema !== undefined);
 
    const parsed = entry.inputSchema.parse({
@@ -63,7 +63,7 @@ test('reddit.comments accepts a valid url post locator', () => {
 
 test('reddit.comments accepts a valid id post locator', () => {
    const server = createServer();
-   const entry = getRegisteredTool(server, 'reddit_comments');
+   const entry = getRegisteredTool(server, 'reddit');
    assert.ok(entry.inputSchema !== undefined);
 
    const parsed = entry.inputSchema.parse({
@@ -80,7 +80,7 @@ test('reddit.comments accepts a valid id post locator', () => {
 
 test('reddit.comments accepts a valid permalink post locator', () => {
    const server = createServer();
-   const entry = getRegisteredTool(server, 'reddit_comments');
+   const entry = getRegisteredTool(server, 'reddit');
    assert.ok(entry.inputSchema !== undefined);
 
    const parsed = entry.inputSchema.parse({
@@ -95,7 +95,7 @@ test('reddit.comments accepts a valid permalink post locator', () => {
 
 test('reddit.comments rejects an invalid post locator (missing fields)', () => {
    const server = createServer();
-   const entry = getRegisteredTool(server, 'reddit_comments');
+   const entry = getRegisteredTool(server, 'reddit');
    assert.ok(entry.inputSchema !== undefined);
 
    // Missing post entirely
@@ -112,7 +112,7 @@ test('reddit.comments rejects an invalid post locator (missing fields)', () => {
 
 test('reddit.comments rejects context without comment', () => {
    const server = createServer();
-   const entry = getRegisteredTool(server, 'reddit_comments');
+   const entry = getRegisteredTool(server, 'reddit');
    assert.ok(entry.inputSchema !== undefined);
 
    // context without comment — schema-level validation doesn't catch this
@@ -129,7 +129,7 @@ test('reddit.comments rejects context without comment', () => {
 
 test('reddit.comments rejects depth outside 1..10', () => {
    const server = createServer();
-   const entry = getRegisteredTool(server, 'reddit_comments');
+   const entry = getRegisteredTool(server, 'reddit');
    assert.ok(entry.inputSchema !== undefined);
 
    const high = entry.inputSchema.safeParse({
@@ -149,7 +149,7 @@ test('reddit.comments rejects depth outside 1..10', () => {
 
 test('reddit.comments rejects limit outside 1..100', () => {
    const server = createServer();
-   const entry = getRegisteredTool(server, 'reddit_comments');
+   const entry = getRegisteredTool(server, 'reddit');
    assert.ok(entry.inputSchema !== undefined);
 
    const high = entry.inputSchema.safeParse({
@@ -169,7 +169,7 @@ test('reddit.comments rejects limit outside 1..100', () => {
 
 test('reddit.comments rejects malformed subreddit in id locator', () => {
    const server = createServer();
-   const entry = getRegisteredTool(server, 'reddit_comments');
+   const entry = getRegisteredTool(server, 'reddit');
    assert.ok(entry.inputSchema !== undefined);
 
    const bad = entry.inputSchema.safeParse({
@@ -181,7 +181,7 @@ test('reddit.comments rejects malformed subreddit in id locator', () => {
 
 test('reddit.search accepts basic params', () => {
    const server = createServer();
-   const entry = getRegisteredTool(server, 'reddit_search');
+   const entry = getRegisteredTool(server, 'reddit');
    assert.ok(entry.inputSchema !== undefined);
 
    const parsed = entry.inputSchema.parse({
@@ -200,7 +200,7 @@ test('reddit.search accepts basic params', () => {
 
 test('reddit.semantic accepts basic params', () => {
    const server = createServer();
-   const entry = getRegisteredTool(server, 'reddit_semantic');
+   const entry = getRegisteredTool(server, 'reddit');
    assert.ok(entry.inputSchema !== undefined);
 
    const parsed = entry.inputSchema.parse({

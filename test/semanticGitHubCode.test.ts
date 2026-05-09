@@ -129,5 +129,5 @@ test('semanticGitHubCode forwards maxFileBytes to corpus collection', async () =
 test('github family is registered in the MCP server', () => {
    resetConfig();
    const server = createServer() as unknown as { _registeredTools?: Record<string, unknown> };
-   assert.ok(server._registeredTools?.github_repo);
+   assert.ok(server._registeredTools?.github);
 });

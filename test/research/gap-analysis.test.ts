@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { GapAnalyzer } from '../../src/research/gapAnalysis.js';
+import { GapAnalyzer, GapFiller } from '../../src/research/gapAnalysis.js';
 import { ResearchStateEngine, BudgetTracker, resolveBudgetProfile } from '../../src/research/state.js';
 import type { SubQuestionCoverage } from '../../src/research/types.js';
 
@@ -157,4 +157,33 @@ test('GapAnalyzer detects thin coverage', () => {
 
    assert.strictEqual(thinGaps.length, 1);
    assert.strictEqual(thinGaps[0]!.category, 'single_source_dependency');
+});
+
+test('GapFiller does not stop before the standard minimum gap-loop sanity pass', async () => {
+   const { state, budget } = setupState();
+   const filler = new GapFiller(state, budget);
+
+   state.addSubQuestion({
+      id: 'sq1',
+      text: 'Well covered question',
+      status: 'sufficient',
+      classification: 'explainer',
+      evidenceType: 'overview',
+      preferredSources: [],
+      freshnessRequirement: 'any',
+      failureModes: [],
+      budgetPriority: 1
+   });
+
+   await filler.fillGaps([{
+      id: 'gap1',
+      category: 'missing_recency',
+      description: 'Low priority but still needs a sanity pass',
+      status: 'open',
+      priority: 4,
+      suggestedActions: ['Check recency'],
+   }]);
+
+   assert.equal(budget.snapshot().gapLoopsUsed, 1);
+   assert.equal(filler.shouldContinueLoop(), true);
 });

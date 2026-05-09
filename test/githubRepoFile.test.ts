@@ -256,7 +256,7 @@ test('getGitHubRepoFile throws validationError when path is a directory', async 
       return (
         err instanceof Error &&
         /directory/i.test(err.message) &&
-        /github_repo_tree/i.test(err.message)
+        /github.tree/i.test(err.message)
       );
     },
   );

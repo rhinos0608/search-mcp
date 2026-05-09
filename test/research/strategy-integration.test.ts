@@ -19,6 +19,7 @@ function makeCtx(): StrategyContext {
     maxTokens: 500_000,
     maxTimeMs: 300_000,
     baseUrl: 'http://localhost:11434/v1',
+    workerBaseUrl: '',
     model: 'test-model',
     workerModel: 'test-worker',
     apiToken: '',
@@ -29,6 +30,7 @@ function makeCtx(): StrategyContext {
     agentMaxIterations: 30,
     agentMaxSubIterations: 8,
     agentDefaultFetchMode: 'summary_focus_query',
+    autoSave: true,
   };
 
   return {
