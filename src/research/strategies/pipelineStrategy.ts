@@ -18,6 +18,9 @@ import { logger } from '../../logger.js';
 import { randomUUID } from 'node:crypto';
 import type { ResearchStrategy, StrategyContext } from './types.js';
 import { QueryDecomposer } from '../decomposer.js';
+
+/** Default relevance score threshold for source admission. */
+const RELEVANCE_SCORE_THRESHOLD = 0.45;
 import { TaxonomyRevision } from '../taxonomy.js';
 import { DiscoveryEngine } from '../discovery.js';
 import { ExtractionEngine } from '../extraction.js';
@@ -35,7 +38,7 @@ import { researchJobManager } from '../jobManager.js';
 import { PruningEngine } from '../pruning.js';
 import { InFlightCompactor } from '../compactionInFlight.js';
 import { validateUrls } from '../urlHealth.js';
-import { scoreAllFindings } from '../relevanceClassifier.js';
+import { scoreAllFindings, scoreTextRelevance } from '../relevanceClassifier.js';
 import { processAndSplitFindings } from '../findingSplitter.js';
 import type {
   ResearchResult,
@@ -229,26 +232,32 @@ export class PipelineStrategy implements ResearchStrategy {
             // 1. Rule-based: detectContradictions() from state engine
             const ruleContradictions = ctx.state.detectContradictions();
             if (ruleContradictions.length > 0) {
-               this.progress.contradictionsFound(ruleContradictions);
-               logger.info({ loop: loopIdx + 1, contradictions: ruleContradictions.length }, 'Rule-based contradictions detected in gap loop');
+              this.progress.contradictionsFound(ruleContradictions);
+              logger.info(
+                { loop: loopIdx + 1, contradictions: ruleContradictions.length },
+                'Rule-based contradictions detected in gap loop',
+              );
             }
 
             // 2. Evidence-pool: generateFromEvidencePool() for date/version/benchmark conflicts
             const evidenceGenerated = generateFromEvidencePool(
-               ctx.state.getFindings(),
-               ctx.state.getSources(),
-               ctx.state.getState().query,
+              ctx.state.getFindings(),
+              ctx.state.getSources(),
+              ctx.state.getState().query,
             );
             if (evidenceGenerated.contradictions.length > 0) {
-               const existing = ctx.state.getState().contradictions;
-               const merged = mergeContradictions(existing, evidenceGenerated.contradictions);
-               ctx.state.setContradictions(merged);
-               logger.info({ loop: loopIdx + 1, added: evidenceGenerated.contradictions.length }, 'Evidence-pool contradictions added in gap loop');
+              const existing = ctx.state.getState().contradictions;
+              const merged = mergeContradictions(existing, evidenceGenerated.contradictions);
+              ctx.state.setContradictions(merged);
+              logger.info(
+                { loop: loopIdx + 1, added: evidenceGenerated.contradictions.length },
+                'Evidence-pool contradictions added in gap loop',
+              );
             }
             if (evidenceGenerated.uncertainties.length > 0) {
-               for (const u of evidenceGenerated.uncertainties) {
-                  ctx.state.addOpenQuestion(u);
-               }
+              for (const u of evidenceGenerated.uncertainties) {
+                ctx.state.addOpenQuestion(u);
+              }
             }
 
             // 3. LLM-powered: semantic contradiction scanner (batched, every 2nd loop)
@@ -260,22 +269,23 @@ export class PipelineStrategy implements ResearchStrategy {
             // Add contradiction-derived gaps: each unresolved contradiction becomes a gap
             const unresolvedContradictions = ctx.state.getUnresolvedContradictions();
             const contradictionGaps: GapRecord[] = unresolvedContradictions.map((c) => ({
-               id: c.id,
-               category: 'unresolvable_contradiction' as const,
-               priority: 2,
-               status: 'open' as const,
-               description: `Contradictory claims: "${c.claimA.slice(0, 120)}" vs "${c.claimB.slice(0, 120)}"`,
-               suggestedActions: [
+              id: c.id,
+              category: 'unresolvable_contradiction' as const,
+              priority: 2,
+              status: 'open' as const,
+              description: `Contradictory claims: "${c.claimA.slice(0, 120)}" vs "${c.claimB.slice(0, 120)}"`,
+              suggestedActions: [
                 `Seek additional evidence to resolve contradiction between sources ${c.sourceIdsA.length > 0 ? c.sourceIdsA.join(', ') : 'multiple findings'} and ${c.sourceIdsB.length > 0 ? c.sourceIdsB.join(', ') : 'multiple findings'}`,
-                  'Look for authoritative sources to arbitrate (official docs, meta-analyses, benchmarks)',
-                  c.followUpSearchRecommended ?? '',
-               ].filter(Boolean),
+                'Look for authoritative sources to arbitrate (official docs, meta-analyses, benchmarks)',
+                c.followUpSearchRecommended ?? '',
+              ].filter(Boolean),
             }));
 
             const allGaps = [...gaps, ...contradictionGaps];
             this.progress.gapsIdentified(allGaps);
 
             const { filled, remaining } = await gapFiller.fillGaps(allGaps);
+            if (jobId) researchJobManager.incrementGapLoops(jobId);
             logger.info(
               { loop: loopIdx + 1, gaps: allGaps.length, filled, remaining: remaining.length },
               'Gap analysis loop',
@@ -291,7 +301,14 @@ export class PipelineStrategy implements ResearchStrategy {
               break;
             }
 
-            const criticalGaps = gaps.filter((g) => g.priority <= 2);
+            const minGapLoops = ctx.budget.profile.minGapLoops;
+            const currentGapLoops = ctx.budget.snapshot().gapLoopsUsed;
+            const criticalGaps =
+              currentGapLoops < minGapLoops
+                ? (allGaps.length > 0 ? allGaps : ctx.state.getOpenGaps()).filter(
+                    (g) => g.priority <= 5,
+                  )
+                : gaps.filter((g) => g.priority <= 2);
             if (criticalGaps.length === 0) break;
 
             // ── Adaptive band extension: extend loop budget for complex topics ───
@@ -301,17 +318,21 @@ export class PipelineStrategy implements ResearchStrategy {
 
             // Band triggers: contradictions found + low source diversity + thin findings
             if (totalContradictions >= 2 && sourceTypeCount < 4 && loopIdx + 1 >= maxLoops - 1) {
-               maxLoops += 2;
-               logger.info(
-                  { contradictions: totalContradictions, sourceTypes: sourceTypeCount, newMaxLoops: maxLoops },
-                  'Adaptive band: extending gap loop budget (contradictions + low diversity)',
-               );
+              maxLoops += 2;
+              logger.info(
+                {
+                  contradictions: totalContradictions,
+                  sourceTypes: sourceTypeCount,
+                  newMaxLoops: maxLoops,
+                },
+                'Adaptive band: extending gap loop budget (contradictions + low diversity)',
+              );
             } else if (totalFindings < 15 && loopIdx + 1 >= maxLoops - 1) {
-               maxLoops += 2;
-               logger.info(
-                  { findings: totalFindings, newMaxLoops: maxLoops },
-                  'Adaptive band: extending gap loop budget (thin coverage)',
-               );
+              maxLoops += 2;
+              logger.info(
+                { findings: totalFindings, newMaxLoops: maxLoops },
+                'Adaptive band: extending gap loop budget (thin coverage)',
+              );
             }
 
             const findingsBeforeExtension = ctx.state.findingCount();
@@ -327,8 +348,6 @@ export class PipelineStrategy implements ResearchStrategy {
                 ctx.budget.extendTimeBudget(extensionMs);
               }
             }
-            if (jobId) researchJobManager.incrementGapLoops(jobId);
-
             const loopProgress = 50 + Math.round((loopIdx / maxLoops) * 10);
             await this.reportProgress(
               ctx,
@@ -397,7 +416,13 @@ export class PipelineStrategy implements ResearchStrategy {
           ctx.state.transitionTo('discovery');
           logger.info('Phase 2: Broad discovery');
 
-          const discovery = new DiscoveryEngine(ctx.state, ctx.budget, undefined, ctx.llm, ctx.abortSignal);
+          const discovery = new DiscoveryEngine(
+            ctx.state,
+            ctx.budget,
+            undefined,
+            ctx.llm,
+            ctx.abortSignal,
+          );
           const candidates = await discovery.discover(subQuestions);
 
           const sqSourceCounts = subQuestions.map((sq) => ({
@@ -506,7 +531,11 @@ export class PipelineStrategy implements ResearchStrategy {
         }
         const admissibleCount = [...relevanceScores.values()].filter((r) => r.admissible).length;
         logger.info(
-          { total: allFindings.length, admissible: admissibleCount, inadmissible: allFindings.length - admissibleCount },
+          {
+            total: allFindings.length,
+            admissible: admissibleCount,
+            inadmissible: allFindings.length - admissibleCount,
+          },
           'Relevance classification applied to findings',
         );
 
@@ -813,7 +842,7 @@ export class PipelineStrategy implements ResearchStrategy {
         const primarySource = allSources.find((s) => s.url === wf.sourceUrls[0]);
         const perspective = primarySource
           ? inferPerspective(primarySource.sourceType)
-          : (('unknown') as Perspective);
+          : ('unknown' as Perspective);
 
         // Epistemic status: derived from worker report confidence + content quality
         const epistemicStatus: EpistemicStatus =
@@ -852,7 +881,9 @@ export class PipelineStrategy implements ResearchStrategy {
           lastUpdated: new Date().toISOString(),
           claimType: 'primary' as const,
           perspective,
-          ...(perspective === 'vendor' || perspective === 'official' ? { conflictOfInterest: true } : {}),
+          ...(perspective === 'vendor' || perspective === 'official'
+            ? { conflictOfInterest: true }
+            : {}),
           epistemicStatus,
         });
       }
@@ -880,7 +911,7 @@ export class PipelineStrategy implements ResearchStrategy {
     for (const report of reports) {
       for (const ws of report.sources) {
         // Only count sources that contributed substantively (not promotional filler)
-        if (ws.quality?.isSubstantive) {
+        if (ws.quality.isSubstantive) {
           ctx.budget.recordExtraction();
           extractionsTracked++;
         }
@@ -903,6 +934,16 @@ export class PipelineStrategy implements ResearchStrategy {
     const wsEntry = report.sources.find((s) => s.url === url);
     const sourceType: SourceType = wsEntry?.sourceType ?? 'web';
     const sourceId = `src-${url.slice(-40).replace(/[^a-zA-Z0-9_-]/g, '_')}-${String(Date.now())}`;
+    const focusText = `${ctx.state.getState().query} ${report.question}`;
+    const sourceText = [
+      wsEntry?.title ?? url,
+      wsEntry?.relevanceRationale ?? '',
+      report.narrativeSummary,
+      report.searchQueries.join(' '),
+      url,
+    ].join(' ');
+    const relevance = scoreTextRelevance(focusText, sourceText);
+    const lowRelevance = !relevance.admissible && relevance.score < RELEVANCE_SCORE_THRESHOLD;
 
     ctx.state.addSource({
       id: sourceId,
@@ -916,6 +957,12 @@ export class PipelineStrategy implements ResearchStrategy {
       accessDate: new Date().toISOString(),
       ...(wsEntry?.publishedDate !== undefined ? { publishedDate: wsEntry.publishedDate } : {}),
       subQuestionId: report.parentSubQuestionId ?? '',
+      usageStatus: lowRelevance ? 'discarded' : 'used',
+      ...(lowRelevance
+        ? { discardReason: 'low_relevance' as const, limitations: relevance.reason }
+        : {}),
+      relevanceScore: relevance.score,
+      ...(wsEntry?.qualityScore !== undefined ? { qualityScore: wsEntry.qualityScore } : {}),
     });
 
     return sourceId;
@@ -1033,7 +1080,13 @@ export class PipelineStrategy implements ResearchStrategy {
     };
     try {
       await ctx.onProgress?.(clamped, message, phase, fullPartials);
-    } catch {}
+    } catch (err) {
+      // Progress callbacks are best-effort; never fail the research run.
+      logger.debug(
+        { err, clamped, message, phase, sourceCount: fullPartials.sourceCount },
+        'ctx.onProgress callback failed',
+      );
+    }
   }
 
   private async synthesizeResults(
@@ -1109,10 +1162,7 @@ export class PipelineStrategy implements ResearchStrategy {
    *
    * Found contradictions are merged into the existing contradiction set.
    */
-  private async runLlmContradictionScan(
-    ctx: StrategyContext,
-    loopIdx: number,
-  ): Promise<void> {
+  private async runLlmContradictionScan(ctx: StrategyContext, loopIdx: number): Promise<void> {
     if (!ctx.llm || ctx.deterministic) return;
 
     // Only run on even-numbered iterations (0, 2, 4, ...) to halve cost
@@ -1163,7 +1213,7 @@ export class PipelineStrategy implements ResearchStrategy {
     const findingsInput = batched
       .map(
         (f) =>
-          `[${f.id}] ${f.claim} (sources: ${f.sourceIds.length}, sub-questions: ${f.subQuestionIds.join(', ')})`,
+          `[${f.id}] ${f.claim} (sources: ${String(f.sourceIds.length)}, sub-questions: ${f.subQuestionIds.join(', ')})`,
       )
       .join('\n');
 
@@ -1221,13 +1271,21 @@ export class PipelineStrategy implements ResearchStrategy {
 
         if (added > 0) {
           logger.info(
-            { loop: loopIdx + 1, scanned: batched.length, found: result.data.contradictions.length, added },
+            {
+              loop: loopIdx + 1,
+              scanned: batched.length,
+              found: result.data.contradictions.length,
+              added,
+            },
             'LLM contradiction scanner: new contradictions detected',
           );
         }
       }
     } catch (err) {
-      logger.warn({ err, loop: loopIdx + 1 }, 'LLM contradiction scanner failed; continuing without it');
+      logger.warn(
+        { err, loop: loopIdx + 1 },
+        'LLM contradiction scanner failed; continuing without it',
+      );
     }
   }
 

@@ -1,19 +1,16 @@
 /**
  * AgentStrategy — LLM-driven ReAct agent for deep research.
- *
- * Uses THOUGHT/ACTION/ARGUMENTS/ANSWER format for tool-calling.
- * Falls back to collector-based synthesis on loop exhaustion or LLM failure.
  */
 
-import { curateEvidenceSources } from '../sourceQuality.js';
-import { type ResearchStateEngine } from '../state.js';
-import { randomUUID } from 'node:crypto';
-import { logger } from '../../logger.js';
 import type { ResearchStrategy, StrategyContext } from './types.js';
 import type { AgentTool, ToolResult } from './agentTools.js';
 import { buildAgentTools, describeTools } from './agentTools.js';
 import { CitationCollector } from '../citationCollector.js';
-import type { ResearchResult, ResearchReport, ResearchProgress } from '../types.js';
+import type { ResearchResult, ResearchReport, ResearchProgress, SourceType } from '../types.js';
+import { curateEvidenceSources } from '../sourceQuality.js';
+import { ResearchStateEngine } from '../state.js';
+import { logger } from '../../logger.js';
+import { randomUUID } from 'node:crypto';
 
 // ── Constants ────────────────────────────────────────────────────────────
 
@@ -186,7 +183,7 @@ export class AgentStrategy implements ResearchStrategy {
         const parsed = parseAgentResponse(response);
 
         if (parsed.type === 'answer') {
-          finalAnswer = parsed.content!;
+          finalAnswer = parsed.content ?? 'No answer provided.';
           logger.info({ iteration }, 'Agent produced final answer');
           break;
         }
@@ -229,7 +226,9 @@ export class AgentStrategy implements ResearchStrategy {
 
           // Record as observation in state diary to ensure it reaches final synthesis
           if (response.trim().length > 50) {
-            ctx.state.appendDiary(`[Agent Observation - Iteration ${String(iteration)}]: ${response.trim()}`);
+            ctx.state.appendDiary(
+              `[Agent Observation - Iteration ${String(iteration)}]: ${response.trim()}`,
+            );
           }
         }
       } catch (err) {
@@ -243,6 +242,38 @@ export class AgentStrategy implements ResearchStrategy {
 
     // ── Fallback synthesis ────────────────────────────────────────────
     if (!finalAnswer) {
+      const hadToolResults = this.history.some((h) => h.role === 'tool');
+      if (!hadToolResults) {
+        // LLM failed before any tools ran — signal unusable LLM to the orchestrator
+        logger.info(
+          { iterations: iteration, sources: this.collector.count },
+          'Agent LLM unusable (no tool results collected), signalling for pipeline fallback',
+        );
+        const report: ResearchReport = {
+          query,
+          classification: 'explainer' as const,
+          depth: ctx.depth,
+          degradationMode: 'source_note_synthesis' as const,
+          executiveSummary:
+            'LLM was unavailable. Research could not proceed with the agent strategy.',
+          narrativeMarkdown:
+            'Deep research could not be completed: the LLM was unavailable or timed out before any research tools could be executed.' +
+            '\n\nA deterministic pipeline fallback should be used instead.',
+          themes: [],
+          contradictions: [],
+          uncertainties: ['LLM unavailable for agent strategy'],
+          sourceNotes: [],
+          openQuestions: [query],
+          limitations: ['Agent strategy failed due to LLM unavailability.'],
+          sourceCount: 0,
+          findingCount: 0,
+          sourceTypeCount: 0,
+          sourceDiversity: [],
+          evidenceSources: [],
+        };
+        return { report, timeline: [{ phase: 'complete' }] };
+      }
+
       logger.info(
         { iterations: iteration, sources: this.collector.count },
         'Agent max iterations exceeded, falling back to synthesis',
@@ -273,7 +304,7 @@ export class AgentStrategy implements ResearchStrategy {
         id: randomUUID().slice(0, 12),
         title: citation.title,
         url: citation.url,
-        sourceType: citation.sourceType as any,
+        sourceType: citation.sourceType as SourceType,
         domain,
         accessDate: new Date().toISOString(),
         isPrimary: false, // Will be updated by classifySourceTier if used
@@ -302,10 +333,20 @@ export class AgentStrategy implements ResearchStrategy {
       query,
       classification: 'explainer',
       depth: ctx.depth,
-      degradationMode: ctx.state.findingCount() === 0 ? ('source_note_synthesis' as const) : ('deep' as const),
+      degradationMode:
+        ctx.state.findingCount() === 0 ? ('source_note_synthesis' as const) : ('deep' as const),
       executiveSummary: answerWithSources.slice(0, 500),
       narrativeMarkdown: answerWithSources,
-      themes: ctx.state.getState().findings.length > 0 ? [{ title: 'Key Findings', narrative: 'Extracted results from agent research.', findings: ctx.state.getFindings().map(f => f.claim) }] : [],
+      themes:
+        ctx.state.getState().findings.length > 0
+          ? [
+              {
+                title: 'Key Findings',
+                narrative: 'Extracted results from agent research.',
+                findings: ctx.state.getFindings().map((f) => f.claim),
+              },
+            ]
+          : [],
       contradictions: ctx.state.getState().contradictions,
       uncertainties: ctx.state.getState().openQuestions,
       sourceNotes: this.collector.count > 0 ? [this.collector.formatSourceList()] : [],
@@ -315,14 +356,16 @@ export class AgentStrategy implements ResearchStrategy {
       findingCount: ctx.state.findingCount(),
       sourceTypeCount: sourceTypeCounts.size,
       sourceDiversity: [...sourceTypeCounts.entries()].map(([type, count]) => ({ type, count })),
-      evidenceSources: curateEvidenceSources(ctx.state.getSources(), ctx.state.getFindings()).map((c, i) => ({
-        index: i + 1,
-        title: c.source.title,
-        url: c.source.url,
-        sourceType: c.source.sourceType,
-        tier: c.tier,
-        domain: c.source.domain,
-      })),
+      evidenceSources: curateEvidenceSources(ctx.state.getSources(), ctx.state.getFindings()).map(
+        (c, i) => ({
+          index: i + 1,
+          title: c.source.title,
+          url: c.source.url,
+          sourceType: c.source.sourceType,
+          tier: c.tier,
+          domain: c.source.domain,
+        }),
+      ),
     };
 
     const timeline: ResearchProgress[] = [{ phase: 'complete' }];
@@ -503,8 +546,8 @@ Search strategy tips:
 
     // Include any intermediate insights from malformed responses or deep thoughts
     const intermediateInsights = this.history
-      .filter((h) => h.role === 'assistant' && !h.action && (h.content || h.thought))
-      .map((h) => h.content || h.thought)
+      .filter((h) => h.role === 'assistant' && !h.action && (h.content !== undefined || h.thought !== undefined))
+      .map((h) => h.content ?? h.thought)
       .join('\n\n');
 
     if (!ctx.llm) {

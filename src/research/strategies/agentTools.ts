@@ -15,658 +15,637 @@ import type { ResearchTools } from '../types.js';
 // ── Types ────────────────────────────────────────────────────────────────
 
 export interface AgentTool {
-   name: string;
-   description: string;
-   parameters: Record<string, { type: string; description: string; required?: boolean }>;
-   execute: (args: Record<string, unknown>) => Promise<ToolResult>;
+  name: string;
+  description: string;
+  parameters: Record<string, { type: string; description: string; required?: boolean }>;
+  execute: (args: Record<string, unknown>) => Promise<ToolResult>;
 }
 
 export interface ToolResult {
-   content: string;
-   error?: string;
+  content: string;
+  error?: string;
 }
 
 // ── Tool builder ─────────────────────────────────────────────────────────
 
-export function buildAgentTools(
-   ctx: StrategyContext,
-   collector: CitationCollector,
-): AgentTool[] {
-   const tools: AgentTool[] = [];
-   const cfg = loadConfig();
+export function buildAgentTools(ctx: StrategyContext, collector: CitationCollector): AgentTool[] {
+  const tools: AgentTool[] = [];
+  const cfg = loadConfig();
 
-   // Lazily created on first use to avoid loading all backends at startup
-   let _researchTools: ResearchTools | null = null;
-   const getTools = async (): Promise<ResearchTools> => {
-      if (!_researchTools) {
-         // Dynamically import to avoid circular dependency at top-level
-         const { createResearchTools } = await import('../researchTools.js');
-         _researchTools = createResearchTools();
-      }
-      return _researchTools;
-   };
+  // Lazily created on first use to avoid loading all backends at startup
+  let _researchTools: ResearchTools | null = null;
+  const getTools = async (): Promise<ResearchTools> => {
+    if (!_researchTools) {
+      // Dynamically import to avoid circular dependency at top-level
+      const { createResearchTools } = await import('../researchTools.js');
+      _researchTools = createResearchTools();
+    }
+    return _researchTools;
+  };
 
-   // Web search — always if any backend configured
-   if (cfg.searchBackend) {
-      tools.push(createWebSearchTool(getTools, collector));
-   }
+  // Web search — always if any backend configured
+  if (cfg.searchBackend.length > 0) {
+    tools.push(createWebSearchTool(getTools, collector));
+  }
 
-   // Free, no-key tools
-   tools.push(createArxivSearchTool(collector));
-   tools.push(createSemanticScholarTool(collector));
-   tools.push(createHackerNewsTool(getTools, collector));
-   tools.push(createStackExchangeTool(collector));
+  // Free, no-key tools
+  tools.push(createArxivSearchTool(collector));
+  tools.push(createSemanticScholarTool(collector));
+  tools.push(createHackerNewsTool(getTools, collector));
+  tools.push(createStackExchangeTool(collector));
 
-   // Free standalone tools (PubMed, Wikipedia — no API key needed)
-   tools.push(createPubMedSearchTool(collector));
-   tools.push(createWikipediaSearchTool(collector));
+  // Free standalone tools (PubMed, Wikipedia — no API key needed)
+  tools.push(createPubMedSearchTool(collector));
+  tools.push(createWikipediaSearchTool(collector));
 
-   // Conditional
-   if ((cfg.github.token ?? '').length > 0) {
-      tools.push(createGitHubSearchTool(getTools, collector));
-   }
+  // Conditional
+  if ((cfg.github.token ?? '').length > 0) {
+    tools.push(createGitHubSearchTool(getTools, collector));
+  }
 
-   if ((cfg.reddit.clientId ?? '').length > 0) {
-      tools.push(createRedditSearchTool(getTools, collector));
-   }
+  if ((cfg.reddit.clientId ?? '').length > 0) {
+    tools.push(createRedditSearchTool(getTools, collector));
+  }
 
-   // Fetch page — needs Crawl4AI
-   if (cfg.crawl4ai.baseUrl.length > 0) {
-      tools.push(createFetchPageTool(getTools, collector));
-   }
+  // Fetch page — needs Crawl4AI
+  if (cfg.crawl4ai.baseUrl.length > 0) {
+    tools.push(createFetchPageTool(getTools, collector));
+  }
 
-   // fetch_focus — needs Crawl4AI + LLM
-   if (cfg.crawl4ai.baseUrl.length > 0 && ctx.llm) {
-      tools.push(createFetchFocusTool(getTools, collector, ctx.llm));
-   }
+  // fetch_focus — needs Crawl4AI + LLM
+  if (cfg.crawl4ai.baseUrl.length > 0 && ctx.llm) {
+    tools.push(createFetchFocusTool(getTools, collector, ctx.llm));
+  }
 
-   // research_subtopic — needs LLM for decomposition
-   if (ctx.llm) {
-      tools.push(createResearchSubtopicTool(ctx, collector));
-   }
+  // research_subtopic — needs LLM for decomposition
+  if (ctx.llm) {
+    tools.push(createResearchSubtopicTool(ctx, collector));
+  }
 
-   return tools;
+  return tools;
 }
-
-
 
 /** Format tool descriptions for the system prompt. */
 export function describeTools(tools: AgentTool[]): string {
-   return tools
-      .map((t) => {
-         const params = Object.entries(t.parameters)
-            .map(([k, v]) => `  ${k}${v.required ? ' (required)' : ''}: ${v.description}`)
-            .join('\n');
-         return `${t.name}: ${t.description}\n${params}`;
-      })
-      .join('\n\n');
+  return tools
+    .map((t) => {
+      const params = Object.entries(t.parameters)
+        .map(([k, v]) => `  ${k}${v.required ? ' (required)' : ''}: ${v.description}`)
+        .join('\n');
+      return `${t.name}: ${t.description}\n${params}`;
+    })
+    .join('\n\n');
 }
 
 // ── Individual tool factories ───────────────────────────────────────────
 
 function createWebSearchTool(
-   getTools: () => Promise<ResearchTools>,
-   collector: CitationCollector,
+  getTools: () => Promise<ResearchTools>,
+  collector: CitationCollector,
 ): AgentTool {
-   return {
-      name: 'search_web',
-      description:
-         'Search the web for general information. Best for current events, factual questions, and broad topics.',
-      parameters: {
-         query: { type: 'string', description: 'The search query', required: true },
-         limit: { type: 'number', description: 'Max results (1-20, default 10)' },
-      },
-      execute: async (args) => {
-         const query = String(args.query ?? '');
-         if (!query) return { content: 'Error: query is required', error: 'missing query' };
-         const limit = Math.min(Number(args.limit) || 10, 20);
+  return {
+    name: 'search_web',
+    description:
+      'Search the web for general information. Best for current events, factual questions, and broad topics.',
+    parameters: {
+      query: { type: 'string', description: 'The search query', required: true },
+      limit: { type: 'number', description: 'Max results (1-20, default 10)' },
+    },
+    execute: async (args) => {
+      const query = typeof args.query === 'string' ? args.query : '';
+      if (!query) return { content: 'Error: query is required', error: 'missing query' };
+      const limit = Math.min(Number(args.limit) || 10, 20);
 
-         try {
-            const results = await (await getTools()).webSearch(query, limit);
-            const startIdx = collector.addResults(
-               results.map((r) => ({ title: r.title, link: r.url, snippet: r.description })),
-               'web',
-            );
-            const text = results
-               .map(
-                  (r, i) => `[${String(startIdx + i)}] ${r.title}\n${r.url}\n${r.description ?? ''}`,
-               )
-               .join('\n\n');
-            return { content: text || 'No results found.' };
-         } catch (err) {
-            return {
-               content: `Web search failed: ${err instanceof Error ? err.message : String(err)}`,
-               error: 'search failed',
-            };
-         }
-      },
-   };
+      try {
+        const results = await (await getTools()).webSearch(query, limit);
+        const startIdx = collector.addResults(
+          results.map((r) => ({ title: r.title, link: r.url, snippet: r.description })),
+          'web',
+        );
+        const text = results
+          .map((r, i) => `[${String(startIdx + i)}] ${r.title}\n${r.url}\n${r.description}`)
+          .join('\n\n');
+        return { content: text || 'No results found.' };
+      } catch (err) {
+        return {
+          content: `Web search failed: ${err instanceof Error ? err.message : String(err)}`,
+          error: 'search failed',
+        };
+      }
+    },
+  };
 }
 
+function createArxivSearchTool(collector: CitationCollector): AgentTool {
+  return {
+    name: 'search_arxiv',
+    description:
+      'Search scientific papers on arXiv. Best for physics, math, CS, and quantitative biology preprints. Free, no API key needed.',
+    parameters: {
+      query: { type: 'string', description: 'The search query', required: true },
+      limit: { type: 'number', description: 'Max results (1-20, default 10)' },
+    },
+    execute: async (args) => {
+      const query = typeof args.query === 'string' ? args.query : '';
+      if (!query) return { content: 'Error: query is required', error: 'missing query' };
+      const limit = Math.min(Number(args.limit) || 10, 20);
 
-function createArxivSearchTool(
-   collector: CitationCollector,
-): AgentTool {
-   return {
-      name: 'search_arxiv',
-      description:
-         'Search scientific papers on arXiv. Best for physics, math, CS, and quantitative biology preprints. Free, no API key needed.',
-      parameters: {
-         query: { type: 'string', description: 'The search query', required: true },
-         limit: { type: 'number', description: 'Max results (1-20, default 10)' },
-      },
-      execute: async (args) => {
-         const query = String(args.query ?? '');
-         if (!query) return { content: 'Error: query is required', error: 'missing query' };
-         const limit = Math.min(Number(args.limit) || 10, 20);
-
-         try {
-            const { arxivSearch } = await import('../../tools/arxivSearch.js');
-            const results = await arxivSearch(query, null, 'relevance', null, null, limit);
-            const startIdx = collector.addResults(
-               results.map((r) => ({ title: r.title, link: r.url, snippet: r.abstract })),
-               'arxiv',
-            );
-            const text = results
-               .map(
-                  (r, i) => `[${String(startIdx + i)}] ${r.title}\n${r.url}\n${r.abstract ?? ''}${r.publishedDate ? ` (${r.publishedDate.slice(0, 10)})` : ''}`,
-               )
-               .join('\n\n');
-            return { content: text || 'No arXiv results found.' };
-         } catch (err) {
-            return {
-               content: `arXiv search failed: ${err instanceof Error ? err.message : String(err)}`,
-               error: 'search failed',
-            };
-         }
-      },
-   };
+      try {
+        const { arxivSearch } = await import('../../tools/arxivSearch.js');
+        const results = await arxivSearch(query, null, 'relevance', null, null, limit);
+        const startIdx = collector.addResults(
+          results.map((r) => ({ title: r.title, link: r.url, snippet: r.abstract })),
+          'arxiv',
+        );
+        const text = results
+          .map(
+            (r, i) =>
+              `[${String(startIdx + i)}] ${r.title}\n${r.url}\n${r.abstract}${r.publishedDate ? ` (${r.publishedDate.slice(0, 10)})` : ''}`,
+          )
+          .join('\n\n');
+        return { content: text || 'No arXiv results found.' };
+      } catch (err) {
+        return {
+          content: `arXiv search failed: ${err instanceof Error ? err.message : String(err)}`,
+          error: 'search failed',
+        };
+      }
+    },
+  };
 }
 
-function createSemanticScholarTool(
-   collector: CitationCollector,
-): AgentTool {
-   return {
-      name: 'search_semantic_scholar',
-      description:
-         'Search academic papers on Semantic Scholar. Best for scientific literature with citation counts and impact analysis.',
-      parameters: {
-         query: { type: 'string', description: 'The search query', required: true },
-         limit: { type: 'number', description: 'Max results (1-20, default 10)' },
-      },
-      execute: async (args) => {
-         const query = String(args.query ?? '');
-         if (!query) return { content: 'Error: query is required', error: 'missing query' };
-         const limit = Math.min(Number(args.limit) || 10, 20);
+function createSemanticScholarTool(collector: CitationCollector): AgentTool {
+  return {
+    name: 'search_semantic_scholar',
+    description:
+      'Search academic papers on Semantic Scholar. Best for scientific literature with citation counts and impact analysis.',
+    parameters: {
+      query: { type: 'string', description: 'The search query', required: true },
+      limit: { type: 'number', description: 'Max results (1-20, default 10)' },
+    },
+    execute: async (args) => {
+      const query = typeof args.query === 'string' ? args.query : '';
+      if (!query) return { content: 'Error: query is required', error: 'missing query' };
+      const limit = Math.min(Number(args.limit) || 10, 20);
 
-         try {
-            const { academicSearch } = await import('../../tools/academicSearch.js');
-            const result = await academicSearch(query, 'semantic_scholar', limit);
-            const startIdx = collector.addResults(
-               result.papers.map((r) => ({ title: r.title, link: r.url, snippet: r.abstract })),
-               'semantic_scholar',
-            );
-            const text = result.papers
-               .map(
-                  (r, i) =>
-                     `[${String(startIdx + i)}] ${r.title}\n${r.url}\n${r.abstract ?? ''}${r.year ? ` (${String(r.year)})` : ''}`,
-               )
-               .join('\n\n');
-            return { content: text || 'No Semantic Scholar results found.' };
-         } catch (err) {
-            return {
-               content: `Semantic Scholar search failed: ${err instanceof Error ? err.message : String(err)}`,
-               error: 'search failed',
-            };
-         }
-      },
-   };
+      try {
+        const { academicSearch } = await import('../../tools/academicSearch.js');
+        const result = await academicSearch(query, 'semantic_scholar', limit);
+        const startIdx = collector.addResults(
+          result.papers.map((r) => ({ title: r.title, link: r.url, snippet: r.abstract })),
+          'semantic_scholar',
+        );
+        const text = result.papers
+          .map(
+            (r, i) =>
+              `[${String(startIdx + i)}] ${r.title}\n${r.url}\n${r.abstract}${r.year ? ` (${String(r.year)})` : ''}`,
+          )
+          .join('\n\n');
+        return { content: text || 'No Semantic Scholar results found.' };
+      } catch (err) {
+        return {
+          content: `Semantic Scholar search failed: ${err instanceof Error ? err.message : String(err)}`,
+          error: 'search failed',
+        };
+      }
+    },
+  };
 }
 
 function createHackerNewsTool(
-   getTools: () => Promise<ResearchTools>,
-   collector: CitationCollector,
+  getTools: () => Promise<ResearchTools>,
+  collector: CitationCollector,
 ): AgentTool {
-   return {
-      name: 'search_hackernews',
-      description:
-         'Search Hacker News for tech news and discussion. Best for technology trends and startup ecosystem insights.',
-      parameters: {
-         query: { type: 'string', description: 'The search query', required: true },
-         limit: { type: 'number', description: 'Max results (1-20, default 10)' },
-      },
-      execute: async (args) => {
-         const query = String(args.query ?? '');
-         if (!query) return { content: 'Error: query is required', error: 'missing query' };
-         const limit = Math.min(Number(args.limit) || 10, 20);
+  return {
+    name: 'search_hackernews',
+    description:
+      'Search Hacker News for tech news and discussion. Best for technology trends and startup ecosystem insights.',
+    parameters: {
+      query: { type: 'string', description: 'The search query', required: true },
+      limit: { type: 'number', description: 'Max results (1-20, default 10)' },
+    },
+    execute: async (args) => {
+      const query = typeof args.query === 'string' ? args.query : '';
+      if (!query) return { content: 'Error: query is required', error: 'missing query' };
+      const limit = Math.min(Number(args.limit) || 10, 20);
 
-         try {
-            const results = await (await getTools()).hackernewsSearch(query, limit);
-            const startIdx = collector.addResults(
-               results.map((r) => ({ title: r.title, link: r.url, snippet: r.text })),
-               'hackernews',
-            );
-            const text = results
-               .map(
-                  (r, i) => `[${String(startIdx + i)}] ${r.title}\n${r.url}\n${r.text ?? ''}`,
-               )
-               .join('\n\n');
-            return { content: text || 'No Hacker News results found.' };
-         } catch (err) {
-            return {
-               content: `HN search failed: ${err instanceof Error ? err.message : String(err)}`,
-               error: 'search failed',
-            };
-         }
-      },
-   };
+      try {
+        const results = await (await getTools()).hackernewsSearch(query, limit);
+        const startIdx = collector.addResults(
+          results.map((r) => ({ title: r.title, link: r.url, snippet: r.text })),
+          'hackernews',
+        );
+        const text = results
+          .map((r, i) => `[${String(startIdx + i)}] ${r.title}\n${r.url}\n${r.text ?? ''}`)
+          .join('\n\n');
+        return { content: text || 'No Hacker News results found.' };
+      } catch (err) {
+        return {
+          content: `HN search failed: ${err instanceof Error ? err.message : String(err)}`,
+          error: 'search failed',
+        };
+      }
+    },
+  };
 }
-
 
 function createGitHubSearchTool(
-   getTools: () => Promise<ResearchTools>,
-   collector: CitationCollector,
+  getTools: () => Promise<ResearchTools>,
+  collector: CitationCollector,
 ): AgentTool {
-   return {
-      name: 'search_github',
-      description:
-         'Search GitHub repositories and code. Best for implementation examples, source code, and repository discovery.',
-      parameters: {
-         query: { type: 'string', description: 'The search query', required: true },
-         limit: { type: 'number', description: 'Max results (1-20, default 10)' },
-      },
-      execute: async (args) => {
-         const query = String(args.query ?? '');
-         if (!query) return { content: 'Error: query is required', error: 'missing query' };
-         const limit = Math.min(Number(args.limit) || 10, 20);
+  return {
+    name: 'search_github',
+    description:
+      'Search GitHub repositories and code. Best for implementation examples, source code, and repository discovery.',
+    parameters: {
+      query: { type: 'string', description: 'The search query', required: true },
+      limit: { type: 'number', description: 'Max results (1-20, default 10)' },
+    },
+    execute: async (args) => {
+      const query = typeof args.query === 'string' ? args.query : '';
+      if (!query) return { content: 'Error: query is required', error: 'missing query' };
+      const limit = Math.min(Number(args.limit) || 10, 20);
 
-         try {
-            const results = await (await getTools()).githubSearch(query, limit);
-            const startIdx = collector.addResults(
-               results.map((r) => ({ title: r.fullName, link: r.htmlUrl, snippet: r.description })),
-               'github',
-            );
-            const text = results
-               .map(
-                  (r, i) => `[${String(startIdx + i)}] ${r.fullName}\n${r.htmlUrl}\n${r.description ?? ''}`,
-               )
-               .join('\n\n');
-            return { content: text || 'No GitHub results found.' };
-         } catch (err) {
-            return {
-               content: `GitHub search failed: ${err instanceof Error ? err.message : String(err)}`,
-               error: 'search failed',
-            };
-         }
-      },
-   };
+      try {
+        const results = await (await getTools()).githubSearch(query, limit);
+        const startIdx = collector.addResults(
+          results.map((r) => ({ title: r.fullName, link: r.htmlUrl, snippet: r.description })),
+          'github',
+        );
+        const text = results
+          .map(
+            (r, i) =>
+              `[${String(startIdx + i)}] ${r.fullName}\n${r.htmlUrl}\n${r.description}`,
+          )
+          .join('\n\n');
+        return { content: text || 'No GitHub results found.' };
+      } catch (err) {
+        return {
+          content: `GitHub search failed: ${err instanceof Error ? err.message : String(err)}`,
+          error: 'search failed',
+        };
+      }
+    },
+  };
 }
 
-function createStackExchangeTool(
-   collector: CitationCollector,
-): AgentTool {
-   return {
-      name: 'search_stackexchange',
-      description:
-         'Search Stack Overflow/Stack Exchange for technical Q&A. Best for programming, engineering, and technical problem-solving.',
-      parameters: {
-         query: { type: 'string', description: 'The search query', required: true },
-         limit: { type: 'number', description: 'Max results (1-20, default 10)' },
-      },
-      execute: async (args) => {
-         const query = String(args.query ?? '');
-         if (!query) return { content: 'Error: query is required', error: 'missing query' };
-         const limit = Math.min(Number(args.limit) || 10, 20);
+function createStackExchangeTool(collector: CitationCollector): AgentTool {
+  return {
+    name: 'search_stackexchange',
+    description:
+      'Search Stack Overflow/Stack Exchange for technical Q&A. Best for programming, engineering, and technical problem-solving.',
+    parameters: {
+      query: { type: 'string', description: 'The search query', required: true },
+      limit: { type: 'number', description: 'Max results (1-20, default 10)' },
+    },
+    execute: async (args) => {
+      const query = typeof args.query === 'string' ? args.query : '';
+      if (!query) return { content: 'Error: query is required', error: 'missing query' };
+      const limit = Math.min(Number(args.limit) || 10, 20);
 
-         try {
-            // Stackoverflow search is available via the research family but not directly
-            // in ResearchTools. Use dynamic import as fallback.
-            const { stackoverflowSearch } = await import('../../tools/stackoverflowSearch.js');
-            // Cast to unknown first to avoid unsafe any
-            const rawResults = await (stackoverflowSearch as (q: string, key: string, s: string, t: string, a: boolean, l: number) => Promise<unknown>)(
-               query,
-               '', // apiKey
-               'relevance',
-               '', // tagged
-               false, // accepted
-               limit,
-            );
-            
-            interface SOResult {
-               title?: string;
-               question_title?: string;
-               link?: string;
-               url?: string;
-               snippet?: string;
-               body?: string;
-            }
+      try {
+        // Stackoverflow search is available via the research family but not directly
+        // in ResearchTools. Use dynamic import as fallback.
+        const { stackoverflowSearch } = await import('../../tools/stackoverflowSearch.js');
+        // Cast to unknown first to avoid unsafe any
+        const rawResults = await (
+          stackoverflowSearch as (
+            q: string,
+            key: string,
+            s: string,
+            t: string,
+            a: boolean,
+            l: number,
+          ) => Promise<unknown>
+        )(
+          query,
+          '', // apiKey
+          'relevance',
+          '', // tagged
+          false, // accepted
+          limit,
+        );
 
-            const results = Array.isArray(rawResults) ? (rawResults as SOResult[]) : [];
-            const normalized = results.map((r) => ({
-               title: r.title ?? r.question_title ?? 'Untitled',
-               link: r.link ?? r.url ?? '',
-               snippet: r.snippet ?? r.body ?? '',
-            }));
+        interface SOResult {
+          title?: string;
+          question_title?: string;
+          link?: string;
+          url?: string;
+          snippet?: string;
+          body?: string;
+        }
 
-            const startIdx = collector.addResults(normalized, 'stackoverflow');
-            const text = normalized
-               .map(
-                  (r, i) => `[${String(startIdx + i)}] ${r.title}\n${r.link}\n${r.snippet}`,
-               )
-               .join('\n\n');
-            return { content: text || 'No Stack Overflow results found.' };
-         } catch (err) {
-            return {
-               content: `StackExchange search failed: ${err instanceof Error ? err.message : String(err)}`,
-               error: 'search failed',
-            };
-         }
-      },
-   };
+        const results = Array.isArray(rawResults) ? (rawResults as SOResult[]) : [];
+        const normalized = results.map((r) => ({
+          title: r.title ?? r.question_title ?? 'Untitled',
+          link: r.link ?? r.url ?? '',
+          snippet: r.snippet ?? r.body ?? '',
+        }));
+
+        const startIdx = collector.addResults(normalized, 'stackoverflow');
+        const text = normalized
+          .map((r, i) => `[${String(startIdx + i)}] ${r.title}\n${r.link}\n${r.snippet}`)
+          .join('\n\n');
+        return { content: text || 'No Stack Overflow results found.' };
+      } catch (err) {
+        return {
+          content: `StackExchange search failed: ${err instanceof Error ? err.message : String(err)}`,
+          error: 'search failed',
+        };
+      }
+    },
+  };
 }
 
 function createRedditSearchTool(
-   getTools: () => Promise<ResearchTools>,
-   collector: CitationCollector,
+  getTools: () => Promise<ResearchTools>,
+  collector: CitationCollector,
 ): AgentTool {
-   return {
-      name: 'search_reddit',
-      description:
-         'Search Reddit for community discussions and opinions. Best for user experiences, reviews, and community knowledge.',
-      parameters: {
-         query: { type: 'string', description: 'The search query', required: true },
-         limit: { type: 'number', description: 'Max results (1-20, default 10)' },
-      },
-      execute: async (args) => {
-         const query = String(args.query ?? '');
-         if (!query) return { content: 'Error: query is required', error: 'missing query' };
-         const limit = Math.min(Number(args.limit) || 10, 20);
+  return {
+    name: 'search_reddit',
+    description:
+      'Search Reddit for community discussions and opinions. Best for user experiences, reviews, and community knowledge.',
+    parameters: {
+      query: { type: 'string', description: 'The search query', required: true },
+      limit: { type: 'number', description: 'Max results (1-20, default 10)' },
+    },
+    execute: async (args) => {
+      const query = typeof args.query === 'string' ? args.query : '';
+      if (!query) return { content: 'Error: query is required', error: 'missing query' };
+      const limit = Math.min(Number(args.limit) || 10, 20);
 
-         try {
-            const results = await (await getTools()).redditSearch(query, limit);
-            const startIdx = collector.addResults(
-               results.map((r) => ({ title: r.title, link: r.url, snippet: r.selftext })),
-               'reddit',
-            );
-            const text = results
-               .map(
-                  (r, i) => `[${String(startIdx + i)}] ${r.title}\n${r.url}\n${r.selftext?.slice(0, 300) ?? ''}`,
-               )
-               .join('\n\n');
-            return { content: text || 'No Reddit results found.' };
-         } catch (err) {
-            return {
-               content: `Reddit search failed: ${err instanceof Error ? err.message : String(err)}`,
-               error: 'search failed',
-            };
-         }
-      },
-   };
+      try {
+        const results = await (await getTools()).redditSearch(query, limit);
+        const startIdx = collector.addResults(
+          results.map((r) => ({ title: r.title, link: r.url, snippet: r.selftext })),
+          'reddit',
+        );
+        const text = results
+          .map(
+            (r, i) =>
+              `[${String(startIdx + i)}] ${r.title}\n${r.url}\n${r.selftext?.slice(0, 300) ?? ''}`,
+          )
+          .join('\n\n');
+        return { content: text || 'No Reddit results found.' };
+      } catch (err) {
+        return {
+          content: `Reddit search failed: ${err instanceof Error ? err.message : String(err)}`,
+          error: 'search failed',
+        };
+      }
+    },
+  };
 }
 
 function createFetchPageTool(
-   getTools: () => Promise<ResearchTools>,
-   collector: CitationCollector,
+  getTools: () => Promise<ResearchTools>,
+  collector: CitationCollector,
 ): AgentTool {
-   return {
-      name: 'fetch_page',
-      description:
-         'Fetch and read the full content of a web page. Use when you need to read a specific source in detail.',
-      parameters: {
-         url: { type: 'string', description: 'The URL to fetch', required: true },
-      },
-      execute: async (args) => {
-         const url = String(args.url ?? '');
-         if (!url) return { content: 'Error: url is required', error: 'missing url' };
+  return {
+    name: 'fetch_page',
+    description:
+      'Fetch and read the full content of a web page. Use when you need to read a specific source in detail.',
+    parameters: {
+      url: { type: 'string', description: 'The URL to fetch', required: true },
+    },
+    execute: async (args) => {
+      const url = typeof args.url === 'string' ? args.url : '';
+      if (!url) return { content: 'Error: url is required', error: 'missing url' };
 
-         try {
-            const pages = await (await getTools()).webCrawl(url, 1);
-            if (pages.length === 0) {
-               return { content: `No content extracted from ${url}`, error: 'empty page' };
-            }
-            const page = pages[0]!;
-            const content = page.markdown.slice(0, 12000);
+      try {
+        const pages = await (await getTools()).webCrawl(url, 1);
+        const page = pages[0];
+        if (!page) {
+          return { content: `No content extracted from ${url}`, error: 'empty page' };
+        }
+        const content = page.markdown.slice(0, 12000);
 
-            collector.addResults(
-               [{ title: page.title, link: url, snippet: content.slice(0, 300) }],
-               'web',
-            );
+        collector.addResults(
+          [{ title: page.title, link: url, snippet: content.slice(0, 300) }],
+          'web',
+        );
 
-            return { content: `[Page: ${page.title}]\n${url}\n\n${content}` };
-         } catch (err) {
-            return {
-               content: `Failed to fetch ${url}: ${err instanceof Error ? err.message : String(err)}`,
-               error: 'fetch failed',
-            };
-         }
-      },
-   };
+        return { content: `[Page: ${page.title}]\n${url}\n\n${content}` };
+      } catch (err) {
+        return {
+          content: `Failed to fetch ${url}: ${err instanceof Error ? err.message : String(err)}`,
+          error: 'fetch failed',
+        };
+      }
+    },
+  };
 }
 
-
 function createFetchFocusTool(
-   getTools: () => Promise<ResearchTools>,
-   collector: CitationCollector,
-   llm: DeepResearchLlmClient,
+  getTools: () => Promise<ResearchTools>,
+  collector: CitationCollector,
+  llm: DeepResearchLlmClient,
 ): AgentTool {
-   return {
-      name: 'fetch_focus',
-      description:
-         'Fetch a web page and extract ONLY the spans relevant to a specific question. Saves tokens — use instead of fetch_page when you only need specific information.',
-      parameters: {
-         url: { type: 'string', description: 'The URL to fetch', required: true },
-         focus: {
-            type: 'string',
-            description: 'What specific information to extract from the page',
-            required: true,
-         },
+  return {
+    name: 'fetch_focus',
+    description:
+      'Fetch a web page and extract ONLY the spans relevant to a specific question. Saves tokens — use instead of fetch_page when you only need specific information.',
+    parameters: {
+      url: { type: 'string', description: 'The URL to fetch', required: true },
+      focus: {
+        type: 'string',
+        description: 'What specific information to extract from the page',
+        required: true,
       },
-      execute: async (args) => {
-         const url = String(args.url ?? '');
-         const focus = String(args.focus ?? '');
-         if (!url) return { content: 'Error: url is required', error: 'missing url' };
-         if (!focus) return { content: 'Error: focus is required', error: 'missing focus' };
+    },
+    execute: async (args) => {
+      const url = typeof args.url === 'string' ? args.url : '';
+      const focus = typeof args.focus === 'string' ? args.focus : '';
+      if (!url) return { content: 'Error: url is required', error: 'missing url' };
+      if (!focus) return { content: 'Error: focus is required', error: 'missing focus' };
 
-         try {
-            // Step 1: Fetch the page
-            const pages = await (await getTools()).webCrawl(url, 1);
-            if (pages.length === 0) {
-               return { content: `No content extracted from ${url}`, error: 'empty page' };
-            }
-            const page = pages[0]!;
-            const rawContent = page.markdown.slice(0, 20000);
+      try {
+        // Step 1: Fetch the page
+        const pages = await (await getTools()).webCrawl(url, 1);
+        const page = pages[0];
+        if (!page) {
+          return { content: `No content extracted from ${url}`, error: 'empty page' };
+        }
+        const rawContent = page.markdown.slice(0, 20000);
 
-            // Step 2: Ask LLM to extract relevant spans
-            const extractResp = await llm.callWorker({
-               messages: [
-                  {
-                     role: 'system',
-                     content:
-                        'Extract verbatim spans from web pages that answer a specific question. Return ONLY relevant excerpts, quoted verbatim. Be concise.',
-                  },
-                  {
-                     role: 'user',
-                     content: `Question: ${focus}\n\nPage content:\n${rawContent}`,
-                  },
-               ],
-               temperature: 0.3,
-               maxTokens: 2000,
-            });
+        // Step 2: Ask LLM to extract relevant spans
+        const extractResp = await llm.callWorker({
+          messages: [
+            {
+              role: 'system',
+              content:
+                'Extract verbatim spans from web pages that answer a specific question. Return ONLY relevant excerpts, quoted verbatim. Be concise.',
+            },
+            {
+              role: 'user',
+              content: `Question: ${focus}\n\nPage content:\n${rawContent}`,
+            },
+          ],
+          temperature: 0.3,
+          maxTokens: 2000,
+        });
 
-            if (!extractResp.success) {
-               return {
-                  content: `[Page: ${page.title}]\n${url}\n\n${rawContent.slice(0, 3000)}`,
-               };
-            }
+        if (!extractResp.success) {
+          return {
+            content: `[Page: ${page.title}]\n${url}\n\n${rawContent.slice(0, 3000)}`,
+          };
+        }
 
-            collector.addResults(
-               [{ title: page.title, link: url, snippet: extractResp.content.slice(0, 300) }],
-               'web',
-            );
+        collector.addResults(
+          [{ title: page.title, link: url, snippet: extractResp.content.slice(0, 300) }],
+          'web',
+        );
 
-            return {
-               content: `[Extracted from: ${page.title}]\n${url}\n\nFocus: ${focus}\n\n${extractResp.content}`,
-            };
-         } catch (err) {
-            return {
-               content: `fetch_focus failed for ${url}: ${err instanceof Error ? err.message : String(err)}`,
-               error: 'fetch_focus failed',
-            };
-         }
-      },
-   };
+        return {
+          content: `[Extracted from: ${page.title}]\n${url}\n\nFocus: ${focus}\n\n${extractResp.content}`,
+        };
+      } catch (err) {
+        return {
+          content: `fetch_focus failed for ${url}: ${err instanceof Error ? err.message : String(err)}`,
+          error: 'fetch_focus failed',
+        };
+      }
+    },
+  };
 }
 
 function createPubMedSearchTool(collector: CitationCollector): AgentTool {
-   return {
-      name: 'search_pubmed',
-      description:
-         'Search biomedical literature on PubMed. Best for medical, biology, and life sciences research. Free, no API key needed.',
-      parameters: {
-         query: { type: 'string', description: 'The search query', required: true },
-         limit: { type: 'number', description: 'Max results (1-20, default 10)' },
-      },
-      execute: async (args) => {
-         const query = String(args.query ?? '');
-         if (!query) return { content: 'Error: query is required', error: 'missing query' };
-         const limit = Math.min(Number(args.limit) || 10, 20);
+  return {
+    name: 'search_pubmed',
+    description:
+      'Search biomedical literature on PubMed. Best for medical, biology, and life sciences research. Free, no API key needed.',
+    parameters: {
+      query: { type: 'string', description: 'The search query', required: true },
+      limit: { type: 'number', description: 'Max results (1-20, default 10)' },
+    },
+    execute: async (args) => {
+      const query = typeof args.query === 'string' ? args.query : '';
+      if (!query) return { content: 'Error: query is required', error: 'missing query' };
+      const limit = Math.min(Number(args.limit) || 10, 20);
 
-         try {
-            const { searchPubMed } = await import('../../tools/pubmedSearch.js');
-            const results = await searchPubMed(query, limit);
-            const startIdx = collector.addResults(
-               results.map((r) => ({ title: r.title, link: r.link, snippet: r.snippet })),
-               'pubmed',
-            );
-            const text = results
-               .map(
-                  (r, i) =>
-                     `[${startIdx + i}] ${r.title}\n${r.link}\n${r.snippet}`,
-               )
-               .join('\n\n');
-            return { content: text || 'No PubMed results found.' };
-         } catch (err) {
-            return {
-               content: `PubMed search failed: ${err instanceof Error ? err.message : String(err)}`,
-               error: 'search failed',
-            };
-         }
-      },
-   };
+      try {
+        const { searchPubMed } = await import('../../tools/pubmedSearch.js');
+        const results = await searchPubMed(query, limit);
+        const startIdx = collector.addResults(
+          results.map((r) => ({ title: r.title, link: r.link, snippet: r.snippet })),
+          'pubmed',
+        );
+        const text = results
+          .map((r, i) => `[${String(startIdx + i)}] ${r.title}\n${r.link}\n${r.snippet}`)
+          .join('\n\n');
+        return { content: text || 'No PubMed results found.' };
+      } catch (err) {
+        return {
+          content: `PubMed search failed: ${err instanceof Error ? err.message : String(err)}`,
+          error: 'search failed',
+        };
+      }
+    },
+  };
 }
 
 function createWikipediaSearchTool(collector: CitationCollector): AgentTool {
-   return {
-      name: 'search_wikipedia',
-      description:
-         'Search Wikipedia for encyclopedia articles. Best for background knowledge, definitions, and fact verification. Free, no API key needed.',
-      parameters: {
-         query: { type: 'string', description: 'The search query', required: true },
-      },
-      execute: async (args) => {
-         const query = String(args.query ?? '');
-         if (!query) return { content: 'Error: query is required', error: 'missing query' };
+  return {
+    name: 'search_wikipedia',
+    description:
+      'Search Wikipedia for encyclopedia articles. Best for background knowledge, definitions, and fact verification. Free, no API key needed.',
+    parameters: {
+      query: { type: 'string', description: 'The search query', required: true },
+    },
+    execute: async (args) => {
+      const query = typeof args.query === 'string' ? args.query : '';
+      if (!query) return { content: 'Error: query is required', error: 'missing query' };
 
-         try {
-            const { searchWikipedia } = await import('../../tools/wikipediaSearch.js');
-            const results = await searchWikipedia(query);
-            const startIdx = collector.addResults(
-               results.map((r) => ({ title: r.title, link: r.link, snippet: r.snippet })),
-               'wikipedia',
-            );
-            const text = results
-               .map(
-                  (r, i) =>
-                     `[${startIdx + i}] ${r.title}\n${r.link}\n${r.snippet}`,
-               )
-               .join('\n\n');
-            return { content: text || 'No Wikipedia results found.' };
-         } catch (err) {
-            return {
-               content: `Wikipedia search failed: ${err instanceof Error ? err.message : String(err)}`,
-               error: 'search failed',
-            };
-         }
-      },
-   };
+      try {
+        const { searchWikipedia } = await import('../../tools/wikipediaSearch.js');
+        const results = await searchWikipedia(query);
+        const startIdx = collector.addResults(
+          results.map((r) => ({ title: r.title, link: r.link, snippet: r.snippet })),
+          'wikipedia',
+        );
+        const text = results
+          .map((r, i) => `[${String(startIdx + i)}] ${r.title}\n${r.link}\n${r.snippet}`)
+          .join('\n\n');
+        return { content: text || 'No Wikipedia results found.' };
+      } catch (err) {
+        return {
+          content: `Wikipedia search failed: ${err instanceof Error ? err.message : String(err)}`,
+          error: 'search failed',
+        };
+      }
+    },
+  };
 }
-
-
 
 // ── Research Subtopic ──────────────────────────────────────────────────
 
-function createResearchSubtopicTool(
-   ctx: StrategyContext,
-   collector: CitationCollector,
-): AgentTool {
-   return {
-      name: 'research_subtopic',
-      description:
-         'Investigate multiple subtopics in parallel. Best when a question has several distinct aspects that can be researched independently. Provide up to 6 subtopics.',
-      parameters: {
-         subtopics: {
-            type: 'array',
-            description: 'Array of subtopic questions to research in parallel (max 6)',
-            required: true,
-         },
+function createResearchSubtopicTool(ctx: StrategyContext, collector: CitationCollector): AgentTool {
+  return {
+    name: 'research_subtopic',
+    description:
+      'Investigate multiple subtopics in parallel. Best when a question has several distinct aspects that can be researched independently. Provide up to 6 subtopics.',
+    parameters: {
+      subtopics: {
+        type: 'array',
+        description: 'Array of subtopic questions to research in parallel (max 6)',
+        required: true,
       },
-      execute: async (args) => {
-         const subtopics = Array.isArray(args.subtopics)
-            ? args.subtopics.slice(0, 6)
-            : [];
-         if (subtopics.length === 0) {
-            return { content: 'Error: subtopics array is required', error: 'missing subtopics' };
-         }
+    },
+    execute: async (args) => {
+      const subtopics = Array.isArray(args.subtopics) ? args.subtopics.slice(0, 6) : [];
+      if (subtopics.length === 0) {
+        return { content: 'Error: subtopics array is required', error: 'missing subtopics' };
+      }
 
-         const results: string[] = [];
-         let hasError = false;
-         const concurrency = 4;
+      const results: string[] = [];
+      let hasError = false;
+      const concurrency = 4;
 
-         // Dynamically import AgentStrategy to avoid circular dependency
-         const { AgentStrategy } = await import('./agentStrategy.js');
+      // Dynamically import AgentStrategy to avoid circular dependency
+      const { AgentStrategy } = await import('./agentStrategy.js');
 
-         for (let i = 0; i < subtopics.length; i += concurrency) {
-            const batch = subtopics.slice(i, i + concurrency);
-            const batchResults = await Promise.allSettled(
-               batch.map(async (subtopic: string) => {
-                  // Create a sub-agent with a reduced iteration budget and the SHARED collector
-                  const subAgent = new AgentStrategy(
-                     {
-                        ...ctx,
-                        config: {
-                           ...ctx.config,
-                           agentMaxIterations: ctx.config.agentMaxSubIterations ?? 8,
-                        },
-                     },
-                     collector,
-                  );
-
-                  const subResult = await subAgent.analyze(subtopic, ctx);
-                  return {
-                     subtopic,
-                     report: subResult.report.narrativeMarkdown,
-                     sourceCount: subResult.report.sourceCount,
-                  };
-               }),
+      for (let i = 0; i < subtopics.length; i += concurrency) {
+        const batch = subtopics.slice(i, i + concurrency);
+        const batchResults = await Promise.allSettled(
+          batch.map(async (subtopic: string) => {
+            // Create a sub-agent with a reduced iteration budget and the SHARED collector
+            const subAgent = new AgentStrategy(
+              {
+                ...ctx,
+                config: {
+                  ...ctx.config,
+                  agentMaxIterations: ctx.config.agentMaxSubIterations,
+                },
+              },
+              collector,
             );
 
-            for (const batchResult of batchResults) {
-               if (batchResult.status === 'fulfilled') {
-                  const { subtopic, report, sourceCount } = batchResult.value;
-                  results.push(
-                     `## Subtopic: ${subtopic}\n\nFindings (${sourceCount} sources):\n\n${report}`,
-                  );
-               } else {
-                  hasError = true;
-                  results.push(
-                     `## Subtopic: unknown\n\nResearch failed: ${batchResult.reason instanceof Error ? batchResult.reason.message : String(batchResult.reason)}`,
-                  );
-               }
-            }
-         }
+            const subResult = await subAgent.analyze(subtopic, ctx);
+            return {
+              subtopic,
+              report: subResult.report.narrativeMarkdown,
+              sourceCount: subResult.report.sourceCount,
+            };
+          }),
+        );
 
-         const header = `Researched ${subtopics.length} subtopic(s)${hasError ? ' (with some errors)' : ''}:\n\n`;
-         return { content: header + results.join('\n\n---\n\n') };
-      },
-   };
+        for (const batchResult of batchResults) {
+          if (batchResult.status === 'fulfilled') {
+            const { subtopic, report, sourceCount } = batchResult.value;
+            results.push(
+              `## Subtopic: ${subtopic}\n\nFindings (${String(sourceCount)} sources):\n\n${report}`,
+            );
+          } else {
+            hasError = true;
+            results.push(
+              `## Subtopic: unknown\n\nResearch failed: ${batchResult.reason instanceof Error ? batchResult.reason.message : String(batchResult.reason)}`,
+            );
+          }
+        }
+      }
+
+      const header = `Researched ${String(subtopics.length)} subtopic(s)${hasError ? ' (with some errors)' : ''}:\n\n`;
+      return { content: header + results.join('\n\n---\n\n') };
+    },
+  };
 }

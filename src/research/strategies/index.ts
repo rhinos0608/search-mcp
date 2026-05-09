@@ -9,19 +9,30 @@ import { strategyRegistry } from './registry.js';
 import { PipelineStrategy, type PipelineRunnerFn } from './pipelineStrategy.js';
 import { AgentStrategy } from './agentStrategy.js';
 import { TreeStrategy } from './treeStrategy.js';
-import type { ResearchStrategy, StrategyContext, StrategyFactory, ProgressCallback } from './types.js';
+import type {
+  ResearchStrategy,
+  StrategyContext,
+  StrategyFactory,
+  ProgressCallback,
+} from './types.js';
 
 if (!strategyRegistry.has('pipeline')) {
-   strategyRegistry.register('pipeline', () => new PipelineStrategy());
+  strategyRegistry.register('pipeline', () => new PipelineStrategy());
 }
 
 if (!strategyRegistry.has('agent')) {
-   strategyRegistry.register('agent', (ctx) => new AgentStrategy(ctx));
+  strategyRegistry.register('agent', (ctx) => new AgentStrategy(ctx));
 }
 
 if (!strategyRegistry.has('tree')) {
-   strategyRegistry.register('tree', () => new TreeStrategy());
+  strategyRegistry.register('tree', () => new TreeStrategy());
 }
 
 export { strategyRegistry, PipelineStrategy, AgentStrategy, TreeStrategy };
-export type { ResearchStrategy, StrategyContext, StrategyFactory, ProgressCallback, PipelineRunnerFn };
+export type {
+  ResearchStrategy,
+  StrategyContext,
+  StrategyFactory,
+  ProgressCallback,
+  PipelineRunnerFn,
+};
