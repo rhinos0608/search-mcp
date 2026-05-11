@@ -33,6 +33,7 @@
     "apiToken": ""
   },
   "embeddingSidecar": {
+    "provider": "sidecar",
     "baseUrl": "",
     "apiToken": "",
     "dimensions": 768,
@@ -78,22 +79,34 @@
     "//": "Deep Research Orchestration Engine (V4.0.0). Opt-in, disabled by default.",
     "enabled": false,
     "defaultDepth": "standard",
-    "//baseUrl": "OpenAI-compatible base URL for the orchestrator LLM. Do NOT include /v1 — it is appended automatically (e.g. http://localhost:11434)",
+    "maxDepth": "deep",
+    "maxToolCalls": 200,
+    "maxTokens": 500000,
     "baseUrl": "",
-    "//workerBaseUrl": "Optional separate base URL for the worker LLM. Falls back to baseUrl if not set. Use this when worker and orchestrator use different endpoints.",
+    "//baseUrl": "OpenAI-compatible base URL for the orchestrator LLM. Do NOT include /v1 — it is appended automatically (e.g. http://localhost:11434)",
     "workerBaseUrl": "",
-    "//apiToken": "Optional API token for authenticated LLM endpoints (e.g. OpenAI API key)",
-    "apiToken": "",
-    "//model": "Orchestrator model — mid-tier for planning, evaluation, audit, synthesis (e.g. gpt-4o, claude-sonnet-4)",
+    "//workerBaseUrl": "Optional separate base URL for the worker LLM. Falls back to baseUrl if not set. Use this when worker and orchestrator use different endpoints.",
     "model": "",
+    "//model": "Orchestrator model — mid-tier for planning, evaluation, audit, synthesis (e.g. gpt-4o, claude-sonnet-4)",
+    "workerModel": "",
     "//workerModel": "Worker model — cheap for extraction, classification (e.g. gpt-4o-mini, llama-3.1-8b)",
-    "workerModel": ""
+    "apiToken": "",
+    "//apiToken": "Optional API token for authenticated LLM endpoints (e.g. OpenAI API key)",
+    "maxTimeMs": 300000,
+    "autoSave": true,
+    "treeBreadth": 4,
+    "treeDepth": 2,
+    "treeConcurrency": 2,
+    "treeContextWordLimit": 25000,
+    "agentMaxIterations": 30,
+    "agentMaxSubIterations": 8,
+    "agentDefaultFetchMode": "summary_focus_query"
   },
   "browser": {
     "//": "CDP Browser Control (V5.2). Opt-in, disabled by default. Requires playwright-core. Three modes:",
-    "//-mode-stealth": "stealth = headless CDP + anti-detection (default). Works autonomously but detectable by advanced bot protection.",
+    "//-mode-stealth": "stealth = autonomous browser session. Set browserEngine=cloak to use the optional CloakBrowser binary instead of stock Playwright Chromium.",
     "//-mode-user": "user = connect to your existing Chrome browser via CDP. Zero stealth needed — uses your real fingerprint and sessions.",
-    "//-mode-profile": "profile = launch Chrome with a persistent user data directory. Pre-authenticate once, reuse across sessions.",
+    "//-mode-profile": "profile = launch Chrome/CloakBrowser with a persistent user data directory. Pre-authenticate once, reuse across sessions.",
     "enabled": false,
     "executablePath": "",
     "headless": true,
@@ -106,32 +119,44 @@
     "stealthEnabled": true,
     "rebrowser": false,
     "bypassCSP": false,
+    "browserEngine": "playwright",
+    "//browserEngine": "Set to 'cloak' to use npm package cloakbrowser as the launch backend. Install optional deps first: npm install cloakbrowser playwright-core.",
+    "cloakHumanize": false,
+    "cloakHumanPreset": "default",
+    "cloakLocale": "",
+    "cloakTimezone": "",
+    "cloakGeoip": false,
+    "cloakStealthArgs": true,
     "mode": "stealth",
     "browserPort": 9222,
     "autoConnect": false,
     "credentials": {}
   },
   "rescoreWeights": {
-    "//": "Per-tool rescoring weights. Tune these to prioritize recency, citations, etc.",
+    "//": "Per-tool rescoring weights. Tune these to prioritize recency, citations, engagement, etc. rrfAnchor should dominate any single other signal.",
     "webSearch": {
-      "rrfAnchor": 0.6,
-      "recency": 0.1,
-      "citations": 0.1
+      "rrfAnchor": 0.5,
+      "recency": 0.2,
+      "hasDeepLinks": 0.05
     },
     "academicSearch": {
-      "rrfAnchor": 0.6,
-      "recency": 0.1,
-      "citations": 0.1
+      "rrfAnchor": 0.5,
+      "recency": 0.05,
+      "citations": 0.3,
+      "venue": 0.15
     },
     "hackernewsSearch": {
-      "rrfAnchor": 0.6,
-      "recency": 0.1,
-      "engagement": 0.1
+      "rrfAnchor": 0.5,
+      "recency": 0.15,
+      "engagement": 0.2,
+      "commentEngagement": 0.15
     },
     "redditSearch": {
-      "rrfAnchor": 0.6,
+      "rrfAnchor": 0.5,
       "recency": 0.1,
-      "commentEngagement": 0.1
+      "engagement": 0.25,
+      "commentEngagement": 0.15
     }
-  }
+  },
+  "challengeLatencyThreshold": 5000
 }

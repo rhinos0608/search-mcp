@@ -325,6 +325,18 @@ RAGA_BRIDGE_URL             # default http://localhost:8000
 RAGA_DEFAULT_PARSER         # 'auto' | 'docling' | 'paddleocr' | 'mineru'
 RAGA_TIMEOUT_MS             # default 30000
 
+# Browser/CDP (optional, disabled by default)
+BROWSER_ENABLED            # 'true' | 'false' (default: false)
+BROWSER_ENGINE             # 'playwright' | 'cloak' (CloakBrowser optional package)
+BROWSER_MODE               # 'stealth' | 'user' | 'profile'
+BROWSER_PROFILE_DIR        # persistent profile path/name for profile mode
+CLOAKBROWSER_HUMANIZE      # 'true' | 'false' for wrapper-level human-like actions
+CLOAKBROWSER_HUMAN_PRESET  # 'default' | 'careful'
+CLOAKBROWSER_LOCALE        # optional locale flag, e.g. en-US
+CLOAKBROWSER_TIMEZONE      # optional timezone flag, e.g. America/New_York
+CLOAKBROWSER_GEOIP         # 'true' | 'false' to infer locale/timezone from proxy IP
+CLOAKBROWSER_STEALTH_ARGS  # 'true' | 'false' to include default CloakBrowser stealth flags
+
 # Deep Research (V4.0.0 — opt-in, off by default)
 DEEP_RESEARCH_ENABLED       # 'true' | 'false' (default: false)
 DEEP_RESEARCH_BASE_URL      # OpenAI-compatible base URL for LLM calls

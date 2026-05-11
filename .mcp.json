@@ -10,14 +10,14 @@
       },
       "directTools": [
         "web_search",
-        "web_read",
         "web_crawl",
         "semantic_crawl",
         "youtube",
         "reddit",
         "github",
         "packages",
-        "research"
+        "research",
+        "browser"
       ]
     }
   }
