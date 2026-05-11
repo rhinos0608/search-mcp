@@ -258,19 +258,27 @@ export class ExtractionEngine {
             let fallbackSucceeded = false;
             try {
               const { InteractiveBrowserAgent } = await import('./interactiveAgent.js');
+              const browserCfg = loadConfig().browser;
               const agent = new InteractiveBrowserAgent({
                 browser: {
-                  headless: true,
-                  viewport: { width: 1280, height: 720 },
-                  userAgent: '',
-                  proxyServer: '',
-                  executablePath: '',
-                  profile: null,
-                  stealthEnabled: true,
-                  rebrowser: false,
-                  maxSessionTimeMs: 0,
-                  bypassCSP: false,
-                  credentials: {},
+                  headless: browserCfg.headless,
+                  viewport: browserCfg.viewport,
+                  userAgent: browserCfg.userAgent,
+                  proxyServer: browserCfg.proxyServer,
+                  executablePath: browserCfg.executablePath,
+                  profile: browserCfg.profileDir || null,
+                  stealthEnabled: browserCfg.stealthEnabled,
+                  rebrowser: browserCfg.rebrowser,
+                  maxSessionTimeMs: browserCfg.maxSessionTimeMs,
+                  bypassCSP: browserCfg.bypassCSP,
+                  credentials: browserCfg.credentials,
+                  browserEngine: browserCfg.browserEngine,
+                  cloakHumanize: browserCfg.cloakHumanize,
+                  cloakHumanPreset: browserCfg.cloakHumanPreset,
+                  cloakLocale: browserCfg.cloakLocale,
+                  cloakTimezone: browserCfg.cloakTimezone,
+                  cloakGeoip: browserCfg.cloakGeoip,
+                  cloakStealthArgs: browserCfg.cloakStealthArgs,
                 },
               });
               const result = await agent.executePlan(source.url, plan);
