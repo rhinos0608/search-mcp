@@ -8,7 +8,7 @@
 import { logger } from '../logger.js';
 import { assertSafeUrl } from '../httpGuards.js';
 import { retryWithBackoff } from '../retry.js';
-import { assessMarkdownBatchQuality } from '../utils/renderRecovery.js';
+import { assessMarkdownBatchQuality, compareQuality } from '../utils/renderRecovery.js';
 import { safeStructuredFromMarkdown } from '../utils/elementHelpers.js';
 import { attemptExternalRecovery } from '../utils/externalRecovery.js';
 import { recordOutcome } from '../utils/extractionStats.js';
@@ -397,17 +397,16 @@ export class ResponseQualityMiddleware implements CrawlMiddleware {
     const quality = assessMarkdownBatchQuality(resp.result.pages.map((p) => p.markdown));
     if (!quality.meaningful) {
       logger.info(
-        { url: resp.result.seedUrl, reasons: quality.reasons },
-        'response-quality: low quality, signaling for aggressive retry',
+        { url: resp.result.seedUrl, classification: quality.classification, score: quality.score, reasons: quality.reasons },
+        'response-quality: low quality, signaling for recovery',
       );
-      // Set a metadata flag so AggressiveRenderMiddleware picks it up
       return {
         ...resp,
         result: {
           ...resp.result,
           warnings: [
             ...(resp.result.warnings ?? []),
-            `Low quality crawl output (${quality.reasons.join(', ')})`,
+            `Low quality crawl output (${quality.classification}: ${quality.reasons.join(', ')})`,
           ],
         },
       };
@@ -425,29 +424,78 @@ export class AggressiveRenderMiddleware implements CrawlMiddleware {
   async processResponse(resp: CrawlResponse, ctx: CrawlContext): Promise<CrawlResponse | null> {
     // Only trigger if the initial response has no or very low-quality content
     if (resp.result.pages.length === 0) return resp;
-    if (resp.result.successfulPages > 0) {
-      // Use same quality assessment as ResponseQualityMiddleware
-      const quality = assessMarkdownBatchQuality(resp.result.pages.map((p) => p.markdown));
-      if (quality.meaningful) return resp; // Content looks reasonable
-    }
+
+    const batchPages = resp.result.pages.map((p) => p.markdown);
+    const quality = assessMarkdownBatchQuality(batchPages);
+    if (quality.meaningful) return resp;
+
     // Don't override user's explicit dynamic-content settings
     if (ctx.request.opts.waitFor || ctx.request.opts.jsCode || ctx.request.opts.jsCodeBeforeWait) {
       return resp;
     }
 
-    logger.info({ url: ctx.request.url }, 'aggressive-render: retrying with aggressive settings');
+    // Use recovery recommendation to decide strategy
+    const rec = quality.recovery;
+    if (rec.stopRetrying) {
+      logger.info(
+        { url: ctx.request.url, classification: quality.classification },
+        'aggressive-render: skipping retry (classification recommends stop)',
+      );
+      return resp;
+    }
 
-    // Build aggressive render options
-    const scrollJs = 'window.scrollTo(0, document.body.scrollHeight);';
-    const waitFor =
-      'js:() => document.body.innerText.trim().length > 0 && !/^(loading\\.?\\.?\\.?|please wait|just a moment|enable javascript|this page requires javascript)$/i.test(document.body.innerText.trim())';
+    if (!rec.retryAggressiveRender) {
+      logger.info(
+        { url: ctx.request.url, classification: quality.classification },
+        'aggressive-render: skipping retry (classification does not recommend aggressive render)',
+      );
+      return resp;
+    }
+
+    logger.info(
+      { url: ctx.request.url, classification: quality.classification, score: quality.score, reasons: quality.reasons },
+      'aggressive-render: retrying with aggressive settings',
+    );
+
+    // Determine delay and scroll strategy based on classification
+    const isJsShell = quality.classification === 'js_shell';
+    const isNavHeavy =
+      quality.classification === 'nav_heavy' ||
+      quality.classification === 'too_thin' ||
+      quality.classification === 'mixed_low_confidence';
+
+    const delaySeconds = isJsShell || isNavHeavy
+      ? Math.max(ctx.request.opts.delayBeforeReturnHtml ?? 0.1, 8)
+      : Math.max(ctx.request.opts.delayBeforeReturnHtml ?? 0.1, 3);
+
+    const scrollJs = isNavHeavy
+      ? [
+          'window.scrollTo(0, document.body.scrollHeight * 0.5);',
+          'new Promise(function(r) { setTimeout(r, 2000); }).then(function() {',
+          '  window.scrollTo(0, document.body.scrollHeight);',
+          '});',
+          '',
+          '// Additional delay to let lazy JS content render',
+          'new Promise(function(r) { setTimeout(r, 2000); });',
+        ].join('\n')
+      : 'window.scrollTo(0, document.body.scrollHeight);';
+
+    const waitFor = isJsShell
+      ? 'js:() => document.body.innerText.trim().length > 200'
+      : isNavHeavy
+        ? 'js:() => document.body.innerText.trim().length > 200'
+        : [
+            'js:() => document.body.innerText.trim().length > 0',
+            '  && !/^(loading\\.?\\.?\\.?|please wait|just a moment|enable javascript|this page requires javascript)$/i',
+            '    .test(document.body.innerText.trim())',
+          ].join('');
 
     const aggressiveReq: CrawlRequest = {
       ...ctx.request,
       opts: {
         ...ctx.request.opts,
         waitFor,
-        delayBeforeReturnHtml: Math.max(ctx.request.opts.delayBeforeReturnHtml ?? 0.1, 3),
+        delayBeforeReturnHtml: delaySeconds,
         jsCodeBeforeWait: scrollJs,
         jsCode:
           ctx.request.opts.jsCode && ctx.request.opts.jsCode.length > 0
@@ -471,16 +519,23 @@ export class AggressiveRenderMiddleware implements CrawlMiddleware {
 
     try {
       const recovery = await crawlFn(aggressiveReq);
+
+      // Compare quality before and after — only accept if quality improved
       const recoveryQuality = assessMarkdownBatchQuality(
         recovery.result.pages.map((p) => p.markdown),
       );
 
       ctx.warnings.push(
-        `Retried ${ctx.request.url} with aggressive render profile because baseline output looked low quality`,
+        'Retried ' +
+          ctx.request.url +
+          ' with aggressive render profile because baseline output looked low quality',
       );
 
-      if (recoveryQuality.meaningful) {
-        ctx.warnings.push('Aggressive render profile recovered meaningful content');
+      // Use compareQuality to check if the retry improved semantic quality
+      const comparison = compareQuality(quality, recoveryQuality);
+
+      if (recoveryQuality.meaningful && comparison.improved) {
+        ctx.warnings.push(`Aggressive render improved quality: ${comparison.summary}`);
         recordOutcome({
           url: ctx.request.url,
           domain: new URL(ctx.request.url).hostname.replace(/^www\./, ''),
@@ -492,7 +547,13 @@ export class AggressiveRenderMiddleware implements CrawlMiddleware {
         return recovery;
       }
 
-      ctx.warnings.push('Aggressive render profile still produced low-quality content');
+      if (comparison.improved) {
+        // Quality improved even if not yet "meaningful" — still better
+        ctx.warnings.push(`Aggressive render improved metrics (overall: ${String(Math.round(comparison.deltas.overallScore))})`);
+        return recovery;
+      }
+
+      ctx.warnings.push(`Aggressive render did not improve quality (${comparison.summary})`);
       return { ...recovery, result: { ...recovery.result, warnings: ctx.warnings } };
     } catch (err) {
       logger.warn({ err, url: ctx.request.url }, 'aggressive-render retry failed');
@@ -512,6 +573,23 @@ export class ExternalRecoveryMiddleware implements CrawlMiddleware {
     if (resp.result.pages.length > 0) {
       const quality = assessMarkdownBatchQuality(resp.result.pages.map((p) => p.markdown));
       if (quality.meaningful) return resp;
+
+      // Check recovery recommendation
+      if (quality.recovery.stopRetrying) {
+        logger.info(
+          { url: ctx.request.url, classification: quality.classification },
+          'external-recovery: skipping (classification recommends stop)',
+        );
+        return resp;
+      }
+
+      if (!quality.recovery.attemptExternalRecovery) {
+        logger.info(
+          { url: ctx.request.url, classification: quality.classification },
+          'external-recovery: skipping (not recommended for this classification)',
+        );
+        return resp;
+      }
     }
 
     logger.info(
