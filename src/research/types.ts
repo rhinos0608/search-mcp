@@ -53,7 +53,14 @@ export type SourceType =
   | 'podcast'
   | 'producthunt'
   | 'youtube'
-  | 'browser-interactive';
+  | 'browser-interactive'
+  | 'openalex'
+  | 'crossref'
+  | 'datacite'
+  | 'ror'
+  | 'semantic_scholar'
+  | 'gdelt'
+  | 'wikidata';
 
 /**
  * Source quality tier used for synthesis gating.
@@ -1045,6 +1052,121 @@ export interface ResearchTools {
     }[]
   >;
 
+
+  // ── Free academic/discovery backends ────────────────────────────────────
+  /** Search OpenAlex for scholarly works (free, no API key). */
+  openalexSearch(
+    query: string,
+    limit?: number,
+  ): Promise<
+    {
+      title: string;
+      link: string;
+      snippet: string;
+      publishedDate?: string | undefined;
+      authors?: string[] | undefined;
+      doi?: string | undefined;
+      citedByCount?: number | undefined;
+      type?: string | undefined;
+    }[]
+  >;
+
+  /** Search Crossref for DOIs and citation metadata (free, no API key). */
+  crossrefSearch(
+    query: string,
+    limit?: number,
+  ): Promise<
+    {
+      title: string;
+      link: string;
+      snippet: string;
+      publishedDate?: string | undefined;
+      authors?: string[] | undefined;
+      doi?: string | undefined;
+      publisher?: string | undefined;
+      type?: string | undefined;
+    }[]
+  >;
+
+  /** Search DataCite for research datasets and DOIs (free, no API key). */
+  dataciteSearch(
+    query: string,
+    limit?: number,
+  ): Promise<
+    {
+      title: string;
+      link: string;
+      snippet: string;
+      publishedDate?: string | undefined;
+      publisher?: string | undefined;
+      doi?: string | undefined;
+      resourceType?: string | undefined;
+    }[]
+  >;
+
+  /** Search ROR for research organizations (free, no API key). */
+  rorSearch(
+    query: string,
+    limit?: number,
+  ): Promise<
+    {
+      title: string;
+      link: string;
+      snippet: string;
+      types?: string[] | undefined;
+      country?: string | undefined;
+      city?: string | undefined;
+      established?: number | undefined;
+      rorId?: string | undefined;
+    }[]
+  >;
+
+  /** Search Semantic Scholar for papers (free, rate-limited). */
+  semanticScholarSearch(
+    query: string,
+    limit?: number,
+  ): Promise<
+    {
+      title: string;
+      link: string;
+      snippet: string;
+      publishedDate?: string | undefined;
+      authors?: string[] | undefined;
+      citationCount?: number | undefined;
+      doi?: string | undefined;
+      paperId?: string | undefined;
+    }[]
+  >;
+
+  /** Search GDELT for global news/events (free, no API key). */
+  gdeltSearch(
+    query: string,
+    limit?: number,
+  ): Promise<
+    {
+      title: string;
+      link: string;
+      snippet: string;
+      publishedDate?: string | undefined;
+      sourceCountry?: string | undefined;
+      tone?: string | undefined;
+      domain?: string | undefined;
+    }[]
+  >;
+
+  /** Search Wikidata for knowledge graph entities (free, no API key). */
+  wikidataSearch(
+    query: string,
+    limit?: number,
+  ): Promise<
+    {
+      title: string;
+      link: string;
+      snippet: string;
+      qid?: string | undefined;
+      aliases?: string[] | undefined;
+    }[]
+  >;
   // ── Browser interactive extraction ──────────────────────────────────
   /** Create a browser session for interactive extraction. */
   browserSession: (config: BrowserSessionConfig) => Promise<{ sessionId: string }>;

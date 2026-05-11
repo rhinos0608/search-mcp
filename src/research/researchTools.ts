@@ -23,7 +23,15 @@ import { searchPubMed } from '../tools/pubmedSearch.js';
 import { searchWikipedia } from '../tools/wikipediaSearch.js';
 import { stackoverflowSearch as searchStackOverflow } from '../tools/stackoverflowSearch.js';
 import { semanticCrawl as realSemanticCrawl } from '../tools/semanticCrawl.js';
+import { searchOpenAlex } from '../tools/openalexSearch.js';
+import { searchCrossref } from '../tools/crossrefSearch.js';
+import { searchDataCite } from '../tools/dataciteSearch.js';
+import { searchRor } from '../tools/rorSearch.js';
+import { searchSemanticScholar } from '../tools/semanticScholarSearch.js';
+import { searchGdelt } from '../tools/gdeltSearch.js';
+import { searchWikidata } from '../tools/wikidataSearch.js';
 import { loadConfig } from '../config.js';
+import { logger } from '../logger.js';
 import type { ResearchTools, InteractiveExtractionPlan } from './types.js';
 import type { SemanticCrawlChunk } from '../types.js';
 import type { BrowserSessionConfig } from '../browser/types.js';
@@ -423,6 +431,70 @@ export function createResearchTools(options?: ResearchToolsOptions): ResearchToo
       }
     },
 
+    // ── Free academic/discovery backends ──────────────────────────────────
+    async openalexSearch(query: string, limit?: number) {
+      onToolCall?.('openalex_search', query);
+      try {
+        return await searchOpenAlex(query, limit ?? 10);
+      } catch {
+        return [];
+      }
+    },
+
+    async crossrefSearch(query: string, limit?: number) {
+      onToolCall?.('crossref_search', query);
+      try {
+        return await searchCrossref(query, limit ?? 10);
+      } catch {
+        return [];
+      }
+    },
+
+    async dataciteSearch(query: string, limit?: number) {
+      onToolCall?.('datacite_search', query);
+      try {
+        return await searchDataCite(query, limit ?? 10);
+      } catch {
+        return [];
+      }
+    },
+
+    async rorSearch(query: string, limit?: number) {
+      onToolCall?.('ror_search', query);
+      try {
+        return await searchRor(query, limit ?? 10);
+      } catch {
+        return [];
+      }
+    },
+
+    async semanticScholarSearch(query: string, limit?: number) {
+      onToolCall?.('semantic_scholar_search', query);
+      try {
+        return await searchSemanticScholar(query, limit ?? 10);
+      } catch {
+        return [];
+      }
+    },
+
+    async gdeltSearch(query: string, limit?: number) {
+      onToolCall?.('gdelt_search', query);
+      try {
+        return await searchGdelt(query, '30d', limit ?? 10);
+      } catch {
+        return [];
+      }
+    },
+
+    async wikidataSearch(query: string, limit?: number) {
+      onToolCall?.('wikidata_search', query);
+      try {
+        return await searchWikidata(query, 'en', limit ?? 10);
+      } catch {
+        return [];
+      }
+    },
+
     // ── Browser interactive extraction ──────────────────────────────────
     async browserSession(config: BrowserSessionConfig) {
       onToolCall?.(
@@ -433,7 +505,11 @@ export function createResearchTools(options?: ResearchToolsOptions): ResearchToo
         const { browserManager } = await import('../browser/browserManager.js');
         const session = await browserManager.launch(config);
         return { sessionId: session.id };
-      } catch {
+      } catch (err) {
+        logger.warn(
+          { err: err instanceof Error ? err.message : String(err) },
+          'research browser session launch failed',
+        );
         return { sessionId: '' };
       }
     },
@@ -447,19 +523,27 @@ export function createResearchTools(options?: ResearchToolsOptions): ResearchToo
         if (session?.id !== sessionId) {
           return { content: '', findings: [], sources: [], screenshots: [] };
         }
+        const browserCfg = loadConfig().browser;
         const agent = new InteractiveBrowserAgent({
           browser: {
-            headless: true,
-            viewport: { width: 1280, height: 720 },
-            userAgent: '',
-            proxyServer: '',
-            executablePath: '',
-            profile: null,
-            stealthEnabled: true,
-            rebrowser: false,
-            maxSessionTimeMs: 0,
-            bypassCSP: false,
-            credentials: {},
+            headless: browserCfg.headless,
+            viewport: browserCfg.viewport,
+            userAgent: browserCfg.userAgent,
+            proxyServer: browserCfg.proxyServer,
+            executablePath: browserCfg.executablePath,
+            profile: browserCfg.profileDir || null,
+            stealthEnabled: browserCfg.stealthEnabled,
+            rebrowser: browserCfg.rebrowser,
+            maxSessionTimeMs: browserCfg.maxSessionTimeMs,
+            bypassCSP: browserCfg.bypassCSP,
+            credentials: browserCfg.credentials,
+            browserEngine: browserCfg.browserEngine,
+            cloakHumanize: browserCfg.cloakHumanize,
+            cloakHumanPreset: browserCfg.cloakHumanPreset,
+            cloakLocale: browserCfg.cloakLocale,
+            cloakTimezone: browserCfg.cloakTimezone,
+            cloakGeoip: browserCfg.cloakGeoip,
+            cloakStealthArgs: browserCfg.cloakStealthArgs,
           },
         });
         const result = await agent.executePlan(url, plan, session);

@@ -552,6 +552,36 @@ export function getNetworkProbes(cfg: SearchConfig): NetworkProbe[] {
       url: 'https://api.semanticscholar.org/graph/v1/paper/search?query=test&limit=1&fields=title',
       tools: ['research.academic', 'research.semantic_scholar'],
     },
+    {
+      label: 'openalex',
+      url: 'https://api.openalex.org/works?search=test&per_page=1',
+      tools: ['research.openalex'],
+    },
+    {
+      label: 'crossref',
+      url: 'https://api.crossref.org/works?query=test&rows=1',
+      tools: ['research.crossref'],
+    },
+    {
+      label: 'datacite',
+      url: 'https://api.datacite.org/dois?query=test&page%5Bsize%5D=1',
+      tools: ['research.datacite'],
+    },
+    {
+      label: 'ror',
+      url: 'https://api.ror.org/v2/organizations?query=stanford',
+      tools: ['research.ror'],
+    },
+    {
+      label: 'gdelt',
+      url: 'https://api.gdeltproject.org/api/v2/doc/doc?query=test&mode=ArtList&format=json&maxrecords=1',
+      tools: ['research.gdelt'],
+    },
+    {
+      label: 'wikidata',
+      url: 'https://www.wikidata.org/w/api.php?action=wbsearchentities&search=test&language=en&format=json',
+      tools: ['research.wikidata'],
+    },
   ];
 
   if (cfg.searxng.baseUrl.length > 0) {

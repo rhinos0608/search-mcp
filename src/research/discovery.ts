@@ -19,6 +19,13 @@ import { stackoverflowSearch } from '../tools/stackoverflowSearch.js';
 import { youtubeSearch } from '../tools/youtubeSearch.js';
 import { getYouTubeTranscript } from '../tools/youtubeTranscript.js';
 import { attemptExternalRecovery } from '../utils/externalRecovery.js';
+import { searchOpenAlex } from '../tools/openalexSearch.js';
+import { searchCrossref } from '../tools/crossrefSearch.js';
+import { searchDataCite } from '../tools/dataciteSearch.js';
+import { searchRor } from '../tools/rorSearch.js';
+import { searchSemanticScholar } from '../tools/semanticScholarSearch.js';
+import { searchGdelt } from '../tools/gdeltSearch.js';
+import { searchWikidata } from '../tools/wikidataSearch.js';
 import type {
   SubQuestion,
   SourceCandidate,
@@ -608,6 +615,46 @@ export class DiscoveryEngine {
       for (const hr of hybridResults) {
         if (hr.status === 'fulfilled') {
           candidates.push(...hr.value);
+        }
+      }
+    }
+
+    // Free academic/discovery backends (hybrid discovery)
+    if (
+      sq.preferredSources.includes('openalex') ||
+      sq.preferredSources.includes('crossref') ||
+      sq.preferredSources.includes('datacite') ||
+      sq.preferredSources.includes('ror') ||
+      sq.preferredSources.includes('semantic_scholar') ||
+      sq.preferredSources.includes('gdelt') ||
+      sq.preferredSources.includes('wikidata')
+    ) {
+      const freeBackendSearches: Promise<SourceCandidate[]>[] = [];
+      if (sq.preferredSources.includes('openalex')) {
+        freeBackendSearches.push(this.searchOpenAlex(sq));
+      }
+      if (sq.preferredSources.includes('crossref')) {
+        freeBackendSearches.push(this.searchCrossref(sq));
+      }
+      if (sq.preferredSources.includes('datacite')) {
+        freeBackendSearches.push(this.searchDataCite(sq));
+      }
+      if (sq.preferredSources.includes('ror')) {
+        freeBackendSearches.push(this.searchRor(sq));
+      }
+      if (sq.preferredSources.includes('semantic_scholar')) {
+        freeBackendSearches.push(this.searchSemanticScholar(sq));
+      }
+      if (sq.preferredSources.includes('gdelt')) {
+        freeBackendSearches.push(this.searchGdelt(sq));
+      }
+      if (sq.preferredSources.includes('wikidata')) {
+        freeBackendSearches.push(this.searchWikidata(sq));
+      }
+      const freeResults = await Promise.allSettled(freeBackendSearches);
+      for (const fr of freeResults) {
+        if (fr.status === 'fulfilled') {
+          candidates.push(...fr.value);
         }
       }
     }
@@ -1446,6 +1493,169 @@ export class DiscoveryEngine {
         : {}),
       relevanceScore: relevance.score,
     };
+  }
+
+  // ── Free academic/discovery backends ────────────────────────────────────
+
+  private async searchOpenAlex(sq: SubQuestion): Promise<SourceCandidate[]> {
+    if (!this.budget.recordToolCall()) return [];
+    try {
+      const results = await withRetry(() => searchOpenAlex(sq.text, 10), {
+        signal: this.abortSignal,
+      });
+      return results.map((r) => ({
+        title: r.title,
+        url: r.link,
+        snippet: r.snippet,
+        sourceType: 'openalex',
+        estimatedQuality: 0.8,
+        estimatedRelevance: 0.6,
+        freshness: r.publishedDate ?? '',
+        reasonForInclusion: `OpenAlex scholarly work for: ${sq.text}`,
+        subQuestionId: sq.id,
+      }));
+    } catch (err) {
+      logger.warn({ err, subQuestion: sq.id }, 'OpenAlex search failed');
+      return [];
+    }
+  }
+
+  private async searchCrossref(sq: SubQuestion): Promise<SourceCandidate[]> {
+    if (!this.budget.recordToolCall()) return [];
+    try {
+      const results = await withRetry(() => searchCrossref(sq.text, 10), {
+        signal: this.abortSignal,
+      });
+      return results.map((r) => ({
+        title: r.title,
+        url: r.link,
+        snippet: r.snippet,
+        sourceType: 'crossref',
+        estimatedQuality: 0.85,
+        estimatedRelevance: 0.6,
+        freshness: r.publishedDate ?? '',
+        reasonForInclusion: `Crossref DOI metadata for: ${sq.text}`,
+        subQuestionId: sq.id,
+      }));
+    } catch (err) {
+      logger.warn({ err, subQuestion: sq.id }, 'Crossref search failed');
+      return [];
+    }
+  }
+
+  private async searchDataCite(sq: SubQuestion): Promise<SourceCandidate[]> {
+    if (!this.budget.recordToolCall()) return [];
+    try {
+      const results = await withRetry(() => searchDataCite(sq.text, 10), {
+        signal: this.abortSignal,
+      });
+      return results.map((r) => ({
+        title: r.title,
+        url: r.link,
+        snippet: r.snippet,
+        sourceType: 'datacite',
+        estimatedQuality: 0.75,
+        estimatedRelevance: 0.5,
+        freshness: r.publishedDate ?? '',
+        reasonForInclusion: `DataCite research dataset for: ${sq.text}`,
+        subQuestionId: sq.id,
+      }));
+    } catch (err) {
+      logger.warn({ err, subQuestion: sq.id }, 'DataCite search failed');
+      return [];
+    }
+  }
+
+  private async searchRor(sq: SubQuestion): Promise<SourceCandidate[]> {
+    if (!this.budget.recordToolCall()) return [];
+    try {
+      const results = await withRetry(() => searchRor(sq.text, 10), {
+        signal: this.abortSignal,
+      });
+      return results.map((r) => ({
+        title: r.title,
+        url: r.link,
+        snippet: r.snippet,
+        sourceType: 'ror',
+        estimatedQuality: 0.8,
+        estimatedRelevance: 0.55,
+        freshness: r.established ? `${String(new Date().getFullYear() - r.established)} years ago` : '',
+        reasonForInclusion: `ROR organization record for: ${sq.text}`,
+        subQuestionId: sq.id,
+      }));
+    } catch (err) {
+      logger.warn({ err, subQuestion: sq.id }, 'ROR search failed');
+      return [];
+    }
+  }
+
+  private async searchSemanticScholar(sq: SubQuestion): Promise<SourceCandidate[]> {
+    if (!this.budget.recordToolCall()) return [];
+    try {
+      const results = await withRetry(() => searchSemanticScholar(sq.text, 10), {
+        signal: this.abortSignal,
+      });
+      return results.map((r) => ({
+        title: r.title,
+        url: r.link,
+        snippet: r.snippet,
+        sourceType: 'semantic_scholar',
+        estimatedQuality: 0.85,
+        estimatedRelevance: 0.65,
+        freshness: r.publishedDate ?? '',
+        reasonForInclusion: `Semantic Scholar paper for: ${sq.text}`,
+        subQuestionId: sq.id,
+      }));
+    } catch (err) {
+      logger.warn({ err, subQuestion: sq.id }, 'Semantic Scholar search failed');
+      return [];
+    }
+  }
+
+  private async searchGdelt(sq: SubQuestion): Promise<SourceCandidate[]> {
+    if (!this.budget.recordToolCall()) return [];
+    try {
+      const results = await withRetry(() => searchGdelt(sq.text, '30d', 10), {
+        signal: this.abortSignal,
+      });
+      return results.map((r) => ({
+        title: r.title,
+        url: r.link,
+        snippet: r.snippet,
+        sourceType: 'gdelt',
+        estimatedQuality: 0.65,
+        estimatedRelevance: 0.5,
+        freshness: r.publishedDate ?? '',
+        reasonForInclusion: `GDELT news/event coverage for: ${sq.text}`,
+        subQuestionId: sq.id,
+      }));
+    } catch (err) {
+      logger.warn({ err, subQuestion: sq.id }, 'GDELT search failed');
+      return [];
+    }
+  }
+
+  private async searchWikidata(sq: SubQuestion): Promise<SourceCandidate[]> {
+    if (!this.budget.recordToolCall()) return [];
+    try {
+      const results = await withRetry(() => searchWikidata(sq.text, 'en', 10), {
+        signal: this.abortSignal,
+      });
+      return results.map((r) => ({
+        title: r.title,
+        url: r.link,
+        snippet: r.snippet,
+        sourceType: 'wikidata',
+        estimatedQuality: 0.8,
+        estimatedRelevance: 0.7,
+        freshness: '',
+        reasonForInclusion: `Wikidata knowledge graph entity for: ${sq.text}`,
+        subQuestionId: sq.id,
+      }));
+    } catch (err) {
+      logger.warn({ err, subQuestion: sq.id }, 'Wikidata search failed');
+      return [];
+    }
   }
 }
 

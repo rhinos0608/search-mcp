@@ -5,14 +5,21 @@
  * stackoverflow_search with a single `research` tool.
  *
  * Actions:
- *   academic      — Search academic papers via ArXiv + Semantic Scholar (with cross-fallback)
- *   arxiv         — Fast, direct search of ArXiv papers with full date/category filters
- *   hackernews    — Search Hacker News via Algolia
- *   stackoverflow — Search Stack Overflow questions
- *   pubmed       — Search biomedical literature on PubMed
- *   wikipedia    — Search Wikipedia for background knowledge
+ *   academic       — Search academic papers via ArXiv + Semantic Scholar (with cross-fallback)
+ *   arxiv          — Fast, direct search of ArXiv papers with full date/category filters
+ *   hackernews     — Search Hacker News via Algolia
+ *   stackoverflow  — Search Stack Overflow questions
+ *   pubmed         — Search biomedical literature on PubMed
+ *   wikipedia      — Search Wikipedia for background knowledge
+ *   openalex       — Search OpenAlex scholarly works (free, no key)
+ *   crossref       — Search Crossref DOI metadata (free, no key)
+ *   datacite       — Search DataCite research data DOIs (free, no key)
+ *   ror            — Look up research organizations via ROR (free, no key)
+ *   semantic_scholar — Direct Semantic Scholar paper search (free, no key)
+ *   gdelt          — Search GDELT global news/events (free, no key)
+ *   wikidata       — Search Wikidata structured entities (free, no key)
  *
- * All actions are free and work without API keys (Stack Overflow benefits
+ * Most actions are free and work without API keys (Stack Overflow benefits
  * from STACKEXCHANGE_API_KEY for higher rate limits).
  */
 
@@ -25,6 +32,13 @@ import { hackernewsSearch } from '../hackernewsSearch.js';
 import { stackoverflowSearch } from '../stackoverflowSearch.js';
 import { searchPubMed } from '../pubmedSearch.js';
 import { searchWikipedia } from '../wikipediaSearch.js';
+import { searchOpenAlex } from '../openalexSearch.js';
+import { searchCrossref } from '../crossrefSearch.js';
+import { searchDataCite } from '../dataciteSearch.js';
+import { searchRor } from '../rorSearch.js';
+import { searchSemanticScholar } from '../semanticScholarSearch.js';
+import { searchGdelt } from '../gdeltSearch.js';
+import { searchWikidata } from '../wikidataSearch.js';
 import { wrapResponse } from '../response.js';
 import { registerFamily, type FamilyDefinition } from '../registry.js';
 
@@ -161,12 +175,109 @@ const wikipediaAction = z.object({
   language: z.string().optional().default('en').describe('Language code (e.g. "en", "es", "fr")'),
 });
 
+const openalexAction = z.object({
+  action: z.literal('openalex').describe('Search OpenAlex scholarly works'),
+  query: z.string().describe('The search query string'),
+  limit: z
+    .number()
+    .int()
+    .min(1)
+    .max(50)
+    .optional()
+    .default(20)
+    .describe('Maximum results (1–50, default 20)'),
+});
+
+const crossrefAction = z.object({
+  action: z.literal('crossref').describe('Search Crossref DOI metadata'),
+  query: z.string().describe('The search query string'),
+  limit: z
+    .number()
+    .int()
+    .min(1)
+    .max(50)
+    .optional()
+    .default(20)
+    .describe('Maximum results (1–50, default 20)'),
+});
+
+const dataciteAction = z.object({
+  action: z.literal('datacite').describe('Search DataCite research data DOIs'),
+  query: z.string().describe('The search query string'),
+  limit: z
+    .number()
+    .int()
+    .min(1)
+    .max(50)
+    .optional()
+    .default(20)
+    .describe('Maximum results (1–50, default 20)'),
+});
+
+const rorAction = z.object({
+  action: z.literal('ror').describe('Look up research organizations via ROR'),
+  query: z.string().describe('Organization name to look up'),
+  limit: z
+    .number()
+    .int()
+    .min(1)
+    .max(20)
+    .optional()
+    .default(10)
+    .describe('Maximum results (1–20, default 10)'),
+});
+
+const semanticScholarAction = z.object({
+  action: z.literal('semantic_scholar').describe('Direct Semantic Scholar paper search'),
+  query: z.string().describe('The search query string'),
+  limit: z
+    .number()
+    .int()
+    .min(1)
+    .max(50)
+    .optional()
+    .default(20)
+    .describe('Maximum papers (1–50, default 20)'),
+});
+
+const gdeltAction = z.object({
+  action: z.literal('gdelt').describe('Search GDELT global news/events'),
+  query: z.string().describe('The search query string'),
+  timespan: z
+    .enum(['1d', '7d', '30d', '6m', '1y'])
+    .optional()
+    .default('30d')
+    .describe('Timespan: 1d | 7d | 30d | 6m | 1y'),
+  limit: z
+    .number()
+    .int()
+    .min(1)
+    .max(50)
+    .optional()
+    .default(20)
+    .describe('Maximum results (1–50, default 20)'),
+});
+
+const wikidataAction = z.object({
+  action: z.literal('wikidata').describe('Search Wikidata structured entities'),
+  query: z.string().describe('The search query string'),
+  language: z.string().optional().default('en').describe('Language code (e.g. en, es, fr)'),
+  limit: z
+    .number()
+    .int()
+    .min(1)
+    .max(50)
+    .optional()
+    .default(20)
+    .describe('Maximum results (1–50, default 20)'),
+});
+
 // ── Family definition ───────────────────────────────────────────────────────
 
 const researchFamily: FamilyDefinition = {
   name: 'research',
   description:
-    'Search academic/research sources: ArXiv, Semantic Scholar, PubMed, Wikipedia, Hacker News, and Stack Overflow. ' +
+    'Search academic, news, and public-data sources: ArXiv, Semantic Scholar, OpenAlex, Crossref, DataCite, ROR, GDELT, Wikidata, PubMed, Wikipedia, Hacker News, and Stack Overflow. ' +
     'Choose the `action` field to select the source.',
   actions: [
     {
@@ -279,6 +390,84 @@ const researchFamily: FamilyDefinition = {
         void _cfg;
         const { query, language } = args as { query: string; language: string };
         return searchWikipedia(query, language);
+      },
+    },
+    {
+      name: 'openalex',
+      description: 'Search OpenAlex scholarly works (papers, authors, venues)',
+      schema: openalexAction,
+      handler: async (args, _cfg) => {
+        void _cfg;
+        const { query, limit } = args as { query: string; limit: number };
+        return searchOpenAlex(query, limit);
+      },
+    },
+    {
+      name: 'crossref',
+      description: 'Search Crossref DOI metadata (journal articles, books, proceedings)',
+      schema: crossrefAction,
+      handler: async (args, _cfg) => {
+        void _cfg;
+        const { query, limit } = args as { query: string; limit: number };
+        return searchCrossref(query, limit);
+      },
+    },
+    {
+      name: 'datacite',
+      description: 'Search DataCite research data DOIs with relation graph',
+      schema: dataciteAction,
+      handler: async (args, _cfg) => {
+        void _cfg;
+        const { query, limit } = args as { query: string; limit: number };
+        return searchDataCite(query, limit);
+      },
+    },
+    {
+      name: 'ror',
+      description: 'Look up research organizations via the ROR registry',
+      schema: rorAction,
+      handler: async (args, _cfg) => {
+        void _cfg;
+        const { query, limit } = args as { query: string; limit: number };
+        return searchRor(query, limit);
+      },
+    },
+    {
+      name: 'semantic_scholar',
+      description: 'Direct Semantic Scholar paper search (independent of academic action)',
+      schema: semanticScholarAction,
+      handler: async (args, _cfg) => {
+        void _cfg;
+        const { query, limit } = args as { query: string; limit: number };
+        return searchSemanticScholar(query, limit);
+      },
+    },
+    {
+      name: 'gdelt',
+      description: 'Search GDELT global news and events database',
+      schema: gdeltAction,
+      handler: async (args, _cfg) => {
+        void _cfg;
+        const { query, timespan, limit } = args as {
+          query: string;
+          timespan: string;
+          limit: number;
+        };
+        return searchGdelt(query, timespan, limit);
+      },
+    },
+    {
+      name: 'wikidata',
+      description: 'Search Wikidata for structured entity data',
+      schema: wikidataAction,
+      handler: async (args, _cfg) => {
+        void _cfg;
+        const { query, language, limit } = args as {
+          query: string;
+          language: string;
+          limit: number;
+        };
+        return searchWikidata(query, language, limit);
       },
     },
   ],
