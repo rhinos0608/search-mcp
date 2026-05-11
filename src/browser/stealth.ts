@@ -20,6 +20,10 @@ import type { BrowserSessionConfig, StealthHealthReport } from './types.js';
  * Always applied when stealth is enabled.
  */
 export function buildLaunchArgs(config: BrowserSessionConfig): string[] {
+  if (config.browserEngine === 'cloak') {
+    return [];
+  }
+
   const args: string[] = [];
   if (config.stealthEnabled) {
     args.push('--disable-blink-features=AutomationControlled');
@@ -116,7 +120,7 @@ const stealthInitScript = `
  * Otherwise, use standard playwright-core.
  */
 export function resolveBrowserModule(config: BrowserSessionConfig): string {
-  if (config.rebrowser) {
+  if (config.rebrowser && config.browserEngine !== 'cloak') {
     return 'rebrowser-playwright';
   }
   return 'playwright-core';
@@ -155,9 +159,24 @@ export function buildContextOptions(config: BrowserSessionConfig): BrowserContex
  * This is advisory — it reports known gaps in the stealth stack so users
  * can make informed tradeoffs between stealth mode and user-browser mode.
  */
-export function getStealthHealth(): StealthHealthReport {
-  const checks: StealthHealthReport['checks'] = [];
+export function getStealthHealth(engine: BrowserSessionConfig['browserEngine'] = 'playwright'): StealthHealthReport {
+  if (engine === 'cloak') {
+    return {
+      status: 'pass',
+      checks: [
+        {
+          name: 'cloakbrowser.binary',
+          passed: true,
+          detail:
+            'CloakBrowser selected: source-level Chromium fingerprint patches are provided by the optional cloakbrowser runtime.',
+        },
+      ],
+      summary:
+        'CloakBrowser backend selected. Stealth depends on the installed cloakbrowser package and verified binary release.',
+    };
+  }
 
+  const checks: StealthHealthReport['checks'] = [];
   // Check 1: navigator.webdriver patch present
   checks.push({
     name: 'navigator.webdriver',

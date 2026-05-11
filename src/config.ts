@@ -202,6 +202,7 @@ export interface DeepResearchConfig {
 }
 
 export type BrowserMode = 'stealth' | 'user' | 'profile';
+export type BrowserEngine = 'playwright' | 'cloak';
 
 export interface BrowserConfig {
   enabled: boolean;
@@ -216,6 +217,20 @@ export interface BrowserConfig {
   stealthEnabled: boolean;
   rebrowser: boolean;
   bypassCSP: boolean;
+  /** Browser automation backend. 'cloak' requires the optional cloakbrowser package. */
+  browserEngine: BrowserEngine;
+  /** Enable CloakBrowser wrapper-level human-like input patches. */
+  cloakHumanize: boolean;
+  /** CloakBrowser humanization preset. */
+  cloakHumanPreset: 'default' | 'careful';
+  /** CloakBrowser locale flag, e.g. en-US. Empty = wrapper default. */
+  cloakLocale: string;
+  /** CloakBrowser timezone flag, e.g. America/New_York. Empty = wrapper default. */
+  cloakTimezone: string;
+  /** Auto-detect locale/timezone from proxy IP via CloakBrowser. */
+  cloakGeoip: boolean;
+  /** Include CloakBrowser default stealth fingerprint flags. */
+  cloakStealthArgs: boolean;
   /** domain -> { username, password, totpSecret? } */
   credentials: Record<string, { username: string; password: string; totpSecret?: string }>;
   /** Browser launch mode. 'stealth' = headless CDP stealth; 'user' = connect to user's existing browser; 'profile' = launch with persistent profile. */
@@ -331,6 +346,13 @@ const DEFAULTS: Omit<SearchConfig, 'rescoreWeights'> = {
     stealthEnabled: true,
     rebrowser: false,
     bypassCSP: false,
+    browserEngine: 'playwright' as const,
+    cloakHumanize: false,
+    cloakHumanPreset: 'default' as const,
+    cloakLocale: '',
+    cloakTimezone: '',
+    cloakGeoip: false,
+    cloakStealthArgs: true,
     credentials: {},
     mode: 'stealth' as const,
     browserPort: 9222,
@@ -626,6 +648,13 @@ function loadFromEnv(): EnvConfig {
     const bMode = process.env.BROWSER_MODE;
     const bPort = process.env.BROWSER_CDP_PORT;
     const bAuto = process.env.BROWSER_AUTO_CONNECT;
+    const bEngine = process.env.BROWSER_ENGINE;
+    const bCloakHumanize = process.env.CLOAKBROWSER_HUMANIZE;
+    const bCloakHumanPreset = process.env.CLOAKBROWSER_HUMAN_PRESET;
+    const bCloakLocale = process.env.CLOAKBROWSER_LOCALE;
+    const bCloakTimezone = process.env.CLOAKBROWSER_TIMEZONE;
+    const bCloakGeoip = process.env.CLOAKBROWSER_GEOIP;
+    const bCloakStealthArgs = process.env.CLOAKBROWSER_STEALTH_ARGS;
 
     if (
       bEnabled !== undefined ||
@@ -644,7 +673,14 @@ function loadFromEnv(): EnvConfig {
       bCreds !== undefined ||
       bMode !== undefined ||
       bPort !== undefined ||
-      bAuto !== undefined
+      bAuto !== undefined ||
+      bEngine !== undefined ||
+      bCloakHumanize !== undefined ||
+      bCloakHumanPreset !== undefined ||
+      bCloakLocale !== undefined ||
+      bCloakTimezone !== undefined ||
+      bCloakGeoip !== undefined ||
+      bCloakStealthArgs !== undefined
     ) {
       const browserCfg: Partial<BrowserConfig> = {};
       if (bEnabled !== undefined) browserCfg.enabled = bEnabled === 'true';
@@ -696,6 +732,23 @@ function loadFromEnv(): EnvConfig {
         if (!isNaN(p) && p > 0 && p <= 65535) browserCfg.browserPort = p;
       }
       if (bAuto !== undefined) browserCfg.autoConnect = bAuto === 'true';
+      if (bEngine !== undefined) {
+        const engine = bEngine.toLowerCase();
+        if (engine === 'playwright' || engine === 'cloak') {
+          browserCfg.browserEngine = engine;
+        }
+      }
+      if (bCloakHumanize !== undefined) browserCfg.cloakHumanize = bCloakHumanize === 'true';
+      if (bCloakHumanPreset !== undefined) {
+        const preset = bCloakHumanPreset.toLowerCase();
+        if (preset === 'default' || preset === 'careful') {
+          browserCfg.cloakHumanPreset = preset;
+        }
+      }
+      if (bCloakLocale !== undefined) browserCfg.cloakLocale = bCloakLocale;
+      if (bCloakTimezone !== undefined) browserCfg.cloakTimezone = bCloakTimezone;
+      if (bCloakGeoip !== undefined) browserCfg.cloakGeoip = bCloakGeoip === 'true';
+      if (bCloakStealthArgs !== undefined) browserCfg.cloakStealthArgs = bCloakStealthArgs !== 'false';
       cfg.browser = browserCfg;
     }
   }
@@ -1005,6 +1058,32 @@ export function loadConfig(): SearchConfig {
         fileConfig.browser?.rebrowser ?? envConfig.browser?.rebrowser ?? DEFAULTS.browser.rebrowser,
       bypassCSP:
         fileConfig.browser?.bypassCSP ?? envConfig.browser?.bypassCSP ?? DEFAULTS.browser.bypassCSP,
+      browserEngine:
+        fileConfig.browser?.browserEngine ??
+        envConfig.browser?.browserEngine ??
+        DEFAULTS.browser.browserEngine,
+      cloakHumanize:
+        fileConfig.browser?.cloakHumanize ??
+        envConfig.browser?.cloakHumanize ??
+        DEFAULTS.browser.cloakHumanize,
+      cloakHumanPreset:
+        fileConfig.browser?.cloakHumanPreset ??
+        envConfig.browser?.cloakHumanPreset ??
+        DEFAULTS.browser.cloakHumanPreset,
+      cloakLocale:
+        fileConfig.browser?.cloakLocale ??
+        envConfig.browser?.cloakLocale ??
+        DEFAULTS.browser.cloakLocale,
+      cloakTimezone:
+        fileConfig.browser?.cloakTimezone ??
+        envConfig.browser?.cloakTimezone ??
+        DEFAULTS.browser.cloakTimezone,
+      cloakGeoip:
+        fileConfig.browser?.cloakGeoip ?? envConfig.browser?.cloakGeoip ?? DEFAULTS.browser.cloakGeoip,
+      cloakStealthArgs:
+        fileConfig.browser?.cloakStealthArgs ??
+        envConfig.browser?.cloakStealthArgs ??
+        DEFAULTS.browser.cloakStealthArgs,
       credentials:
         fileConfig.browser?.credentials ??
         envConfig.browser?.credentials ??

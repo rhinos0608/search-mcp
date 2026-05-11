@@ -1,7 +1,7 @@
 {
 	"name": "search-mcp",
 	"version": "5.3.0",
-	"description": "MCP server providing web search, web read, GitHub, YouTube, Reddit, Twitter/X, Product Hunt, patent, podcast, and academic research tools",
+	"description": "MCP server with 14 tools: web search/search/read/crawl, semantic RAG, YouTube, Reddit, GitHub, deep research, browser automation, jobs, packages, and health",
 	"type": "module",
 	"main": "dist/index.js",
 	"bin": {
@@ -39,7 +39,8 @@
 		"zod": "^4.3.6"
 	},
 	"optionalDependencies": {
-		"playwright-core": "^1.52.0",
+		"cloakbrowser": "^0.3.27",
+		"playwright-core": "^1.53.0",
 		"rebrowser-playwright": "^1.52.0"
 	},
 	"devDependencies": {

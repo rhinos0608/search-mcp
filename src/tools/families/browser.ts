@@ -177,13 +177,29 @@ const sessionSchema = z.object({
     .max(65535)
     .optional()
     .describe('CDP port for user-browser mode (0 = auto-detect 9222, 9223, 9229)'),
+  browserEngine: z
+    .enum(['playwright', 'cloak'])
+    .optional()
+    .describe('Browser backend: playwright (default) or cloak (optional CloakBrowser package)'),
+  cloakHumanize: z
+    .boolean()
+    .optional()
+    .describe('Enable CloakBrowser human-like input patches for Cloak sessions'),
+  cloakHumanPreset: z.enum(['default', 'careful']).optional().describe('CloakBrowser human preset'),
+  cloakLocale: z.string().optional().describe('CloakBrowser locale flag, e.g. en-US'),
+  cloakTimezone: z.string().optional().describe('CloakBrowser timezone flag, e.g. America/New_York'),
+  cloakGeoip: z.boolean().optional().describe('Let CloakBrowser infer locale/timezone from proxy IP'),
+  cloakStealthArgs: z
+    .boolean()
+    .optional()
+    .describe('Include CloakBrowser default stealth fingerprint flags'),
 });
 
 // ── Config gates ─────────────────────────────────────────────────────────────
 
 function browserDisabledIssue(cfg: SearchConfig): string | null {
   if (!cfg.browser.enabled) {
-    return 'Set BROWSER_ENABLED=true to enable interactive browser control via Playwright + CDP.';
+    return 'Set BROWSER_ENABLED=true to enable interactive browser control via Playwright/CDP or CloakBrowser.';
   }
   return null;
 }
@@ -208,6 +224,13 @@ async function getOrCreateSession(
     cdpEndpoint?: string;
     mode?: string;
     browserPort?: number;
+    browserEngine?: string;
+    cloakHumanize?: boolean;
+    cloakHumanPreset?: 'default' | 'careful';
+    cloakLocale?: string;
+    cloakTimezone?: string;
+    cloakGeoip?: boolean;
+    cloakStealthArgs?: boolean;
   },
 ): Promise<{ sessionId: string; mode: string }> {
   const { BrowserError } = await import('../../browser/types.js');
@@ -248,6 +271,16 @@ async function getOrCreateSession(
     maxSessionTimeMs: cfg.browser.maxSessionTimeMs,
     bypassCSP: cfg.browser.bypassCSP,
     credentials: cfg.browser.credentials,
+    browserEngine:
+      opts?.browserEngine === 'cloak' || opts?.browserEngine === 'playwright'
+        ? opts.browserEngine
+        : cfg.browser.browserEngine,
+    cloakHumanize: opts?.cloakHumanize ?? cfg.browser.cloakHumanize,
+    cloakHumanPreset: opts?.cloakHumanPreset ?? cfg.browser.cloakHumanPreset,
+    cloakLocale: opts?.cloakLocale ?? cfg.browser.cloakLocale,
+    cloakTimezone: opts?.cloakTimezone ?? cfg.browser.cloakTimezone,
+    cloakGeoip: opts?.cloakGeoip ?? cfg.browser.cloakGeoip,
+    cloakStealthArgs: opts?.cloakStealthArgs ?? cfg.browser.cloakStealthArgs,
   };
 
   // Mode: user-browser (connect to user's Chrome)
@@ -321,7 +354,7 @@ async function withSession<T>(
 const browserFamily: FamilyDefinition = {
   name: 'browser',
   description:
-    'Interactive browser control via Playwright + CDP. Use the `action` field to choose: ' +
+    'Interactive browser control via Playwright + CDP, with optional CloakBrowser launch backend. Use the `action` field to choose: ' +
     '"navigate" to go to a URL, "snapshot" to capture the page structure as accessible elements, ' +
     '"click"/"type" to interact, "evaluate" to run JavaScript, "screenshot" to capture images, ' +
     '"extract" to pull structured data, "wait" for conditions, and "session" to manage the browser lifecycle.',
@@ -961,13 +994,34 @@ const browserFamily: FamilyDefinition = {
         'Browser session lifecycle: start, close, check status, or discover user browsers',
       schema: sessionSchema,
       handler: async (args, cfg) => {
-        const { op, headless, profile, cdpEndpoint, mode, browserPort } = args as {
+        const {
+          op,
+          headless,
+          profile,
+          cdpEndpoint,
+          mode,
+          browserPort,
+          browserEngine,
+          cloakHumanize,
+          cloakHumanPreset,
+          cloakLocale,
+          cloakTimezone,
+          cloakGeoip,
+          cloakStealthArgs,
+        } = args as {
           op: string;
           headless?: boolean;
           profile?: string;
           cdpEndpoint?: string;
           mode?: string;
           browserPort?: number;
+          browserEngine?: string;
+          cloakHumanize?: boolean;
+          cloakHumanPreset?: 'default' | 'careful';
+          cloakLocale?: string;
+          cloakTimezone?: string;
+          cloakGeoip?: boolean;
+          cloakStealthArgs?: boolean;
         };
         const { browserManager } = await import('../../browser/browserManager.js');
         switch (op) {
@@ -978,6 +1032,13 @@ const browserFamily: FamilyDefinition = {
             if (cdpEndpoint !== undefined) sessionOpts.cdpEndpoint = cdpEndpoint;
             if (mode !== undefined) sessionOpts.mode = mode;
             if (browserPort !== undefined) sessionOpts.browserPort = browserPort;
+            if (browserEngine !== undefined) sessionOpts.browserEngine = browserEngine;
+            if (cloakHumanize !== undefined) sessionOpts.cloakHumanize = cloakHumanize;
+            if (cloakHumanPreset !== undefined) sessionOpts.cloakHumanPreset = cloakHumanPreset;
+            if (cloakLocale !== undefined) sessionOpts.cloakLocale = cloakLocale;
+            if (cloakTimezone !== undefined) sessionOpts.cloakTimezone = cloakTimezone;
+            if (cloakGeoip !== undefined) sessionOpts.cloakGeoip = cloakGeoip;
+            if (cloakStealthArgs !== undefined) sessionOpts.cloakStealthArgs = cloakStealthArgs;
             const session = await getOrCreateSession(cfg, sessionOpts);
             return session;
           }

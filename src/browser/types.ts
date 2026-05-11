@@ -5,6 +5,8 @@ import type {
   CDPSession,
 } from 'playwright-core';
 
+export type BrowserEngine = 'playwright' | 'cloak';
+
 /** Active browser session state. */
 export interface BrowserSession {
   /** Unique session identifier. */
@@ -29,6 +31,8 @@ export interface BrowserSession {
   timeoutHandle: ReturnType<typeof setTimeout> | null;
   /** How the session was created. */
   source: 'launch' | 'cdp' | 'user' | 'profile';
+  /** Browser backend used to launch the session. */
+  browserEngine: BrowserEngine;
 }
 
 /** Configuration for browser session launch or connect. */
@@ -55,6 +59,20 @@ export interface BrowserSessionConfig {
   bypassCSP: boolean;
   /** Domain credentials map (domain → {username, password, totpSecret?}). */
   credentials: Record<string, { username: string; password: string; totpSecret?: string }>;
+  /** Browser automation backend. CloakBrowser is optional and imported only when selected. */
+  browserEngine: BrowserEngine;
+  /** Enable CloakBrowser wrapper-level humanized input behavior. */
+  cloakHumanize: boolean;
+  /** CloakBrowser humanization preset. */
+  cloakHumanPreset: 'default' | 'careful';
+  /** Optional locale routed through CloakBrowser binary flags. */
+  cloakLocale: string;
+  /** Optional timezone routed through CloakBrowser binary flags. */
+  cloakTimezone: string;
+  /** Let CloakBrowser infer locale/timezone from proxy IP. */
+  cloakGeoip: boolean;
+  /** Include CloakBrowser's default stealth fingerprint arguments. */
+  cloakStealthArgs: boolean;
 }
 
 /** CDP endpoint connection configuration. */
@@ -212,6 +230,8 @@ export interface SessionStatus {
   profileName: string | null;
   /** Browser mode in use. */
   mode: 'stealth' | 'user' | 'profile';
+  /** Browser backend in use. */
+  browserEngine: BrowserEngine;
   /** Stealth health report (null when not in stealth mode). */
   stealthHealth: StealthHealthReport | null;
 }

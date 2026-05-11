@@ -31,6 +31,13 @@ const baseConfig = {
    maxSessionTimeMs: 0,
    bypassCSP: false,
    credentials: {} as Record<string, { username: string; password: string; totpSecret?: string }>,
+   browserEngine: 'playwright' as const,
+   cloakHumanize: false,
+   cloakHumanPreset: 'default' as const,
+   cloakLocale: '',
+   cloakTimezone: '',
+   cloakGeoip: false,
+   cloakStealthArgs: true,
 };
 
 // ── Browser Manager ──────────────────────────────────────────────────────────
@@ -115,6 +122,10 @@ test('resolveBrowserModule returns rebrowser-playwright when enabled', () => {
    assert.equal(resolveBrowserModule({ ...baseConfig, rebrowser: true }), 'rebrowser-playwright');
 });
 
+
+test('resolveBrowserModule uses playwright-core for CloakBrowser wrapper imports', () => {
+   assert.equal(resolveBrowserModule({ ...baseConfig, browserEngine: 'cloak' }), 'playwright-core');
+});
 test('buildContextOptions sets viewport and default bypassCSP false', () => {
    const opts = buildContextOptions(baseConfig);
    assert.deepEqual(opts.viewport, { width: 1280, height: 720 });

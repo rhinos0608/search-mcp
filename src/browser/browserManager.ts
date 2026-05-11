@@ -13,6 +13,7 @@ import {
   buildContextOptions,
   getStealthHealth,
 } from './stealth.js';
+import { launchCloakBrowser, launchCloakPersistentContext } from './cloak.js';
 import { assertSafeUrl } from '../httpGuards.js';
 import { logger } from '../logger.js';
 
@@ -100,32 +101,37 @@ export class BrowserManager {
       );
     }
 
-    const moduleName = resolveBrowserModule(config);
-    let playwrightModule: typeof import('playwright-core');
-    try {
-      playwrightModule = await import(moduleName);
-    } catch {
-      throw new BrowserError(
-        `Failed to import ${moduleName}. Ensure it is installed: npm install ${moduleName}`,
-        'LAUNCH_FAILED',
-      );
-    }
+    let browser: import('playwright-core').Browser;
+    if (config.browserEngine === 'cloak') {
+      browser = await launchCloakBrowser(config);
+    } else {
+      const moduleName = resolveBrowserModule(config);
+      let playwrightModule: typeof import('playwright-core');
+      try {
+        playwrightModule = await import(moduleName);
+      } catch {
+        throw new BrowserError(
+          `Failed to import ${moduleName}. Ensure it is installed: npm install ${moduleName}`,
+          'LAUNCH_FAILED',
+        );
+      }
 
-    const launchArgs = buildLaunchArgs(config);
-    const launchOptions: Parameters<typeof playwrightModule.chromium.launch>[0] = {
-      headless: config.headless,
-      args: launchArgs,
-    };
-    if (config.executablePath) {
-      launchOptions.executablePath = config.executablePath;
+      const launchArgs = buildLaunchArgs(config);
+      const launchOptions: Parameters<typeof playwrightModule.chromium.launch>[0] = {
+        headless: config.headless,
+        args: launchArgs,
+      };
+      if (config.executablePath) {
+        launchOptions.executablePath = config.executablePath;
+      }
+      browser = await playwrightModule.chromium.launch(launchOptions);
     }
-    const browser = await playwrightModule.chromium.launch(launchOptions);
 
     const contextOptions = buildContextOptions(config);
     const context = await browser.newContext(contextOptions);
 
-    // Inject init scripts for stealth
-    if (config.stealthEnabled) {
+    // Inject init scripts for Playwright stealth. CloakBrowser supplies source-level patches.
+    if (config.stealthEnabled && config.browserEngine !== 'cloak') {
       const scripts = buildInitScripts(config);
       for (const script of scripts) {
         await context.addInitScript(script);
@@ -150,6 +156,7 @@ export class BrowserManager {
       profileName: config.profile ?? null,
       timeoutHandle: null,
       source: 'launch',
+      browserEngine: config.browserEngine,
     };
 
     // Set up session timeout
@@ -160,6 +167,7 @@ export class BrowserManager {
     }
 
     this.activeSession = session;
+    this.activeMode = 'stealth';
     return session;
   }
 
@@ -190,6 +198,13 @@ export class BrowserManager {
       maxSessionTimeMs: config.maxSessionTimeMs ?? 0,
       bypassCSP: config.bypassCSP ?? false,
       credentials: config.credentials ?? {},
+      browserEngine: config.browserEngine ?? 'playwright',
+      cloakHumanize: config.cloakHumanize ?? false,
+      cloakHumanPreset: config.cloakHumanPreset ?? 'default',
+      cloakLocale: config.cloakLocale ?? '',
+      cloakTimezone: config.cloakTimezone ?? '',
+      cloakGeoip: config.cloakGeoip ?? false,
+      cloakStealthArgs: config.cloakStealthArgs ?? true,
     };
 
     const moduleName = resolveBrowserModule(synthConfig);
@@ -243,6 +258,7 @@ export class BrowserManager {
       profileName: null,
       timeoutHandle: null,
       source: 'cdp',
+      browserEngine: synthConfig.browserEngine,
     };
 
     this.activeSession = session;
@@ -330,6 +346,13 @@ export class BrowserManager {
       maxSessionTimeMs: config.maxSessionTimeMs ?? 0,
       bypassCSP: config.bypassCSP ?? false,
       credentials: config.credentials ?? {},
+      browserEngine: config.browserEngine ?? 'playwright',
+      cloakHumanize: config.cloakHumanize ?? false,
+      cloakHumanPreset: config.cloakHumanPreset ?? 'default',
+      cloakLocale: config.cloakLocale ?? '',
+      cloakTimezone: config.cloakTimezone ?? '',
+      cloakGeoip: config.cloakGeoip ?? false,
+      cloakStealthArgs: config.cloakStealthArgs ?? true,
     };
 
     const moduleName = resolveBrowserModule(synthConfig);
@@ -375,6 +398,7 @@ export class BrowserManager {
       profileName: null,
       timeoutHandle: null,
       source: 'user',
+      browserEngine: synthConfig.browserEngine,
     };
 
     this.activeSession = session;
@@ -406,44 +430,46 @@ export class BrowserManager {
       ? profileDir
       : join(homedir(), '.cache', 'search-mcp', 'browser-profiles', profileDir);
 
-    const moduleName = resolveBrowserModule(config);
-    let playwrightModule: typeof import('playwright-core');
-    try {
-      playwrightModule = await import(moduleName);
-    } catch {
-      throw new BrowserError(
-        `Failed to import ${moduleName}. Ensure it is installed: npm install ${moduleName}`,
-        'LAUNCH_FAILED',
-      );
+    let context: import('playwright-core').BrowserContext;
+    if (config.browserEngine === 'cloak') {
+      context = await launchCloakPersistentContext(config, profilePath);
+    } else {
+      const moduleName = resolveBrowserModule(config);
+      let playwrightModule: typeof import('playwright-core');
+      try {
+        playwrightModule = await import(moduleName);
+      } catch {
+        throw new BrowserError(
+          `Failed to import ${moduleName}. Ensure it is installed: npm install ${moduleName}`,
+          'LAUNCH_FAILED',
+        );
+      }
+
+      const launchArgs = buildLaunchArgs(config);
+      const launchOptions: Parameters<typeof playwrightModule.chromium.launchPersistentContext>[1] = {
+        headless: config.headless,
+        args: launchArgs,
+        viewport: config.viewport || { width: 1280, height: 720 },
+        bypassCSP: config.bypassCSP ?? false,
+      };
+
+      // Pass proxy through the dedicated option (not just CLI arg)
+      if (config.proxyServer) {
+        launchOptions.proxy = { server: config.proxyServer };
+      }
+
+      if (config.executablePath) {
+        launchOptions.executablePath = config.executablePath;
+      }
+      if (config.userAgent) {
+        launchOptions.userAgent = config.userAgent;
+      }
+
+      context = await playwrightModule.chromium.launchPersistentContext(profilePath, launchOptions);
     }
 
-    const launchArgs = buildLaunchArgs(config);
-    const launchOptions: Parameters<typeof playwrightModule.chromium.launchPersistentContext>[1] = {
-      headless: config.headless,
-      args: launchArgs,
-      viewport: config.viewport || { width: 1280, height: 720 },
-      bypassCSP: config.bypassCSP ?? false,
-    };
-
-    // Pass proxy through the dedicated option (not just CLI arg)
-    if (config.proxyServer) {
-      launchOptions.proxy = { server: config.proxyServer };
-    }
-
-    if (config.executablePath) {
-      launchOptions.executablePath = config.executablePath;
-    }
-    if (config.userAgent) {
-      launchOptions.userAgent = config.userAgent;
-    }
-
-    const context = await playwrightModule.chromium.launchPersistentContext(
-      profilePath,
-      launchOptions,
-    );
-
-    // Inject stealth init scripts if enabled
-    if (config.stealthEnabled) {
+    // Inject Playwright stealth init scripts if enabled. CloakBrowser supplies source-level patches.
+    if (config.stealthEnabled && config.browserEngine !== 'cloak') {
       const scripts = buildInitScripts(config);
       for (const script of scripts) {
         await context.addInitScript(script);
@@ -470,6 +496,7 @@ export class BrowserManager {
       profileName: profileDir,
       timeoutHandle: null,
       source: 'profile',
+      browserEngine: config.browserEngine,
     };
 
     if (config.maxSessionTimeMs > 0) {
@@ -525,7 +552,8 @@ export class BrowserManager {
       isCDPEndpoint: session.source === 'cdp',
       profileName: session.profileName,
       mode: this.activeMode ?? 'stealth',
-      stealthHealth: this.activeMode === 'stealth' ? getStealthHealth() : null,
+      browserEngine: session.browserEngine,
+      stealthHealth: this.activeMode === 'stealth' ? getStealthHealth(session.browserEngine) : null,
     };
   }
 
