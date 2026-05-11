@@ -26,7 +26,6 @@ import {
   type ToolWrappedResponse,
 } from './response.js';
 
-
 // ── Types ──────────────────────────────────────
 
 /**
@@ -82,27 +81,52 @@ export interface FamilyDefinition {
 // ── Registration ─────────────────────────────────────────────────────────────
 
 /**
+ * Build a flat merged Zod object schema from all action schemas.
+ * Combines all properties into a single z.object(). Action becomes
+ * a z.enum(); other fields made optional. Passes the SDK's
+ * normalizeObjectSchema check (which rejects non-object schemas).
+ */
+function buildMergedSchema(family: FamilyDefinition): z.ZodObject<z.ZodRawShape> {
+  const allFields = new Map<string, unknown>();
+  for (const action of family.actions) {
+    const objSchema = action.schema as z.ZodObject<z.ZodRawShape>;
+    const rawShape = objSchema._zod.def.shape;
+    for (const [key, fieldType] of Object.entries(rawShape)) {
+      if (!allFields.has(key)) allFields.set(key, fieldType);
+    }
+  }
+  const names = family.actions.map((a) => a.name) as [string, ...string[]];
+  const merged: Record<string, unknown> = {
+    action: z.enum(names).describe(family.name + ' action: ' + names.join(', ')),
+  };
+  for (const [key, fieldType] of allFields) {
+    if (key === 'action') continue;
+    merged[key] = (fieldType as z.ZodType).optional();
+  }
+  return z.object(merged) as z.ZodObject<z.ZodRawShape>;
+}
+
+/**
  * Register a tool family as a single MCP tool with a discriminated-union
  * `action` field. Each action becomes a literal option in a Zod union,
  * giving clients a single tool to discover instead of N individual tools.
+ *
+ * NOTE: inputSchema is a flat merged z.object (not discriminatedUnion)
+ * because the SDK's normalizeObjectSchema rejects non-object schemas.
+ * Runtime validation uses each action's own handler for strict checking.
  */
 export function registerFamily(
   server: McpServer,
   family: FamilyDefinition,
   cfg: SearchConfig,
 ): void {
-  // Build a discriminated union from all action schemas
-  const actionSchemas = family.actions.map((a) => a.schema) as [
-    z.ZodObject<z.ZodRawShape>,
-    ...z.ZodObject<z.ZodRawShape>[],
-  ];
-  const unionSchema = z.discriminatedUnion('action', actionSchemas);
+  const mergedSchema = buildMergedSchema(family);
 
   server.registerTool(
     family.name,
     {
       description: family.description,
-      inputSchema: unionSchema,
+      inputSchema: mergedSchema,
     },
     async (rawArgs: unknown, extra: unknown) => {
       const args = rawArgs as Record<string, string>;
@@ -122,7 +146,10 @@ export function registerFamily(
       }
 
       const start = Date.now();
-      logger.info({ tool: family.name, action: actionName }, `${family.name}.${actionName} invoked`);
+      logger.info(
+        { tool: family.name, action: actionName },
+        `${family.name}.${actionName} invoked`,
+      );
 
       try {
         const result = await action.handler(rawArgs as Record<string, unknown>, cfg, extra);
