@@ -194,14 +194,13 @@ docker compose up -d
 #   searxng (port 8081)
 ```
 
-See [docs/comparison.md](docs/comparison.md) for a full feature comparison with other MCP servers.
+See the [feature matrix](docs/tools.md) for the full tool reference.
 
 ## Documentation
 
 - [Full Tool Reference](docs/tools.md) — Detailed docs for all 14 tools
 - [Architecture Overview](docs/architecture.md) — System architecture and data flow
 - [Quick Start Guide](docs/quickstart.md) — Getting started with examples
-- [Feature Comparison](docs/comparison.md) — search-mcp vs. alternatives
 
 ## License
 

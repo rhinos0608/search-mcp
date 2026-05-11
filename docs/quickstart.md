@@ -102,4 +102,3 @@ docker compose up -d
 
 - [Full Tool Reference](tools.md)
 - [Architecture Overview](architecture.md)
-- [Feature Comparison](comparison.md)
