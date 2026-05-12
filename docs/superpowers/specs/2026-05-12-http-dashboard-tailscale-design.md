@@ -462,7 +462,35 @@ search-mcp:
 
 ---
 
-## 11. Out of Scope (V1)
+## 11. Implementation Invariants
+
+These are hard requirements that must hold for every line of implementation. They are not defaults or conventions — violations are bugs.
+
+1. **`SEARCH_MCP_CONFIG_KEY` is always required.** The server never generates or stores the encryption key. If the env var is absent and `config.enc` exists, the server refuses to start with a clear error. First-run generates a fresh config and MCP API key but still requires the operator to have set `SEARCH_MCP_CONFIG_KEY` before starting.
+
+2. **Versioned authenticated encryption envelope.** `config.enc` uses AES-256-GCM with a per-write random salt and nonce. The key is derived from `SEARCH_MCP_CONFIG_KEY` via scrypt. The envelope includes a version byte so the format can evolve without breaking old files.
+
+3. **Mutable-config allowlist.** `ConfigManager.update()` rejects unknown keys and validates patches against an explicit allowlist of mutable fields. No arbitrary key injection via the dashboard API.
+
+4. **`ExternalAccessProvider` is read-only derived state.** The resolver computes it from config + runtime detection. `/dashboard/api/access/update` accepts only a typed `AccessConfigPatch` — never resolver output or raw provider objects as input.
+
+5. **Dashboard exposure checks are first.** They run before static asset serving, the React index.html fallback, and any API dispatch for every `/dashboard/*` request. No partial exposure by route ordering.
+
+6. **Proxy headers are never speculatively trusted.** Tailscale and other proxy headers are only treated as authoritative after `classifyRequestOrigin` confirms the immediate peer is a trusted local proxy via socket-level origin checks. Client-supplied headers on public/unknown origins are silently ignored.
+
+7. **Dashboard POST APIs require both session cookie and same-origin validation.** Where the `Origin` header is present, it is validated against the expected host before processing. Applies to all state-mutating dashboard routes.
+
+8. **Request bodies have explicit size limits.** All POST bodies are capped (e.g. 64KB for config patches, 1KB for login). Requests exceeding the limit receive 413 before any parsing occurs.
+
+9. **Missing dashboard build assets do not affect `/mcp`.** If `dist-dashboard/` is absent or incomplete, `/dashboard` returns 503 with a clear message. The MCP transport continues operating normally.
+
+10. **Key rotation has defined session/transport teardown policy.** Rotation closes all active HTTP MCP transport sessions and revokes all dashboard sessions. The rotation response documents this behaviour explicitly so callers are not surprised.
+
+11. **Logs never contain secrets.** `Authorization` headers, session cookie values, raw config patches, and URLs containing query-param keys are never logged. The logger must strip or omit these fields at the call site, not rely on post-hoc redaction.
+
+---
+
+## 12. Out of Scope (V1)
 
 - SSE legacy transport (transport abstraction is in place; implement when a real client requires it)
 - Separate MCP key vs admin key (deferred to V2 when public exposure is common)
