@@ -6,7 +6,7 @@
  */
 
 import { strategyRegistry } from './registry.js';
-import { PipelineStrategy, type PipelineRunnerFn } from './pipelineStrategy.js';
+import { PipelineStrategy } from './pipelineStrategy.js';
 import { AgentStrategy } from './agentStrategy.js';
 import { TreeStrategy } from './treeStrategy.js';
 import type {
@@ -34,5 +34,4 @@ export type {
   StrategyContext,
   StrategyFactory,
   ProgressCallback,
-  PipelineRunnerFn,
 };
