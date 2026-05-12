@@ -54,7 +54,7 @@ export function buildCloakLaunchOptions(config: BrowserSessionConfig): CloakLaun
 async function importCloakBrowser(): Promise<CloakBrowserModule> {
   try {
     // CloakBrowser is an optional runtime integration. Do not make startup depend on it.
-    // @ts-expect-error optional dependency; resolved only when BROWSER_ENGINE=cloak is used.
+    // @ts-ignore optional dependency; resolved only when BROWSER_ENGINE=cloak is used.
     const mod: unknown = await import('cloakbrowser');
     if (!hasCloakLaunchers(mod)) {
       throw new BrowserError('cloakbrowser module did not export launch functions.', 'LAUNCH_FAILED');

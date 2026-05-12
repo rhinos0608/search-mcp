@@ -15,9 +15,9 @@
 | **V3.2.0**       | ✅ In progress | Domain adapters (Stack Overflow, HN, academic, news), full job pipeline, `semantic_search`, constraint ranking, dedup, distribution packaging *(parallel track)* |
 | **V3.3.0**       | ✅ Done       | Kill chain extraction, contextual embeddings, render recovery                                                              |
 | **V3.3.1**       | ✅ Planned    | DuckDuckGo zero-key fallback, opt-in Ollama web search, availability-aware selection + merge                               |
-| **V3.4.0**       | 🟡 Planned    | Integration: resolver pattern, output budget, structured errors, diagnostics                                               |
-| **V3.5.0**       | 🔲 Pending    | Competitive integration                                                                                                    |
-| **V4.0.0**       | ✅ Done       | **Deep Research Orchestration Engine** — LLM control loop, 3D confidence, multi-backend discovery, gap analysis, audit, synthesis |
+| **V3.4.0**       | ✅ Planned    | Integration: resolver pattern, output budget, structured errors, diagnostics                                               |
+| **V3.5.0**       | ✅ Pending    | Competitive integration and tool consilodation                                                                                                   |
+| **V4.0.0**       | ✅ Done       | **Deep Research Orchestration Engine** — LLM control loop, multi-backend discovery, gap analysis, audit, synthesis |
 | **V5.0.0**       | 🔲 Planned    | Persistent corpus indexes (was V4.0.0) — from ephemeral cache to durable research memory                                   |
 
 ## Roadmap Summary
