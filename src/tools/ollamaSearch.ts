@@ -1,15 +1,16 @@
 /**
  * Ollama web-search provider.
  *
- * Queries an Ollama-hosted web-search API to retrieve search results.
+ * Queries Ollama's experimental web-search API to retrieve search results.
  * Requires explicit configuration (SEARCH_OLLAMA_BASE_URL + optional
  * SEARCH_OLLAMA_API_KEY) and is disabled by default.
  *
- * The API contract follows the standard pattern:
- *   POST {baseUrl}/v1/search
- *   Authorization: Bearer {apiKey}
- *   Body: { "query": "...", "limit": N, "safeSearch": "..." }
- *   Response: { "results": [{ "title": "...", "url": "...", "description": "...", ... }] }
+ * API contract:
+ *   POST {baseUrl}/api/experimental/web_search
+ *   Body: { "query": "...", "max_results": N }
+ *   Response: { "results": [{ "title": "...", "url": "...", "content": "..." }] }
+ *
+ * Reference: @ollama/pi-web-search (npm)
  */
 
 import { logger } from '../logger.js';
@@ -32,10 +33,7 @@ interface OllamaSearchResponse {
 interface OllamaResultItem {
   title?: string;
   url?: string;
-  description?: string;
-  age?: string;
-  snippet?: string;
-  domain?: string;
+  content?: string;
 }
 
 export async function ollamaSearch(
@@ -54,7 +52,7 @@ export async function ollamaSearch(
   }
 
   const baseUrl = config.baseUrl.replace(/\/+$/, '');
-  const searchUrl = `${baseUrl}/v1/search`;
+  const searchUrl = `${baseUrl}/api/experimental/web_search`;
 
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
@@ -67,8 +65,7 @@ export async function ollamaSearch(
 
   const body = JSON.stringify({
     query,
-    limit,
-    safeSearch: safeSearch,
+    max_results: limit,
   });
 
   const response = await retryWithBackoff(
@@ -86,6 +83,14 @@ export async function ollamaSearch(
         throw unavailableError(
           `Ollama search host unreachable at ${baseUrl}: ${err instanceof Error ? err.message : String(err)}`,
           { backend: 'ollama-search', retryable: true },
+        );
+      }
+
+      // Ollama's experimental API returns 401 when not signed in via `ollama signin`
+      if (res.status === 401) {
+        throw unavailableError(
+          `Ollama search returned 401: Unauthorized. Run \`ollama signin\` to authenticate.`,
+          { statusCode: 401, backend: 'ollama-search', retryable: false },
         );
       }
 
@@ -132,7 +137,7 @@ export async function ollamaSearch(
     .map((r, i) => {
       let domain = '';
       try {
-        domain = r.domain ?? (r.url ? new URL(r.url).hostname : '');
+        domain = r.url ? new URL(r.url).hostname : '';
       } catch {
         /* should not happen due to filter */
       }
@@ -140,11 +145,11 @@ export async function ollamaSearch(
       return {
         title: r.title ?? '',
         url: r.url ?? '',
-        description: r.snippet ?? r.description ?? '',
+        description: r.content ?? '',
         position: i + 1,
         domain,
         source: 'ollama-search' as const,
-        age: r.age ?? null,
+        age: null,
         extraSnippet: null,
         deepLinks: null,
       };

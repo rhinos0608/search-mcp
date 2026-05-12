@@ -21,9 +21,7 @@ test('maps a valid Ollama search response to SearchResult[]', async () => {
           {
             title: 'Example Page',
             url: 'https://example.com/page',
-            description: 'A detailed description',
-            domain: 'example.com',
-            age: '2 days ago',
+            content: 'A detailed content snippet',
           },
         ],
       }),
@@ -36,22 +34,21 @@ test('maps a valid Ollama search response to SearchResult[]', async () => {
   assert.equal(results.length, 1);
   assert.equal(results[0]!.title, 'Example Page');
   assert.equal(results[0]!.url, 'https://example.com/page');
-  assert.equal(results[0]!.description, 'A detailed description');
+  assert.equal(results[0]!.description, 'A detailed content snippet');
   assert.equal(results[0]!.domain, 'example.com');
-  assert.equal(results[0]!.age, '2 days ago');
+  assert.equal(results[0]!.age, null);
   assert.equal(results[0]!.source, 'ollama-search');
 });
 
-test('prefers snippet over description for description field', async () => {
+test('uses content field for description', async () => {
   globalThis.fetch = async () => {
     return new Response(
       JSON.stringify({
         results: [
           {
-            title: 'Snippet Test',
+            title: 'Content Test',
             url: 'https://example.com',
-            description: 'Long description',
-            snippet: 'Short snippet',
+            content: 'Primary content field',
           },
         ],
       }),
@@ -59,20 +56,19 @@ test('prefers snippet over description for description field', async () => {
     );
   };
 
-  const results = await ollamaSearch('test-snippet', 10, 'moderate', DEFAULT_CONFIG);
+  const results = await ollamaSearch('content-test', 10, 'moderate', DEFAULT_CONFIG);
 
-  assert.equal(results[0]!.description, 'Short snippet');
+  assert.equal(results[0]!.description, 'Primary content field');
 });
 
-test('falls back to description if snippet is missing', async () => {
+test('falls back to empty string when content is missing', async () => {
   globalThis.fetch = async () => {
     return new Response(
       JSON.stringify({
         results: [
           {
-            title: 'No Snippet',
+            title: 'No Content',
             url: 'https://example.com',
-            description: 'Only description',
           },
         ],
       }),
@@ -80,9 +76,9 @@ test('falls back to description if snippet is missing', async () => {
     );
   };
 
-  const results = await ollamaSearch('no-snippet', 10, 'moderate', DEFAULT_CONFIG);
+  const results = await ollamaSearch('no-content', 10, 'moderate', DEFAULT_CONFIG);
 
-  assert.equal(results[0]!.description, 'Only description');
+  assert.equal(results[0]!.description, '');
 });
 
 test('maps multiple results from a single response', async () => {
@@ -90,9 +86,9 @@ test('maps multiple results from a single response', async () => {
     return new Response(
       JSON.stringify({
         results: [
-          { title: 'First', url: 'https://one.com', description: 'One' },
-          { title: 'Second', url: 'https://two.com', description: 'Two' },
-          { title: 'Third', url: 'https://three.com', description: 'Three' },
+          { title: 'First', url: 'https://one.com', content: 'One' },
+          { title: 'Second', url: 'https://two.com', content: 'Two' },
+          { title: 'Third', url: 'https://three.com', content: 'Three' },
         ],
       }),
       { status: 200, headers: { 'content-type': 'application/json' } },
@@ -110,7 +106,7 @@ test('respects the limit parameter', async () => {
   const rawResults = Array.from({ length: 20 }, (_, i) => ({
     title: `Result ${i + 1}`,
     url: `https://r${i + 1}.com`,
-    description: `Desc ${i + 1}`,
+    content: `Desc ${i + 1}`,
   }));
 
   globalThis.fetch = async () => {
@@ -180,7 +176,7 @@ test('extracts domain from URL when domain field missing', async () => {
           {
             title: 'Domain Test',
             url: 'https://sub.example.org/path?q=1',
-            description: 'No domain field',
+            content: 'No domain field',
           },
         ],
       }),
@@ -201,7 +197,7 @@ test('handles invalid URL in domain extraction gracefully', async () => {
           {
             title: 'Bad URL',
             url: 'not-a-valid-url',
-            description: 'Invalid URL',
+            content: 'Invalid URL',
           },
           {
             title: 'Good URL',
@@ -230,6 +226,17 @@ test('throws on HTTP error status', async () => {
   await assert.rejects(
     ollamaSearch('error-status', 10, 'moderate', DEFAULT_CONFIG),
     /Ollama search returned 500/i,
+  );
+});
+
+test('throws on 401 with ollama signin message', async () => {
+  globalThis.fetch = async () => {
+    return new Response('Unauthorized', { status: 401, statusText: 'Unauthorized' });
+  };
+
+  await assert.rejects(
+    ollamaSearch('unauthorized', 10, 'moderate', DEFAULT_CONFIG),
+    /ollama signin/i,
   );
 });
 
@@ -325,5 +332,5 @@ test('strips trailing slash from baseUrl before appending path', async () => {
     apiKey: '',
   });
 
-  assert.equal(calledUrl, 'http://localhost:11434/v1/search');
+  assert.equal(calledUrl, 'http://localhost:11434/api/experimental/web_search');
 });
