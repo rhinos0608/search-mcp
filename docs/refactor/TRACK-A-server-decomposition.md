@@ -28,7 +28,7 @@
 
 ### Architecture After
 
-```
+```text
 src/server.ts                    # Pure wiring: imports, loadConfig, register tools (74 lines)
 ├── src/utils/ragaFallback.ts    # Shared RAGA extraction for document URLs
 ├── src/utils/crawlResultShaping.ts  # Shared crawl result normalization

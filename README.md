@@ -194,7 +194,8 @@ docker compose up -d
 #   searxng (port 8081)
 ```
 
-See the [feature matrix](docs/tools.md) for the full tool reference.
+
+See the [Full Tool Reference](docs/tools.md) for the full tool reference.
 
 ## Documentation
 

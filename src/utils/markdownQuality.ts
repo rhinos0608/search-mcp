@@ -1276,8 +1276,6 @@ export function assessMarkdownQuality(
       };
    }
 
-   // ── Compute all signals ──────────────────────────────────────────────────
-   // ── Compute all signals ──────────────────────────────────────────────────
    const lines = countLines(markdown);
    const nonEmpty = nonEmptyLines(lines);
 
@@ -1350,8 +1348,11 @@ export function assessMarkdownBatchQuality(
 
    if (meaningfulAssessments.length > 0) {
       // Return the best meaningful assessment
-      // eslint-disable-next-line @typescript-eslint/non-nullable-type-assertion-style
-      const best = meaningfulAssessments.sort((a, b) => b.score.positive - a.score.positive)[0] as MarkdownQualityAssessment;
+      const sorted = [...meaningfulAssessments].sort(
+        (a, b) => b.score.positive - a.score.positive,
+      );
+      const best = sorted[0];
+      if (!best) throw new Error('Impossible: non-empty array');
       return {
          ...best,
          reasons: [],
@@ -1360,8 +1361,16 @@ export function assessMarkdownBatchQuality(
 
    // Aggregate non-meaningful
    const allReasons = assessments.flatMap((a) => a.reasons);
-   // eslint-disable-next-line @typescript-eslint/non-nullable-type-assertion-style
-   const worst = assessments.sort((a, b) => a.score.overall - b.score.overall)[0] as MarkdownQualityAssessment;
+   if (assessments.length === 0) {
+      // Should not happen because nonEmpty was already validated
+      throw new Error('Impossible: empty assessment array');
+   }
+   const first = assessments[0];
+   // Guaranteed non-empty due to guard above; avoids assertions vs lint rules
+   if (!first) throw new Error('Impossible: non-empty assessment array');
+   const worst = assessments.reduce<MarkdownQualityAssessment>((min, a) =>
+      a.score.overall < min.score.overall ? a : min, first,
+   );
 
    return {
       ...worst,

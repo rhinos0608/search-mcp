@@ -38,7 +38,7 @@ export function registerFetchFocus(server: McpServer, cfg: SearchConfig): void {
       try {
         const result = await fetchFocus(url, focus, cfg);
         return successResponse(makeResult('fetch_focus', result, Date.now() - start));
-      } catch (err) {
+      } catch (err: unknown) {
         return errorResponse(err);
       }
     },

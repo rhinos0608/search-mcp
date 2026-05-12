@@ -7,6 +7,8 @@
 
 import { createHash } from 'node:crypto';
 import { writeFile, mkdir } from 'node:fs/promises';
+import * as path from 'node:path';
+import * as os from 'node:os';
 import { TRUNCATED_MARKER } from '../httpGuards.js';
 import { logger } from '../logger.js';
 import type { LlmConfig } from '../config.js';
@@ -62,8 +64,8 @@ export async function tryRagaFallback(
         method: 'notifications/progress',
         params: { progressToken: e._meta.progressToken, progress, total: 100, message },
       });
-    } catch {
-      /* non-fatal */
+    } catch (err) {
+      logger.trace({ err }, 'non-fatal: failed to send progress notification');
     }
   };
 
@@ -86,8 +88,8 @@ export async function tryRagaFallback(
     (progress: number, message: string) => {
       // Bridge progress is 0-100; pipe through to MCP progress notifications.
       // Fire-and-forget — progress visibility is best-effort.
-      sendProgress(Math.round(progress), message).catch(() => {
-        /* no-op */
+      sendProgress(Math.round(progress), message).catch((err: unknown) => {
+        logger.trace({ err }, 'non-fatal: failed to send progress notification from bridge');
       });
     },
   );
@@ -118,10 +120,11 @@ export async function tryRagaFallback(
 
   if (markdown.length > MAX_RAGA_MARKDOWN_BYTES) {
     const hash = createHash('sha256').update(markdown).digest('hex');
-    const filePath = `/tmp/raga-extracts/${hash}.md`;
+    const tmpDir = path.join(os.tmpdir(), 'raga-extracts');
+    const filePath = path.join(tmpDir, `${hash}.md`);
 
     try {
-      await mkdir('/tmp/raga-extracts/', { recursive: true });
+      await mkdir(tmpDir, { recursive: true });
       await writeFile(filePath, markdown);
       logger.info({ filePath }, 'Full RAGA extraction saved to temp file');
     } catch (err) {

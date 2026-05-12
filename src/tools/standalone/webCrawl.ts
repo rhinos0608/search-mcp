@@ -151,10 +151,7 @@ export function registerWebCrawl(server: McpServer, cfg: SearchConfig): void {
               image: null,
             };
             const data = readabilityFallbackResult(url, article, strategy, maxDepth, maxPages);
-            if (data.pages[0]) {
-              data.pages[0].success = true;
-            }
-            const result = makeResult('web_crawl', data, Date.now() - start, { warnings: [] });
+            const result = makeResult('web_crawl', data, Date.now() - start, { warnings });
             return successResponse(result);
           }
         }

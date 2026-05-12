@@ -32,7 +32,6 @@ export abstract class BasePhase implements ResearchPhase {
     partials?: Record<string, unknown>,
   ): Promise<void> {
     const clamped = Math.max(0, Math.min(100, progress));
-    // Match exact behaviour from PipelineStrategy.reportProgress() lines 1059-1090
     try {
       await ctx.onProgress?.(clamped, message, phaseName, {
         sourceCount: ctx.state.sourceCount(),

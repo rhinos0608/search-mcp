@@ -229,11 +229,11 @@ export function registerSemanticCrawl(server: McpServer, cfg: SearchConfig): voi
           );
         }
 
-        // RAG-Anything escalation for document URLs (PDF, Office, images, etc.)
         if (
           source.type === 'url' &&
           cfg.raga.enabled &&
-          cfg.raga.baseUrl
+          typeof cfg.raga.baseUrl === 'string' &&
+          cfg.raga.baseUrl.trim() !== ''
         ) {
           const ragaResult = await tryRagaFallback(
             source.url,

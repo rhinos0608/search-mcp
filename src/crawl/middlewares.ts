@@ -470,13 +470,13 @@ export class AggressiveRenderMiddleware implements CrawlMiddleware {
 
     const scrollJs = isNavHeavy
       ? [
-          'window.scrollTo(0, document.body.scrollHeight * 0.5);',
-          'new Promise(function(r) { setTimeout(r, 2000); }).then(function() {',
+          '(async () => {',
+          '  window.scrollTo(0, document.body.scrollHeight * 0.5);',
+          '  await new Promise(r => setTimeout(r, 2000));',
           '  window.scrollTo(0, document.body.scrollHeight);',
-          '});',
+          '  await new Promise(r => setTimeout(r, 2000));',
+          '})();',
           '',
-          '// Additional delay to let lazy JS content render',
-          'new Promise(function(r) { setTimeout(r, 2000); });',
         ].join('\n')
       : 'window.scrollTo(0, document.body.scrollHeight);';
 

@@ -29,7 +29,7 @@
 
 ### Architecture After
 
-```
+```text
 src/research/
 ├── orchestrator.ts                  # Unchanged (23 lines — orchestrator sits above strategies)
 ├── phases/                          # 8 composable phase modules
@@ -80,6 +80,6 @@ src/research/
 - ✅ ESM imports with `.js` extension
 - ✅ TypeScript strict mode — no `any`, no unchecked index access
 - ✅ Gap loop budget interactions, contradiction merging, adaptive band extension preserved
-- ✅ Progress reporting uses exact same percentage ranges
+- ✅ Progress reporting uses same percentage ranges
 - ✅ Phase ordering: decomposition → discovery → extraction → post-processing → gap loop → audit → synthesis
 - ✅ Tree research path unmodified

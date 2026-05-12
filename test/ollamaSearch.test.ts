@@ -229,15 +229,20 @@ test('throws on HTTP error status', async () => {
   );
 });
 
-test('throws on 401 with ollama signin message', async () => {
+test('throws on 401 with ollama signin message and is not retryable', async () => {
   globalThis.fetch = async () => {
     return new Response('Unauthorized', { status: 401, statusText: 'Unauthorized' });
   };
 
-  await assert.rejects(
-    ollamaSearch('unauthorized', 10, 'moderate', DEFAULT_CONFIG),
-    /ollama signin/i,
-  );
+  try {
+    await ollamaSearch('unauthorized', 10, 'moderate', DEFAULT_CONFIG);
+    assert.fail('Expected an error to be thrown');
+  } catch (err: unknown) {
+    assert.match(String(err), /ollama signin/i);
+    if (err instanceof Object && 'retryable' in err) {
+      assert.strictEqual((err as { retryable: boolean }).retryable, false);
+    }
+  }
 });
 
 test('throws on network error (unreachable host)', async () => {

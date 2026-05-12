@@ -196,19 +196,7 @@ export class WorkerPoolManager {
           evidenceExcerpt: wf.evidence.slice(0, 500),
           evidenceDirectness: this.deriveEvidenceDirectness(wf, firstSourceQuality),
           ...(wf.caveats !== undefined ? { caveats: wf.caveats } : {}),
-          ...(wf.citationConfidence === 'unattributed'
-            ? {
-                caveats:
-                  (wf.caveats ? wf.caveats + ' ' : '') +
-                  '[Citation: unattributed — no source could be verified for this claim]',
-              }
-            : wf.citationConfidence === 'inferred'
-              ? {
-                  caveats:
-                    (wf.caveats ? wf.caveats + ' ' : '') +
-                    '[Citation: inferred — source mapping may be imprecise]',
-                }
-              : {}),
+          ...this.augmentCaveats(wf),
           freshnessSensitive: false,
           lastUpdated: new Date().toISOString(),
           claimType: 'primary' as const,
@@ -219,7 +207,6 @@ export class WorkerPoolManager {
           epistemicStatus,
         });
       }
-    }
 
     if (unattributedCount > 0) {
       ctx.state.addOpenQuestion(
@@ -248,6 +235,24 @@ export class WorkerPoolManager {
         'V5: Extraction budget tracked for worker agent sources',
       );
     }
+    }
+  }
+
+  /**
+   * Compute caveats based on citation confidence.
+   * Preserves existing wf.caveats and appends the appropriate bracketed message
+   * for unattributed or inferred citations.
+   */
+  private augmentCaveats(wf: WorkerFinding): { caveats?: string } {
+    if (wf.citationConfidence === 'unattributed') {
+      const prefix = wf.caveats ? wf.caveats + ' ' : '';
+      return { caveats: prefix + '[Citation: unattributed — no source could be verified for this claim]' };
+    }
+    if (wf.citationConfidence === 'inferred') {
+      const prefix = wf.caveats ? wf.caveats + ' ' : '';
+      return { caveats: prefix + '[Citation: inferred — source mapping may be imprecise]' };
+    }
+    return wf.caveats !== undefined ? { caveats: wf.caveats } : {};
   }
 
   private async ensureSourceExists(ctx: StrategyContext, url: string, report: WorkerReport): Promise<string> {

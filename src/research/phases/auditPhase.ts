@@ -75,7 +75,12 @@ export class AuditPhase extends BasePhase {
       temperature: 0.3,
     });
     if (!result.success) return undefined;
-    return result.data as unknown as AuditReport;
+    const data = result.data;
+    if (typeof data.passed !== 'boolean' || !Array.isArray(data.issues)) {
+      logger.warn({ data }, 'LLM returned invalid AuditReport — missing required fields');
+      return undefined;
+    }
+    return data as unknown as AuditReport;
   }
 
   private buildStateSummary(ctx: StrategyContext): string {
