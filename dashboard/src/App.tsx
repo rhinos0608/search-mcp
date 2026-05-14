@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { checkSetup, checkSession } from './api/client.js';
+import { checkSetup, checkSession, setUnauthorizedHandler } from './api/client.js';
 import Login from './pages/Login.js';
 import Setup from './pages/Setup.js';
 import Shell from './Shell.js';
@@ -9,6 +9,11 @@ type AuthState = 'loading' | 'setup' | 'unauthenticated' | 'authenticated' | 'er
 export default function App() {
   const [auth, setAuth] = useState<AuthState>('loading');
   const [setupKey, setSetupKey] = useState('');
+
+  useEffect(() => {
+    setUnauthorizedHandler(() => setAuth('unauthenticated'));
+    return () => setUnauthorizedHandler(null);
+  }, []);
 
   useEffect(() => {
     let mounted = true;

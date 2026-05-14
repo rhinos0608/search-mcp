@@ -11,6 +11,7 @@ import {
   buildSetCookieHeader,
   buildClearCookieHeader,
 } from './auth.js';
+import { parseSessionTtlMs } from './session-utils.js';
 import { classifyRequestOrigin, dashboardAllowed } from './access-provider.js';
 import type { HttpTransportManager } from './mcp-transport.js';
 import { timingSafeEqual } from 'node:crypto';
@@ -159,7 +160,11 @@ export async function handleDashboard(
         return;
       }
 
-      if (!validateOriginHeader(req, port)) {
+      // Origin check: only enforce for public (direct internet) requests.
+      // Loopback requests — including Tailscale Serve, which proxies to 127.0.0.1 — are
+      // trusted by network position. SameSite=Lax on the session cookie handles CSRF
+      // for whatever domain the browser is using (localhost or Tailscale hostname).
+      if (classifyRequestOrigin(req) === 'public' && !validateOriginHeader(req, port)) {
         res.writeHead(403, { 'Content-Type': 'text/plain' });
         res.end('Forbidden: invalid Origin');
         return;
@@ -226,7 +231,9 @@ async function handleApi(
   // --- Setup endpoints (loopback-only, no session required) ---
   if (endpoint === '/setup' && req.method === 'GET') {
     if (classifyRequestOrigin(req) !== 'loopback') {
-      json(res, 403, { error: 'Setup is only accessible from localhost' });
+      // Non-local clients can never see or claim the key — treat as claimed so
+      // the frontend falls through to the normal login flow instead of erroring.
+      json(res, 200, { claimed: true });
       return;
     }
     const cfg = configManager.get();
@@ -245,9 +252,7 @@ async function handleApi(
     }
     configManager.claimApiKey();
     const session = sessionStore.create();
-    const rawTtl = process.env.SESSION_TTL_HOURS;
-    const ttlHours = rawTtl !== undefined ? Number.parseFloat(rawTtl) : 12;
-    const ttl = (Number.isFinite(ttlHours) && ttlHours > 0 ? ttlHours : 12) * 3600 * 1000;
+    const ttl = parseSessionTtlMs();
     res.setHeader('Set-Cookie', buildSetCookieHeader(session.id, ttl, https));
     json(res, 200, { ok: true });
     return;
@@ -289,9 +294,7 @@ async function handleApi(
     }
     rateLimiter.recordSuccess(ip);
     const session = sessionStore.create();
-    const rawTtl = process.env.SESSION_TTL_HOURS;
-    const ttlHours = rawTtl !== undefined ? Number.parseFloat(rawTtl) : 12;
-    const ttl = (Number.isFinite(ttlHours) && ttlHours > 0 ? ttlHours : 12) * 3600 * 1000;
+    const ttl = parseSessionTtlMs();
     res.setHeader('Set-Cookie', buildSetCookieHeader(session.id, ttl, https));
     json(res, 200, { ok: true });
     return;

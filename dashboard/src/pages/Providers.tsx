@@ -39,7 +39,7 @@ const PROVIDER_GROUPS = [
   { id: 'brave', label: 'Brave Search', fields: [{ key: 'apiKey', label: 'API Key' }] },
   { id: 'searxng', label: 'SearXNG', fields: [{ key: 'baseUrl', label: 'Base URL' }] },
   { id: 'exa', label: 'Exa', fields: [{ key: 'apiKey', label: 'API Key' }] },
-  { id: 'crawl4ai', label: 'Crawl4AI', fields: [{ key: 'baseUrl', label: 'Base URL' }, { key: 'apiToken', label: 'API Token' }] },
+  { id: 'crawl4ai', label: 'Crawl4AI', fields: [{ key: 'baseUrl', label: 'Base URL' }] },
   { id: 'youtube', label: 'YouTube', fields: [{ key: 'apiKey', label: 'API Key' }] },
   { id: 'github', label: 'GitHub', fields: [{ key: 'token', label: 'Token' }] },
 ];
@@ -67,12 +67,14 @@ function updateFieldState(
 export default function Providers() {
   const [fields, setFields] = useState<Record<string, Record<string, FieldState>>>({});
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [saving, setSaving] = useState<string | null>(null);
+  const [saving, setSaving] = useState<Set<string>>(new Set());
   const [testResults, setTestResults] = useState<Record<string, { ok: boolean; latencyMs?: number; error?: string }>>({});
   const [saveErrors, setSaveErrors] = useState<Record<string, string>>({});
 
   useEffect(() => {
+    let mounted = true;
     getConfigStatus().then(({ config: _raw }) => {
+      if (!mounted) return;
       const raw = _raw as Record<string, Record<string, string>>;
       const init: typeof fields = {};
       for (const g of PROVIDER_GROUPS) {
@@ -86,8 +88,9 @@ export default function Providers() {
       setFields(init);
       setLoadError(null);
     }).catch((err) => {
-      setLoadError(String(err));
+      if (mounted) setLoadError(String(err));
     });
+    return () => { mounted = false; };
   }, []);
 
   function handleChange(groupId: string, fieldKey: string, value: string) {
@@ -95,7 +98,7 @@ export default function Providers() {
   }
 
   async function handleSave(groupId: string) {
-    setSaving(groupId);
+    setSaving(prev => new Set(prev).add(groupId));
     setSaveErrors(prev => { const next = { ...prev }; delete next[groupId]; return next; });
     const groupFields = fields[groupId] ?? {};
     const patch: Record<string, { op: 'keep' | 'clear' | 'set'; value?: string }> = {};
@@ -119,7 +122,7 @@ export default function Providers() {
     } catch (err) {
       setSaveErrors(prev => ({ ...prev, [groupId]: String(err) }));
     } finally {
-      setSaving(null);
+      setSaving(prev => { const next = new Set(prev); next.delete(groupId); return next; });
     }
   }
 
@@ -165,9 +168,9 @@ export default function Providers() {
               ))}
             </div>
             {saveErrors[group.id] && <p style={{ fontSize: 12, color: '#f87171', marginBottom: 8 }}>{saveErrors[group.id]}</p>}
-            <button onClick={() => void handleSave(group.id)} disabled={saving === group.id}
+            <button onClick={() => void handleSave(group.id)} disabled={saving.has(group.id)}
               style={{ padding: '7px 16px', borderRadius: 6, background: '#2563eb', border: 'none', color: '#fff', fontSize: 13, fontWeight: 600 }}>
-              {saving === group.id ? 'Saving…' : 'Save'}
+              {saving.has(group.id) ? 'Saving…' : 'Save'}
             </button>
           </div>
         ))}

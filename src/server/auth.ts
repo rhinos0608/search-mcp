@@ -56,6 +56,8 @@ export class LoginRateLimiter {
     if (e.lockedUntil !== undefined && Date.now() < e.lockedUntil) {
       return { allowed: false, retryAfter: Math.ceil((e.lockedUntil - Date.now()) / 1000) };
     }
+    // Lockout expired — clean up so the map doesn't grow unbounded
+    if (e.lockedUntil !== undefined) this.entries.delete(ip);
     return { allowed: true };
   }
 
@@ -75,8 +77,12 @@ export function getCookieName(https: boolean): string {
 
 export function parseCookieHeader(cookieHeader: string, name: string): string | undefined {
   for (const part of cookieHeader.split(';')) {
-    const [k, v] = part.trim().split('=');
-    if (k?.trim() === name) return v?.trim();
+    const trimmed = part.trim();
+    const eq = trimmed.indexOf('=');
+    if (eq === -1) continue;
+    const k = trimmed.slice(0, eq).trim();
+    const v = trimmed.slice(eq + 1).trim();
+    if (k === name) return v;
   }
   return undefined;
 }

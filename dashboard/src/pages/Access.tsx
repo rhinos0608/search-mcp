@@ -12,11 +12,7 @@ interface ConnInfo {
 }
 
 function tailscaleServiceHost(magicDnsName: string): string | null {
-  // magicDnsName = "my-machine.tailnet-xyz.ts.net"
-  // service host  = "svc-mcp-server.tailnet-xyz.ts.net"
-  const dot = magicDnsName.indexOf('.');
-  if (dot === -1) return null;
-  return `svc-mcp-server${magicDnsName.slice(dot)}`;
+  return magicDnsName || null;
 }
 
 export default function Access() {
@@ -32,16 +28,22 @@ export default function Access() {
   const [copied, setCopied] = useState<string | null>(null);
 
   useEffect(() => {
+    let mounted = true;
     void Promise.all([
       getAccess(),
       getConnectionInfo(),
       getTailscaleStatus(),
     ]).then(([accessRes, connRes, tsRes]) => {
+      if (!mounted) return;
       setAccess(accessRes.access);
       setManualUrl(accessRes.access.manualBaseUrl ?? '');
       setConnInfo({ localPort: connRes.localPort, apiKey: connRes.apiKey, allowQueryKey: connRes.allowQueryKey });
       setTsStatus(tsRes.tailscale);
-    }).catch(() => {});
+    }).catch((err) => {
+      console.error('Failed to load access config:', err);
+      if (mounted) setError('Failed to load configuration. Check server connectivity.');
+    });
+    return () => { mounted = false; };
   }, []);
 
   function validateUrl(url: string): string {
@@ -103,48 +105,23 @@ export default function Access() {
 
   const serviceHost = tsStatus?.magicDnsName ? tailscaleServiceHost(tsStatus.magicDnsName) : null;
   const serveCmd = connInfo
-    ? `tailscale serve --service=svc:mcp-server --https=443 http://localhost:${String(connInfo.localPort)}`
-    : 'tailscale serve --service=svc:mcp-server --https=443 http://localhost:<port>';
+    ? `tailscale serve --https=443 http://localhost:${String(connInfo.localPort)}`
+    : 'tailscale serve --https=443 http://localhost:<port>';
 
   const connectionUrl = serviceHost
     ? `https://${serviceHost}/mcp${connInfo?.allowQueryKey ? `?key=${connInfo.apiKey}` : ''}`
     : null;
 
-  const mcpRemoteSnippet = serviceHost
-    ? JSON.stringify(
-        {
-          mcpServers: {
-            'search-mcp': {
-              command: 'npx',
-              args: [
-                'mcp-remote',
-                `https://${serviceHost}/mcp`,
-                '--header',
-                `Authorization: Bearer ${connInfo?.apiKey ?? '<api-key>'}`,
-              ],
-            },
-          },
-        },
-        null,
-        2,
-      )
-    : JSON.stringify(
-        {
-          mcpServers: {
-            'search-mcp': {
-              command: 'npx',
-              args: [
-                'mcp-remote',
-                'https://svc-mcp-server.<tailnet>.ts.net/mcp',
-                '--header',
-                'Authorization: Bearer <api-key>',
-              ],
-            },
-          },
-        },
-        null,
-        2,
-      );
+  function makeSnippet(windows: boolean) {
+    const mcpUrl = serviceHost ? `https://${serviceHost}/mcp` : 'https://<machine>.<tailnet>.ts.net/mcp';
+    const bearer = `Authorization: Bearer ${connInfo?.apiKey ?? '<api-key>'}`;
+    const entry = windows
+      ? { command: 'cmd', args: ['/c', 'npx', '-y', 'mcp-remote', mcpUrl, '--header', bearer] }
+      : { command: 'npx', args: ['-y', 'mcp-remote', mcpUrl, '--header', bearer] };
+    return JSON.stringify({ mcpServers: { 'search-mcp': entry } }, null, 2);
+  }
+  const mcpRemoteSnippetUnix = makeSnippet(false);
+  const mcpRemoteSnippetWindows = makeSnippet(true);
 
   return (
     <div style={{ maxWidth: 700, margin: '0 auto', padding: 24 }}>
@@ -187,7 +164,7 @@ export default function Access() {
             <InfoBox>
               <p style={{ fontSize: 13, marginBottom: 8 }}>
                 Run this command to expose the MCP server over Tailscale HTTPS. This creates a named service at
-                {' '}<code style={{ background: '#1c1c1f', padding: '1px 4px', borderRadius: 3, fontSize: 11 }}>svc-mcp-server.&lt;tailnet&gt;.ts.net</code>:
+                {' '}<code style={{ background: '#1c1c1f', padding: '1px 4px', borderRadius: 3, fontSize: 11 }}>&lt;machine&gt;.&lt;tailnet&gt;.ts.net</code>:
               </p>
               <CodeBlock text={serveCmd} onCopy={() => copyText(serveCmd, 'serve')} copied={copied === 'serve'} />
               <p style={{ fontSize: 12, color: '#71717a', marginTop: 8 }}>
@@ -221,7 +198,7 @@ export default function Access() {
                 ) : (
                   <p style={{ fontSize: 12, color: '#71717a' }}>
                     Tailscale not detected locally. Your URL:
-                    {' '}<code style={{ background: '#1c1c1f', padding: '1px 4px', borderRadius: 3 }}>https://svc-mcp-server.&lt;tailnet&gt;.ts.net/mcp</code>
+                    {' '}<code style={{ background: '#1c1c1f', padding: '1px 4px', borderRadius: 3 }}>https://&lt;machine&gt;.&lt;tailnet&gt;.ts.net/mcp</code>
                   </p>
                 )}
               </InfoBox>
@@ -230,10 +207,12 @@ export default function Access() {
                 <p style={{ fontSize: 13, fontWeight: 600, marginBottom: 8 }}>
                   For stdio-only clients (mcp-remote)
                 </p>
-                <p style={{ fontSize: 12, color: '#71717a', marginBottom: 8 }}>
-                  Add to your Claude Desktop / MCP client config:
-                </p>
-                <CodeBlock text={mcpRemoteSnippet} onCopy={() => copyText(mcpRemoteSnippet, 'snippet')} copied={copied === 'snippet'} mono />
+                <p style={{ fontSize: 12, color: '#71717a', marginBottom: 4 }}>macOS / Linux</p>
+                <div style={{ marginBottom: 10 }}>
+                  <CodeBlock text={mcpRemoteSnippetUnix} onCopy={() => copyText(mcpRemoteSnippetUnix, 'snippet-unix')} copied={copied === 'snippet-unix'} mono />
+                </div>
+                <p style={{ fontSize: 12, color: '#71717a', marginBottom: 4 }}>Windows</p>
+                <CodeBlock text={mcpRemoteSnippetWindows} onCopy={() => copyText(mcpRemoteSnippetWindows, 'snippet-win')} copied={copied === 'snippet-win'} mono />
               </InfoBox>
 
               <button

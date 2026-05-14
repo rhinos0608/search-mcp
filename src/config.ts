@@ -7,19 +7,19 @@
  */
 
 import { readFileSync, existsSync } from 'node:fs';
-import { createDecipheriv, pbkdf2Sync } from 'node:crypto';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { logger } from './logger.js';
 import { DEFAULT_SEMANTIC_MAX_BYTES } from './semanticLimits.js';
 import type { AccessConfig } from './config/types.js';
+import { decryptConfig } from './config/crypto.js';
 
 /** Load .env from the project root if present. Only sets vars not already in the environment. */
 function loadDotEnv(pkgRoot: string): void {
   const envPath = join(pkgRoot, '.env');
   if (!existsSync(envPath)) return;
   try {
-    const lines = readFileSync(envPath, 'utf8').split('\n');
+    const lines = readFileSync(envPath, 'utf8').split(/\r?\n/);
     let loaded = 0;
     for (const raw of lines) {
       const line = raw.trim();
@@ -384,29 +384,6 @@ const VALID_BACKENDS = new Set<string>([
   'tavily',
 ]);
 
-/**
- * Decrypt config.enc using AES-256-GCM.
- *
- * File format (binary):
- *   [16 bytes salt][12 bytes IV][16 bytes auth tag][...ciphertext]
- *
- * Key derivation: PBKDF2(password, salt, 100_000, 32, sha512)
- */
-function decryptConfigFile(filePath: string, password: string): SearchConfig {
-  const buf = readFileSync(filePath);
-
-  const salt = buf.subarray(0, 16);
-  const iv = buf.subarray(16, 28);
-  const authTag = buf.subarray(28, 44);
-  const ciphertext = buf.subarray(44);
-
-  const key = pbkdf2Sync(password, salt, 100_000, 32, 'sha512');
-  const decipher = createDecipheriv('aes-256-gcm', key, iv);
-  decipher.setAuthTag(authTag);
-
-  const decrypted = Buffer.concat([decipher.update(ciphertext), decipher.final()]);
-  return JSON.parse(decrypted.toString('utf8')) as SearchConfig;
-}
 
 type EnvConfig = Omit<
   Partial<SearchConfig>,
@@ -872,7 +849,8 @@ export function loadConfig(): SearchConfig {
 
   if (existsSync(encPath) && configKey) {
     try {
-      const encryptedConfig = decryptConfigFile(encPath, configKey);
+      const buf = readFileSync(encPath);
+      const encryptedConfig = decryptConfig(buf, configKey) as SearchConfig;
       // Deep merge encrypted config over JSON config with safety checks
       fileConfig = {
         ...fileConfig,
@@ -1206,13 +1184,13 @@ export function loadConfig(): SearchConfig {
         DEFAULTS.access.exposeDashboardExternally,
       tailscale: {
         serveConfigured:
-          ((fileConfig as Partial<SearchConfig>).access?.tailscale.serveConfigured) ??
+          ((fileConfig as Partial<SearchConfig>).access?.tailscale?.serveConfigured) ??
           DEFAULTS.access.tailscale.serveConfigured,
         funnelConfigured:
-          ((fileConfig as Partial<SearchConfig>).access?.tailscale.funnelConfigured) ??
+          ((fileConfig as Partial<SearchConfig>).access?.tailscale?.funnelConfigured) ??
           DEFAULTS.access.tailscale.funnelConfigured,
         allowDashboardOverFunnel:
-          ((fileConfig as Partial<SearchConfig>).access?.tailscale.allowDashboardOverFunnel) ??
+          ((fileConfig as Partial<SearchConfig>).access?.tailscale?.allowDashboardOverFunnel) ??
           DEFAULTS.access.tailscale.allowDashboardOverFunnel,
       },
     },

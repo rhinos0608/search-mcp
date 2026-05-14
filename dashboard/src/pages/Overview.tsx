@@ -12,9 +12,11 @@ export default function Overview({ onLogout }: Props) {
   const [mcpUrl] = useState(`${window.location.origin}/mcp`);
 
   useEffect(() => {
+    let mounted = true;
     getProviders()
-      .then(r => { setProviders(r.providers); setProvidersError(null); })
-      .catch(() => { setProviders([]); setProvidersError('Failed to load providers. Is the server running?'); });
+      .then(r => { if (mounted) { setProviders(r.providers); setProvidersError(null); } })
+      .catch(() => { if (mounted) { setProviders([]); setProvidersError('Failed to load providers. Is the server running?'); } });
+    return () => { mounted = false; };
   }, []);
 
   async function handleRotate() {
@@ -81,7 +83,11 @@ export default function Overview({ onLogout }: Props) {
               <button onClick={() => { void navigator.clipboard.writeText(newKey); }}
                 style={{ padding: '8px 12px', borderRadius: 6, background: '#27272a', border: 'none', color: '#e4e4e7', fontSize: 13 }}>Copy</button>
             </div>
-            <p style={{ fontSize: 12, color: '#71717a', marginTop: 8 }}>All existing MCP sessions have been terminated.</p>
+            <p style={{ fontSize: 12, color: '#71717a', marginTop: 8 }}>All existing MCP sessions have been terminated. Your dashboard session is now invalid.</p>
+            <button onClick={() => void handleLogout()}
+              style={{ marginTop: 10, padding: '6px 14px', borderRadius: 5, background: '#27272a', border: 'none', color: '#60a5fa', fontSize: 13, cursor: 'pointer' }}>
+              Log in with new key →
+            </button>
           </div>
         ) : (
           <button

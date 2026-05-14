@@ -17,6 +17,47 @@ const SECRET_LEAF_PATHS = new Set([
   'llm.apiToken', 'raga.apiToken',
 ]);
 
+/**
+ * Deep merge two config objects.
+ *
+ * Rules:
+ * - String fields: raw takes priority when non-empty; empty raw strings
+ *   leave the default in place. This prevents an older config.enc with empty
+ *   placeholder strings from erasing values added to config.json or env vars.
+ * - Null in raw: treated as "absent" for string defaults — the non-empty
+ *   default is kept. For non-string defaults, null overrides (explicitly
+ *   clearing a value is intentional).
+ * - Nested objects: recursed.
+ * - Arrays: replaced wholesale (not merged). If you need partial array
+ *   updates, apply them before calling this function.
+ */
+function deepMergePreferNonEmpty<T extends object>(
+  defaults: T,
+  raw: Partial<T>,
+): T {
+  const result = { ...defaults } as Record<string, unknown>;
+  for (const [key, rawVal] of Object.entries(raw as Record<string, unknown>)) {
+    if (rawVal === undefined) continue; // treat absent-in-raw as "use default"
+    const defVal = (defaults as Record<string, unknown>)[key];
+    if (typeof rawVal === 'string' && rawVal === '' && typeof defVal === 'string' && defVal !== '') {
+      // Empty raw placeholder — keep the default value from config.json/env
+    } else if (rawVal === null && typeof defVal === 'string' && defVal !== '') {
+      // Null raw with non-empty string default — keep the default
+    } else if (
+      rawVal !== null && typeof rawVal === 'object' && !Array.isArray(rawVal) &&
+      defVal !== null && typeof defVal === 'object' && !Array.isArray(defVal)
+    ) {
+      result[key] = deepMergePreferNonEmpty(
+        defVal as Record<string, unknown>,
+        rawVal as Record<string, unknown>,
+      );
+    } else {
+      result[key] = rawVal;
+    }
+  }
+  return result as unknown as T;
+}
+
 function redactValue(path: string, value: unknown): unknown {
   if (typeof value === 'string' && value.length > 0 && SECRET_LEAF_PATHS.has(path)) {
     return '•••';
@@ -84,9 +125,17 @@ export class ConfigManager {
 
     const buf = readFileSync(this.configPath);
     const raw = decryptConfig(buf, password) as Partial<SearchConfig>;
-    // Merge with defaults to handle any new fields added after this file was created
+    // Merge with defaults (config.json + env vars) so:
+    // 1. New fields added after config.enc was created get their defaults.
+    // 2. Non-empty values from config.json/env show through when config.enc has
+    //    an empty placeholder (e.g. crawl4ai.baseUrl added to config.json after
+    //    config.enc was first created).
     resetConfig();
-    this.config = { ...loadConfig(), ...raw };
+    const defaults = loadConfig();
+    this.config = deepMergePreferNonEmpty<SearchConfig>(
+      defaults,
+      raw,
+    );
   }
 
   get(): Readonly<SearchConfig> {

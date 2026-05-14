@@ -2,6 +2,7 @@ import { useState } from 'react';
 import Overview from './pages/Overview.js';
 import Providers from './pages/Providers.js';
 import Access from './pages/Access.js';
+import { logout } from './api/client.js';
 
 type Page = 'overview' | 'providers' | 'access';
 
@@ -13,6 +14,11 @@ const NAV_ITEMS: { id: Page; label: string }[] = [
 
 export default function Shell({ onLogout }: { onLogout: () => void }) {
   const [page, setPage] = useState<Page>('overview');
+
+  async function handleLogout() {
+    await logout().catch(() => {});
+    onLogout();
+  }
 
   return (
     <div style={{ display: 'flex', minHeight: '100vh', background: '#09090b', color: '#e4e4e7', fontFamily: 'system-ui, sans-serif' }}>
@@ -31,13 +37,13 @@ export default function Shell({ onLogout }: { onLogout: () => void }) {
           </button>
         ))}
         <div style={{ flex: 1 }} />
-        <button onClick={onLogout}
+        <button onClick={() => void handleLogout()}
           style={{ margin: '0 8px', padding: '8px 16px', textAlign: 'left', background: 'none', border: 'none', color: '#71717a', fontSize: 14, borderRadius: 6 }}>
           Log out
         </button>
       </nav>
       <main style={{ flex: 1, overflowY: 'auto' }}>
-        {page === 'overview' && <Overview onLogout={onLogout} />}
+        {page === 'overview' && <Overview onLogout={() => void handleLogout()} />}
         {page === 'providers' && <Providers />}
         {page === 'access' && <Access />}
       </main>

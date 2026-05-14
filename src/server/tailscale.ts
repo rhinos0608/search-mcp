@@ -17,15 +17,15 @@ export interface TailscaleStatus {
 
 export function getTailscaleServeCommands(port: number, _version?: string): string[] {
   return [
-    `tailscale serve --service=svc:mcp-server --https=443 http://localhost:${String(port)}`,
+    `tailscale serve --https=443 http://localhost:${String(port)}`,
     `# Verify: tailscale serve status`,
-    `# MCP accessible at: https://svc-mcp-server.<tailnet>.ts.net/mcp`,
+    `# MCP accessible at: https://<machine>.<tailnet>.ts.net/mcp`,
   ];
 }
 
 export function getTailscaleFunnelCommands(port: number, _version?: string): string[] {
   return [
-    `tailscale funnel --service=svc:mcp-server --https=443 http://localhost:${String(port)}`,
+    `tailscale funnel --https=443 http://localhost:${String(port)}`,
     `# Verify: tailscale funnel status`,
   ];
 }

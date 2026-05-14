@@ -5,6 +5,7 @@ import { timingSafeEqual } from 'node:crypto';
 import { logger } from '../logger.js';
 import type { ConfigManager } from '../config/manager.js';
 import { SessionStore, LoginRateLimiter } from './auth.js';
+import { parseSessionTtlMs } from './session-utils.js';
 import { HttpTransportManager } from './mcp-transport.js';
 import { handleDashboard, readBody } from './dashboard-router.js';
 import type { SearchMcpRuntime } from '../config/types.js';
@@ -54,7 +55,7 @@ export async function startHttpServer(
     );
   }
 
-  const ttlMs = Number(process.env.SESSION_TTL_HOURS ?? 12) * 3600 * 1000;
+  const ttlMs = parseSessionTtlMs();
   const sessionStore = new SessionStore(ttlMs);
   const rateLimiter = new LoginRateLimiter();
   const transportManager = new HttpTransportManager(runtime);

@@ -7,6 +7,13 @@ export class ApiError extends Error {
   }
 }
 
+type UnauthorizedHandler = () => void;
+let _onUnauthorized: UnauthorizedHandler | null = null;
+
+export function setUnauthorizedHandler(fn: UnauthorizedHandler | null): void {
+  _onUnauthorized = fn;
+}
+
 /**
  * Create a typed request with optional runtime response validation.
  * If `validate` is provided, the parsed JSON is run through it before returning.
@@ -30,7 +37,10 @@ async function request<T>(
       ...(shouldSetContentType ? { 'Content-Type': 'application/json' } : {}),
     },
   });
-  if (res.status === 401) throw new ApiError(401, 'Not authenticated');
+  if (res.status === 401) {
+    _onUnauthorized?.();
+    throw new ApiError(401, 'Not authenticated');
+  }
   if (!res.ok) {
     const parsed = await res.json().catch(() => null);
     const body: { error?: string } =

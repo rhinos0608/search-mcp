@@ -5,26 +5,36 @@
  * with a discriminated-union `action` field.
  *
  * Actions:
- *   navigate   — Navigate to a URL
- *   snapshot   — Capture accessibility tree snapshot
- *   click      — Click an element
- *   type       — Type text into a field
- *   evaluate   — Execute JavaScript in page context
- *   screenshot — Take a screenshot
- *   extract    — Extract structured data
- *   act        — Natural language instruction (requires LLM)
- *   wait       — Wait for a condition
- *   pdf        — Save page as PDF (requires headless)
- *   storage    — Manage browser storage state
- *   network    — Network interception
- *   tabs       — Tab management
- *   session    — Browser session lifecycle
+ *   navigate          — Navigate to a URL
+ *   snapshot          — Capture accessibility tree snapshot
+ *   click             — Click an element
+ *   type              — Type text into a field
+ *   evaluate          — Execute JavaScript in page context
+ *   screenshot        — Take a screenshot
+ *   extract           — Extract structured data
+ *   act               — Natural language instruction (requires LLM)
+ *   wait / wait_for   — Wait for conditions
+ *   dialog_handle     — Handle alert/confirm/prompt dialogs
+ *   iframe_context    — List frames or switch into an iframe
+ *   scroll_to_load    — Infinite scroll / lazy-load handler
+ *   paginate          — Auto-walk paginated content
+ *   download          — Intercept file downloads
+ *   table_extract     — Extract structured HTML tables
+ *   network_intercept — Block resources, inject headers, modify responses
+ *   resource_timing   — Navigation Timing / Resource Timing API data
+ *   diff              — Structural DOM diff between snapshots
+ *   pdf               — Save page as PDF (requires headless)
+ *   storage           — Manage browser storage state
+ *   network           — Network interception
+ *   tabs              — Tab management
+ *   session           — Browser session lifecycle
  */
 
 import { z } from 'zod/v4';
 
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { SearchConfig } from '../../config.js';
+import type { DownloadResult } from '../../browser/types.js';
 import { assertSafeUrl } from '../../httpGuards.js';
 import { registerFamily, type FamilyDefinition } from '../registry.js';
 import { logger } from '../../logger.js';
@@ -201,6 +211,250 @@ const sessionSchema = z.object({
     .describe('Include CloakBrowser default stealth fingerprint flags'),
 });
 
+// ── New action schemas (V4.1) ────────────────────────────────────────────────
+
+const waitForSchema = z.object({
+  action: z.literal('wait_for').describe('Wait for one or more condition-based element states'),
+  conditions: z
+    .array(
+      z.object({
+        condition: z
+          .enum(['visible', 'gone', 'has-text', 'count'])
+          .describe('Condition type'),
+        selector: z.string().describe('CSS selector for the target element'),
+        timeout: z.number().int().min(1000).max(60000).optional().describe('Max wait time in ms'),
+        text: z.string().optional().describe('Expected text for has-text condition'),
+        count: z.number().int().min(0).optional().describe('Expected count for count condition'),
+        countOperator: z
+          .enum(['>=', '<=', '==', '>', '<'])
+          .optional()
+          .describe('Comparison operator for count condition'),
+      }),
+    )
+    .describe('Array of conditions to wait for in sequence'),
+});
+
+const dialogSchema = z.object({
+  action: z.literal('dialog_handle').describe('Handle browser dialogs (alert/confirm/prompt)'),
+  op: z
+    .enum(['auto-accept', 'auto-dismiss', 'handle-current', 'stop', 'history', 'clear'])
+    .describe('Dialog operation'),
+  accept: z.boolean().optional().describe('Accept (true) or dismiss (false) for handle-current'),
+  promptText: z
+    .string()
+    .optional()
+    .describe('Default text for prompt dialogs when auto-accepting'),
+  maxDialogs: z
+    .number()
+    .int()
+    .min(1)
+    .max(100)
+    .optional()
+    .describe('Max dialogs to auto-handle before stopping'),
+});
+
+const iframeSchema = z.object({
+  action: z.literal('iframe_context').describe('List frames or switch into an iframe'),
+  op: z.enum(['list', 'switch']).describe('Iframe operation'),
+  by: z
+    .enum(['name', 'url', 'index', 'selector'])
+    .optional()
+    .describe('How to locate the frame (for switch)'),
+  value: z
+    .union([z.string(), z.number()])
+    .optional()
+    .describe('Frame identifier value (for switch)'),
+});
+
+const scrollToLoadSchema = z.object({
+  action: z.literal('scroll_to_load').describe('Infinite scroll / lazy-load handler'),
+  maxScrolls: z
+    .number()
+    .int()
+    .min(1)
+    .max(200)
+    .optional()
+    .describe('Maximum scroll operations (default 50)'),
+  scrollDelayMs: z
+    .number()
+    .int()
+    .min(100)
+    .max(10000)
+    .optional()
+    .describe('Delay between scrolls in ms'),
+  direction: z.enum(['down', 'up']).optional().describe('Scroll direction'),
+  scrollPixels: z
+    .number()
+    .int()
+    .min(50)
+    .max(5000)
+    .optional()
+    .describe('Pixels per scroll step'),
+  timeoutMs: z
+    .number()
+    .int()
+    .min(1000)
+    .max(300000)
+    .optional()
+    .describe('Max total time in ms'),
+  scrollContainer: z
+    .string()
+    .optional()
+    .describe('CSS selector for scroll container (default: window)'),
+});
+
+const paginateSchema = z.object({
+  action: z.literal('paginate').describe('Auto-walk paginated content'),
+  nextSelector: z.string().optional().describe('CSS selector for next link (auto-detected if omitted)'),
+  maxPages: z
+    .number()
+    .int()
+    .min(1)
+    .max(100)
+    .optional()
+    .describe('Maximum pages to collect'),
+  waitBetweenMs: z
+    .number()
+    .int()
+    .min(500)
+    .max(30000)
+    .optional()
+    .describe('Wait between pages in ms'),
+  contentSelector: z
+    .string()
+    .optional()
+    .describe('CSS selector for content area'),
+  extractMode: z
+    .enum(['full', 'content-only'])
+    .optional()
+    .describe('Extraction mode'),
+});
+
+const downloadSchema = z.object({
+  action: z.literal('download').describe('Intercept file downloads and return content'),
+  op: z
+    .enum(['intercept', 'start-collection', 'get-collected'])
+    .describe('Download operation'),
+  savePath: z.string().optional().describe('Directory to save downloaded files'),
+  maxSize: z
+    .number()
+    .int()
+    .min(1)
+    .max(500000000)
+    .optional()
+    .describe('Maximum download size in bytes'),
+  trigger: z
+    .object({
+      action: z.string().describe('Action to trigger download (click, navigate)'),
+      target: z.string().optional().describe('Target for click action'),
+      url: z.string().optional().describe('URL for navigate action'),
+    })
+    .optional()
+    .describe('Action to trigger the download'),
+});
+
+const tableExtractSchema = z.object({
+  action: z.literal('table_extract').describe('Extract structured HTML tables'),
+  selector: z.string().optional().describe('CSS selector for a specific table'),
+  maxTables: z
+    .number()
+    .int()
+    .min(1)
+    .max(50)
+    .optional()
+    .describe('Maximum tables to extract'),
+  includeCaptions: z
+    .boolean()
+    .optional()
+    .describe('Include table captions in output'),
+  flattenSpans: z
+    .boolean()
+    .optional()
+    .describe('Flatten colspan/rowspan into individual cells'),
+});
+
+const networkInterceptSchema = z.object({
+  action: z
+    .literal('network_intercept')
+    .describe('Enhanced network interception: block, inject headers, modify responses'),
+  op: z
+    .enum(['block', 'inject', 'modify', 'unblock', 'list'])
+    .describe('Interception operation'),
+  blockTypes: z
+    .array(
+      z.enum(['image', 'font', 'stylesheet', 'media', 'script', 'fetch', 'websocket', 'other']),
+    )
+    .optional()
+    .describe('Resource types to block'),
+  blockPatterns: z
+    .array(z.string())
+    .optional()
+    .describe('URL patterns to block (glob-style)'),
+  allowPatterns: z
+    .array(z.string())
+    .optional()
+    .describe('URL patterns to allow (overrides blocks)'),
+  injectPatterns: z
+    .array(z.string())
+    .optional()
+    .describe('URL patterns for header injection'),
+  injectHeaders: z
+    .record(z.string(), z.string())
+    .optional()
+    .describe('Headers to inject {key: value}'),
+  modifyPatterns: z
+    .array(z.string())
+    .optional()
+    .describe('URL patterns for response modification'),
+  modifyStatus: z
+    .number()
+    .int()
+    .min(100)
+    .max(599)
+    .optional()
+    .describe('New HTTP status code'),
+  modifyBody: z.string().optional().describe('Replacement response body'),
+  modifyHeaders: z
+    .record(z.string(), z.string())
+    .optional()
+    .describe('Replacement response headers'),
+});
+
+const resourceTimingSchema = z.object({
+  action: z
+    .literal('resource_timing')
+    .describe('Return Navigation Timing and Resource Timing API data'),
+});
+
+const diffSchema = z.object({
+  action: z
+    .literal('diff')
+    .describe('Take a DOM snapshot, perform actions, return structural diff'),
+  actions: z
+    .array(
+      z.object({
+        action: z
+          .enum(['click', 'type', 'select', 'wait', 'navigate', 'scroll'])
+          .describe('Action to perform'),
+        target: z.string().optional().describe('Target selector'),
+        value: z.string().optional().describe('Value (for type/select)'),
+        time: z.number().optional().describe('Wait time in seconds'),
+      }),
+    )
+    .describe('Actions to perform between snapshots'),
+  selector: z
+    .string()
+    .optional()
+    .describe('Scope diff to a CSS selector (default: body)'),
+  maxChanges: z
+    .number()
+    .int()
+    .min(1)
+    .max(500)
+    .optional()
+    .describe('Maximum changes to report'),
+});
+
 // ── Config gates ─────────────────────────────────────────────────────────────
 
 function browserDisabledIssue(cfg: SearchConfig): string | null {
@@ -221,6 +475,9 @@ function llmRequiredForAct(cfg: SearchConfig): string | null {
 
 /** Track which pages have request tracking active to avoid duplicate listeners. */
 const trackingPages = new WeakSet();
+
+/** Track download collectors per page to avoid casting Page to Record<string, unknown>. */
+const downloadCollectors = new WeakMap<object, { cleanup: () => void; waitForDownloads: () => Promise<DownloadResult[]> }>();
 
 async function getOrCreateSession(
   cfg: SearchConfig,
@@ -363,7 +620,13 @@ const browserFamily: FamilyDefinition = {
     'Interactive browser control via Playwright + CDP, with optional CloakBrowser launch backend. Use the `action` field to choose: ' +
     '"navigate" to go to a URL, "snapshot" to capture the page structure as accessible elements, ' +
     '"click"/"type" to interact, "evaluate" to run JavaScript, "screenshot" to capture images, ' +
-    '"extract" to pull structured data, "wait" for conditions, and "session" to manage the browser lifecycle.',
+    '"extract" to pull structured data, "act" for natural-language instructions, ' +
+    '"wait" / "wait_for" for conditions, "dialog_handle" for alert/confirm/prompt, ' +
+    '"iframe_context" to switch frames, "scroll_to_load" for infinite scroll, ' +
+    '"paginate" to walk paginated content, "download" to intercept file downloads, ' +
+    '"table_extract" for structured tables, "network_intercept" to block/inject/modify requests, ' +
+    '"resource_timing" for performance data, "diff" for DOM change detection, ' +
+    'and "session" / "tabs" / "storage" / "network" / "pdf" for lifecycle management.',
   actions: [
     // ── navigate ──────────────────────────────────────────────────────────
     {
@@ -1076,6 +1339,411 @@ const browserFamily: FamilyDefinition = {
           default:
             throw new Error(`Unknown session op: ${op}`);
         }
+      },
+      configIssue: browserDisabledIssue,
+    },
+    // ── wait_for (condition-based) ────────────────────────────────────────
+    {
+      name: 'wait_for',
+      description: 'Wait for condition-based element state (visible, gone, has-text, count)',
+      schema: waitForSchema,
+      handler: async (args, cfg) => {
+        const { conditions } = args as {
+          conditions: {
+            condition: 'visible' | 'gone' | 'has-text' | 'count';
+            selector: string;
+            timeout?: number;
+            text?: string;
+            count?: number;
+            countOperator?: '>=' | '<=' | '==' | '>' | '<';
+          }[];
+        };
+        return withSession(cfg, async (page) => {
+          const { waitForConditions } = await import('../../browser/waitForEnhanced.js');
+          const results = await waitForConditions(page, conditions);
+          return {
+            results,
+            allSatisfied: results.every((r) => r.satisfied),
+            totalConditions: results.length,
+            satisfiedCount: results.filter((r) => r.satisfied).length,
+          };
+        });
+      },
+      configIssue: browserDisabledIssue,
+    },
+    // ── dialog_handle ─────────────────────────────────────────────────────
+    {
+      name: 'dialog_handle',
+      description: 'Handle browser dialogs (alert, confirm, prompt)',
+      schema: dialogSchema,
+      handler: async (args, cfg) => {
+        const { op, accept, promptText, maxDialogs } = args as {
+          op: string;
+          accept?: boolean;
+          promptText?: string;
+          maxDialogs?: number;
+        };
+        return withSession(cfg, async (page) => {
+          const {
+            startDialogHandler,
+            stopDialogHandler,
+            handleCurrentDialog,
+            getDialogHistory,
+            clearDialogHistory,
+          } = await import('../../browser/dialogs.js');
+
+          switch (op) {
+            case 'auto-accept':
+              startDialogHandler(page, {
+                accept: true,
+                promptText: promptText ?? '',
+                maxDialogs: maxDialogs ?? 50,
+              });
+              return { started: true, mode: 'auto-accept' };
+            case 'auto-dismiss':
+              startDialogHandler(page, {
+                accept: false,
+                maxDialogs: maxDialogs ?? 50,
+              });
+              return { started: true, mode: 'auto-dismiss' };
+            case 'handle-current': {
+              const result = await handleCurrentDialog(page, accept ?? true, promptText);
+              return { handled: result !== null, result };
+            }
+            case 'stop':
+              stopDialogHandler(page);
+              return { stopped: true };
+            case 'history':
+              return { history: getDialogHistory(page) };
+            case 'clear':
+              clearDialogHistory(page);
+              return { cleared: true };
+            default:
+              throw new Error(`Unknown dialog op: ${op}`);
+          }
+        });
+      },
+      configIssue: browserDisabledIssue,
+    },
+    // ── iframe_context ────────────────────────────────────────────────────
+    {
+      name: 'iframe_context',
+      description: 'List frames or switch into an iframe',
+      schema: iframeSchema,
+      handler: async (args, cfg) => {
+        const { op, by, value } = args as {
+          op: string;
+          by?: 'name' | 'url' | 'index' | 'selector';
+          value?: string | number;
+        };
+        return withSession(cfg, async (page) => {
+          const { listFrames, switchToFrame } = await import('../../browser/iframeContext.js');
+
+          switch (op) {
+            case 'list': {
+              const frames = listFrames(page);
+              return { frames, totalFrames: frames.length };
+            }
+            case 'switch': {
+              if (!by || value === undefined) {
+                throw new Error('by and value are required for iframe_context.switch');
+              }
+              // Guard: index requires number, name/url/selector require string
+              if (by === 'index' && typeof value !== 'number') {
+                throw new Error('value must be a number when by is "index"');
+              }
+              if ((by === 'name' || by === 'url' || by === 'selector') && typeof value !== 'string') {
+                throw new Error('value must be a string when by is "name", "url", or "selector"');
+              }
+              return switchToFrame(page, { by, value });
+            }
+            default:
+              throw new Error(`Unknown iframe op: ${op}`);
+          }
+        });
+      },
+      configIssue: browserDisabledIssue,
+    },
+    // ── scroll_to_load ────────────────────────────────────────────────────
+    {
+      name: 'scroll_to_load',
+      description: 'Infinite scroll / lazy-load handler',
+      schema: scrollToLoadSchema,
+      handler: async (args, cfg) => {
+        const { maxScrolls, scrollDelayMs, direction, scrollPixels, timeoutMs, scrollContainer } =
+          args as {
+            maxScrolls?: number;
+            scrollDelayMs?: number;
+            direction?: 'down' | 'up';
+            scrollPixels?: number;
+            timeoutMs?: number;
+            scrollContainer?: string;
+          };
+        return withSession(cfg, async (page) => {
+          const { scrollToLoad } = await import('../../browser/scrollToLoad.js');
+          // exactOptionalPropertyTypes: filter out undefined values
+          const scrollOpts: Record<string, unknown> = {};
+          if (maxScrolls !== undefined) scrollOpts.maxScrolls = maxScrolls;
+          if (scrollDelayMs !== undefined) scrollOpts.scrollDelayMs = scrollDelayMs;
+          if (direction !== undefined) scrollOpts.direction = direction;
+          if (scrollPixels !== undefined) scrollOpts.scrollPixels = scrollPixels;
+          if (timeoutMs !== undefined) scrollOpts.timeoutMs = timeoutMs;
+          if (scrollContainer !== undefined) scrollOpts.scrollContainer = scrollContainer;
+          return scrollToLoad(page, scrollOpts);
+        });
+      },
+      configIssue: browserDisabledIssue,
+    },
+    // ── paginate ──────────────────────────────────────────────────────────
+    {
+      name: 'paginate',
+      description: 'Auto-walk paginated content',
+      schema: paginateSchema,
+      handler: async (args, cfg) => {
+        const { nextSelector, maxPages, waitBetweenMs, contentSelector, extractMode } = args as {
+          nextSelector?: string;
+          maxPages?: number;
+          waitBetweenMs?: number;
+          contentSelector?: string;
+          extractMode?: 'full' | 'content-only';
+        };
+        return withSession(cfg, async (page) => {
+          const { paginate } = await import('../../browser/paginate.js');
+          const pagOpts: Record<string, unknown> = {};
+          if (nextSelector !== undefined) pagOpts.nextSelector = nextSelector;
+          if (maxPages !== undefined) pagOpts.maxPages = maxPages;
+          if (waitBetweenMs !== undefined) pagOpts.waitBetweenMs = waitBetweenMs;
+          if (contentSelector !== undefined) pagOpts.contentSelector = contentSelector;
+          if (extractMode !== undefined) pagOpts.extractMode = extractMode;
+          return paginate(page, pagOpts);
+        });
+      },
+      configIssue: browserDisabledIssue,
+    },
+    // ── download ──────────────────────────────────────────────────────────
+    {
+      name: 'download',
+      description: 'Intercept file downloads and return content',
+      schema: downloadSchema,
+      handler: async (args, cfg) => {
+        const { op, savePath, maxSize, trigger } = args as {
+          op: string;
+          savePath?: string;
+          maxSize?: number;
+          trigger?: { action: string; target?: string; url?: string };
+        };
+        return withSession(cfg, async (page) => {
+          const { interceptDownload, startDownloadCollection } =
+            await import('../../browser/download.js');
+
+          switch (op) {
+            case 'intercept': {
+              if (!trigger) throw new Error('trigger is required for download.intercept');
+              const dlCfg: Record<string, unknown> = {};
+              if (savePath !== undefined) dlCfg.savePath = savePath;
+              if (maxSize !== undefined) dlCfg.maxSize = maxSize;
+              const result = await interceptDownload(
+                page,
+                async () => {
+                  if (trigger.action === 'click' && trigger.target) {
+                    await page.locator(trigger.target).click();
+                  } else if (trigger.action === 'navigate' && trigger.url) {
+                    await page.goto(trigger.url);
+                  }
+                },
+                dlCfg,
+              );
+              return { downloaded: result !== null, result };
+            }
+            case 'start-collection': {
+              // Start collecting downloads; return a handle
+              const collector = startDownloadCollection(page, savePath, maxSize);
+              // Store the collector reference for 'get-collected' to use
+              downloadCollectors.set(page, collector);
+              return { started: true, savePath };
+            }
+            case 'get-collected': {
+              const collector = downloadCollectors.get(page);
+              if (!collector) {
+                return { downloads: [] };
+              }
+              const downloads = await collector.waitForDownloads();
+              return { downloads };
+            }
+            default:
+              throw new Error(`Unknown download op: ${op}`);
+          }
+        });
+      },
+      configIssue: browserDisabledIssue,
+    },
+    // ── table_extract ─────────────────────────────────────────────────────
+    {
+      name: 'table_extract',
+      description: 'Extract structured HTML tables',
+      schema: tableExtractSchema,
+      handler: async (args, cfg) => {
+        const { selector, maxTables, includeCaptions, flattenSpans } = args as {
+          selector?: string;
+          maxTables?: number;
+          includeCaptions?: boolean;
+          flattenSpans?: boolean;
+        };
+        return withSession(cfg, async (page) => {
+          const { extractTables } = await import('../../browser/tableExtract.js');
+          const tblOpts: Record<string, unknown> = {};
+          if (selector !== undefined) tblOpts.selector = selector;
+          if (maxTables !== undefined) tblOpts.maxTables = maxTables;
+          if (includeCaptions !== undefined) tblOpts.includeCaptions = includeCaptions;
+          if (flattenSpans !== undefined) tblOpts.flattenSpans = flattenSpans;
+          return extractTables(page, tblOpts);
+        });
+      },
+      configIssue: browserDisabledIssue,
+    },
+    // ── network_intercept ─────────────────────────────────────────────────
+    {
+      name: 'network_intercept',
+      description: 'Enhanced network interception: block resources, inject headers, modify responses',
+      schema: networkInterceptSchema,
+      handler: async (args, cfg) => {
+        const {
+          op,
+          blockTypes,
+          blockPatterns,
+          allowPatterns,
+          injectPatterns,
+          injectHeaders: injectHeadersConfig,
+          modifyPatterns,
+          modifyStatus,
+          modifyBody,
+          modifyHeaders,
+        } = args as {
+          op: string;
+          blockTypes?: ('image' | 'font' | 'stylesheet' | 'media' | 'script' | 'fetch' | 'websocket' | 'other')[];
+          blockPatterns?: string[];
+          allowPatterns?: string[];
+          injectPatterns?: string[];
+          injectHeaders?: Record<string, string>;
+          modifyPatterns?: string[];
+          modifyStatus?: number;
+          modifyBody?: string;
+          modifyHeaders?: Record<string, string>;
+        };
+        return withSession(cfg, async (page) => {
+          const {
+            blockResources,
+            injectHeaders: doInjectHeaders,
+            modifyResponse,
+            removeAllIntercepts,
+            listIntercepts,
+          } = await import('../../browser/networkInterceptEnhanced.js');
+
+          switch (op) {
+            case 'block': {
+              const blockCfg: Record<string, unknown> = {};
+              if (blockTypes !== undefined) blockCfg.blockTypes = blockTypes;
+              if (blockPatterns !== undefined) blockCfg.blockPatterns = blockPatterns;
+              if (allowPatterns !== undefined) blockCfg.allowPatterns = allowPatterns;
+              return blockResources(page, blockCfg);
+            }
+            case 'inject': {
+              if (!injectHeadersConfig) throw new Error('injectHeaders is required for network_intercept.inject');
+              type InjCfg = Parameters<typeof doInjectHeaders>[1];
+              const injCfg: InjCfg = {
+                headers: injectHeadersConfig,
+                ...(injectPatterns !== undefined ? { patterns: injectPatterns } : {}),
+              };
+              return doInjectHeaders(page, injCfg);
+            }
+            case 'modify': {
+              if (!modifyPatterns || modifyPatterns.length === 0)
+                throw new Error('modifyPatterns is required for network_intercept.modify');
+              type ModCfg = Parameters<typeof modifyResponse>[1];
+              const modCfg: ModCfg = {
+                patterns: modifyPatterns,
+                ...(modifyStatus !== undefined ? { status: modifyStatus } : {}),
+                ...(modifyBody !== undefined ? { body: modifyBody } : {}),
+                ...(modifyHeaders !== undefined ? { headers: modifyHeaders } : {}),
+              };
+              return modifyResponse(page, modCfg);
+            }
+            case 'unblock':
+              return removeAllIntercepts(page);
+            case 'list':
+              return listIntercepts(page);
+            default:
+              throw new Error(`Unknown network_intercept op: ${op}`);
+          }
+        });
+      },
+      configIssue: browserDisabledIssue,
+    },
+    // ── resource_timing ───────────────────────────────────────────────────
+    {
+      name: 'resource_timing',
+      description: 'Return Navigation Timing and Resource Timing API data',
+      schema: resourceTimingSchema,
+      handler: async (_args, cfg) => {
+        return withSession(cfg, async (page) => {
+          const { getResourceTiming } = await import('../../browser/resourceTiming.js');
+          return getResourceTiming(page);
+        });
+      },
+      configIssue: browserDisabledIssue,
+    },
+    // ── diff ──────────────────────────────────────────────────────────────
+    {
+      name: 'diff',
+      description: 'Take a DOM snapshot, perform actions, return structural diff',
+      schema: diffSchema,
+      handler: async (args, cfg) => {
+        const { actions, selector, maxChanges } = args as {
+          actions: { action: string; target?: string; value?: string; time?: number }[];
+          selector?: string;
+          maxChanges?: number;
+        };
+        return withSession(cfg, async (page) => {
+          const { diffAfterAction } = await import('../../browser/diffDom.js');
+          const diffOpts: Record<string, unknown> = {};
+          if (selector !== undefined) diffOpts.selector = selector;
+          if (maxChanges !== undefined) diffOpts.maxChanges = maxChanges;
+          return diffAfterAction(
+            page,
+            async () => {
+              for (const step of actions) {
+                switch (step.action) {
+                  case 'click':
+                    if (step.target) await page.locator(step.target).click();
+                    break;
+                  case 'type':
+                    if (step.target && step.value)
+                      await page.locator(step.target).fill(step.value);
+                    break;
+                  case 'select':
+                    if (step.target && step.value)
+                      await page.locator(step.target).selectOption(step.value);
+                    break;
+                  case 'wait':
+                    await page.waitForTimeout((step.time ?? 1) * 1000);
+                    break;
+                  case 'navigate':
+                    if (step.value) {
+                      assertSafeUrl(step.value);
+                      await page.goto(step.value, { waitUntil: 'domcontentloaded' });
+                    }
+                    break;
+                  case 'scroll':
+                    await page.mouse.wheel(0, parseInt(step.value ?? '300', 10));
+                    break;
+                  default:
+                    break;
+                }
+              }
+            },
+            diffOpts,
+          );
+        });
       },
       configIssue: browserDisabledIssue,
     },
