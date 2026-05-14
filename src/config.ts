@@ -12,6 +12,7 @@ import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { logger } from './logger.js';
 import { DEFAULT_SEMANTIC_MAX_BYTES } from './semanticLimits.js';
+import type { AccessConfig } from './config/types.js';
 
 /** Load .env from the project root if present. Only sets vars not already in the environment. */
 function loadDotEnv(pkgRoot: string): void {
@@ -264,6 +265,8 @@ export interface SearchConfig {
   browser: BrowserConfig;
   rescoreWeights: RescoreConfig;
   challengeLatencyThreshold: number;
+  mcpApiKey?: string;   // Generated on first run; stored encrypted.
+  access: AccessConfig; // External access configuration.
 }
 
 const DEFAULTS: Omit<SearchConfig, 'rescoreWeights'> = {
@@ -333,6 +336,16 @@ const DEFAULTS: Omit<SearchConfig, 'rescoreWeights'> = {
     autoSave: true,
   },
   challengeLatencyThreshold: 5000,
+  mcpApiKey: '',
+  access: {
+    provider: 'localhost',
+    exposeDashboardExternally: false,
+    tailscale: {
+      serveConfigured: false,
+      funnelConfigured: false,
+      allowDashboardOverFunnel: false,
+    },
+  },
   browser: {
     enabled: false,
     executablePath: '',
@@ -748,7 +761,8 @@ function loadFromEnv(): EnvConfig {
       if (bCloakLocale !== undefined) browserCfg.cloakLocale = bCloakLocale;
       if (bCloakTimezone !== undefined) browserCfg.cloakTimezone = bCloakTimezone;
       if (bCloakGeoip !== undefined) browserCfg.cloakGeoip = bCloakGeoip === 'true';
-      if (bCloakStealthArgs !== undefined) browserCfg.cloakStealthArgs = bCloakStealthArgs !== 'false';
+      if (bCloakStealthArgs !== undefined)
+        browserCfg.cloakStealthArgs = bCloakStealthArgs !== 'false';
       cfg.browser = browserCfg;
     }
   }
@@ -1079,7 +1093,9 @@ export function loadConfig(): SearchConfig {
         envConfig.browser?.cloakTimezone ??
         DEFAULTS.browser.cloakTimezone,
       cloakGeoip:
-        fileConfig.browser?.cloakGeoip ?? envConfig.browser?.cloakGeoip ?? DEFAULTS.browser.cloakGeoip,
+        fileConfig.browser?.cloakGeoip ??
+        envConfig.browser?.cloakGeoip ??
+        DEFAULTS.browser.cloakGeoip,
       cloakStealthArgs:
         fileConfig.browser?.cloakStealthArgs ??
         envConfig.browser?.cloakStealthArgs ??
@@ -1177,6 +1193,26 @@ export function loadConfig(): SearchConfig {
         DEFAULTS.deepResearch.autoSave,
     },
     rescoreWeights: DEFAULT_RESCORE_WEIGHTS,
+    mcpApiKey: (fileConfig as Partial<SearchConfig>).mcpApiKey ?? '',
+    access: {
+      provider:
+        ((fileConfig as Partial<SearchConfig>).access?.provider) ??
+        DEFAULTS.access.provider,
+      exposeDashboardExternally:
+        ((fileConfig as Partial<SearchConfig>).access?.exposeDashboardExternally) ??
+        DEFAULTS.access.exposeDashboardExternally,
+      tailscale: {
+        serveConfigured:
+          ((fileConfig as Partial<SearchConfig>).access?.tailscale?.serveConfigured) ??
+          DEFAULTS.access.tailscale.serveConfigured,
+        funnelConfigured:
+          ((fileConfig as Partial<SearchConfig>).access?.tailscale?.funnelConfigured) ??
+          DEFAULTS.access.tailscale.funnelConfigured,
+        allowDashboardOverFunnel:
+          ((fileConfig as Partial<SearchConfig>).access?.tailscale?.allowDashboardOverFunnel) ??
+          DEFAULTS.access.tailscale.allowDashboardOverFunnel,
+      },
+    },
   };
 
   // Validate weights
