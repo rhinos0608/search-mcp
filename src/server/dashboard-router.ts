@@ -269,10 +269,14 @@ async function handleApi(
       return;
     }
     const expected = configManager.get().mcpApiKey ?? '';
+    const configKey = process.env.SEARCH_MCP_CONFIG_KEY ?? '';
     await new Promise((r) => setTimeout(r, 500));
     let match = false;
     if (expected.length > 0 && apiKey.length === expected.length) {
       match = timingSafeEqual(Buffer.from(apiKey), Buffer.from(expected));
+    }
+    if (!match && configKey.length > 0 && apiKey.length === configKey.length) {
+      match = timingSafeEqual(Buffer.from(apiKey), Buffer.from(configKey));
     }
     if (!match) {
       rateLimiter.recordFailure(ip);

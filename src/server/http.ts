@@ -13,15 +13,21 @@ const PKG_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const DASHBOARD_DIST = join(PKG_ROOT, 'dist-dashboard');
 
 function safeTimingEqual(a: string, b: string): boolean {
-  try { return timingSafeEqual(Buffer.from(a), Buffer.from(b)); }
-  catch { return false; }
+  try {
+    return timingSafeEqual(Buffer.from(a), Buffer.from(b));
+  } catch {
+    return false;
+  }
 }
 
 function validateMcpKey(req: http.IncomingMessage, apiKey: string): boolean {
   if (!apiKey) return false;
   const auth = req.headers.authorization ?? '';
   if (auth.startsWith('Bearer ')) {
-    return safeTimingEqual(auth.slice(7).trim(), apiKey);
+    const token = auth.slice(7).trim();
+    if (safeTimingEqual(token, apiKey)) return true;
+    const configKey = process.env.SEARCH_MCP_CONFIG_KEY ?? '';
+    return configKey.length > 0 && safeTimingEqual(token, configKey);
   }
   if (process.env.MCP_ALLOW_QUERY_KEY === 'true') {
     const url = new URL(req.url ?? '/', 'http://localhost');
@@ -37,7 +43,9 @@ export async function startHttpServer(
   port: number,
 ): Promise<http.Server> {
   if (process.env.MCP_ALLOW_QUERY_KEY === 'true') {
-    logger.warn('MCP_ALLOW_QUERY_KEY=true: query-param auth is enabled. API key may appear in logs and browser history.');
+    logger.warn(
+      'MCP_ALLOW_QUERY_KEY=true: query-param auth is enabled. API key may appear in logs and browser history.',
+    );
   }
 
   const ttlMs = Number(process.env.SESSION_TTL_HOURS ?? 12) * 3600 * 1000;
@@ -71,7 +79,9 @@ export async function startHttpServer(
           return;
         }
 
-        const sessionId = req.headers['mcp-session-id'] as string | undefined;
+        const rawSessionId = req.headers['mcp-session-id'] as string | undefined;
+        const sessionId =
+          rawSessionId && /^[a-zA-Z0-9-]{1,128}$/.test(rawSessionId) ? rawSessionId : undefined;
         const result = await transportManager.getOrCreate(sessionId);
         if (result === null) {
           res.writeHead(404, { 'Content-Type': 'application/json' });
@@ -97,7 +107,16 @@ export async function startHttpServer(
           bodyBuf = buf;
         }
 
-        const parsedBody: unknown = bodyBuf ? JSON.parse(bodyBuf.toString('utf8')) as unknown : undefined;
+        let parsedBody: unknown = undefined;
+        if (bodyBuf) {
+          try {
+            parsedBody = JSON.parse(bodyBuf.toString('utf8')) as unknown;
+          } catch {
+            res.writeHead(400, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: 'Invalid JSON in request body' }));
+            return;
+          }
+        }
         await result.transport.handleRequest(req, res, parsedBody);
         return;
       }
@@ -125,7 +144,9 @@ export async function startHttpServer(
   }
 
   await new Promise<void>((resolve, reject) => {
-    server.listen(port, '0.0.0.0', () => { resolve(); });
+    server.listen(port, '0.0.0.0', () => {
+      resolve();
+    });
     server.on('error', reject);
   });
 
