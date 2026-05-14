@@ -17,6 +17,8 @@ import type {
   SubQuestion,
 } from './types.js';
 import { curateEvidenceSources } from './sourceQuality.js';
+import { buildFindingLinkage, clusterIdByFindingId } from './findingLinkage.js';
+import { applyReportValidation } from './provenance.js';
 
 // ── Utilities ───────────────────────────────────────────────────────────────────
 
@@ -40,7 +42,12 @@ export class ResearchSynthesizer {
   }
 
   synthesize(): ResearchReport {
-    const findings = this.state.findings;
+    const linkage = buildFindingLinkage(this.state.findings);
+    const clusterByFinding = clusterIdByFindingId(linkage.clusters);
+    const findings = this.state.findings.map((finding) => {
+      const clusterId = clusterByFinding.get(finding.id);
+      return clusterId ? { ...finding, clusterId } : finding;
+    });
     const sources = this.state.sources;
     const contradictions = this.state.contradictions;
     const subQuestions = this.state.subQuestions;
@@ -78,6 +85,7 @@ export class ResearchSynthesizer {
       title: c.source.title,
       url: c.source.url,
       sourceType: c.source.sourceType,
+      ...(c.source.authorityClass ? { authorityClass: c.source.authorityClass } : {}),
       tier: c.tier,
       domain: c.source.domain,
     }));
@@ -98,7 +106,7 @@ export class ResearchSynthesizer {
       );
     }
 
-    return {
+    const report: ResearchReport = {
       query: this.state.query,
       classification: this.inferClassification(),
       depth: this.inferDepth(),
@@ -121,7 +129,11 @@ export class ResearchSynthesizer {
       sourceDiversity,
       findingCount: findings.length,
       evidenceSources,
+      findingClusters: linkage.clusters,
+      findingClusterEdges: linkage.edges,
     };
+
+    return applyReportValidation(report, sources, findings);
   }
 
   // ── Internal builders ──────────────────────────────────────────────────

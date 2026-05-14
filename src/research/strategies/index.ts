@@ -29,9 +29,4 @@ if (!strategyRegistry.has('tree')) {
 }
 
 export { strategyRegistry, PipelineStrategy, AgentStrategy, TreeStrategy };
-export type {
-  ResearchStrategy,
-  StrategyContext,
-  StrategyFactory,
-  ProgressCallback,
-};
+export type { ResearchStrategy, StrategyContext, StrategyFactory, ProgressCallback };

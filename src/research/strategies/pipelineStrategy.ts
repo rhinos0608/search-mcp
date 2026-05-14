@@ -102,7 +102,7 @@ export class PipelineStrategy implements ResearchStrategy {
             return await this.synthesizePartial(ctx);
           }
 
-                // ── Gap analysis loop ───────────────────────────────
+          // ── Gap analysis loop ───────────────────────────────
           const gapLoopPhase = new GapLoopPhase();
           await gapLoopPhase.execute(query, ctx);
 
@@ -163,8 +163,12 @@ export class PipelineStrategy implements ResearchStrategy {
 
   private async runWorkerAgentPhase(ctx: StrategyContext, query: string): Promise<void> {
     const decomposer = new (await import('../decomposer.js')).QueryDecomposer();
-    const { classification: _classification, subQuestions, disambiguationNote, extractedEntities } =
-      decomposer.decompose(query);
+    const {
+      classification: _classification,
+      subQuestions,
+      disambiguationNote,
+      extractedEntities,
+    } = decomposer.decompose(query);
 
     ctx.state.transitionTo('discovery');
     logger.info({ subQuestions: subQuestions.length }, 'V5: Worker agent phase starting');
@@ -255,13 +259,21 @@ export class PipelineStrategy implements ResearchStrategy {
     );
     await this.reportProgress(ctx, 100, 'Pipeline research complete', 'complete');
 
-    return { report, timeline: this.progress.getTimeline() };
+    return {
+      report,
+      timeline: this.progress.getTimeline(),
+      canonicalFindings: [...state.findings],
+    };
   }
 
   private async synthesizePartial(ctx: StrategyContext): Promise<ResearchResult> {
     const state = ctx.state.getState();
     const report = new ResearchSynthesizer(state).synthesize();
-    return { report, timeline: this.progress.getTimeline() };
+    return {
+      report,
+      timeline: this.progress.getTimeline(),
+      canonicalFindings: [...state.findings],
+    };
   }
 
   async close(): Promise<void> {

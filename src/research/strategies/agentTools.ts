@@ -54,9 +54,20 @@ export function buildAgentTools(ctx: StrategyContext, collector: CitationCollect
   tools.push(createHackerNewsTool(getTools, collector));
   tools.push(createStackExchangeTool(collector));
 
+  // Multi-backend academic search (fans out to all research backends)
+  tools.push(createAcademicSearchTool(collector));
+
   // Free standalone tools (PubMed, Wikipedia — no API key needed)
   tools.push(createPubMedSearchTool(collector));
   tools.push(createWikipediaSearchTool(collector));
+
+  // Free academic/discovery backends
+  tools.push(createOpenAlexSearchTool(collector));
+  tools.push(createCrossrefSearchTool(collector));
+  tools.push(createDataCiteSearchTool(collector));
+  tools.push(createRorSearchTool(collector));
+  tools.push(createGdeltSearchTool(collector));
+  tools.push(createWikidataSearchTool(collector));
 
   // Conditional
   if ((cfg.github.token ?? '').length > 0) {
@@ -273,10 +284,7 @@ function createGitHubSearchTool(
           'github',
         );
         const text = results
-          .map(
-            (r, i) =>
-              `[${String(startIdx + i)}] ${r.fullName}\n${r.htmlUrl}\n${r.description}`,
-          )
+          .map((r, i) => `[${String(startIdx + i)}] ${r.fullName}\n${r.htmlUrl}\n${r.description}`)
           .join('\n\n');
         return { content: text || 'No GitHub results found.' };
       } catch (err) {
@@ -570,6 +578,255 @@ function createWikipediaSearchTool(collector: CitationCollector): AgentTool {
       } catch (err) {
         return {
           content: `Wikipedia search failed: ${err instanceof Error ? err.message : String(err)}`,
+          error: 'search failed',
+        };
+      }
+    },
+  };
+}
+
+// ── Multi-backend academic ────────────────────────────────────────────
+
+function createAcademicSearchTool(collector: CitationCollector): AgentTool {
+  return {
+    name: 'search_academic',
+    description:
+      'Search across ALL available research backends (ArXiv, Semantic Scholar, OpenAlex, Crossref, PubMed, Wikipedia, HN, SO, DataCite, ROR, GDELT, Wikidata) in parallel. Best for comprehensive literature and cross-disciplinary searches.',
+    parameters: {
+      query: { type: 'string', description: 'The search query', required: true },
+      limit: { type: 'number', description: 'Max results (1-20, default 10)' },
+    },
+    execute: async (args) => {
+      const query = typeof args.query === 'string' ? args.query : '';
+      if (!query) return { content: 'Error: query is required', error: 'missing query' };
+      const limit = Math.min(Number(args.limit) || 10, 20);
+
+      try {
+        const { academicSearch } = await import('../../tools/academicSearch.js');
+        const result = await academicSearch(query, 'all', limit);
+        const startIdx = collector.addResults(
+          result.papers.map((r) => ({ title: r.title, link: r.url, snippet: r.abstract })),
+          'academic',
+        );
+        const text = result.papers
+          .map(
+            (r, i) =>
+              `[${String(startIdx + i)}] [${r.source}] ${r.title}\n${r.url}\n${r.abstract}${r.year ? ` (${String(r.year)})` : ''}`,
+          )
+          .join('\n\n');
+        return { content: text || 'No academic results found.' };
+      } catch (err) {
+        return {
+          content: `Academic search failed: ${err instanceof Error ? err.message : String(err)}`,
+          error: 'search failed',
+        };
+      }
+    },
+  };
+}
+
+// ── Free academic/discovery backends ────────────────────────────────────
+
+function createOpenAlexSearchTool(collector: CitationCollector): AgentTool {
+  return {
+    name: 'search_openalex',
+    description:
+      'Search OpenAlex scholarly works index (papers, authors, venues). Free, no API key needed.',
+    parameters: {
+      query: { type: 'string', description: 'The search query', required: true },
+      limit: { type: 'number', description: 'Max results (1-20, default 10)' },
+    },
+    execute: async (args) => {
+      const query = typeof args.query === 'string' ? args.query : '';
+      if (!query) return { content: 'Error: query is required', error: 'missing query' };
+      const limit = Math.min(Number(args.limit) || 10, 20);
+
+      try {
+        const { searchOpenAlex } = await import('../../tools/openalexSearch.js');
+        const results = await searchOpenAlex(query, limit);
+        const startIdx = collector.addResults(
+          results.map((r) => ({ title: r.title, link: r.link, snippet: r.snippet })),
+          'openalex',
+        );
+        const text = results
+          .map((r, i) => `[${String(startIdx + i)}] ${r.title}\n${r.link}\n${r.snippet}`)
+          .join('\n\n');
+        return { content: text || 'No OpenAlex results found.' };
+      } catch (err) {
+        return {
+          content: `OpenAlex search failed: ${err instanceof Error ? err.message : String(err)}`,
+          error: 'search failed',
+        };
+      }
+    },
+  };
+}
+
+function createCrossrefSearchTool(collector: CitationCollector): AgentTool {
+  return {
+    name: 'search_crossref',
+    description:
+      'Search Crossref for DOIs, journal articles, and citation metadata. Free, no API key needed.',
+    parameters: {
+      query: { type: 'string', description: 'The search query', required: true },
+      limit: { type: 'number', description: 'Max results (1-20, default 10)' },
+    },
+    execute: async (args) => {
+      const query = typeof args.query === 'string' ? args.query : '';
+      if (!query) return { content: 'Error: query is required', error: 'missing query' };
+      const limit = Math.min(Number(args.limit) || 10, 20);
+
+      try {
+        const { searchCrossref } = await import('../../tools/crossrefSearch.js');
+        const results = await searchCrossref(query, limit);
+        const startIdx = collector.addResults(
+          results.map((r) => ({ title: r.title, link: r.link, snippet: r.snippet })),
+          'crossref',
+        );
+        const text = results
+          .map((r, i) => `[${String(startIdx + i)}] ${r.title}\n${r.link}\n${r.snippet}`)
+          .join('\n\n');
+        return { content: text || 'No Crossref results found.' };
+      } catch (err) {
+        return {
+          content: `Crossref search failed: ${err instanceof Error ? err.message : String(err)}`,
+          error: 'search failed',
+        };
+      }
+    },
+  };
+}
+
+function createDataCiteSearchTool(collector: CitationCollector): AgentTool {
+  return {
+    name: 'search_datacite',
+    description: 'Search DataCite for research datasets and data DOIs. Free, no API key needed.',
+    parameters: {
+      query: { type: 'string', description: 'The search query', required: true },
+      limit: { type: 'number', description: 'Max results (1-20, default 10)' },
+    },
+    execute: async (args) => {
+      const query = typeof args.query === 'string' ? args.query : '';
+      if (!query) return { content: 'Error: query is required', error: 'missing query' };
+      const limit = Math.min(Number(args.limit) || 10, 20);
+
+      try {
+        const { searchDataCite } = await import('../../tools/dataciteSearch.js');
+        const results = await searchDataCite(query, limit);
+        const startIdx = collector.addResults(
+          results.map((r) => ({ title: r.title, link: r.link, snippet: r.snippet })),
+          'datacite',
+        );
+        const text = results
+          .map((r, i) => `[${String(startIdx + i)}] ${r.title}\n${r.link}\n${r.snippet}`)
+          .join('\n\n');
+        return { content: text || 'No DataCite results found.' };
+      } catch (err) {
+        return {
+          content: `DataCite search failed: ${err instanceof Error ? err.message : String(err)}`,
+          error: 'search failed',
+        };
+      }
+    },
+  };
+}
+
+function createRorSearchTool(collector: CitationCollector): AgentTool {
+  return {
+    name: 'search_ror',
+    description: 'Look up research organizations in the ROR registry. Free, no API key needed.',
+    parameters: {
+      query: { type: 'string', description: 'Organization name to look up', required: true },
+      limit: { type: 'number', description: 'Max results (1-20, default 10)' },
+    },
+    execute: async (args) => {
+      const query = typeof args.query === 'string' ? args.query : '';
+      if (!query) return { content: 'Error: query is required', error: 'missing query' };
+      const limit = Math.min(Number(args.limit) || 10, 20);
+
+      try {
+        const { searchRor } = await import('../../tools/rorSearch.js');
+        const results = await searchRor(query, limit);
+        const startIdx = collector.addResults(
+          results.map((r) => ({ title: r.title, link: r.link, snippet: r.snippet })),
+          'ror',
+        );
+        const text = results
+          .map((r, i) => `[${String(startIdx + i)}] ${r.title}\n${r.link}\n${r.snippet}`)
+          .join('\n\n');
+        return { content: text || 'No ROR results found.' };
+      } catch (err) {
+        return {
+          content: `ROR search failed: ${err instanceof Error ? err.message : String(err)}`,
+          error: 'search failed',
+        };
+      }
+    },
+  };
+}
+
+function createGdeltSearchTool(collector: CitationCollector): AgentTool {
+  return {
+    name: 'search_gdelt',
+    description: 'Search GDELT for global news coverage and events. Free, no API key needed.',
+    parameters: {
+      query: { type: 'string', description: 'The search query', required: true },
+      limit: { type: 'number', description: 'Max results (1-20, default 10)' },
+    },
+    execute: async (args) => {
+      const query = typeof args.query === 'string' ? args.query : '';
+      if (!query) return { content: 'Error: query is required', error: 'missing query' };
+      const limit = Math.min(Number(args.limit) || 10, 20);
+
+      try {
+        const { searchGdelt } = await import('../../tools/gdeltSearch.js');
+        const results = await searchGdelt(query, '30d', limit);
+        const startIdx = collector.addResults(
+          results.map((r) => ({ title: r.title, link: r.link, snippet: r.snippet })),
+          'gdelt',
+        );
+        const text = results
+          .map((r, i) => `[${String(startIdx + i)}] ${r.title}\n${r.link}\n${r.snippet}`)
+          .join('\n\n');
+        return { content: text || 'No GDELT results found.' };
+      } catch (err) {
+        return {
+          content: `GDELT search failed: ${err instanceof Error ? err.message : String(err)}`,
+          error: 'search failed',
+        };
+      }
+    },
+  };
+}
+
+function createWikidataSearchTool(collector: CitationCollector): AgentTool {
+  return {
+    name: 'search_wikidata',
+    description:
+      'Search Wikidata for structured knowledge graph entities. Free, no API key needed.',
+    parameters: {
+      query: { type: 'string', description: 'The search query', required: true },
+      limit: { type: 'number', description: 'Max results (1-20, default 10)' },
+    },
+    execute: async (args) => {
+      const query = typeof args.query === 'string' ? args.query : '';
+      if (!query) return { content: 'Error: query is required', error: 'missing query' };
+      const limit = Math.min(Number(args.limit) || 10, 20);
+
+      try {
+        const { searchWikidata } = await import('../../tools/wikidataSearch.js');
+        const results = await searchWikidata(query, 'en', limit);
+        const startIdx = collector.addResults(
+          results.map((r) => ({ title: r.title, link: r.link, snippet: r.snippet })),
+          'wikidata',
+        );
+        const text = results
+          .map((r, i) => `[${String(startIdx + i)}] ${r.title}\n${r.link}\n${r.snippet}`)
+          .join('\n\n');
+        return { content: text || 'No Wikidata results found.' };
+      } catch (err) {
+        return {
+          content: `Wikidata search failed: ${err instanceof Error ? err.message : String(err)}`,
           error: 'search failed',
         };
       }

@@ -32,7 +32,7 @@ export interface LlmCallOptions {
   responseFormat?: 'text' | 'json_object';
   /** AbortSignal to cancel in-flight requests. Merged with the internal timeout. */
   signal?: AbortSignal;
-  /** Request timeout in ms. Defaults to REQUEST_TIMEOUT_MS (60s). */
+  /** Request timeout in ms. Defaults to REQUEST_TIMEOUT_MS (300s / 5 min). */
   timeoutMs?: number;
 }
 
@@ -58,10 +58,19 @@ export interface TokenBudget {
 // ── Constants ────────────────────────────────────────────────────────────────
 
 /** Default per-request timeout (can be overridden per-call via LlmCallOptions.timeoutMs). */
-const REQUEST_TIMEOUT_MS = 60_000;
+const REQUEST_TIMEOUT_MS = 300_000; // 5 minutes
 const ORCHESTRATOR_DEFAULT_TEMPERATURE = 0.7;
 const WORKER_DEFAULT_TEMPERATURE = 0.3;
-const MAX_RETRIES = 1;
+const MAX_RETRIES = 8;
+/** Base delay for exponential backoff in ms. */
+const RETRY_BASE_DELAY_MS = 1_000;
+/** Cap on exponential backoff delay in ms. */
+const RETRY_MAX_DELAY_MS = 60_000;
+
+/** Compute exponential backoff delay: min(base * 2^attempt, maxDelay). */
+function backoffDelay(attempt: number): number {
+  return Math.min(RETRY_BASE_DELAY_MS * 2 ** attempt, RETRY_MAX_DELAY_MS);
+}
 
 // ── Token estimation ─────────────────────────────────────────────────────────
 
@@ -220,9 +229,9 @@ export class DeepResearchLlmClient {
    * Core HTTP call with retry logic.
    *
    * Retry policy:
-   *   - 429 (rate limit): retry once after 1 000 ms
-   *   - 5xx (server error): retry once after 500 ms
-   *   - Network error: retry once after 500 ms
+   *   - Up to 8 retries with exponential backoff (1s, 2s, 4s, …, 60s cap).
+   *   - Retries on: 429 (rate limit), 5xx (server error), network errors.
+   *   - Per-request timeout: 5 minutes (300s).
    * All other statuses return immediately with `success: false`.
    */
   private async callModel(
@@ -303,10 +312,10 @@ export class DeepResearchLlmClient {
           const status = response.status;
           const errorText = await response.text().catch(() => '');
 
-          // Retry once on rate-limit or server errors
+          // Retry with exponential backoff on rate-limit or server errors
           if (attempt < MAX_RETRIES && (status === 429 || status >= 500)) {
-            const delay = status === 429 ? 1000 : 500;
-            logger.warn({ status, attempt, delay }, 'LLM request returned error; retrying');
+            const delay = backoffDelay(attempt);
+            logger.warn({ status, attempt, delay }, 'LLM request returned error; retrying with backoff');
             await new Promise((resolve) => setTimeout(resolve, delay));
             continue;
           }
@@ -344,8 +353,9 @@ export class DeepResearchLlmClient {
       } catch (err) {
         const isLastAttempt = attempt >= MAX_RETRIES;
         if (!isLastAttempt) {
-          logger.warn({ err }, 'LLM request threw; retrying once');
-          await new Promise((resolve) => setTimeout(resolve, 500));
+          const delay = backoffDelay(attempt);
+          logger.warn({ err, attempt, delay }, 'LLM request threw; retrying with backoff');
+          await new Promise((resolve) => setTimeout(resolve, delay));
           continue;
         }
 

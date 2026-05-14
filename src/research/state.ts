@@ -145,7 +145,7 @@ const BUDGET_PROFILES: Record<ResearchDepth, BudgetProfile> = {
     minGapLoops: 1,
     maxToolCalls: 30,
     maxTokens: 100_000,
-    maxTimeMs: 180_000,
+    maxTimeMs: 300_000,
     maxStateEntries: 200,
   },
   standard: {
@@ -167,7 +167,7 @@ const BUDGET_PROFILES: Record<ResearchDepth, BudgetProfile> = {
     minGapLoops: 3,
     maxToolCalls: 200,
     maxTokens: 500_000,
-    maxTimeMs: 900_000,
+    maxTimeMs: 1_800_000,
     maxStateEntries: 1000,
   },
   exhaustive: {
@@ -178,7 +178,7 @@ const BUDGET_PROFILES: Record<ResearchDepth, BudgetProfile> = {
     minGapLoops: 4,
     maxToolCalls: 400,
     maxTokens: 1_000_000,
-    maxTimeMs: 1_800_000,
+    maxTimeMs: 2_700_000,
     maxStateEntries: 2000,
   },
   tree: {
@@ -189,7 +189,7 @@ const BUDGET_PROFILES: Record<ResearchDepth, BudgetProfile> = {
     minGapLoops: 0,
     maxToolCalls: 150,
     maxTokens: 400_000,
-    maxTimeMs: 720_000,
+    maxTimeMs: 900_000,
     maxStateEntries: 500,
   },
 };

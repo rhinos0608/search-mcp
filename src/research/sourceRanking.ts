@@ -1,4 +1,5 @@
-import type { SourceEntry, SourceType } from './types.js';
+import type { AuthorityClass, SourceEntry, SourceType } from './types.js';
+import { classifySourceAuthority } from './provenance.js';
 
 const AUTHORITY_DOMAINS = new Set<string>([
   'arxiv.org',
@@ -57,7 +58,36 @@ function extractDomain(url: string): string {
   }
 }
 
-function domainAuthorityScore(domain: string): number {
+function authorityClassScore(authorityClass: AuthorityClass): number {
+  switch (authorityClass) {
+    case 'official_spec':
+    case 'official_changelog':
+      return 0.98;
+    case 'official_repo':
+      return 0.94;
+    case 'official_vendor':
+      return 0.9;
+    case 'package_registry':
+      return 0.76;
+    case 'vendor_sdk_docs':
+      return 0.72;
+    case 'news':
+      return 0.62;
+    case 'third_party_analysis':
+      return 0.5;
+    case 'encyclopedia':
+      return 0.45;
+    case 'forum_social':
+      return 0.35;
+    case 'unknown':
+      return 0.42;
+  }
+}
+
+function domainAuthorityScore(domain: string, source: SourceEntry): number {
+  const classified = classifySourceAuthority(source);
+  const classifiedScore = authorityClassScore(classified);
+  if (classifiedScore !== 0.42) return classifiedScore;
   if (AUTHORITY_DOMAINS.has(domain)) return 0.85;
   if (domain.endsWith('.edu') || domain.endsWith('.gov')) return 0.8;
   if (domain.includes('blog.') || domain.includes('engineering.')) return 0.65;
@@ -111,7 +141,7 @@ export function rankSource(
   );
 
   // Evidence-weight score: how much to trust extracted findings?
-  const authority = domainAuthorityScore(domain);
+  const authority = domainAuthorityScore(domain, source);
   const typeBase = sourceTypeBaseWeight(source.sourceType);
 
   const evidenceWeight = Math.min(
@@ -136,14 +166,23 @@ function sourceTypeBaseWeight(type: SourceType): number {
     case 'github':
       return 0.8;
     case 'documentation':
-      return 0.8;
+    case 'official_docs':
+    case 'official_blog':
+      return 0.9;
+    case 'vendor_docs':
+      return 0.72;
+    case 'package_registry':
+      return 0.7;
     case 'news':
       return 0.6;
     case 'stackoverflow':
+    case 'forum':
       return 0.6;
     case 'web':
+    case 'unknown':
       return 0.5;
     case 'reddit':
+    case 'social':
       return 0.4;
     case 'hackernews':
       return 0.4;

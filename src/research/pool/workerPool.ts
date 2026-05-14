@@ -9,17 +9,18 @@ import { logger } from '../../logger.js';
 import type { StrategyContext } from '../strategies/types.js';
 import type { SubQuestion, WorkerReport, WorkerFinding } from '../types.js';
 import { createResearchTools } from '../researchTools.js';
+import {
+  classifySourceAuthority,
+  inferSourceTypeFromUrl,
+  isPrimaryAuthority,
+} from '../provenance.js';
 import type { TokenBudget } from '../llm/chat.js';
 
 export interface WorkerPoolConfig {
   concurrency: number;
   perWorkerToolCalls: number;
   tokenBudget: TokenBudget;
-  onProgress?(
-    completed: number,
-    total: number,
-    firstQuestion: string,
-  ): Promise<void>;
+  onProgress?(completed: number, total: number, firstQuestion: string): Promise<void>;
 }
 
 export class WorkerPoolManager {
@@ -78,8 +79,12 @@ export class WorkerPoolManager {
           const parentId = batchSubQuestions?.[batchIdx]?.id;
           const report = await worker.investigate(question, {
             ...(parentId !== undefined ? { parentSubQuestionId: parentId } : {}),
-            ...(options.contextSubQuestions !== undefined ? { subQuestions: options.contextSubQuestions } : {}),
-            ...(options.priorKnowledge !== undefined ? { priorKnowledge: options.priorKnowledge } : {}),
+            ...(options.contextSubQuestions !== undefined
+              ? { subQuestions: options.contextSubQuestions }
+              : {}),
+            ...(options.priorKnowledge !== undefined
+              ? { priorKnowledge: options.priorKnowledge }
+              : {}),
             onProgress: (stage, detail) => {
               void ctx.onProgress?.(
                 20 + Math.round((i / questions.length) * 30),
@@ -208,33 +213,33 @@ export class WorkerPoolManager {
         });
       }
 
-    if (unattributedCount > 0) {
-      ctx.state.addOpenQuestion(
-        `${String(unattributedCount)} finding(s) have unattributed citations. Treat these claims as low-confidence.`,
-      );
-    }
-    if (inferredCount > 0) {
-      ctx.state.addOpenQuestion(
-        `${String(inferredCount)} finding(s) have inferred citations. Verify before relying on these claims.`,
-      );
-    }
+      if (unattributedCount > 0) {
+        ctx.state.addOpenQuestion(
+          `${String(unattributedCount)} finding(s) have unattributed citations. Treat these claims as low-confidence.`,
+        );
+      }
+      if (inferredCount > 0) {
+        ctx.state.addOpenQuestion(
+          `${String(inferredCount)} finding(s) have inferred citations. Verify before relying on these claims.`,
+        );
+      }
 
-    // ── V5.1.0: Extraction accounting for LLM worker path ───────────────────
-    let extractionsTracked = 0;
-    for (const report of reports) {
-      for (const ws of report.sources) {
-        if (ws.quality.isSubstantive) {
-          ctx.budget.recordExtraction();
-          extractionsTracked++;
+      // ── V5.1.0: Extraction accounting for LLM worker path ───────────────────
+      let extractionsTracked = 0;
+      for (const report of reports) {
+        for (const ws of report.sources) {
+          if (ws.quality.isSubstantive) {
+            ctx.budget.recordExtraction();
+            extractionsTracked++;
+          }
         }
       }
-    }
-    if (extractionsTracked > 0) {
-      logger.info(
-        { reports: reports.length, extractionsTracked },
-        'V5: Extraction budget tracked for worker agent sources',
-      );
-    }
+      if (extractionsTracked > 0) {
+        logger.info(
+          { reports: reports.length, extractionsTracked },
+          'V5: Extraction budget tracked for worker agent sources',
+        );
+      }
     }
   }
 
@@ -246,7 +251,9 @@ export class WorkerPoolManager {
   private augmentCaveats(wf: WorkerFinding): { caveats?: string } {
     if (wf.citationConfidence === 'unattributed') {
       const prefix = wf.caveats ? wf.caveats + ' ' : '';
-      return { caveats: prefix + '[Citation: unattributed — no source could be verified for this claim]' };
+      return {
+        caveats: prefix + '[Citation: unattributed — no source could be verified for this claim]',
+      };
     }
     if (wf.citationConfidence === 'inferred') {
       const prefix = wf.caveats ? wf.caveats + ' ' : '';
@@ -255,14 +262,18 @@ export class WorkerPoolManager {
     return wf.caveats !== undefined ? { caveats: wf.caveats } : {};
   }
 
-  private async ensureSourceExists(ctx: StrategyContext, url: string, report: WorkerReport): Promise<string> {
+  private async ensureSourceExists(
+    ctx: StrategyContext,
+    url: string,
+    report: WorkerReport,
+  ): Promise<string> {
     if (!url) return `src-${report.id}`;
     const existingSources = ctx.state.getSources();
     const existing = existingSources.find((s) => s.url === url);
     if (existing) return existing.id;
 
     const wsEntry = report.sources.find((s) => s.url === url);
-    const sourceType: import('../types.js').SourceType = wsEntry?.sourceType ?? 'web';
+    const sourceType = inferSourceTypeFromUrl(url, wsEntry?.sourceType ?? 'web');
     const sourceId = `src-${url.slice(-40).replace(/[^a-zA-Z0-9_-]/g, '_')}-${String(Date.now())}`;
     const focusText = `${ctx.state.getState().query} ${report.question}`;
     const sourceText = [
@@ -276,13 +287,16 @@ export class WorkerPoolManager {
     const relevance = scoreTextRelevance(focusText, sourceText);
     const lowRelevance = !relevance.admissible && relevance.score < 0.45;
 
+    const domain = wsEntry?.domain ?? this.extractDomain(url);
+    const authorityClass = classifySourceAuthority({ url, domain, sourceType });
     ctx.state.addSource({
       id: sourceId,
       title: wsEntry?.title ?? url,
       url,
       sourceType,
-      domain: wsEntry?.domain ?? this.extractDomain(url),
-      isPrimary: sourceType === 'academic',
+      domain,
+      authorityClass,
+      isPrimary: isPrimaryAuthority(authorityClass) || sourceType === 'academic',
       relevantSubQuestions: report.parentSubQuestionId ? [report.parentSubQuestionId] : [],
       extractionStatus: 'extracted',
       accessDate: new Date().toISOString(),
@@ -317,7 +331,9 @@ export class WorkerPoolManager {
     }
   }
 
-  private inferPerspective(sourceType: import('../types.js').SourceType): import('../types.js').Perspective {
+  private inferPerspective(
+    sourceType: import('../types.js').SourceType,
+  ): import('../types.js').Perspective {
     switch (sourceType) {
       case 'academic':
         return 'academic';

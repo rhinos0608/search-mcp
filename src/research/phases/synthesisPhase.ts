@@ -49,7 +49,9 @@ export class SynthesisPhase extends BasePhase {
 
     // Store the report in state for the orchestrator to retrieve
     // (PipelineStrategy stored it in this.report field)
-    ctx.state.appendDiary(`Synthesis complete: ${String(report.findingCount)} findings, ${String(report.sourceCount)} sources`);
+    ctx.state.appendDiary(
+      `Synthesis complete: ${String(report.findingCount)} findings, ${String(report.sourceCount)} sources`,
+    );
   }
 
   private async synthesize(ctx: StrategyContext): Promise<import('../types.js').ResearchReport> {
@@ -65,7 +67,8 @@ export class SynthesisPhase extends BasePhase {
 
   // Expose the result for the orchestrator to retrieve
   async getResult(ctx: StrategyContext): Promise<ResearchResult> {
+    const state = ctx.state.getState();
     const report = await this.synthesize(ctx);
-    return { report, timeline: [{ phase: 'complete' }] };
+    return { report, timeline: [{ phase: 'complete' }], canonicalFindings: [...state.findings] };
   }
 }

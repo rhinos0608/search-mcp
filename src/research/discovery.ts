@@ -39,6 +39,11 @@ import { withRetry } from './retry.js';
 import { ResearchStateEngine, BudgetTracker } from './state.js';
 import { rankSource, maxPerHostname } from './sourceRanking.js';
 import { scoreTextRelevance } from './relevanceClassifier.js';
+import {
+  classifySourceAuthority,
+  inferSourceTypeFromUrl,
+  isPrimaryAuthority,
+} from './provenance.js';
 import type { DeepResearchLlmClient } from './llm/chat.js';
 // ── Configuration ──────────────────────────────────────────────────────────
 
@@ -721,6 +726,7 @@ export class DiscoveryEngine {
       } else if (domain.includes('docs.') || domain.includes('learn.') || domain.includes('dev.')) {
         (r as { sourceType: SourceType }).sourceType = 'documentation';
       }
+      (r as { sourceType: SourceType }).sourceType = inferSourceTypeFromUrl(r.url, r.sourceType);
     }
 
     return results;
@@ -1449,14 +1455,23 @@ export class DiscoveryEngine {
   // ── Adapter: SourceCandidate → minimal SourceEntry for rankSource ──────────
 
   private toMinimalSourceEntry(candidate: SourceCandidate): SourceEntry {
+    const sourceType = inferSourceTypeFromUrl(candidate.url, candidate.sourceType);
+    const domain = extractDomain(candidate.url);
+    const authorityClass = classifySourceAuthority({
+      url: candidate.url,
+      domain,
+      sourceType,
+    });
     return {
       id: '',
       title: candidate.title,
       url: candidate.url,
       accessDate: new Date().toISOString(),
-      sourceType: candidate.sourceType,
-      domain: extractDomain(candidate.url),
-      isPrimary: candidate.sourceType === 'academic' || candidate.sourceType === 'github',
+      sourceType,
+      domain,
+      authorityClass,
+      isPrimary:
+        isPrimaryAuthority(authorityClass) || sourceType === 'academic' || sourceType === 'github',
       relevantSubQuestions: [candidate.subQuestionId],
       extractionStatus: 'pending' as const,
       subQuestionId: candidate.subQuestionId,
@@ -1475,14 +1490,19 @@ export class DiscoveryEngine {
       `${candidate.title} ${candidate.snippet} ${candidate.reasonForInclusion} ${candidate.url}`,
     );
     const lowRelevance = !relevance.admissible && relevance.score < 0.35;
+    const sourceType = inferSourceTypeFromUrl(candidate.url, candidate.sourceType);
+    const domain = extractDomain(candidate.url);
+    const authorityClass = classifySourceAuthority({ url: candidate.url, domain, sourceType });
 
     return {
       id: rawId.replace(/[^a-zA-Z0-9_-]/g, '_'),
       title: candidate.title,
       url: candidate.url,
-      sourceType: candidate.sourceType,
-      domain: extractDomain(candidate.url),
-      isPrimary: candidate.sourceType === 'academic' || candidate.sourceType === 'github',
+      sourceType,
+      domain,
+      authorityClass,
+      isPrimary:
+        isPrimaryAuthority(authorityClass) || sourceType === 'academic' || sourceType === 'github',
       relevantSubQuestions: [candidate.subQuestionId],
       extractionStatus: lowRelevance ? 'failed' : ('pending' as const),
       accessDate: new Date().toISOString(),
@@ -1579,7 +1599,9 @@ export class DiscoveryEngine {
         sourceType: 'ror',
         estimatedQuality: 0.8,
         estimatedRelevance: 0.55,
-        freshness: r.established ? `${String(new Date().getFullYear() - r.established)} years ago` : '',
+        freshness: r.established
+          ? `${String(new Date().getFullYear() - r.established)} years ago`
+          : '',
         reasonForInclusion: `ROR organization record for: ${sq.text}`,
         subQuestionId: sq.id,
       }));

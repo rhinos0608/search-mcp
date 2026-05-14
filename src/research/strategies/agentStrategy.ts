@@ -370,7 +370,7 @@ export class AgentStrategy implements ResearchStrategy {
 
     const timeline: ResearchProgress[] = [{ phase: 'complete' }];
 
-    return { report, timeline };
+    return { report, timeline, canonicalFindings: [...ctx.state.getFindings()] };
   }
 
   async close(): Promise<void> {
@@ -546,7 +546,12 @@ Search strategy tips:
 
     // Include any intermediate insights from malformed responses or deep thoughts
     const intermediateInsights = this.history
-      .filter((h) => h.role === 'assistant' && !h.action && (h.content !== undefined || h.thought !== undefined))
+      .filter(
+        (h) =>
+          h.role === 'assistant' &&
+          !h.action &&
+          (h.content !== undefined || h.thought !== undefined),
+      )
       .map((h) => h.content ?? h.thought)
       .join('\n\n');
 

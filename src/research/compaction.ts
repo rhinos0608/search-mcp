@@ -144,8 +144,12 @@ function compactSingleFinding(f: Finding, maxExcerptChars: number): CompactFindi
     ...(excerpt !== undefined ? { evidenceExcerpt: excerpt } : {}),
     evidenceDirectness: f.evidenceDirectness,
     sourceCount: f.sourceIds.length,
+    sourceIds: [...f.sourceIds],
     claimType: f.claimType,
     subQuestionIds: [...f.subQuestionIds],
+    ...(f.evidenceAlignment ? { evidenceAlignment: f.evidenceAlignment } : {}),
+    ...(f.provenanceRisks ? { provenanceRisks: [...f.provenanceRisks] } : {}),
+    ...(f.clusterId ? { clusterId: f.clusterId } : {}),
   };
 }
 
@@ -211,6 +215,7 @@ function scheduleCleanup(dir: string): void {
       // Non-fatal — best-effort cleanup
     }
   }, 300_000); // Check every 5 minutes
+  cleanupTimer.unref();
 }
 
 /**
@@ -310,7 +315,12 @@ export function compactResearchResult(
 
   // Layer 2: Trim findings
   const maxFindings = opts.maxFindingsPerTheme * Math.max(report.themes.length, 1);
-  const allFindings = extractAllFindings(timeline);
+  const allFindings = attachClusterIds(
+    result.canonicalFindings?.length
+      ? dedupeFindings(result.canonicalFindings)
+      : extractAllFindings(timeline),
+    report.findingClusters ?? [],
+  );
   const { compact: compactF, droppedCap: dc } = trimFindings(allFindings, maxFindings, opts);
 
   // Layer 3: Write full result to file
@@ -361,20 +371,41 @@ export function compactResearchResult(
 /**
  * Extract all Finding objects from the timeline's findings events.
  */
+function attachClusterIds(
+  findings: Finding[],
+  clusters: NonNullable<ResearchResult['report']['findingClusters']>,
+): Finding[] {
+  if (clusters.length === 0) return findings;
+  const clusterByFinding = new Map<string, string>();
+  for (const cluster of clusters) {
+    for (const findingId of cluster.findingIds) clusterByFinding.set(findingId, cluster.id);
+  }
+  return findings.map((finding) => {
+    const clusterId = clusterByFinding.get(finding.id);
+    return clusterId && !finding.clusterId ? { ...finding, clusterId } : finding;
+  });
+}
+
+function dedupeFindings(findings: Finding[]): Finding[] {
+  const deduped: Finding[] = [];
+  const seen = new Set<string>();
+  for (const finding of findings) {
+    if (!seen.has(finding.id)) {
+      seen.add(finding.id);
+      deduped.push(finding);
+    }
+  }
+  return deduped;
+}
+
 function extractAllFindings(timeline: ResearchProgress[]): Finding[] {
   const all: Finding[] = [];
-  const seen = new Set<string>();
 
   for (const entry of timeline) {
     if (entry.phase === 'findings') {
-      for (const f of entry.findings) {
-        if (!seen.has(f.id)) {
-          seen.add(f.id);
-          all.push(f);
-        }
-      }
+      all.push(...entry.findings);
     }
   }
 
-  return all;
+  return dedupeFindings(all);
 }

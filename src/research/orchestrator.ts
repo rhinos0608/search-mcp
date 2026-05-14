@@ -48,7 +48,7 @@ const DEFAULT_CONFIG: Required<DeepResearchConfig> = {
   maxDepth: 'deep',
   maxToolCalls: 200,
   maxTokens: 500_000,
-  maxTimeMs: 300_000,
+  maxTimeMs: 2_700_000,
   baseUrl: '',
   workerBaseUrl: '',
   model: '',

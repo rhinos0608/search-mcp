@@ -17,8 +17,12 @@ export class DecompositionPhase extends BasePhase {
     this.checkAborted(ctx);
 
     const decomposer = new QueryDecomposer();
-    const { classification, subQuestions, disambiguationNote: _disambiguationNote, extractedEntities: _extractedEntities } =
-      decomposer.decompose(query);
+    const {
+      classification,
+      subQuestions,
+      disambiguationNote: _disambiguationNote,
+      extractedEntities: _extractedEntities,
+    } = decomposer.decompose(query);
 
     for (const sq of subQuestions) {
       if (classification === 'current-events' || classification === 'market-ecosystem') {

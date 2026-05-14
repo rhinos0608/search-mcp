@@ -46,6 +46,12 @@ export type SourceType =
   | 'hackernews'
   | 'stackoverflow'
   | 'documentation'
+  | 'official_docs'
+  | 'official_blog'
+  | 'package_registry'
+  | 'vendor_docs'
+  | 'forum'
+  | 'social'
   | 'news'
   | 'patent'
   | 'pubmed'
@@ -60,7 +66,8 @@ export type SourceType =
   | 'ror'
   | 'semantic_scholar'
   | 'gdelt'
-  | 'wikidata';
+  | 'wikidata'
+  | 'unknown';
 
 /**
  * Source quality tier used for synthesis gating.
@@ -70,6 +77,221 @@ export type SourceType =
  * Tier 4 = low-quality/excluded (SEO blogs, event calendars, homepages, social posts unless explicitly needed).
  */
 export type SourceQualityTier = 1 | 2 | 3 | 4;
+
+export type AuthorityClass =
+  | 'official_spec'
+  | 'official_changelog'
+  | 'official_repo'
+  | 'official_vendor'
+  | 'package_registry'
+  | 'vendor_sdk_docs'
+  | 'third_party_analysis'
+  | 'news'
+  | 'encyclopedia'
+  | 'forum_social'
+  | 'unknown';
+
+export type ClaimAuthorityRequirement =
+  | 'primary_required'
+  | 'primary_preferred'
+  | 'secondary_ok'
+  | 'any_ok';
+
+export type ReleaseEntityType =
+  | 'protocol'
+  | 'specification'
+  | 'sdk'
+  | 'package'
+  | 'client_app'
+  | 'server'
+  | 'blog_post'
+  | 'proposal'
+  | 'roadmap'
+  | 'unknown';
+
+export interface ReleaseEntity {
+  canonicalName: string;
+  entityType: ReleaseEntityType;
+  owner?: string;
+  ecosystem?: string;
+  packageName?: string;
+  repo?: string;
+  version?: string;
+  releaseDate?: string;
+  sourceIds: string[];
+  confidence: number;
+}
+
+export type TemporalEventType =
+  | 'released'
+  | 'announced'
+  | 'proposed'
+  | 'documented'
+  | 'discussed'
+  | 'updated'
+  | 'deprecated'
+  | 'unknown';
+
+export type DateConfidence = 'exact' | 'inferred' | 'publication_only' | 'unknown';
+
+export interface TemporalClaim {
+  claim: string;
+  eventType: TemporalEventType;
+  eventDate?: string;
+  publicationDate?: string;
+  version?: string;
+  entity: ReleaseEntity;
+  sourceIds: string[];
+  confidence: number;
+  dateConfidence: DateConfidence;
+}
+
+export type ClaimRisk =
+  | 'entity_mismatch'
+  | 'temporal_misattribution'
+  | 'weak_authority'
+  | 'weak_evidence_alignment'
+  | 'marketing_language'
+  | 'cluster_bridge';
+
+export interface EvidenceAlignment {
+  score: number;
+  method: 'lexical_anchor_overlap' | 'semantic_vector_overlap' | 'hybrid_lexical_semantic';
+  matchedTerms: string[];
+  missingAnchorTerms: string[];
+  semanticScore?: number;
+  semanticMatches?: {
+    field: 'evidenceSummary' | 'evidenceExcerpt';
+    score: number;
+    snippet: string;
+  }[];
+  evidenceSnippet?: string;
+  explanation: string;
+}
+
+export type FindingClusterEdgeMethod = 'direct' | 'lexical' | 'vector';
+
+export type FindingClusterRelation =
+  | 'same_claim'
+  | 'near_duplicate'
+  | 'supports'
+  | 'elaborates'
+  | 'contradicts'
+  | 'background';
+
+export type FindingClusterEdgeStrength = 'strong' | 'weak';
+
+export interface FindingClusterEdge {
+  leftFindingId: string;
+  rightFindingId: string;
+  method: FindingClusterEdgeMethod;
+  relation: FindingClusterRelation;
+  strength: FindingClusterEdgeStrength;
+  score: number;
+  rationale: string;
+  lexicalOverlap?: number;
+  anchorOverlap?: number;
+  semanticScore?: number;
+  bridge?: boolean;
+  /** When true, this edge falls in the LLM-review band and should be evaluated by the LLM. */
+  needsLlmReview?: boolean;
+}
+
+export interface FindingCluster {
+  id: string;
+  findingIds: string[];
+  representativeClaim: string;
+  method: FindingClusterEdgeMethod | 'hybrid';
+  confidence: number;
+  edges: FindingClusterEdge[];
+  strongEdges: FindingClusterEdge[];
+  weakEdges: FindingClusterEdge[];
+  bridgeEdges: FindingClusterEdge[];
+  relationCounts: Partial<Record<FindingClusterRelation, number>>;
+  confidenceCapReason?: string;
+  /** Whether this cluster needs LLM review for merge decisions. */
+  mergeStatus?: 'auto_merged' | 'needs_llm_review' | 'split' | 'llm_merged' | 'llm_split' | 'llm_kept';
+}
+
+export interface ClusterRevisionDecision {
+  action: 'merge' | 'split' | 'keep' | 'abstain';
+  clusterIds: string[];
+  reasoning: string;
+  splitGroupIndices?: Record<string, number>;
+}
+
+export interface ResearchClaim {
+  id: string;
+  text: string;
+  subjectEntity: ReleaseEntity;
+  predicate: string;
+  object?: string;
+  eventDate?: string;
+  publicationDate?: string;
+  version?: string;
+  sourceIds: string[];
+  authorityClass: AuthorityClass;
+  authorityRequirement: ClaimAuthorityRequirement;
+  supportLevel: 'primary' | 'secondary' | 'weak' | 'conflicting';
+  evidenceAlignment?: EvidenceAlignment;
+  confidence: number;
+  risks: ClaimRisk[];
+}
+
+export interface LatestOfficialVersion {
+  entity: string;
+  version: string;
+  sourceId: string;
+  changelogUrl: string;
+  confidence: number;
+}
+
+export interface SourceRecord {
+  id: string;
+  index: number;
+  title: string;
+  url: string;
+  domain: string;
+  sourceType: SourceType;
+  authorityClass: AuthorityClass;
+  usedInReport: boolean;
+  citedClaimIds: string[];
+  extractedFindingIds: string[];
+}
+
+export type ReportAuditIssueType =
+  | 'source_authority'
+  | 'entity_mismatch'
+  | 'temporal_misattribution'
+  | 'unsupported_claim'
+  | 'evidence_alignment'
+  | 'cluster_integrity'
+  | 'citation_mismatch'
+  | 'internal_count_mismatch'
+  | 'source_diversity'
+  | 'marketing_language';
+
+export type AuditEnforcement = 'none' | 'caveat_required' | 'quarantine' | 'block';
+
+export interface ReportAuditIssue {
+  id?: string;
+  type: ReportAuditIssueType;
+  severity: 'low' | 'medium' | 'high' | 'critical';
+  claim?: string;
+  sourceIds?: string[];
+  relatedFindingIds?: string[];
+  relatedClusterId?: string;
+  explanation: string;
+  suggestedFix?: string;
+  enforcement?: AuditEnforcement;
+}
+
+export interface ReportAuditResult {
+  pass: boolean;
+  severity: 'ok' | 'warning' | 'fail';
+  issues: ReportAuditIssue[];
+  requiredRevisions: string[];
+}
 
 /**
  * Citable category labels for findings — more specific than generic "architecture".
@@ -118,6 +340,7 @@ export interface SourceEntry {
   accessDate: string;
   sourceType: SourceType;
   domain: string;
+  authorityClass?: AuthorityClass;
   isPrimary: boolean;
   relevantSubQuestions: string[];
   extractionStatus: ExtractionStatus;
@@ -175,11 +398,20 @@ export interface Finding {
   evidenceSummary: string;
   evidenceExcerpt?: string;
   evidenceDirectness: EvidenceDirectness;
+  evidenceAlignment?: EvidenceAlignment;
   caveats?: string;
   scope?: string;
   freshnessSensitive: boolean;
   lastUpdated: string;
   claimType: ClaimType;
+  /** Structured provenance fields used to prevent entity/date/source collapses during synthesis. */
+  subjectEntity?: ReleaseEntity;
+  temporalClaim?: TemporalClaim;
+  authorityRequirement?: ClaimAuthorityRequirement;
+  authorityClass?: AuthorityClass;
+  provenanceRisks?: ClaimRisk[];
+  /** Cluster assigned by direct/lexical/vector finding linkage during synthesis. */
+  clusterId?: string;
   /** Explicit category label for audit accuracy (architecture, training_paradigm, world_model, etc.). */
   category?: FindingCategory;
   /** Source quality tier of the best source backing this finding. */
@@ -289,6 +521,34 @@ export interface SearchCluster {
   insight: string;
   question: string;
   urls: string[];
+}
+
+// ── Grounding types (Phase 1: synthesis claim grounding) ──────────────────
+
+/** Result of grounding a single synthesis claim against source chunks. */
+export interface GroundedClaim {
+  /** The claim sentence text. */
+  text: string;
+  /** Cosine similarity to the nearest source chunk embedding (0-1). */
+  nearestSourceScore: number;
+  /** ID of the nearest source chunk, if any. */
+  nearestSourceChunkId?: string;
+  /** Whether the claim passes the grounding threshold (default 0.72). */
+  grounded: boolean;
+  /** Extracted dates found in the claim but not in any source. */
+  unverifiedDates?: string[];
+  /** Extracted numbers found in the claim but not in any source. */
+  unverifiedNumbers?: string[];
+  /** Extracted named entities (proper nouns) found in the claim but not in any source. */
+  unverifiedEntities?: string[];
+}
+
+export interface GroundingResult {
+  claims: GroundedClaim[];
+  groundedCount: number;
+  ungroundedCount: number;
+  /** Ungrounded claims that should be flagged as uncertainties. */
+  warnings: string[];
 }
 
 // ── New: FailureMode (operational replacement for old FailureAnalysis) ────────
@@ -632,6 +892,70 @@ export type ResearchProgress =
 
 // ── Output ────────────────────────────────────────────────────────────────────
 
+export interface EvidenceItem {
+  id: string;
+  sourceIds: string[];
+  findingId?: string;
+  summary: string;
+  excerpt?: string;
+  alignment?: EvidenceAlignment;
+}
+
+export type EvidenceGraphNodeType =
+  | 'source'
+  | 'evidence'
+  | 'finding'
+  | 'cluster'
+  | 'audit_issue'
+  | 'synthesis_claim';
+
+export type EvidenceGraphEdgeRelation =
+  | 'source_provides_evidence'
+  | 'evidence_supports_finding'
+  | 'finding_member_of_cluster'
+  | 'cluster_has_audit_issue'
+  | 'finding_has_audit_issue'
+  | 'synthesis_renders_finding'
+  | 'synthesis_renders_cluster'
+  | 'synthesis_has_audit_issue';
+
+export interface EvidenceGraphEdge {
+  fromId: string;
+  toId: string;
+  relation: EvidenceGraphEdgeRelation;
+  reason: string;
+  confidence?: number;
+}
+
+export interface EvidenceGraphFindingNode {
+  id: string;
+  claim: string;
+  sourceIds: string[];
+  evidenceItemIds: string[];
+  clusterId?: string;
+  confidence?: number;
+  confidenceCapReason?: string;
+}
+
+export interface SynthesisClaimNode {
+  id: string;
+  text: string;
+  findingIds: string[];
+  clusterIds: string[];
+  auditIssueIds: string[];
+}
+
+export interface EvidenceGraph {
+  sources: SourceRecord[];
+  evidence: EvidenceItem[];
+  findings: EvidenceGraphFindingNode[];
+  clusters: FindingCluster[];
+  findingClusterEdges: FindingClusterEdge[];
+  auditIssues: ReportAuditIssue[];
+  synthesisClaims: SynthesisClaimNode[];
+  edges: EvidenceGraphEdge[];
+}
+
 export interface ResearchReport {
   query: string;
   classification: QueryClassification;
@@ -667,9 +991,17 @@ export interface ResearchReport {
     title: string;
     url: string;
     sourceType: SourceType;
+    authorityClass?: AuthorityClass;
     tier: SourceQualityTier;
     domain: string;
   }[];
+  sourceRegistry?: SourceRecord[];
+  claimLedger?: ResearchClaim[];
+  findingClusters?: FindingCluster[];
+  findingClusterEdges?: FindingClusterEdge[];
+  evidenceGraph?: EvidenceGraph;
+  latestOfficialVersion?: LatestOfficialVersion;
+  reportAudit?: ReportAuditResult;
   /** Per-sub-question coverage summary for gap detection. */
   subQuestionCoverage?: SubQuestionCoverage[];
 }
@@ -677,6 +1009,8 @@ export interface ResearchReport {
 export interface ResearchResult {
   report: ResearchReport;
   timeline: ResearchProgress[];
+  /** Canonical final findings from ResearchState; compact output should prefer this over timeline events. */
+  canonicalFindings?: Finding[];
 }
 // ── Compact output (V4.2.0 — result compaction for MCP transport) ─────────────────
 
@@ -687,8 +1021,12 @@ export interface CompactFinding {
   evidenceExcerpt?: string;
   evidenceDirectness: EvidenceDirectness;
   sourceCount: number;
+  sourceIds?: string[];
   claimType: ClaimType;
   subQuestionIds: string[];
+  evidenceAlignment?: EvidenceAlignment;
+  provenanceRisks?: ClaimRisk[];
+  clusterId?: string;
 }
 
 export interface CompactContradiction {
@@ -1051,7 +1389,6 @@ export interface ResearchTools {
       isAnswered: boolean;
     }[]
   >;
-
 
   // ── Free academic/discovery backends ────────────────────────────────────
   /** Search OpenAlex for scholarly works (free, no API key). */

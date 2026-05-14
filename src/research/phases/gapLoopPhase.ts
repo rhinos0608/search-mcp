@@ -11,6 +11,7 @@ import { BasePhase } from './basePhase.js';
 import type { StrategyContext } from '../strategies/types.js';
 import { GapAnalyzer, GapFiller } from '../gapAnalysis.js';
 import { generateFromEvidencePool, mergeContradictions } from '../contradictionGenerator.js';
+import { ContradictionDetector } from '../contradictionDetector.js';
 import { researchJobManager } from '../jobManager.js';
 import { PruningEngine } from '../pruning.js';
 import { logger } from '../../logger.js';
@@ -53,7 +54,7 @@ export class GapLoopPhase extends BasePhase {
       const contentQuality = ctx.state.getAllContentQuality();
 
       // ── Contradiction detection (runs inside each gap loop) ──────
-      // 1. Rule-based: detectContradictions() from state engine
+      // 1. Rule-based: detectContradictions() from state engine (always runs)
       const ruleContradictions = ctx.state.detectContradictions();
       if (ruleContradictions.length > 0) {
         logger.info(
@@ -62,7 +63,39 @@ export class GapLoopPhase extends BasePhase {
         );
       }
 
-      // 2. Evidence-pool: generateFromEvidencePool() for date/version/benchmark conflicts
+      // 2. LLM-powered: shared ContradictionDetector for contradictions + open questions
+      //    (runs on even iterations like the old runLlmContradictionScan)
+      if (loopIdx % 2 === 0) {
+        const detector = new ContradictionDetector(ctx.llm);
+        const existingContradictions = ctx.state.getState().contradictions;
+        const llmResult = await detector.analyze(
+          ctx.state.getFindings(),
+          ctx.state.getSources(),
+          existingContradictions,
+          ctx.state.getState().query,
+        );
+
+        if (llmResult.contradictions.length > 0) {
+          const merged = mergeContradictions(existingContradictions, llmResult.contradictions);
+          ctx.state.setContradictions(merged);
+          logger.info(
+            { loop: loopIdx + 1, added: llmResult.contradictions.length },
+            'LLM contradiction detector: contradictions added in gap loop',
+          );
+        }
+
+        if (llmResult.openQuestions.length > 0) {
+          for (const q of llmResult.openQuestions) {
+            ctx.state.addOpenQuestion(q);
+          }
+          logger.info(
+            { loop: loopIdx + 1, added: llmResult.openQuestions.length },
+            'LLM open-questions generator: questions added in gap loop',
+          );
+        }
+      }
+
+      // 3. Evidence-pool: generateFromEvidencePool() for date/version/benchmark conflicts (supplement)
       const evidenceGenerated = generateFromEvidencePool(
         ctx.state.getFindings(),
         ctx.state.getSources(),
@@ -82,9 +115,6 @@ export class GapLoopPhase extends BasePhase {
           ctx.state.addOpenQuestion(u);
         }
       }
-
-      // 3. LLM-powered: semantic contradiction scanner (batched, every 2nd loop)
-      await this.runLlmContradictionScan(ctx, loopIdx);
 
       const analyzer = new GapAnalyzer(ctx.state);
       const gaps = analyzer.analyze(coverage, contentQuality);
@@ -128,9 +158,7 @@ export class GapLoopPhase extends BasePhase {
       const currentGapLoops = ctx.budget.snapshot().gapLoopsUsed;
       const criticalGaps =
         currentGapLoops < minGapLoops
-          ? (allGaps.length > 0 ? allGaps : ctx.state.getOpenGaps()).filter(
-              (g) => g.priority <= 5,
-            )
+          ? (allGaps.length > 0 ? allGaps : ctx.state.getOpenGaps()).filter((g) => g.priority <= 5)
           : gaps.filter((g) => g.priority <= 2);
       if (criticalGaps.length === 0) break;
 
@@ -237,135 +265,4 @@ export class GapLoopPhase extends BasePhase {
     const sources = ctx.state.getSources();
     return new Set(sources.map((s) => s.sourceType)).size;
   }
-
-  private async runLlmContradictionScan(ctx: StrategyContext, loopIdx: number): Promise<void> {
-    if (!ctx.llm || ctx.deterministic) return;
-
-    // Only run on even-numbered iterations (0, 2, 4, ...) to halve cost
-    if (loopIdx % 2 !== 0) return;
-
-    const state = ctx.state.getState();
-    const findings = state.findings;
-    if (findings.length < 6) return;
-
-    // Group findings by sub-question
-    const bySubQuestion = new Map<string, import('../types.js').Finding[]>();
-    for (const f of findings) {
-      for (const sqId of f.subQuestionIds) {
-        const group = bySubQuestion.get(sqId) ?? [];
-        group.push(f);
-        bySubQuestion.set(sqId, group);
-      }
-    }
-
-    // Filter: only sub-questions with >= 3 findings (enough density for contradictions)
-    const qualifying = [...bySubQuestion.entries()]
-      .filter(([, group]) => group.length >= 3)
-      .sort(([, a], [, b]) => b.length - a.length);
-
-    if (qualifying.length === 0) return;
-
-    // Batch: take up to 20 findings total across qualifying sub-questions
-    const MAX_FINDINGS_PER_BATCH = 20;
-    const batched: import('../types.js').Finding[] = [];
-    for (const [, group] of qualifying) {
-      for (const f of group) {
-        if (batched.length >= MAX_FINDINGS_PER_BATCH) break;
-        batched.push(f);
-      }
-      if (batched.length >= MAX_FINDINGS_PER_BATCH) break;
-    }
-
-    if (batched.length < 6) return;
-
-    // Build existing contradiction set for dedup
-    const existingContradictions = state.contradictions;
-    const existingPairs = new Set<string>();
-    for (const c of existingContradictions) {
-      existingPairs.add(`${c.claimA}|||${c.claimB}`);
-      existingPairs.add(`${c.claimB}|||${c.claimA}`);
-    }
-
-    const findingsInput = batched
-      .map(
-        (f) =>
-          `[${f.id}] ${f.claim} (sources: ${String(f.sourceIds.length)}, sub-questions: ${f.subQuestionIds.join(', ')})`,
-      )
-      .join('\n');
-
-    const existingContradictionSummary =
-      existingContradictions.length > 0
-        ? `\nExisting contradictions already recorded (DO NOT re-flag these):\n${existingContradictions.map((c) => `- "${c.claimA.slice(0, 80)}" vs "${c.claimB.slice(0, 80)}"`).join('\n')}`
-        : '';
-
-    const { randomUUID } = await import('node:crypto');
-    const makeId = () => randomUUID().slice(0, 12);
-
-    try {
-      const result = await ctx.llm.callJSON<{
-        contradictions: {
-          claimA: string;
-          claimB: string;
-          contradictionType: string;
-          explanation: string;
-          followUpSearchRecommended?: string;
-        }[];
-      }>({
-        model: 'orchestrator',
-        messages: [
-          { role: 'system', content: 'Scan findings for contradictions.' },
-          {
-            role: 'user',
-            content: `Scan the following findings for hidden contradictions:\n\n${findingsInput}${existingContradictionSummary}`,
-          },
-        ],
-        temperature: 0.2,
-        maxTokens: 2000,
-        responseFormat: 'json_object',
-      });
-
-      if (result.success && result.data.contradictions.length > 0) {
-        let added = 0;
-        for (const c of result.data.contradictions) {
-          const pairKey = `${c.claimA}|||${c.claimB}`;
-          if (existingPairs.has(pairKey)) continue;
-
-          const id = makeId();
-          ctx.state.addContradiction({
-            id,
-            claimA: c.claimA,
-            claimB: c.claimB,
-            sourceIdsA: [],
-            sourceIdsB: [],
-            contradictionType: c.contradictionType as import('../types.js').ContradictionType,
-            likelyExplanation: c.explanation,
-            resolutionStatus: 'unresolved',
-            ...(c.followUpSearchRecommended !== undefined
-              ? { followUpSearchRecommended: c.followUpSearchRecommended }
-              : {}),
-          });
-          existingPairs.add(pairKey);
-          added++;
-        }
-
-        if (added > 0) {
-          logger.info(
-            {
-              loop: loopIdx + 1,
-              scanned: batched.length,
-              found: result.data.contradictions.length,
-              added,
-            },
-            'LLM contradiction scanner: new contradictions detected',
-          );
-        }
-      }
-    } catch (err) {
-      logger.warn(
-        { err, loop: loopIdx + 1 },
-        'LLM contradiction scanner failed; continuing without it',
-      );
-    }
-  }
-
 }

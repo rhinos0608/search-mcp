@@ -609,6 +609,7 @@ export function isContentSubstantive(quality: ContentQualityAssessment): boolean
 // ── Source Quality Tier Classification ─────────────────────────────────────────
 
 import type { SourceEntry, SourceQualityTier } from './types.js';
+import { classifySourceAuthority, isPrimaryAuthority } from './provenance.js';
 
 /**
  * Tier-1 domains: primary evidence sources.
@@ -676,6 +677,13 @@ const LOW_QUALITY_PATH_PATTERNS: RegExp[] = [
  */
 export function classifySourceTier(source: SourceEntry): SourceQualityTier {
   const domain = source.domain.toLowerCase();
+  const authorityClass = source.authorityClass ?? classifySourceAuthority(source);
+
+  // Tier 1: Topic-aware primary sources (official specs/changelogs/repos/vendor posts).
+  if (isPrimaryAuthority(authorityClass)) return 1;
+
+  // Tier 2: Official package/SDK evidence, authoritative for package/SDK claims but not protocol claims.
+  if (authorityClass === 'package_registry' || authorityClass === 'vendor_sdk_docs') return 2;
 
   // Tier 1: Academic / primary domains
   if (TIER1_DOMAINS.has(domain)) return 1;
@@ -684,7 +692,12 @@ export function classifySourceTier(source: SourceEntry): SourceQualityTier {
   if (source.sourceType === 'github') return 1;
 
   // Tier 1: Official documentation / research blogs on the project domain
-  if (source.sourceType === 'documentation') return 1;
+  if (
+    source.sourceType === 'documentation' ||
+    source.sourceType === 'official_docs' ||
+    source.sourceType === 'official_blog'
+  )
+    return 1;
 
   // Tier 1: Academic source type
   if (source.sourceType === 'academic' || source.sourceType === 'pubmed') return 1;
@@ -766,7 +779,7 @@ export function curateEvidenceSources(
 
   // Classify and score every source
   const classified = sources.map((s) => ({
-    source: s,
+    source: { ...s, authorityClass: s.authorityClass ?? classifySourceAuthority(s) },
     tier: classifySourceTier(s),
     findingCount: sourceFindingCounts.get(s.id) ?? 0,
   }));

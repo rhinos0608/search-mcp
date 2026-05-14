@@ -530,20 +530,20 @@ export class ResearchJobManager {
   }
 
   private resolveDefaultMaxTimeMs(depth: ResearchDepth): number {
-    // Aligned with budget profile defaults
+    // Aligned with budget profile defaults — generous to avoid premature timeouts
     switch (depth) {
       case 'quick':
-        return 60_000;
+        return 300_000; // 5 minutes
       case 'standard':
-        return 180_000;
+        return 480_000; // 8 minutes
       case 'deep':
-        return 300_000;
+        return 1_800_000; // 30 minutes
       case 'exhaustive':
-        return 600_000;
+        return 2_700_000; // 45 minutes
       case 'tree':
-        return 300_000;
+        return 900_000; // 15 minutes
       default:
-        return 180_000;
+        return 480_000;
     }
   }
 

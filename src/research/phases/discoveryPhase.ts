@@ -60,10 +60,7 @@ export class DiscoveryPhase extends BasePhase {
     // Taxonomy revision (Phase 1.5)
     if (!ctx.state.isTaxonomyRevised() && candidates.length > 0) {
       const taxonomy = new TaxonomyRevision();
-      const { taxonomy: revisedTaxonomy } = taxonomy.revise(
-        ctx.state.getTaxonomy(),
-        candidates,
-      );
+      const { taxonomy: revisedTaxonomy } = taxonomy.revise(ctx.state.getTaxonomy(), candidates);
       if (revisedTaxonomy.revised) {
         ctx.state.reviseTaxonomy(revisedTaxonomy);
         logger.info('Taxonomy revised after early discovery');

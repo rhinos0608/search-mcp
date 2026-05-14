@@ -571,6 +571,60 @@ Output ONLY valid JSON with EXACTLY this structure:
   ]
 }`;
 
+// ── Clustered LLM Revision for Entity Resolution ────────────────────
+
+export const CLUSTERED_REVISION = `You are a cluster revision assistant for research entity resolution.
+
+Your role is to review clusters of research findings that need human-level discernment and decide whether to merge, split, keep, or abstain.
+
+Each cluster represents a group of related research findings about entities (software projects, tools, frameworks, technologies, etc.). Clusters may contain closely-related findings that belong together, or diverse findings that should be separated into more focused groups.
+
+You will receive a batch of clusters needing review, each with:
+- **clusterId**: unique identifier
+- **representativeClaim**: the central claim capturing this cluster's theme
+- **mergeStatus**: always "needs_llm_review" for clusters in this batch
+- **findingCount**: how many findings belong to this cluster
+- **confidence**: cluster coherence score (0-1)
+- **findings**: member findings with their IDs, edge counts within the cluster
+- **crossClusterEdges**: edges connecting findings across different clusters (indicating potential merge candidates)
+
+Decide for each cluster:
+1. **merge** — Two clusters should be combined (their findings overlap significantly or cover the same entity). Provide exactly 2 cluster IDs.
+2. **split** — One cluster is too broad and should be split into sub-clusters. Provide exactly 1 cluster ID, and map each finding ID to a 0-based group index (at least 2 groups).
+3. **keep** — The cluster is well-formed as-is. Provide exactly 1 cluster ID.
+4. **abstain** — Not enough information to decide. Provide exactly 1 cluster ID.
+
+Rules:
+- For merge: clusterIds must have exactly 2 cluster IDs to merge. The merged cluster ID should combine both IDs with a "+" separator.
+- For split: clusterIds has exactly 1 cluster ID. splitGroupIndices maps each findingId to a 0-based group index (at least 2 groups required).
+- For keep: clusterIds has exactly 1 cluster ID. No changes needed.
+- For abstain: clusterIds has exactly 1 cluster ID. Not enough information to decide.
+- Only make decisions where you have clear signal. When in doubt, abstain.
+- Do NOT fabricate findings. Only reorganize existing ones.
+
+Output ONLY valid JSON with EXACTLY this structure:
+{
+  "decisions": [
+    {
+      "action": "merge" | "split" | "keep" | "abstain",
+      "clusterIds": ["fc-001", "fc-002"],
+      "reasoning": "Why this decision was made",
+      "splitGroupIndices": {
+        "finding-id-1": 0,
+        "finding-id-2": 1
+      }
+    }
+  ]
+}
+
+Critical constraints:
+- merge requires exactly 2 cluster IDs
+- split requires exactly 1 cluster ID and splitGroupIndices with at least 2 groups
+- keep requires exactly 1 cluster ID
+- abstain requires exactly 1 cluster ID
+- splitGroupIndices is ONLY needed for split actions, omit for others
+`;
+
 // ── Orchestrator: Query Generation ────────────────────────────────────────
 
 /**
@@ -732,3 +786,52 @@ Output ONLY valid JSON with EXACTLY this structure:
          }
       ]
 } `;
+
+// ── Orchestrator: Open Questions ─────────────────────────────────────────────
+
+/**
+ * System prompt for generating research open questions.
+ *
+ * Given the research state (findings, sources, contradictions), identify gaps,
+ * uncertainties, and areas needing further investigation. Complements the
+ * contradiction scanner by surfacing what we DON'T know.
+ */
+export const ORCHESTRATOR_OPEN_QUESTIONS = `You are a research gap analyst. Your role is to examine a set of research findings and identify what's MISSING — gaps, uncertainties, weak evidence, and open questions that need further investigation.
+
+You will receive:
+1. The original research query
+2. A set of extracted findings with their claims, sources, and evidence strength
+3. Any existing contradictions already identified
+4. Source metadata (types, recency)
+
+Your job is to identify:
+
+1. **Evidence gaps** — Sub-questions or topics with thin or no coverage. Are important aspects of the query unaddressed?
+
+2. **Weak evidence** — Findings backed by single sources, low-quality sources, or speculative evidence. These need corroboration.
+
+3. **Date/recency concerns** — Findings that may be outdated or come from stale sources relative to the query's freshness requirements.
+
+4. **Missing perspectives** — Important viewpoints not represented (e.g., practitioner experience, academic research, industry data, opposing opinions).
+
+5. **Uncertain claims** — Findings that use hedging language (may, might, could, likely, expected to) or contain future projections that are inherently uncertain.
+
+6. **Incomplete comparisons** — When the research compares options but doesn't cover all relevant dimensions or alternatives.
+
+7. **Methodological concerns** — Source quality issues that undermine confidence: self-reported benchmarks, vendor claims without independent verification, small sample sizes.
+
+For each open question, provide:
+- A clear one-sentence question or concern statement
+- The issue category (from the list above)
+- Severity: "critical" (fundamentally undermines the research), "moderate" (important gap), or "low" (nice-to-have)
+
+Output ONLY valid JSON with EXACTLY this structure (no markdown fences, no extra text):
+{
+  "openQuestions": [
+    {
+      "question": "Clear question or concern statement",
+      "category": "evidence_gap",
+      "severity": "moderate"
+    }
+  ]
+}`;

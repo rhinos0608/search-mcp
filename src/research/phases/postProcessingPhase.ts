@@ -1,14 +1,15 @@
 /**
  * PostProcessingPhase — runs after extraction, before audit.
  *
- * Relevance classification, finding splitting, and evidence-pool contradiction
- * generation. Runs for both LLM and rule-based paths.
+ * Relevance classification, finding splitting, and contradiction/open-question
+ * generation via LLM (preferred) with regex fallback. Runs for ALL paths.
  * Extracted from PipelineStrategy.analyze() lines 129-201.
  */
 
 import { BasePhase } from './basePhase.js';
 import type { StrategyContext } from '../strategies/types.js';
 import { logger } from '../../logger.js';
+import { ContradictionDetector } from '../contradictionDetector.js';
 
 export class PostProcessingPhase extends BasePhase {
   readonly name = 'post_processing';
@@ -22,7 +23,8 @@ export class PostProcessingPhase extends BasePhase {
 
     const { scoreAllFindings } = await import('../relevanceClassifier.js');
     const { processAndSplitFindings } = await import('../findingSplitter.js');
-    const { generateFromEvidencePool, mergeContradictions } = await import('../contradictionGenerator.js');
+    const { generateFromEvidencePool, mergeContradictions } =
+      await import('../contradictionGenerator.js');
 
     // 1. Relevance classify all findings against the original query
     const relevanceScores = scoreAllFindings(query, allFindings);
@@ -62,7 +64,41 @@ export class PostProcessingPhase extends BasePhase {
       logger.info({ splitAdded }, 'Finding splitter: atomic findings added');
     }
 
-    // 3. Generate contradictions and uncertainties from the evidence pool
+    // 3. LLM-based contradiction + open-question detection (preferred path)
+    if (ctx.llm && !ctx.deterministic) {
+      const detector = new ContradictionDetector(ctx.llm);
+      const llmResult = await detector.analyze(
+        ctx.state.getFindings(),
+        ctx.state.getSources(),
+        ctx.state.getState().contradictions,
+        query,
+      );
+
+      if (llmResult.contradictions.length > 0) {
+        const { mergeContradictions: mergeC } = await import('../contradictionGenerator.js');
+        const merged = mergeC(
+          ctx.state.getState().contradictions,
+          llmResult.contradictions,
+        );
+        ctx.state.setContradictions(merged);
+        logger.info(
+          { added: llmResult.contradictions.length, total: merged.length },
+          'LLM contradiction detector: contradictions added',
+        );
+      }
+
+      if (llmResult.openQuestions.length > 0) {
+        for (const q of llmResult.openQuestions) {
+          ctx.state.addOpenQuestion(q);
+        }
+        logger.info(
+          { added: llmResult.openQuestions.length },
+          'LLM open-questions generator: open questions added',
+        );
+      }
+    }
+
+    // 3b. Regex-based evidence-pool contradiction generation (always runs as supplement)
     const generated = generateFromEvidencePool(
       ctx.state.getFindings(),
       ctx.state.getSources(),
