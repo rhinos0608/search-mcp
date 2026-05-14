@@ -68,15 +68,15 @@ export default function Providers() {
   function handleChange(groupId: string, fieldKey: string, value: string) {
     setFields(prev => ({
       ...prev,
-      [groupId]: { ...prev[groupId], [fieldKey]: { ...prev[groupId]?.[fieldKey], edit: value, dirty: true } },
+      [groupId]: { ...prev[groupId], [fieldKey]: { ...(prev[groupId]?.[fieldKey] ?? { current: '', edit: '', dirty: false }), edit: value, dirty: true } },
     }));
   }
 
   async function handleSave(groupId: string) {
     setSaving(groupId);
-    setSaveErrors(prev => ({ ...prev, [groupId]: '' }));
+    setSaveErrors(prev => { const next = { ...prev }; delete next[groupId]; return next; });
     const groupFields = fields[groupId] ?? {};
-    const patch: Record<string, { op: string; value?: string }> = {};
+    const patch: Record<string, { op: 'keep' | 'clear' | 'set'; value?: string }> = {};
     for (const [key, state] of Object.entries(groupFields)) {
       if (!state.dirty) { patch[key] = { op: 'keep' }; continue; }
       if (state.edit === '\x00CLEAR') { patch[key] = { op: 'clear' }; continue; }
