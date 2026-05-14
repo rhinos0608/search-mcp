@@ -1,23 +1,34 @@
 # Progress
 
 ## Status
-Completed telemetry bug fixes for research strategies.
+Entity-resolution + provenance grounding work complete — all phases implemented and committed.
 
 ## Tasks
-- [x] Fix `subQuestionCount` in `pipelineStrategy.ts`
-- [x] Add `sourceTypeCount` to all `onProgress` calls in `pipelineStrategy.ts`
-- [x] Add `getSourceTypeCount` helper method to `PipelineStrategy`
-- [x] Ensure `findingCount` uses `ctx.state.findingCount()`
-- [x] Wire up `sourceTypeCount` and `gapLoopCount` in `deepResearch.ts`
-- [x] Update `ProgressCallback` type in `orchestrator.ts`
-- [x] Add and wire `gapLoopCount` in `jobManager.ts`
+- [x] Entity-Resolution / Record-Linkage for Deep Research
+  - [x] `findingLinkage.ts`: UnionFind transitive clustering with 3 edge methods + 3-zone merge logic
+  - [x] `clusterRevision.ts`: LLM-powered cluster revision with conflict resolution
+  - [x] `contradictionDetector.ts`: Shared contradiction detection (LLM + rule-based fallback)
+  - [x] Three-zone merge: deterministic merge (≥0.92 cosine), LLM review band, lexical/direct fallthrough
+  - [x] `greedySplit()` and `splitOversizedClusters()` for oversized cluster management
+  - [x] Phase 2 three-zone merge logic + `needsLlmReview` / `mergeStatus` in types
+- [x] Source-Chunk Provenance Grounding
+  - [x] `provenance.ts`: GroundedClaim/GroundingResult with Perplexity-style citation grounding
+  - [x] `extractClaimEntities()`, `groundSynthesisClaims()`, `enrichReport()` wiring
+- [x] Budget/timeout increases for LLM-heavy pipeline
+  - [x] LLM retry with exponential backoff (8 retries, 60s max delay)
+  - [x] Depth profile timeouts: quick 5min, standard 8min, deep 30min, exhaustive 45min, tree 15min
+- [x] Free backends academic search expansion
+  - [x] Fan-out to all 12 backends in academicSearch.ts
+  - [x] Research family source enum expanded
 
 ## Files Changed
-- `src/research/strategies/pipelineStrategy.ts`
-- `src/tools/deepResearch.ts`
-- `src/research/orchestrator.ts`
-- `src/research/jobManager.ts`
+- `src/research/` — 23 modified + 4 new modules (clusterRevision, contradictionDetector, findingLinkage, provenance)
+- `src/tools/academicSearch.ts` — 12-backend fan-out
+- `src/tools/deepResearch.ts` — timeout limits aligned with new budgets
+- `src/tools/`, `src/browser/`, `src/crawl/`, `src/utils/` — formatting fixes
+- `test/research/` — 2 new test files (cluster-revision, provenance-mcp)
 
 ## Notes
-- `PipelineStrategy.reportProgress` now automatically injects `sourceCount`, `findingCount`, `subQuestionCount`, and `sourceTypeCount` from global state if not explicitly overridden.
-- `gapLoopCount` is now correctly tracked in the job manager and visible via `poll` / `list` snapshots.
+- All lint and typecheck pass cleanly
+- No new npm dependencies
+- Backward compatible: existing callers that don't use new cluster/provenance fields see no behavior change
