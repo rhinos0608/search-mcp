@@ -4,14 +4,17 @@ import { getProviders, rotateApiKey, logout } from '../api/client.js';
 interface Props { onLogout: () => void }
 
 export default function Overview({ onLogout }: Props) {
-  const [providers, setProviders] = useState<Array<{ id: string; configured: boolean }>>([]);
+  const [providers, setProviders] = useState<{ id: string; configured: boolean }[]>([]);
+  const [providersError, setProvidersError] = useState<string | null>(null);
   const [showRotateModal, setShowRotateModal] = useState(false);
   const [newKey, setNewKey] = useState('');
   const [rotating, setRotating] = useState(false);
   const [mcpUrl] = useState(`${window.location.origin}/mcp`);
 
   useEffect(() => {
-    getProviders().then(r => { setProviders(r.providers); }).catch(() => {});
+    getProviders()
+      .then(r => { setProviders(r.providers); setProvidersError(null); })
+      .catch(() => { setProviders([]); setProvidersError('Failed to load providers. Is the server running?'); });
   }, []);
 
   async function handleRotate() {
@@ -19,6 +22,9 @@ export default function Overview({ onLogout }: Props) {
     try {
       const result = await rotateApiKey();
       setNewKey(result.newKey);
+      setShowRotateModal(false);
+    } catch (e) {
+      console.error('Rotation failed', e);
     } finally {
       setRotating(false);
     }
@@ -51,6 +57,8 @@ export default function Overview({ onLogout }: Props) {
 
       <section style={{ marginBottom: 32 }}>
         <h2 style={{ fontSize: 14, fontWeight: 600, color: '#a1a1aa', marginBottom: 12, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Providers</h2>
+        {providersError && <p style={{ fontSize: 13, color: '#f87171', marginBottom: 12 }}>{providersError}</p>}
+        {!providersError && providers.length === 0 && <p style={{ fontSize: 13, color: '#71717a' }}>No providers configured.</p>}
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))', gap: 8 }}>
           {providers.map(p => (
             <div key={p.id} style={{ padding: '10px 14px', background: '#18181b', borderRadius: 8, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -94,7 +102,7 @@ export default function Overview({ onLogout }: Props) {
             </p>
             <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
               <button onClick={() => { setShowRotateModal(false); }} style={{ padding: '8px 16px', borderRadius: 6, background: 'none', border: '1px solid #3f3f46', color: '#a1a1aa' }}>Cancel</button>
-              <button onClick={() => { setShowRotateModal(false); void handleRotate(); }} disabled={rotating}
+              <button onClick={() => { void handleRotate(); }} disabled={rotating}
                 style={{ padding: '8px 16px', borderRadius: 6, background: '#dc2626', border: 'none', color: '#fff', fontWeight: 600 }}>
                 {rotating ? 'Rotating…' : 'Rotate key'}
               </button>

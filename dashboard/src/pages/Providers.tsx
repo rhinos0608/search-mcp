@@ -44,8 +44,29 @@ const PROVIDER_GROUPS = [
   { id: 'github', label: 'GitHub', fields: [{ key: 'token', label: 'Token' }] },
 ];
 
+/** Pure helper: given previous fields state, return updated fields for a change event. */
+function updateFieldState(
+  prev: Record<string, Record<string, FieldState>>,
+  groupId: string,
+  fieldKey: string,
+  value: string,
+): Record<string, Record<string, FieldState>> {
+  return {
+    ...prev,
+    [groupId]: {
+      ...prev[groupId],
+      [fieldKey]: {
+        ...(prev[groupId]?.[fieldKey] ?? { current: '', edit: '', dirty: false }),
+        edit: value,
+        dirty: true,
+      },
+    },
+  };
+}
+
 export default function Providers() {
   const [fields, setFields] = useState<Record<string, Record<string, FieldState>>>({});
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [saving, setSaving] = useState<string | null>(null);
   const [testResults, setTestResults] = useState<Record<string, { ok: boolean; latencyMs?: number; error?: string }>>({});
   const [saveErrors, setSaveErrors] = useState<Record<string, string>>({});
@@ -55,21 +76,22 @@ export default function Providers() {
       const raw = _raw as Record<string, Record<string, string>>;
       const init: typeof fields = {};
       for (const g of PROVIDER_GROUPS) {
-        init[g.id] = {};
+        const group: Record<string, FieldState> = {};
+        init[g.id] = group;
         for (const f of g.fields) {
           const current = raw[g.id]?.[f.key] ?? '';
-          init[g.id]![f.key] = { current, edit: '', dirty: false };
+          group[f.key] = { current, edit: '', dirty: false };
         }
       }
       setFields(init);
-    }).catch(() => {});
+      setLoadError(null);
+    }).catch((err) => {
+      setLoadError(String(err));
+    });
   }, []);
 
   function handleChange(groupId: string, fieldKey: string, value: string) {
-    setFields(prev => ({
-      ...prev,
-      [groupId]: { ...prev[groupId], [fieldKey]: { ...(prev[groupId]?.[fieldKey] ?? { current: '', edit: '', dirty: false }), edit: value, dirty: true } },
-    }));
+    setFields(prev => updateFieldState(prev, groupId, fieldKey, value));
   }
 
   async function handleSave(groupId: string) {
@@ -89,7 +111,8 @@ export default function Providers() {
       setFields(prev => {
         const updated = { ...prev[groupId] };
         for (const key of Object.keys(updated)) {
-          updated[key] = { ...updated[key]!, edit: '', dirty: false };
+          const field = updated[key];
+          if (field) updated[key] = { ...field, edit: '', dirty: false };
         }
         return { ...prev, [groupId]: updated };
       });
@@ -108,6 +131,11 @@ export default function Providers() {
   return (
     <div style={{ maxWidth: 800, margin: '0 auto', padding: 24 }}>
       <h1 style={{ fontSize: 20, fontWeight: 600, marginBottom: 24 }}>Providers</h1>
+      {loadError && (
+        <div style={{ background: '#451a1a', border: '1px solid #dc2626', borderRadius: 8, padding: '10px 14px', marginBottom: 16 }}>
+          <p style={{ fontSize: 13, color: '#f87171', margin: 0 }}>Failed to load config: {loadError}</p>
+        </div>
+      )}
       <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
         {PROVIDER_GROUPS.map(group => (
           <div key={group.id} style={{ background: '#18181b', borderRadius: 10, border: '1px solid #27272a', padding: 20 }}>

@@ -26,8 +26,14 @@ function validateMcpKey(req: http.IncomingMessage, apiKey: string): boolean {
   if (auth.startsWith('Bearer ')) {
     const token = auth.slice(7).trim();
     if (safeTimingEqual(token, apiKey)) return true;
-    const configKey = process.env.SEARCH_MCP_CONFIG_KEY ?? '';
-    return configKey.length > 0 && safeTimingEqual(token, configKey);
+    // SEARCH_MCP_CONFIG_KEY fallback is only accepted when MCP_ALLOW_CONFIG_KEY_FALLBACK=true
+    // (or during setup mode via SETUP_MODE=true)
+    const configKeyFallback =
+      process.env.MCP_ALLOW_CONFIG_KEY_FALLBACK === 'true' || process.env.SETUP_MODE === 'true';
+    if (configKeyFallback) {
+      const configKey = process.env.SEARCH_MCP_CONFIG_KEY ?? '';
+      if (configKey.length > 0 && safeTimingEqual(token, configKey)) return true;
+    }
   }
   if (process.env.MCP_ALLOW_QUERY_KEY === 'true') {
     const url = new URL(req.url ?? '/', 'http://localhost');

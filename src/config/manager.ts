@@ -5,7 +5,7 @@ import { encryptConfig, decryptConfig } from './crypto.js';
 import { loadConfig, resetConfig } from '../config.js';
 import type { SearchConfig } from '../config.js';
 import { MUTABLE_CONFIG_KEYS } from './types.js';
-import type { ConfigPatch, FieldPatch, ProviderTestResult, RedactedConfig } from './types.js';
+import type { AccessConfig, ConfigPatch, FieldPatch, ProviderTestResult, RedactedConfig } from './types.js';
 
 /** Fields whose string values are redacted in getRedacted() output. */
 const SECRET_LEAF_PATHS = new Set([
@@ -98,6 +98,14 @@ export class ConfigManager {
     return redactValue('', this.get()) as RedactedConfig;
   }
 
+  /** Write encrypted config to disk and update in-memory cache. */
+  private persistEncryptedConfig(cfg: SearchConfig): void {
+    const password = process.env.SEARCH_MCP_CONFIG_KEY;
+    if (!password) throw new Error('SEARCH_MCP_CONFIG_KEY not set; cannot persist config update');
+    this._writeEncrypted(cfg, password);
+    this.config = cfg;
+  }
+
   update(patch: ConfigPatch): void {
     // Validate: no unknown keys
     for (const key of Object.keys(patch)) {
@@ -123,27 +131,20 @@ export class ConfigManager {
     }
 
     const updated = cfg as unknown as SearchConfig;
-    const password = process.env.SEARCH_MCP_CONFIG_KEY;
-    if (!password) throw new Error('SEARCH_MCP_CONFIG_KEY not set; cannot persist config update');
-    this._writeEncrypted(updated, password);
-    this.config = updated;
+    this.persistEncryptedConfig(updated);
+  }
+
+  setAccess(access: AccessConfig): void {
+    this.persistEncryptedConfig({ ...this.get(), access });
   }
 
   claimApiKey(): void {
-    const cfg = { ...this.get(), apiKeyClaimed: true };
-    const password = process.env.SEARCH_MCP_CONFIG_KEY;
-    if (!password) throw new Error('SEARCH_MCP_CONFIG_KEY not set');
-    this._writeEncrypted(cfg, password);
-    this.config = cfg;
+    this.persistEncryptedConfig({ ...this.get(), apiKeyClaimed: true });
   }
 
   rotateApiKey(): string {
     const newKey = randomBytes(32).toString('base64url');
-    const cfg = { ...this.get(), mcpApiKey: newKey };
-    const password = process.env.SEARCH_MCP_CONFIG_KEY;
-    if (!password) throw new Error('SEARCH_MCP_CONFIG_KEY not set');
-    this._writeEncrypted(cfg, password);
-    this.config = cfg;
+    this.persistEncryptedConfig({ ...this.get(), mcpApiKey: newKey });
     return newKey;
   }
 

@@ -15,41 +15,18 @@ export interface TailscaleStatus {
   inspectedVia: 'localapi' | 'cli' | 'none';
 }
 
-function parseVersion(v: string): [number, number, number] {
-  const parts = v.replace(/[^0-9.]/g, '').split('.').map(Number);
-  return [parts[0] ?? 0, parts[1] ?? 0, parts[2] ?? 0];
-}
-
-function isModernSyntax(version?: string): boolean {
-  if (!version) return true; // assume modern
-  const [major, minor] = parseVersion(version);
-  return major > 1 || (major === 1 && minor >= 52);
-}
-
-export function getTailscaleServeCommands(port: number, version?: string): string[] {
-  if (isModernSyntax(version)) {
-    return [
-      `tailscale serve --bg ${String(port)}`,
-      `# Verify with: tailscale serve status`,
-    ];
-  }
-  // Legacy syntax (< 1.52)
+export function getTailscaleServeCommands(port: number, _version?: string): string[] {
   return [
-    `tailscale serve https / http://localhost:${String(port)}`,
-    `# Verify with: tailscale serve status`,
+    `tailscale serve --service=svc:mcp-server --https=443 http://localhost:${String(port)}`,
+    `# Verify: tailscale serve status`,
+    `# MCP accessible at: https://svc-mcp-server.<tailnet>.ts.net/mcp`,
   ];
 }
 
-export function getTailscaleFunnelCommands(port: number, version?: string): string[] {
-  if (isModernSyntax(version)) {
-    return [
-      `tailscale funnel ${String(port)}`,
-      `# Verify with: tailscale funnel status`,
-    ];
-  }
+export function getTailscaleFunnelCommands(port: number, _version?: string): string[] {
   return [
-    `tailscale serve --funnel https / http://localhost:${String(port)}`,
-    `# Verify with: tailscale serve status`,
+    `tailscale funnel --service=svc:mcp-server --https=443 http://localhost:${String(port)}`,
+    `# Verify: tailscale funnel status`,
   ];
 }
 

@@ -11,18 +11,25 @@ export default function App() {
   const [setupKey, setSetupKey] = useState('');
 
   useEffect(() => {
+    let mounted = true;
     checkSetup()
       .then(({ claimed, apiKey }) => {
+        if (!mounted) return;
         if (!claimed && apiKey) {
           setSetupKey(apiKey);
           setAuth('setup');
         } else {
           return checkSession().then(({ authenticated }) => {
+            if (!mounted) return;
             setAuth(authenticated ? 'authenticated' : 'unauthenticated');
           });
         }
       })
-      .catch(() => { setAuth('error'); });
+      .catch(() => {
+        if (!mounted) return;
+        setAuth('error');
+      });
+    return () => { mounted = false; };
   }, []);
 
   if (auth === 'loading') return <div style={{ padding: 24, fontFamily: 'system-ui, sans-serif', color: '#a1a1aa' }}>Loading…</div>;

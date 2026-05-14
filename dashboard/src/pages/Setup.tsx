@@ -1,15 +1,28 @@
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { claimKey } from '../api/client.js';
 
 export default function Setup({ apiKey, onClaimed }: { apiKey: string; onClaimed: () => void }) {
   const [copied, setCopied] = useState(false);
   const [claiming, setClaiming] = useState(false);
   const [error, setError] = useState('');
+  const copyTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (copyTimeoutRef.current !== null) {
+        clearTimeout(copyTimeoutRef.current);
+      }
+    };
+  }, []);
 
   async function handleCopy() {
-    await navigator.clipboard.writeText(apiKey);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+    try {
+      await navigator.clipboard.writeText(apiKey);
+      setCopied(true);
+      copyTimeoutRef.current = setTimeout(() => setCopied(false), 2000);
+    } catch {
+      setError('Failed to copy to clipboard');
+    }
   }
 
   async function handleClaim() {
@@ -19,7 +32,14 @@ export default function Setup({ apiKey, onClaimed }: { apiKey: string; onClaimed
       await claimKey();
       onClaimed();
     } catch (e) {
-      setError(String(e));
+      const message =
+        e instanceof Error
+          ? e.message
+          : typeof e === 'object' && e !== null && 'message' in e
+            ? String((e as Record<string, unknown>).message)
+            : 'Claim failed. Check that the server is running and SEARCH_MCP_CONFIG_KEY is set.';
+      setError(message);
+      console.error('Claim error:', e);
       setClaiming(false);
     }
   }

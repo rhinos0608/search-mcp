@@ -4,6 +4,7 @@ import { stat } from 'node:fs/promises';
 import { join, extname, resolve } from 'node:path';
 import type { ConfigManager } from '../config/manager.js';
 import type { SessionStore, LoginRateLimiter } from './auth.js';
+import { detectTailscale } from './tailscale.js';
 import {
   parseCookieHeader,
   getCookieName,
@@ -257,7 +258,7 @@ async function handleApi(
     let parsedLogin: unknown;
     try {
       parsedLogin = parseBody(body, endpoint);
-    } catch (err) {
+    } catch (_err) {
       json(res, 400, { error: 'Invalid request body' });
       return;
     }
@@ -275,7 +276,10 @@ async function handleApi(
     if (expected.length > 0 && apiKey.length === expected.length) {
       match = timingSafeEqual(Buffer.from(apiKey), Buffer.from(expected));
     }
-    if (!match && configKey.length > 0 && apiKey.length === configKey.length) {
+    // SEARCH_MCP_CONFIG_KEY fallback is only accepted when MCP_ALLOW_CONFIG_KEY_FALLBACK=true
+    const configKeyFallback =
+      process.env.MCP_ALLOW_CONFIG_KEY_FALLBACK === 'true' || process.env.SETUP_MODE === 'true';
+    if (!match && configKeyFallback && configKey.length > 0 && apiKey.length === configKey.length) {
       match = timingSafeEqual(Buffer.from(apiKey), Buffer.from(configKey));
     }
     if (!match) {
@@ -365,12 +369,26 @@ async function handleApi(
 
   if (endpoint === '/access/update' && req.method === 'POST') {
     try {
-      const patch = parseBody(body, endpoint) as never;
-      configManager.update({ access: patch });
+      const patch = parseBody(body, endpoint) as import('../config/types.js').AccessConfig;
+      configManager.setAccess(patch);
       json(res, 200, { ok: true });
     } catch (err) {
       json(res, 400, { error: String(err) });
     }
+    return;
+  }
+
+  if (endpoint === '/connection-info' && req.method === 'GET') {
+    const cfg = configManager.get();
+    const proto = isHttps(req) ? 'https' : 'http';
+    const host = req.headers.host ?? `localhost:${String(port)}`;
+    const mcpUrl = `${proto}://${host}/mcp`;
+    json(res, 200, {
+      mcpUrl,
+      apiKey: cfg.mcpApiKey ?? '',
+      allowQueryKey: process.env.MCP_ALLOW_QUERY_KEY === 'true',
+      localPort: port,
+    });
     return;
   }
 
@@ -380,6 +398,12 @@ async function handleApi(
     const newKey = configManager.rotateApiKey();
     res.setHeader('Set-Cookie', buildClearCookieHeader(https));
     json(res, 200, { newKey, warning: 'All sessions and MCP connections have been terminated.' });
+    return;
+  }
+
+  if (endpoint === '/tailscale-status' && req.method === 'GET') {
+    const tailscale = await detectTailscale();
+    json(res, 200, { tailscale });
     return;
   }
 

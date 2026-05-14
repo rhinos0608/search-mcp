@@ -196,11 +196,12 @@ HTTP_PORT=8050 SEARCH_MCP_CONFIG_KEY="your-passphrase" npm start
 ```
 
 On first run the server prints the initial MCP API key to stderr **once**:
-```
+
+```text
 {"level":"info","msg":"Generated initial mcpApiKey","key":"smcp_..."}
 ```
 
-```
+```text
 # 3. Open the dashboard
 open http://localhost:8050/dashboard
 ```
@@ -213,6 +214,7 @@ Log in with the API key from step 2. Then:
 ### Connect an MCP client (HTTP mode)
 
 Claude Desktop (`claude_desktop_config.json`):
+
 ```json
 {
   "mcpServers": {
@@ -226,6 +228,7 @@ Claude Desktop (`claude_desktop_config.json`):
 ```
 
 ### Dev mode (hot reload)
+
 ```bash
 # Terminal 1 — server with hot reload
 HTTP_PORT=8050 SEARCH_MCP_CONFIG_KEY="your-passphrase" npm run dev
@@ -249,7 +252,7 @@ Leave `HTTP_PORT` unset. The server reads config from `config.enc` (with `SEARCH
 
 ## Tailscale Access
 
-Connect to search-mcp from any device on your tailnet — no port forwarding, automatic HTTPS via MagicDNS.
+Connect to search-mcp from any device on your tailnet — no port forwarding, automatic HTTPS via MagicDNS. This creates a named service at `svc-mcp-server.<tailnet>.ts.net` separate from your machine's hostname.
 
 ### On the host machine
 
@@ -257,39 +260,64 @@ Connect to search-mcp from any device on your tailnet — no port forwarding, au
 # 1. Start search-mcp in HTTP mode
 HTTP_PORT=8050 SEARCH_MCP_CONFIG_KEY="your-passphrase" npm start
 
-# 2. Proxy your tailnet hostname to the local port (Tailscale v1.52+)
-tailscale serve --bg 8050
-# For Tailscale < v1.52: tailscale serve https / http://localhost:8050
+# 2. Create a named HTTPS service on your tailnet
+tailscale serve --service=svc:mcp-server --https=443 http://localhost:8050
 
 # Verify
 tailscale serve status
 ```
 
-Then open the dashboard → **Access** → select **tailscale** → **"I configured it"** → Save.
+Then open the dashboard → **Access** → select **tailscale** → **"I configured it"**.
+
+The dashboard shows your shareable connection URL:
+
+```text
+https://svc-mcp-server.<tailnet>.ts.net/mcp
+```
 
 ### On the connecting device
+
+For clients that support HTTP (Claude.ai, Cursor, etc.):
 
 ```json
 {
   "mcpServers": {
     "search-mcp": {
       "type": "http",
-      "url": "https://<hostname>.<tailnet>.ts.net/mcp",
-      "headers": { "Authorization": "Bearer smcp_..." }
+      "url": "https://svc-mcp-server.<tailnet>.ts.net/mcp",
+      "headers": { "Authorization": "Bearer <api-key>" }
     }
   }
 }
 ```
 
-Your hostname is shown in `tailscale status` or at tailscale.com/machines.
+For stdio-only clients, use [mcp-remote](https://github.com/geelen/mcp-remote) as a proxy:
 
-### Public internet via Funnel
-
-```bash
-tailscale funnel 8050
+```json
+{
+  "mcpServers": {
+    "search-mcp": {
+      "command": "npx",
+      "args": [
+        "mcp-remote",
+        "https://svc-mcp-server.<tailnet>.ts.net/mcp",
+        "--header",
+        "Authorization: Bearer <api-key>"
+      ]
+    }
+  }
+}
 ```
 
-Then dashboard → Access → **Enable Funnel…** → type `enable funnel`. Exposes `/mcp` publicly; dashboard stays protected unless you enable "Allow dashboard access over Funnel". The Bearer token is the only auth gate — use a strong key.
+Your tailnet name is shown in `tailscale status` or at [tailscale.com/machines](https://tailscale.com/machines). The dashboard **Access** page auto-generates the full snippet with your real hostname and API key.
+
+### Public internet via Funnel (advanced)
+
+```bash
+tailscale funnel --service=svc:mcp-server --https=443 http://localhost:8050
+```
+
+Only use Funnel if you need non-Tailscale clients to reach the server. It exposes `/mcp` to the public internet — anyone with the URL can attempt to connect. Dashboard → Access → Advanced → **Enable Funnel…**.
 
 ## Docker Deployment
 

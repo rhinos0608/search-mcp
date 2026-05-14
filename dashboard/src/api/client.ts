@@ -17,19 +17,33 @@ async function request<T>(
   init: RequestInit = {},
   validate?: (data: unknown) => T,
 ): Promise<T> {
+  const shouldSetContentType =
+    init.body !== undefined &&
+    !(init.body instanceof FormData) &&
+    !(init.body instanceof Blob) &&
+    !(init.body instanceof URLSearchParams);
   const res = await fetch(`${BASE}${path}`, {
     credentials: 'same-origin',
-    headers: { 'Content-Type': 'application/json', ...init.headers },
     ...init,
+    headers: {
+      ...(init.headers as Record<string, string> | undefined),
+      ...(shouldSetContentType ? { 'Content-Type': 'application/json' } : {}),
+    },
   });
   if (res.status === 401) throw new ApiError(401, 'Not authenticated');
   if (!res.ok) {
-    const body = await res.json().catch(() => ({ error: res.statusText })) as { error?: string };
+    const parsed = await res.json().catch(() => null);
+    const body: { error?: string } =
+      parsed !== null && typeof parsed === 'object' && parsed !== null && ('error' in parsed)
+        ? { error: String((parsed as Record<string, unknown>).error) }
+        : { error: res.statusText };
     throw new ApiError(res.status, body.error ?? res.statusText);
   }
   const data: unknown = await res.json();
   if (validate) return validate(data);
-  return data as T;
+  // For callers that pass a validate function, validated data is returned above.
+  // Without validation, cast at the call site via a proper schema.
+  return data as unknown as T;
 }
 
 // ---- Setup (first-run, no auth required) ----
@@ -39,7 +53,7 @@ export function checkSetup(): Promise<{ claimed: boolean; apiKey?: string }> {
 }
 
 export function claimKey(): Promise<{ ok: boolean }> {
-  return request('/setup/claim', { method: 'POST', body: '{}' });
+  return request('/setup/claim', { method: 'POST', body: JSON.stringify({}) });
 }
 
 // ---- Auth ----
@@ -53,12 +67,17 @@ export function login(apiKey: string): Promise<{ ok: boolean }> {
 }
 
 export function logout(): Promise<{ ok: boolean }> {
-  return request('/logout', { method: 'POST', body: '{}' });
+  return request('/logout', { method: 'POST', body: JSON.stringify({}) });
 }
 
 // ---- Config ----
 
-export function getConfigStatus(): Promise<{ config: Record<string, unknown> }> {
+/** Backend config status response — group → field key → value. */
+export interface ConfigStatus {
+  [group: string]: Record<string, string>;
+}
+
+export function getConfigStatus(): Promise<{ config: ConfigStatus }> {
   return request('/config/status');
 }
 
@@ -99,5 +118,26 @@ export function updateAccess(patch: Partial<AccessConfig>): Promise<{ ok: boolea
 // ---- Key rotation ----
 
 export function rotateApiKey(): Promise<{ newKey: string; warning: string }> {
-  return request('/rotate-key', { method: 'POST', body: '{}' });
+  return request('/rotate-key', { method: 'POST', body: JSON.stringify({}) });
+}
+
+// ---- Connection info ----
+
+export function getConnectionInfo(): Promise<{ mcpUrl: string; apiKey: string; allowQueryKey: boolean; localPort: number }> {
+  return request('/connection-info');
+}
+
+// ---- Tailscale status ----
+
+export interface TailscaleStatusInfo {
+  detected: boolean;
+  hostname?: string;
+  magicDnsName?: string;
+  selfIp?: string;
+  serveActive?: boolean;
+  inspectedVia: 'localapi' | 'cli' | 'none';
+}
+
+export function getTailscaleStatus(): Promise<{ tailscale: TailscaleStatusInfo }> {
+  return request('/tailscale-status');
 }

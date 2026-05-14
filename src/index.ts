@@ -5,6 +5,7 @@ import { logger } from './logger.js';
 import { loadConfig } from './config.js';
 import { createServer } from './server.js';
 import { ConfigManager } from './config/manager.js';
+import * as http from 'node:http';
 import { startHttpServer } from './server/http.js';
 import type { SearchMcpRuntime } from './config/types.js';
 
@@ -34,25 +35,53 @@ async function main(): Promise<void> {
       getConfig: () => configManager.get(),
     };
 
-    const httpServer = await startHttpServer(runtime, configManager, port);
+    let httpServer: http.Server;
+    try {
+      httpServer = await startHttpServer(runtime, configManager, port);
+    } catch (err) {
+      logger.error({ err: err as Error }, 'HTTP server startup failed');
+      await stdioServer.close().catch(() => {});
+      throw err;
+    }
     logger.info({ port }, 'HTTP MCP transport active');
 
-    async function shutdown(): Promise<void> {
+    async function shutdown(exitCode = 0): Promise<void> {
       logger.info('Shutting down search-mcp server');
-      try { await stdioServer.close(); } catch (err) { logger.error({ err }, 'stdio close error'); }
-      await new Promise<void>(r => { httpServer.close(() => { r(); }); });
-      process.exit(0);
+      try {
+        await stdioServer.close();
+      } catch (err) {
+        logger.error({ err }, 'stdio close error');
+      }
+      try {
+        await new Promise<void>((resolve, reject) => {
+          httpServer.close((err) => {
+            if (err) reject(err);
+            else resolve();
+          });
+        });
+      } catch (err) {
+        logger.error({ err }, 'http close error');
+      }
+      if (exitCode !== 0) process.exit(exitCode);
     }
 
-    process.on('SIGINT', () => { void shutdown(); });
-    process.on('SIGTERM', () => { void shutdown(); });
+    process.on('SIGINT', () => {
+      void shutdown(0);
+    });
+    process.on('SIGTERM', () => {
+      void shutdown(0);
+    });
     process.on('uncaughtException', (err) => {
       logger.fatal({ err }, 'Uncaught exception');
-      void shutdown().finally(() => { process.exit(1); });
+      void shutdown(1).finally(() => {
+        process.exit(1);
+      });
     });
     process.on('unhandledRejection', (reason) => {
       logger.fatal({ reason }, 'Unhandled rejection');
-      void shutdown().finally(() => { process.exit(1); });
+      void shutdown(1).finally(() => {
+        process.exit(1);
+      });
     });
   } else {
     const cfg = loadConfig();
@@ -61,27 +90,27 @@ async function main(): Promise<void> {
     await server.connect(transport);
     logger.info('search-mcp server connected via stdio');
 
-    async function shutdown(): Promise<void> {
+    async function shutdown(exitCode = 0): Promise<void> {
       logger.info('Shutting down search-mcp server');
       try {
         await server.close();
       } catch (err) {
         logger.error({ err }, 'Error during server close');
       }
-      process.exit(0);
+      if (exitCode !== 0) process.exit(exitCode);
     }
 
-    process.on('SIGINT', () => void shutdown());
-    process.on('SIGTERM', () => void shutdown());
+    process.on('SIGINT', () => void shutdown(0));
+    process.on('SIGTERM', () => void shutdown(0));
 
     process.on('uncaughtException', (err) => {
       logger.fatal({ err }, 'Uncaught exception — shutting down');
-      void shutdown().finally(() => process.exit(1));
+      void shutdown(1).finally(() => process.exit(1));
     });
 
     process.on('unhandledRejection', (reason) => {
       logger.fatal({ reason }, 'Unhandled promise rejection — shutting down');
-      void shutdown().finally(() => process.exit(1));
+      void shutdown(1).finally(() => process.exit(1));
     });
   }
 }

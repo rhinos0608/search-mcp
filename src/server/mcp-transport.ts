@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import type { Transport } from '@modelcontextprotocol/sdk/shared/transport.js';
 import { createServer } from '../server.js';
+import { logger } from '../logger.js';
 import type { SearchMcpRuntime } from '../config/types.js';
 
 interface SessionEntry {
@@ -42,7 +43,11 @@ export class HttpTransportManager {
   close(sessionId: string): void {
     const entry = this.sessions.get(sessionId);
     if (entry) {
-      try { void entry.transport.close(); } catch { /* ignore */ }
+      try {
+        void entry.transport.close();
+      } catch (err) {
+        logger.debug({ err, sessionId }, 'Transport close error');
+      }
       this.sessions.delete(sessionId);
     }
   }
@@ -51,5 +56,7 @@ export class HttpTransportManager {
     for (const [id] of this.sessions) this.close(id);
   }
 
-  get sessionCount(): number { return this.sessions.size; }
+  get sessionCount(): number {
+    return this.sessions.size;
+  }
 }
