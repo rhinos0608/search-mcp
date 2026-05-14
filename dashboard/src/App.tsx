@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { checkSession } from './api/client.js';
 import Login from './pages/Login.js';
-import Overview from './pages/Overview.js';
+import Shell from './Shell.js';
 
 type AuthState = 'loading' | 'unauthenticated' | 'authenticated';
 
@@ -16,5 +16,5 @@ export default function App() {
 
   if (auth === 'loading') return <div style={{ padding: 24 }}>Loading…</div>;
   if (auth === 'unauthenticated') return <Login onLogin={() => { setAuth('authenticated'); }} />;
-  return <Overview onLogout={() => { setAuth('unauthenticated'); }} />;
+  return <Shell onLogout={() => { setAuth('unauthenticated'); }} />;
 }
