@@ -9,10 +9,19 @@ import { ToolCache, cacheKey } from '../cache.js';
 import { retryWithBackoff } from '../retry.js';
 import { ToolError, unavailableError, timeoutError, parseError } from '../errors.js';
 import { assertRateLimitOk, getTracker } from '../rateLimit.js';
-import type { AcademicPaper } from '../types.js';
-import { rrfMerge } from '../utils/fusion.js';
-import { multiSignalRescore, extractAcademicSignals } from '../utils/rescore.js';
+import type { AcademicPaper, HackerNewsItem, StackOverflowQuestion } from '../types.js';
 import { loadConfig } from '../config.js';
+import { searchPubMed } from './pubmedSearch.js';
+import { searchWikipedia } from './wikipediaSearch.js';
+import { hackernewsSearch } from './hackernewsSearch.js';
+import { stackoverflowSearch } from './stackoverflowSearch.js';
+import { searchOpenAlex } from './openalexSearch.js';
+import { searchCrossref } from './crossrefSearch.js';
+import { searchDataCite } from './dataciteSearch.js';
+import { searchRor } from './rorSearch.js';
+import { searchSemanticScholar } from './semanticScholarSearch.js';
+import { searchGdelt } from './gdeltSearch.js';
+import { searchWikidata } from './wikidataSearch.js';
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -64,8 +73,6 @@ export function normalizeFirstAuthor(author: string): string {
   return parts[parts.length - 1] ?? s;
 }
 
-const rescoreWeights = loadConfig().rescoreWeights.academicSearch;
-
 // ── XML helpers (regex-based, no parser dependency) ──────────────────────────
 
 /** Extract the text content of the first occurrence of a given XML tag. */
@@ -104,6 +111,19 @@ function extractLinkHref(xml: string, attrMatch: string): string | null {
 function truncateText(text: string, maxLength: number): string {
   if (text.length <= maxLength) return text;
   return text.slice(0, maxLength) + TRUNCATED_MARKER;
+}
+
+// ── Year extraction helper ────────────────────────────────────────────────────
+
+function extractYearFromDate(dateStr: string | undefined): number | null {
+  if (!dateStr) return null;
+  const yearMatch = /^(\d{4})/.exec(dateStr);
+  return yearMatch?.[1] !== undefined ? parseInt(yearMatch[1], 10) : null;
+}
+
+/** Strip HTML tags for plain-text snippet extraction. */
+function stripHtml(html: string): string {
+  return html.replace(/<[^>]+>/g, '');
 }
 
 // ── ArXiv backend ────────────────────────────────────────────────────────────
@@ -241,7 +261,7 @@ async function searchArxiv(
   return papers;
 }
 
-// ── Semantic Scholar backend ─────────────────────────────────────────────────
+// ── Semantic Scholar backend (via Graph API) ─────────────────────────────────
 
 const SEMANTIC_SCHOLAR_FIELDS = [
   'title',
@@ -255,7 +275,7 @@ const SEMANTIC_SCHOLAR_FIELDS = [
   'url',
 ].join(',');
 
-async function searchSemanticScholar(
+async function searchSemanticScholarApi(
   query: string,
   limit: number,
   yearFrom: number | null,
@@ -433,16 +453,6 @@ function deduplicateByTitle(papers: AcademicPaper[]): AcademicPaper[] {
   return [...seen.values()];
 }
 
-function sortByCitations(papers: AcademicPaper[]): AcademicPaper[] {
-  return papers.sort((a, b) => {
-    // Nulls last
-    if (a.citationCount === null && b.citationCount === null) return 0;
-    if (a.citationCount === null) return 1;
-    if (b.citationCount === null) return -1;
-    return b.citationCount - a.citationCount;
-  });
-}
-
 // ── Public API ───────────────────────────────────────────────────────────────
 
 export interface AcademicSearchResult {
@@ -450,13 +460,321 @@ export interface AcademicSearchResult {
   warnings: string[];
 }
 
+/** All supported research backends the academic action can query. */
+export type AcademicSource =
+  | 'arxiv'
+  | 'semantic_scholar'
+  | 'openalex'
+  | 'crossref'
+  | 'pubmed'
+  | 'wikipedia'
+  | 'hackernews'
+  | 'stackoverflow'
+  | 'datacite'
+  | 'ror'
+  | 'gdelt'
+  | 'wikidata'
+  | 'all';
+
+// ── Backend list for fan-out ─────────────────────────────────────────────────
+
+interface BackendEntry {
+  name: string;
+  search: (query: string, limit: number) => Promise<AcademicPaper[]>;
+}
+
+function buildBackendEntries(): BackendEntry[] {
+  return [
+    {
+      name: 'ArXiv',
+      search: (q, l) => searchArxiv(q, l, null),
+    },
+    {
+      name: 'Semantic Scholar (Graph API)',
+      search: (q, l) => searchSemanticScholarApi(q, l, null),
+    },
+    {
+      name: 'Semantic Scholar (REST)',
+      search: async (q, l) =>
+        (await searchSemanticScholar(q, l)).map(
+          (r): AcademicPaper => ({
+            title: r.title,
+            authors: r.authors ?? [],
+            abstract: truncateText(r.snippet, ABSTRACT_MAX_LENGTH),
+            url: r.link,
+            year: extractYearFromDate(r.publishedDate),
+            venue: null,
+            citationCount: r.citationCount ?? null,
+            source: 'semantic_scholar',
+            doi: r.doi ?? null,
+            pdfUrl: null,
+          }),
+        ),
+    },
+    {
+      name: 'OpenAlex',
+      search: async (q, l) =>
+        (await searchOpenAlex(q, l)).map(
+          (r): AcademicPaper => ({
+            title: r.title,
+            authors: r.authors ?? [],
+            abstract: truncateText(r.snippet, ABSTRACT_MAX_LENGTH),
+            url: r.link,
+            year: extractYearFromDate(r.publishedDate),
+            venue: null,
+            citationCount: r.citedByCount ?? null,
+            source: 'openalex',
+            doi: r.doi ?? null,
+            pdfUrl: null,
+          }),
+        ),
+    },
+    {
+      name: 'Crossref',
+      search: async (q, l) =>
+        (await searchCrossref(q, l)).map(
+          (r): AcademicPaper => ({
+            title: r.title,
+            authors: r.authors ?? [],
+            abstract: truncateText(r.snippet, ABSTRACT_MAX_LENGTH),
+            url: r.link,
+            year: extractYearFromDate(r.publishedDate),
+            venue: r.publisher ?? null,
+            citationCount: null,
+            source: 'crossref',
+            doi: r.doi ?? null,
+            pdfUrl: null,
+          }),
+        ),
+    },
+    {
+      name: 'PubMed',
+      search: async (q, l) =>
+        (await searchPubMed(q, l)).map(
+          (r): AcademicPaper => ({
+            title: r.title,
+            authors: r.authors ?? [],
+            abstract: truncateText(r.snippet, ABSTRACT_MAX_LENGTH),
+            url: r.link,
+            year: extractYearFromDate(r.publishedDate),
+            venue: null,
+            citationCount: null,
+            source: 'pubmed',
+            doi: null,
+            pdfUrl: null,
+          }),
+        ),
+    },
+    {
+      name: 'Wikipedia',
+      search: async (q, _l) =>
+        (await searchWikipedia(q)).map(
+          (r): AcademicPaper => ({
+            title: r.title,
+            authors: [],
+            abstract: truncateText(r.snippet, ABSTRACT_MAX_LENGTH),
+            url: r.link,
+            year: null,
+            venue: null,
+            citationCount: null,
+            source: 'wikipedia',
+            doi: null,
+            pdfUrl: null,
+          }),
+        ),
+    },
+    {
+      name: 'Hacker News',
+      search: async (q, l) => {
+        const items = await hackernewsSearch(q, 'story', 'relevance', null, l);
+        return items.map(
+          (r: HackerNewsItem): AcademicPaper => ({
+            title: r.title,
+            authors: [],
+            abstract: truncateText(r.storyText ?? '', ABSTRACT_MAX_LENGTH),
+            url: r.url ?? '',
+            year: null,
+            venue: null,
+            citationCount: null,
+            source: 'hackernews',
+            doi: null,
+            pdfUrl: null,
+          }),
+        );
+      },
+    },
+    {
+      name: 'Stack Overflow',
+      search: async (q, l) => {
+        const cfg = loadConfig();
+        const results = await stackoverflowSearch(
+          q,
+          cfg.stackexchange.apiKey ?? '',
+          'relevance',
+          '',
+          false,
+          l,
+        );
+        return results.map(
+          (r: StackOverflowQuestion): AcademicPaper => ({
+            title: r.title,
+            authors: [],
+            abstract: truncateText(stripHtml(r.body), ABSTRACT_MAX_LENGTH),
+            url: r.link,
+            year: null,
+            venue: null,
+            citationCount: null,
+            source: 'stackoverflow',
+            doi: null,
+            pdfUrl: null,
+          }),
+        );
+      },
+    },
+    {
+      name: 'DataCite',
+      search: async (q, l) =>
+        (await searchDataCite(q, l)).map(
+          (r): AcademicPaper => ({
+            title: r.title,
+            authors: [],
+            abstract: truncateText(r.snippet, ABSTRACT_MAX_LENGTH),
+            url: r.link,
+            year: extractYearFromDate(r.publishedDate),
+            venue: r.publisher ?? null,
+            citationCount: null,
+            source: 'datacite',
+            doi: r.doi ?? null,
+            pdfUrl: null,
+          }),
+        ),
+    },
+    {
+      name: 'ROR',
+      search: async (q, l) =>
+        (await searchRor(q, l)).map((r): AcademicPaper => {
+          const venue = [r.country, r.city].filter(Boolean).join(', ') || null;
+          return {
+            title: r.title,
+            authors: [],
+            abstract: truncateText(r.snippet, ABSTRACT_MAX_LENGTH),
+            url: r.link,
+            year: r.established ?? null,
+            venue,
+            citationCount: null,
+            source: 'ror',
+            doi: null,
+            pdfUrl: null,
+          };
+        }),
+    },
+    {
+      name: 'GDELT',
+      search: async (q, l) =>
+        (await searchGdelt(q, '30d', l)).map(
+          (r): AcademicPaper => ({
+            title: r.title,
+            authors: [],
+            abstract: truncateText(r.snippet, ABSTRACT_MAX_LENGTH),
+            url: r.link,
+            year: extractYearFromDate(r.publishedDate),
+            venue: r.domain ?? null,
+            citationCount: null,
+            source: 'gdelt',
+            doi: null,
+            pdfUrl: null,
+          }),
+        ),
+    },
+    {
+      name: 'Wikidata',
+      search: async (q, l) =>
+        (await searchWikidata(q, 'en', l)).map(
+          (r): AcademicPaper => ({
+            title: r.title,
+            authors: [],
+            abstract: truncateText(r.snippet, ABSTRACT_MAX_LENGTH),
+            url: r.link,
+            year: null,
+            venue: null,
+            citationCount: null,
+            source: 'wikidata',
+            doi: null,
+            pdfUrl: null,
+          }),
+        ),
+    },
+  ];
+}
+
+// ── Simple multi-backend sort ────────────────────────────────────────────────
+
+/**
+ * Sort heterogeneous results: prioritize items with metadata richness
+ * (citation count, year recency, venue presence). Falls back to
+ * implicit source priority (academic sources rank higher).
+ */
+function sortMultiBackend(papers: AcademicPaper[]): AcademicPaper[] {
+  const currentYear = new Date().getFullYear();
+  const sourceRank: Record<string, number> = {
+    arxiv: 0,
+    semantic_scholar: 0,
+    openalex: 1,
+    crossref: 1,
+    pubmed: 2,
+    datacite: 3,
+    wikipedia: 4,
+    hackernews: 5,
+    stackoverflow: 5,
+    gdelt: 6,
+    wikidata: 6,
+    ror: 7,
+  };
+
+  return papers.sort((a, b) => {
+    // Items with citation counts rank higher
+    if (a.citationCount !== null && b.citationCount === null) return -1;
+    if (a.citationCount === null && b.citationCount !== null) return 1;
+    if (a.citationCount !== null && b.citationCount !== null) {
+      return b.citationCount - a.citationCount;
+    }
+
+    // Items with venues rank higher than those without
+    if (a.venue !== null && b.venue === null) return -1;
+    if (a.venue === null && b.venue !== null) return 1;
+
+    // Recent items rank higher
+    if (a.year !== null && b.year !== null) {
+      const aRecency = currentYear - a.year;
+      const bRecency = currentYear - b.year;
+      if (aRecency !== bRecency) return aRecency - bRecency;
+    }
+    if (a.year !== null && b.year === null) return -1;
+    if (a.year === null && b.year !== null) return 1;
+
+    // Items with abstracts rank higher
+    if (a.abstract.length > 0 && b.abstract.length === 0) return -1;
+    if (a.abstract.length === 0 && b.abstract.length > 0) return 1;
+
+    // Source priority: academic sources first
+    const aRank = sourceRank[a.source] ?? 9;
+    const bRank = sourceRank[b.source] ?? 9;
+    return aRank - bRank;
+  });
+}
+
+// ── Export the public API ────────────────────────────────────────────────────
+
 export async function academicSearch(
   query: string,
-  source: 'arxiv' | 'semantic_scholar' | 'all' = 'all',
+  source: AcademicSource = 'all',
   limit = 20,
   yearFrom: number | null = null,
 ): Promise<AcademicSearchResult> {
-  logger.info({ tool: 'academic_search', source, limit, yearFrom }, 'Searching academic papers');
+  logger.info(
+    { tool: 'academic_search', source, limit, yearFrom },
+    'Searching across research backends',
+  );
 
   const key = cacheKey('academic', query, source, String(limit), String(yearFrom ?? ''));
   const cached = cache.get(key);
@@ -465,87 +783,82 @@ export async function academicSearch(
     return { papers: cached, warnings: [] };
   }
 
-  let allPapers: AcademicPaper[] = [];
   const warnings: string[] = [];
 
+  // ── Single-backend paths (ArXiv and Semantic Scholar have their own
+  //     optimized code paths with yearFrom support) ────────────────────────
   if (source === 'arxiv') {
-    allPapers = await searchArxiv(query, limit, yearFrom);
-  } else if (source === 'semantic_scholar') {
-    allPapers = await searchSemanticScholar(query, limit, yearFrom);
-  } else {
-    const [arxivResult, ssResult] = await Promise.allSettled([
-      searchArxiv(query, limit, yearFrom),
-      searchSemanticScholar(query, limit, yearFrom),
-    ]);
+    const papers = await searchArxiv(query, limit, yearFrom);
+    const results = papers.slice(0, limit);
+    cache.set(key, results);
+    logger.debug({ resultCount: results.length }, 'ArXiv search complete');
+    return { papers: results, warnings };
+  }
 
-    if (arxivResult.status === 'rejected') {
-      const msg =
-        arxivResult.reason instanceof Error
-          ? arxivResult.reason.message
-          : String(arxivResult.reason);
-      warnings.push(`ArXiv search failed: ${msg}`);
-      logger.warn({ backend: 'arxiv', error: msg }, 'ArXiv search failed');
+  if (source === 'semantic_scholar') {
+    const papers = await searchSemanticScholarApi(query, limit, yearFrom);
+    const results = papers.slice(0, limit);
+    cache.set(key, results);
+    logger.debug({ resultCount: results.length }, 'Semantic Scholar search complete');
+    return { papers: results, warnings };
+  }
+
+  // ── Single-backend paths for other backends ────────────────────────────
+  const backends = buildBackendEntries();
+
+  if (source !== 'all') {
+    const entry = backends.find(
+      (b) =>
+        b.name.toLowerCase().replace(/[^a-z0-9]/g, '') === source ||
+        b.name.toLowerCase().startsWith(source),
+    );
+    if (entry) {
+      try {
+        const papers = await entry.search(query, limit);
+        const results = papers.slice(0, limit);
+        cache.set(key, results);
+        logger.debug({ resultCount: results.length, source }, 'Single-backend search complete');
+        return { papers: results, warnings };
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        throw unavailableError(`${entry.name} search failed: ${msg}`);
+      }
     }
+    // If no matching entry found, fall through to all-backends fan-out
+  }
 
-    if (ssResult.status === 'rejected') {
-      const msg =
-        ssResult.reason instanceof Error ? ssResult.reason.message : String(ssResult.reason);
-      warnings.push(`Semantic Scholar search failed: ${msg}`);
-      logger.warn({ backend: 'semantic_scholar', error: msg }, 'Semantic Scholar search failed');
-    }
+  // ── All backends fan-out ──────────────────────────────────────────────
+  const settled = await Promise.allSettled(
+    backends.map((b) => b.search(query, limit).then((papers) => ({ name: b.name, papers }))),
+  );
 
-    const arxivPapers = arxivResult.status === 'fulfilled' ? arxivResult.value : [];
-    const ssPapers = ssResult.status === 'fulfilled' ? ssResult.value : [];
+  const allPapers: AcademicPaper[] = [];
+  let successCount = 0;
 
-    if (arxivPapers.length === 0 && ssPapers.length === 0) {
-      throw unavailableError(`Both ArXiv and Semantic Scholar APIs failed. ${warnings.join('. ')}`);
-    }
-
-    if (arxivPapers.length === 0 || ssPapers.length === 0) {
-      // Only one source succeeded — fall through to existing dedup + sort pipeline
-      allPapers = [...arxivPapers, ...ssPapers];
+  for (const result of settled) {
+    if (result.status === 'fulfilled') {
+      allPapers.push(...result.value.papers);
+      successCount++;
     } else {
-      // Both succeeded — RRF merge + multi-signal rescoring
-      const merged = rrfMerge([arxivPapers, ssPapers], {
-        keyFn: (p) => p.url,
-        getId: (p) => {
-          if (p.doi) return p.doi.toLowerCase().trim();
-          return normalizeTitle(p.title) + '|' + normalizeFirstAuthor(p.authors[0] ?? '');
-        },
-      });
-
-      const currentYear = new Date().getFullYear();
-      const signals = extractAcademicSignals(
-        merged.map((m) => m.item),
-        currentYear,
-      );
-      const signaled = merged.map((m, i) => {
-        const signal = signals[i];
-        if (signal === undefined) {
-          throw new Error('Signal extraction returned fewer entries than expected');
-        }
-        return {
-          item: m.item,
-          rrfScore: m.rrfScore,
-          signals: signal,
-        };
-      });
-
-      const rescored = multiSignalRescore(signaled, rescoreWeights, limit);
-      const results = rescored.map((r) => r.item);
-
-      cache.set(key, results);
-      logger.debug({ resultCount: results.length, warnings }, 'Academic search complete');
-      return { papers: results, warnings };
+      const msg = result.reason instanceof Error ? result.reason.message : String(result.reason);
+      warnings.push(`Backend search failed: ${msg}`);
+      logger.warn({ error: msg }, 'Backend search failed in academicSearch');
     }
   }
 
-  // Deduplicate, sort, and limit
+  if (allPapers.length === 0) {
+    throw unavailableError(`All research backends failed. ${warnings.join('. ')}`);
+  }
+
+  // Deduplicate by title, sort, and limit
   const deduped = deduplicateByTitle(allPapers);
-  const sorted = sortByCitations(deduped);
+  const sorted = sortMultiBackend(deduped);
   const results = sorted.slice(0, limit);
 
   cache.set(key, results);
-  logger.debug({ resultCount: results.length, warnings }, 'Academic search complete');
+  logger.debug(
+    { resultCount: results.length, successCount, warningCount: warnings.length },
+    'Multi-backend academic search complete',
+  );
   return { papers: results, warnings };
 }

@@ -5,7 +5,7 @@
  * stackoverflow_search with a single `research` tool.
  *
  * Actions:
- *   academic       — Search academic papers via ArXiv + Semantic Scholar (with cross-fallback)
+ *   academic       — Search across ALL available research backends with parallel fan-out
  *   arxiv          — Fast, direct search of ArXiv papers with full date/category filters
  *   hackernews     — Search Hacker News via Algolia
  *   stackoverflow  — Search Stack Overflow questions
@@ -45,14 +45,32 @@ import { registerFamily, type FamilyDefinition } from '../registry.js';
 // ── Action schemas ──────────────────────────────────────────────────────────
 
 const academicAction = z.object({
-  action: z.literal('academic').describe('Search academic papers via ArXiv and Semantic Scholar'),
+  action: z
+    .literal('academic')
+    .describe(
+      'Search across all available research backends (ArXiv, Semantic Scholar, OpenAlex, Crossref, PubMed, Wikipedia, Hacker News, Stack Overflow, DataCite, ROR, GDELT, Wikidata)',
+    ),
   query: z.string().describe('The search query string'),
   source: z
-    .enum(['all', 'arxiv', 'semantic_scholar'])
+    .enum([
+      'all',
+      'arxiv',
+      'semantic_scholar',
+      'openalex',
+      'crossref',
+      'pubmed',
+      'wikipedia',
+      'hackernews',
+      'stackoverflow',
+      'datacite',
+      'ror',
+      'gdelt',
+      'wikidata',
+    ])
     .optional()
     .default('all')
     .describe(
-      'Backend: all (both, merged), arxiv, or semantic_scholar (default all). Falls back to the other backend if one fails.',
+      'Backend to query. "all" fans out to every available backend in parallel and merges results. Individual backends can be selected for faster targeted searches.',
     ),
   limit: z
     .number()
@@ -282,13 +300,27 @@ const researchFamily: FamilyDefinition = {
   actions: [
     {
       name: 'academic',
-      description: 'Search academic papers via ArXiv and Semantic Scholar with automatic fallback',
+      description:
+        'Search across all available research backends (ArXiv, Semantic Scholar, OpenAlex, Crossref, PubMed, Wikipedia, HN, SO, DataCite, ROR, GDELT, Wikidata) with parallel fan-out',
       schema: academicAction,
       handler: async (args, _cfg) => {
         void _cfg;
         const { query, source, limit, yearFrom } = args as {
           query: string;
-          source: 'all' | 'arxiv' | 'semantic_scholar';
+          source:
+            | 'all'
+            | 'arxiv'
+            | 'semantic_scholar'
+            | 'openalex'
+            | 'crossref'
+            | 'pubmed'
+            | 'wikipedia'
+            | 'hackernews'
+            | 'stackoverflow'
+            | 'datacite'
+            | 'ror'
+            | 'gdelt'
+            | 'wikidata';
           limit: number;
           yearFrom?: number;
         };
