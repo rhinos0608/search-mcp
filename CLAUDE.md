@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-> **Version: 3.3.0** — Semantic RAG pipeline with multi-provider embeddings (sidecar/Ollama/Transformers.js/OpenAI), Docker Compose full-stack deployment, evaluation framework, observability/metrics, RAG-Anything multimodal document extraction, and extraction resilience features (contextual embeddings, domain trust, external recovery, content scrubbing, query expansion, cross-backend merging, code extraction, self-improvement tracking).
+> **Version: 6.0.0** — HTTP/HTTPS transport with React browser dashboard (provider config, API key management, Tailscale access), session-gated dashboard API, dual-mode startup (stdio-only or HTTP+stdio), ConfigManager with AES-256-GCM encrypted config, and all V3.x features (semantic RAG, multi-provider embeddings, RAG-Anything, extraction resilience).
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
@@ -8,7 +8,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 An MCP (Model Context Protocol) server that exposes web search, web reading, deep crawling, **semantic RAG search**, GitHub (repo, file, tree, search, corpus), YouTube, Reddit, Twitter/X, Product Hunt, patent, podcast, academic research, Hacker News, Stack Overflow, npm, PyPI, and news tools over stdio JSON-RPC. Clients like Claude Desktop or the Claude CLI connect via stdin/stdout; all logging goes to stderr.
 
-V3.0.0 extracts the retrieval pipeline into reusable `src/rag/` modules. V3.0.5 adds `semantic_jobs`. V3.1.0 adds `semantic_github_code` (AST-aware code search via tree-sitter). V3.1.1 fixes three reliability bugs (HTML threading, timeout scaling, response-size guard). V3.1.5 adds RAG-Anything integration for multimodal document extraction (PDFs, Office, scanned docs) via a Python bridge service. V3.2.0 adds multi-provider embeddings (Ollama, Transformers.js, OpenAI dispatch), Docker Compose full-stack deployment, evaluation framework with golden queries, observability/metrics/instrumentation, two-phase job crawl, Stack Overflow adapter, and academic/QA adapters. V3.3.0 adds extraction resilience features: contextual embeddings, domain trust, external recovery (Wayback/Google Cache), content scrubbing, query expansion, cross-backend search merging, code example extraction, and self-improvement tracking.
+**V6.0.0** adds opt-in HTTP transport with a React browser dashboard: set `HTTP_PORT` to enable. The dashboard serves at `/dashboard`, the MCP endpoint at `/mcp` (Bearer token auth). A `ConfigManager` manages AES-256-GCM encrypted config (`config.enc`); on first run it generates an `mcpApiKey` printed once to stderr. Startup is dual-mode: `HTTP_PORT` absent → original `loadConfig()` stdio-only path; `HTTP_PORT` set → `ConfigManager` + `startHttpServer`.
+
+V3.3.0 adds extraction resilience: contextual embeddings, domain trust, external recovery (Wayback/Google Cache), content scrubbing, query expansion, cross-backend search merging, code example extraction, and self-improvement tracking. V3.2.0 adds multi-provider embeddings (Ollama, Transformers.js, OpenAI), Docker Compose full-stack, evaluation framework, observability/metrics. V3.1.0 adds `semantic_github_code` (AST-aware code search via tree-sitter). V3.0.0 extracts the retrieval pipeline into reusable `src/rag/` modules.
 
 ## Commands
 
@@ -23,13 +25,22 @@ npm run format:check     # Prettier check
 npm run typecheck        # tsc --noEmit
 npm run config:encrypt   # Encrypt config.json → config.enc
 npm run config:decrypt   # Decrypt config.enc → config.json
+npm run install:dashboard  # npm install inside dashboard/
+npm run build:dashboard    # Vite build of dashboard → dist-dashboard/
+npm run build:all          # npm run build && npm run build:dashboard
 ```
 
 Append `--json` (via `dev:json` / `start:json`) for structured JSON logging instead of pino-pretty.
 
+**HTTP mode startup (enables dashboard):**
+```bash
+HTTP_PORT=8050 SEARCH_MCP_CONFIG_KEY="your-passphrase" npm start
+```
+On first run this prints the generated `mcpApiKey` to stderr — that key is the dashboard login password and MCP Bearer token. Subsequent runs read from `config.enc`.
+
 ## Architecture
 
-**Transport**: stdio only. stdout is exclusively for JSON-RPC frames; never write anything else to stdout. All logging uses pino routed to stderr via `src/logger.ts`.
+**Transport**: Dual-mode. When `HTTP_PORT` is unset, stdio only — stdout is exclusively for JSON-RPC frames; never write anything else to stdout. When `HTTP_PORT` is set, the server binds an HTTP server on that port (MCP at `/mcp`, dashboard at `/dashboard`) **and** also connects the stdio transport. All logging uses pino routed to stderr via `src/logger.ts`.
 
 **Tool registration**: `src/server.ts` creates the `McpServer` and registers all tools inline with Zod input schemas. Each tool delegates to a function in `src/tools/`.
 

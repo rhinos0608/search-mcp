@@ -179,6 +179,74 @@ Copy [`config.example.json`](config.example.json) to `config.json` and fill in y
 | `SEARCH_MCP_CONFIG_KEY` | — | Password for decrypting `config.enc` |
 | `CHALLENGE_LATENCY_THRESHOLD` | `5000` | Latency threshold in ms for challenge detection |
 
+## HTTP Mode & Browser Dashboard (V6.0)
+
+Set `HTTP_PORT` to enable an HTTP MCP transport and a React browser dashboard for managing API keys and provider configuration.
+
+### Quick setup
+
+```bash
+# 1. Build server + dashboard
+npm install
+npm run install:dashboard
+npm run build:all
+
+# 2. Start in HTTP mode (generates config.enc on first run)
+HTTP_PORT=8050 SEARCH_MCP_CONFIG_KEY="your-passphrase" npm start
+```
+
+On first run the server prints the initial MCP API key to stderr **once**:
+```
+{"level":"info","msg":"Generated initial mcpApiKey","key":"smcp_..."}
+```
+
+```
+# 3. Open the dashboard
+open http://localhost:8050/dashboard
+```
+
+Log in with the API key from step 2. Then:
+- **Providers page** — enter search backend keys, test connections
+- **Overview page** — copy the MCP connection URL, rotate the API key
+- **Access page** — configure external access (localhost / Tailscale / manual URL)
+
+### Connect an MCP client (HTTP mode)
+
+Claude Desktop (`claude_desktop_config.json`):
+```json
+{
+  "mcpServers": {
+    "search-mcp": {
+      "type": "http",
+      "url": "http://localhost:8050/mcp",
+      "headers": { "Authorization": "Bearer smcp_..." }
+    }
+  }
+}
+```
+
+### Dev mode (hot reload)
+```bash
+# Terminal 1 — server with hot reload
+HTTP_PORT=8050 SEARCH_MCP_CONFIG_KEY="your-passphrase" npm run dev
+
+# Terminal 2 — dashboard Vite dev server (proxies /dashboard/api → port 8050)
+cd dashboard && npm run dev
+```
+
+### Environment variables (HTTP mode)
+
+| Variable | Required | Description |
+|---|---|---|
+| `HTTP_PORT` | Yes | Port to bind (e.g. `8050`). Unset = stdio-only mode. |
+| `SEARCH_MCP_CONFIG_KEY` | Yes | Passphrase for `config.enc` encryption. |
+| `SESSION_TTL_HOURS` | No | Dashboard session lifetime (default: `12`). |
+| `MCP_ALLOW_QUERY_KEY` | No | Allow `?key=` auth on `/mcp` (not recommended, may leak in logs). |
+
+### stdio-only mode (original, unchanged)
+
+Leave `HTTP_PORT` unset. The server reads config from `config.enc` (with `SEARCH_MCP_CONFIG_KEY`), `config.json`, or environment variables — same as before V6.0.
+
 ## Docker Deployment
 
 ```bash

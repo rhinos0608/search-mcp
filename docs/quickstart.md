@@ -68,6 +68,63 @@ export BRAVE_API_KEY=your_key
 claude --mcp 'search-mcp'
 ```
 
+## HTTP Mode & Browser Dashboard
+
+Set `HTTP_PORT` to enable an HTTP MCP endpoint and a React dashboard for managing providers and API keys without touching config files.
+
+### Setup
+
+```bash
+# Install and build (one-time)
+npm install
+npm run install:dashboard   # installs dashboard/node_modules
+npm run build:all           # compiles TypeScript + Vite dashboard
+
+# Start
+HTTP_PORT=8050 SEARCH_MCP_CONFIG_KEY="your-passphrase" npm start
+```
+
+Generate a strong passphrase with `openssl rand -base64 32`.
+
+**First run only:** the server creates `config.enc` and prints the initial API key to stderr:
+```
+{"level":"info","msg":"Generated initial mcpApiKey","key":"smcp_..."}
+```
+This is your dashboard login password and MCP Bearer token. Store it securely — it's only shown once.
+
+### Use the dashboard
+
+Open `http://localhost:8050/dashboard`, log in with the key above, then:
+
+- **Providers** — configure search backends (Brave/Exa/SearXNG/GitHub/etc.), test connections
+- **Overview** — copy the `/mcp` URL for your MCP client, rotate the API key
+- **Access** — switch between localhost / Tailscale / manual external URL
+
+### Connect an MCP client
+
+```json
+{
+  "mcpServers": {
+    "search-mcp": {
+      "type": "http",
+      "url": "http://localhost:8050/mcp",
+      "headers": { "Authorization": "Bearer smcp_..." }
+    }
+  }
+}
+```
+
+### Dev mode
+
+```bash
+# Terminal 1 — server
+HTTP_PORT=8050 SEARCH_MCP_CONFIG_KEY="your-passphrase" npm run dev
+
+# Terminal 2 — dashboard (Vite, proxies /dashboard/api to server)
+cd dashboard && npm run dev
+# dashboard available at http://localhost:5173/dashboard/
+```
+
 ## Docker Deployment
 
 ```bash
