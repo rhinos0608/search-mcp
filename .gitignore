@@ -49,3 +49,7 @@ docs/superpowers/plans/
 .pi-smartread.embeddings.cache/c0b90861666600c2.json
 omp-session-2026-05-06T08-42-17-006Z_019dfc73-be2e-7000-9298-1f9f12c43542.html
 .mcp.json
+
+dist-dashboard/
+dashboard/node_modules/
+dashboard/dist/

@@ -29,6 +29,11 @@ services:
       - RAGA_ENABLED=true
       - RAGA_BRIDGE_URL=http://rag-anything-bridge:8000
       - RAGA_DEFAULT_PARSER=auto
+      # HTTP server (leave unset to run stdio-only)
+      - HTTP_PORT=8050
+      - SEARCH_MCP_CONFIG_KEY=${SEARCH_MCP_CONFIG_KEY}
+      - SESSION_TTL_HOURS=${SESSION_TTL_HOURS:-12}
+      - MCP_ALLOW_QUERY_KEY=${MCP_ALLOW_QUERY_KEY:-false}
       # Optional API keys (uncomment to enable premium backends)
       # - BRAVE_API_KEY=your_brave_key
       # - EXA_API_KEY=your_exa_key

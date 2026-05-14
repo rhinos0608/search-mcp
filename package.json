@@ -20,7 +20,10 @@
 		"format:check": "prettier --check src docs",
 		"typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.test.json",
 		"config:encrypt": "tsx scripts/encrypt-config.ts",
-		"config:decrypt": "tsx scripts/decrypt-config.ts"
+		"config:decrypt": "tsx scripts/decrypt-config.ts",
+		"build:dashboard": "cd dashboard && npm run build",
+		"build:all": "npm run build && npm run build:dashboard",
+		"install:dashboard": "cd dashboard && npm install"
 	},
 	"dependencies": {
 		"@huggingface/tokenizers": "^0.1.3",
