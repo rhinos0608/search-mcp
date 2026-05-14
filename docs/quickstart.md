@@ -125,6 +125,59 @@ cd dashboard && npm run dev
 # dashboard available at http://localhost:5173/dashboard/
 ```
 
+## Tailscale Access (connect from another device)
+
+Tailscale Serve tunnels your tailnet hostname to `localhost:8050` — giving you HTTPS and MagicDNS with no port forwarding or certificates to manage.
+
+### Setup (run on the host machine)
+
+```bash
+# 1. Start search-mcp in HTTP mode (if not already running)
+HTTP_PORT=8050 SEARCH_MCP_CONFIG_KEY="your-passphrase" npm start
+
+# 2. Enable Tailscale Serve (v1.52+)
+tailscale serve --bg 8050
+
+# For Tailscale < v1.52:
+tailscale serve https / http://localhost:8050
+
+# Verify
+tailscale serve status
+```
+
+Then in the dashboard: **Access** → select **tailscale** → click **"I configured it"** → Save.
+
+### Connect from the other device
+
+Your MCP URL is your Tailscale MagicDNS hostname:
+
+```json
+{
+  "mcpServers": {
+    "search-mcp": {
+      "type": "http",
+      "url": "https://<hostname>.<tailnet-name>.ts.net/mcp",
+      "headers": { "Authorization": "Bearer smcp_..." }
+    }
+  }
+}
+```
+
+Replace `<hostname>.<tailnet-name>.ts.net` with your machine's Tailscale hostname (visible in `tailscale status` or at tailscale.com/machines).
+
+### Optional: Tailscale Funnel (public internet)
+
+Funnel exposes the server to devices **not** on your tailnet:
+
+```bash
+tailscale funnel 8050
+tailscale funnel status
+```
+
+In the dashboard: Access → **Enable Funnel…** → type `enable funnel` to confirm. The `/mcp` endpoint becomes publicly reachable; the dashboard remains protected unless you also enable "Allow dashboard access over Funnel".
+
+> The Bearer token is the only auth gate for public Funnel access — use a strong key and rotate it if exposed.
+
 ## Docker Deployment
 
 ```bash

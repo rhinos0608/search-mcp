@@ -247,6 +247,50 @@ cd dashboard && npm run dev
 
 Leave `HTTP_PORT` unset. The server reads config from `config.enc` (with `SEARCH_MCP_CONFIG_KEY`), `config.json`, or environment variables — same as before V6.0.
 
+## Tailscale Access
+
+Connect to search-mcp from any device on your tailnet — no port forwarding, automatic HTTPS via MagicDNS.
+
+### On the host machine
+
+```bash
+# 1. Start search-mcp in HTTP mode
+HTTP_PORT=8050 SEARCH_MCP_CONFIG_KEY="your-passphrase" npm start
+
+# 2. Proxy your tailnet hostname to the local port (Tailscale v1.52+)
+tailscale serve --bg 8050
+# For Tailscale < v1.52: tailscale serve https / http://localhost:8050
+
+# Verify
+tailscale serve status
+```
+
+Then open the dashboard → **Access** → select **tailscale** → **"I configured it"** → Save.
+
+### On the connecting device
+
+```json
+{
+  "mcpServers": {
+    "search-mcp": {
+      "type": "http",
+      "url": "https://<hostname>.<tailnet>.ts.net/mcp",
+      "headers": { "Authorization": "Bearer smcp_..." }
+    }
+  }
+}
+```
+
+Your hostname is shown in `tailscale status` or at tailscale.com/machines.
+
+### Public internet via Funnel
+
+```bash
+tailscale funnel 8050
+```
+
+Then dashboard → Access → **Enable Funnel…** → type `enable funnel`. Exposes `/mcp` publicly; dashboard stays protected unless you enable "Allow dashboard access over Funnel". The Bearer token is the only auth gate — use a strong key.
+
 ## Docker Deployment
 
 ```bash
