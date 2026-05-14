@@ -1,6 +1,6 @@
 # Roadmap
 
-## Current State (2026-05-04)
+## Current State (2026-05-15)
 
 > Canonical plan status lives in `docs/plans/index.md`; this file is a legacy high-level summary.
 
@@ -14,11 +14,13 @@
 | **V3.1.5**       | ✅ Done       | RAG-Anything integration, code review fixes across RAG pipeline                                                           |
 | **V3.2.0**       | ✅ In progress | Domain adapters (Stack Overflow, HN, academic, news), full job pipeline, `semantic_search`, constraint ranking, dedup, distribution packaging *(parallel track)* |
 | **V3.3.0**       | ✅ Done       | Kill chain extraction, contextual embeddings, render recovery                                                              |
-| **V3.3.1**       | ✅ Planned    | DuckDuckGo zero-key fallback, opt-in Ollama web search, availability-aware selection + merge                               |
-| **V3.4.0**       | ✅ Planned    | Integration: resolver pattern, output budget, structured errors, diagnostics                                               |
-| **V3.5.0**       | ✅ Pending    | Competitive integration and tool consolidation                                                                                                   |
-| **V4.0.0**       | ✅ Done       | **Deep Research Orchestration Engine** — LLM control loop, multi-backend discovery, gap analysis, audit, synthesis |
-| **V5.0.0**       | 🔲 Planned    | Persistent corpus indexes (was V4.0.0) — from ephemeral cache to durable research memory                                   |
+| **V3.3.1**       | ✅ Done       | DuckDuckGo zero-key fallback, opt-in Ollama web search, availability-aware selection + merge                               |
+| **V3.4.0**       | ✅ Done       | Integration: resolver pattern, output budget, structured errors, diagnostics                                               |
+| **V3.5.0**       | ✅ Done       | Competitive integration and tool consolidation                                                                             |
+| **V4.0.0**       | ✅ Done       | **Deep Research Orchestration Engine** — LLM control loop, multi-backend discovery, gap analysis, audit, synthesis        |
+| **V5.0.0**       | ❌ Retired    | Persistent corpus indexes — superseded by V7.0.0 (event log subsumes corpus abstraction)                                  |
+| **V6.0.0**       | ✅ Done       | HTTP Dashboard + Tailscale access — React browser dashboard, ConfigManager AES-256-GCM, dual-mode startup                 |
+| **V7.0.0**       | 📐 Specced    | **Longitudinal Knowledge Graph** — event-sourced persistent graph, families, multi-run discourse accumulation             |
 
 ## Roadmap Summary
 
@@ -27,7 +29,10 @@
 - **V3.3.1** — search-backend expansion: DuckDuckGo plus opt-in Ollama web search.
 - **V3.4.0** — integration work: resolver pattern, output budget, structured errors, diagnostics.
 - **V3.5.0** — competitive integration.
-- **V4.0.0** — Deep Research Orchestration Engine (replaces original V4 "persistent corpus indexes" → pushed to V5.0.0).
+- **V4.0.0** — Deep Research Orchestration Engine.
+- **V5.0.0** — Retired. Persistent corpus indexes superseded by V7.0.0.
+- **V6.0.0** — HTTP Dashboard + Tailscale integration (shipped, was undocumented).
+- **V7.0.0** — Longitudinal Knowledge Graph. Spec: `docs/superpowers/specs/2026-05-15-longitudinal-knowledge-graph-design.md`.
 
 ## Canonical Docs
 
@@ -41,4 +46,4 @@
 
 ---
 
-_Generated: 2026-05-04 · Last updated: 2026-05-04 (V4.0.0 Deep Research Orchestration)_
+_Generated: 2026-05-04 · Last updated: 2026-05-15 (V6.0.0 + V7.0.0 spec)_
