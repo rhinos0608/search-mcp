@@ -1,0 +1,5 @@
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: system-ui, -apple-system, sans-serif; background: #0f0f0f; color: #e4e4e7; min-height: 100vh; }
+a { color: #60a5fa; text-decoration: none; }
+button { cursor: pointer; }
+input, button, select, textarea { font: inherit; }
