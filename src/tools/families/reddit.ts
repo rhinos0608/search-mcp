@@ -97,7 +97,12 @@ const simplePostLocator = z
     if (parts.length === 2 && parts[0] && parts[1]) {
       const [subreddit, postId] = parts;
       // Validate subreddit name
-      if (subreddit && postId && /^[A-Za-z0-9_]{1,21}$/.test(subreddit) && /^[A-Za-z0-9]+$/.test(postId)) {
+      if (
+        subreddit &&
+        postId &&
+        /^[A-Za-z0-9_]{1,21}$/.test(subreddit) &&
+        /^[A-Za-z0-9]+$/.test(postId)
+      ) {
         return { type: 'id' as const, subreddit, postId };
       }
     }
@@ -141,7 +146,10 @@ const commentsSchema = z
     action: z.literal('comments').describe('Fetch a Reddit post and its comment tree'),
     // Accept either 'post' (preferred) or 'url' (common LLM mistake) — normalize to post locator
     post: unifiedPostLocator.optional(),
-    url: z.url().optional().describe('Reddit post URL (alternative to post field, auto-converted to post locator)'),
+    url: z
+      .url()
+      .optional()
+      .describe('Reddit post URL (alternative to post field, auto-converted to post locator)'),
     comment: z
       .string()
       .regex(/^[A-Za-z0-9]+$/)
@@ -174,7 +182,8 @@ const commentsSchema = z
       ),
   })
   .refine((data) => data.post ?? data.url, {
-    message: "Missing post identifier: provide either `post` (object with type+url/permalink/id) or `url` (full Reddit URL)",
+    message:
+      'Missing post identifier: provide either `post` (object with type+url/permalink/id) or `url` (full Reddit URL)',
     path: ['post'],
   });
 

@@ -73,7 +73,10 @@ export async function searchOpenAlex(query: string, limit = 10): Promise<OpenAle
       const title = typeof item.title === 'string' ? item.title : 'Untitled';
 
       // Build link from the OpenAlex work ID (URL)
-      const link = typeof item.id === 'string' ? item.id : `https://openalex.org/W${typeof item.id === 'string' ? item.id : ''}`;
+      const link =
+        typeof item.id === 'string'
+          ? item.id
+          : `https://openalex.org/W${typeof item.id === 'string' ? item.id : ''}`;
 
       // Reconstruct abstract from inverted index
       const abstractIndex = item.abstract_inverted_index as Record<string, number[]> | undefined;
@@ -106,7 +109,8 @@ export async function searchOpenAlex(query: string, limit = 10): Promise<OpenAle
         title,
         link,
         snippet: snippet.slice(0, 500),
-        publishedDate: typeof item.publication_date === 'string' ? item.publication_date : undefined,
+        publishedDate:
+          typeof item.publication_date === 'string' ? item.publication_date : undefined,
         authors: authors?.length ? authors : undefined,
         doi,
         citedByCount: typeof item.cited_by_count === 'number' ? item.cited_by_count : undefined,

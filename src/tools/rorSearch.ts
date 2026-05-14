@@ -59,7 +59,8 @@ export async function searchRor(query: string, limit = 10): Promise<RorResult[]>
 
       // Extract country
       const countryObj = item.country as Record<string, unknown> | undefined;
-      const country = typeof countryObj?.country_name === 'string' ? countryObj.country_name : undefined;
+      const country =
+        typeof countryObj?.country_name === 'string' ? countryObj.country_name : undefined;
 
       // Extract city from first address
       const addresses = item.addresses;

@@ -440,7 +440,6 @@ export function registerGitHubTool(server: McpServer, cfg: SearchConfig): void {
   registerFamily(server, githubFamily, cfg);
 }
 
-
 export function gitHubCapabilities(cfg: SearchConfig) {
   return githubFamily.actions.map((a) => ({
     name: `github.${a.name}`,

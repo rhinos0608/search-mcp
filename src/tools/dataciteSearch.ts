@@ -78,9 +78,10 @@ export async function searchDataCite(query: string, limit = 10): Promise<DataCit
         title,
         link,
         snippet: snippet.slice(0, 500),
-        publishedDate: typeof attributes?.publicationYear === 'number'
-          ? String(attributes.publicationYear)
-          : undefined,
+        publishedDate:
+          typeof attributes?.publicationYear === 'number'
+            ? String(attributes.publicationYear)
+            : undefined,
         publisher: typeof attributes?.publisher === 'string' ? attributes.publisher : undefined,
         doi: id || undefined,
         resourceType,

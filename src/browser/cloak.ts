@@ -21,13 +21,18 @@ export interface CloakLaunchOptions {
 
 interface CloakBrowserModule {
   launch?: (options?: CloakLaunchOptions) => Promise<Browser>;
-  launchPersistentContext?: (options: CloakLaunchOptions & { userDataDir: string }) => Promise<BrowserContext>;
+  launchPersistentContext?: (
+    options: CloakLaunchOptions & { userDataDir: string },
+  ) => Promise<BrowserContext>;
 }
 
 function hasCloakLaunchers(value: unknown): value is CloakBrowserModule {
   if (typeof value !== 'object' || value === null) return false;
   const candidate = value as Partial<CloakBrowserModule>;
-  return typeof candidate.launch === 'function' || typeof candidate.launchPersistentContext === 'function';
+  return (
+    typeof candidate.launch === 'function' ||
+    typeof candidate.launchPersistentContext === 'function'
+  );
 }
 
 export function buildCloakLaunchOptions(config: BrowserSessionConfig): CloakLaunchOptions {
@@ -56,7 +61,10 @@ async function importCloakBrowser(): Promise<CloakBrowserModule> {
     // CloakBrowser is an optional runtime integration. Do not make startup depend on it.
     const mod: unknown = await import('cloakbrowser');
     if (!hasCloakLaunchers(mod)) {
-      throw new BrowserError('cloakbrowser module did not export launch functions.', 'LAUNCH_FAILED');
+      throw new BrowserError(
+        'cloakbrowser module did not export launch functions.',
+        'LAUNCH_FAILED',
+      );
     }
     return mod;
   } catch (err) {

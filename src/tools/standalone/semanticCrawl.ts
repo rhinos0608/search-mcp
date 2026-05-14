@@ -50,9 +50,7 @@ export function registerSemanticCrawl(server: McpServer, cfg: SearchConfig): voi
             }),
             z.object({
               type: z.literal('search'),
-              query: z
-                .string()
-                .describe('Web search query to discover seed URLs, then crawl them'),
+              query: z.string().describe('Web search query to discover seed URLs, then crawl them'),
               maxSeedUrls: z
                 .number()
                 .int()
@@ -212,10 +210,7 @@ export function registerSemanticCrawl(server: McpServer, cfg: SearchConfig): voi
       },
       extra,
     ) => {
-      logger.info(
-        { tool: 'semantic_crawl', sourceType: source.type, query, topK },
-        'Tool invoked',
-      );
+      logger.info({ tool: 'semantic_crawl', sourceType: source.type, query, topK }, 'Tool invoked');
       const start = Date.now();
       try {
         if (extractionConfig) {

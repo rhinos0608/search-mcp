@@ -27,7 +27,11 @@ export interface GdeltResult {
  * Search GDELT for news articles and events matching the query.
  * Results span the last 30 days by default.
  */
-export async function searchGdelt(query: string, timespan = '30d', limit = 10): Promise<GdeltResult[]> {
+export async function searchGdelt(
+  query: string,
+  timespan = '30d',
+  limit = 10,
+): Promise<GdeltResult[]> {
   const url = `https://api.gdeltproject.org/api/v2/doc/doc?query=${encodeURIComponent(query)}&mode=ArtList&format=json&maxrecords=${String(limit)}&timespan=${timespan}`;
 
   try {

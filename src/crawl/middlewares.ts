@@ -397,7 +397,12 @@ export class ResponseQualityMiddleware implements CrawlMiddleware {
     const quality = assessMarkdownBatchQuality(resp.result.pages.map((p) => p.markdown));
     if (!quality.meaningful) {
       logger.info(
-        { url: resp.result.seedUrl, classification: quality.classification, score: quality.score, reasons: quality.reasons },
+        {
+          url: resp.result.seedUrl,
+          classification: quality.classification,
+          score: quality.score,
+          reasons: quality.reasons,
+        },
         'response-quality: low quality, signaling for recovery',
       );
       return {
@@ -453,7 +458,12 @@ export class AggressiveRenderMiddleware implements CrawlMiddleware {
     }
 
     logger.info(
-      { url: ctx.request.url, classification: quality.classification, score: quality.score, reasons: quality.reasons },
+      {
+        url: ctx.request.url,
+        classification: quality.classification,
+        score: quality.score,
+        reasons: quality.reasons,
+      },
       'aggressive-render: retrying with aggressive settings',
     );
 
@@ -464,9 +474,10 @@ export class AggressiveRenderMiddleware implements CrawlMiddleware {
       quality.classification === 'too_thin' ||
       quality.classification === 'mixed_low_confidence';
 
-    const delaySeconds = isJsShell || isNavHeavy
-      ? Math.max(ctx.request.opts.delayBeforeReturnHtml ?? 0.1, 8)
-      : Math.max(ctx.request.opts.delayBeforeReturnHtml ?? 0.1, 3);
+    const delaySeconds =
+      isJsShell || isNavHeavy
+        ? Math.max(ctx.request.opts.delayBeforeReturnHtml ?? 0.1, 8)
+        : Math.max(ctx.request.opts.delayBeforeReturnHtml ?? 0.1, 3);
 
     const scrollJs = isNavHeavy
       ? [
@@ -549,7 +560,9 @@ export class AggressiveRenderMiddleware implements CrawlMiddleware {
 
       if (comparison.improved) {
         // Quality improved even if not yet "meaningful" — still better
-        ctx.warnings.push(`Aggressive render improved metrics (overall: ${String(Math.round(comparison.deltas.overallScore))})`);
+        ctx.warnings.push(
+          `Aggressive render improved metrics (overall: ${String(Math.round(comparison.deltas.overallScore))})`,
+        );
         return recovery;
       }
 

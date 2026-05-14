@@ -100,7 +100,7 @@ function detectBoilerplateBlocks(
   let totalCount = 0;
 
   for (let i = 0; i < lines.length; i++) {
-    const line = lines[i] ?? "";
+    const line = lines[i] ?? '';
     const trimmed = line.trim();
 
     // Stop block at empty lines or code fences

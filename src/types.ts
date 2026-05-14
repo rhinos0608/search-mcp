@@ -250,7 +250,19 @@ export interface AcademicPaper {
   year: number | null;
   venue: string | null;
   citationCount: number | null;
-  source: 'arxiv' | 'semantic_scholar';
+  source:
+    | 'arxiv'
+    | 'semantic_scholar'
+    | 'openalex'
+    | 'crossref'
+    | 'pubmed'
+    | 'wikipedia'
+    | 'hackernews'
+    | 'stackoverflow'
+    | 'datacite'
+    | 'ror'
+    | 'gdelt'
+    | 'wikidata';
   doi: string | null;
   pdfUrl: string | null;
 }

@@ -22,7 +22,11 @@ export interface WikidataResult {
 /**
  * Search Wikidata for entities matching the query.
  */
-export async function searchWikidata(query: string, language = 'en', limit = 10): Promise<WikidataResult[]> {
+export async function searchWikidata(
+  query: string,
+  language = 'en',
+  limit = 10,
+): Promise<WikidataResult[]> {
   const url = `https://www.wikidata.org/w/api.php?action=wbsearchentities&search=${encodeURIComponent(query)}&language=${language}&limit=${String(limit)}&format=json&origin=*`;
 
   try {

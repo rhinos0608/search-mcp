@@ -446,12 +446,13 @@ export class BrowserManager {
       }
 
       const launchArgs = buildLaunchArgs(config);
-      const launchOptions: Parameters<typeof playwrightModule.chromium.launchPersistentContext>[1] = {
-        headless: config.headless,
-        args: launchArgs,
-        viewport: config.viewport || { width: 1280, height: 720 },
-        bypassCSP: config.bypassCSP ?? false,
-      };
+      const launchOptions: Parameters<typeof playwrightModule.chromium.launchPersistentContext>[1] =
+        {
+          headless: config.headless,
+          args: launchArgs,
+          viewport: config.viewport || { width: 1280, height: 720 },
+          bypassCSP: config.bypassCSP ?? false,
+        };
 
       // Pass proxy through the dedicated option (not just CLI arg)
       if (config.proxyServer) {

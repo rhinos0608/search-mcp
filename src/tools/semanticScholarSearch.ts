@@ -25,7 +25,10 @@ export interface SemanticScholarResult {
  * Search Semantic Scholar for papers matching the query.
  * Rate limit: 100 requests per 5 minutes without an API key.
  */
-export async function searchSemanticScholar(query: string, limit = 10): Promise<SemanticScholarResult[]> {
+export async function searchSemanticScholar(
+  query: string,
+  limit = 10,
+): Promise<SemanticScholarResult[]> {
   const url = `https://api.semanticscholar.org/graph/v1/paper/search?query=${encodeURIComponent(query)}&limit=${String(limit)}&fields=title,year,authors,abstract,url,externalIds,citationCount`;
 
   try {
@@ -48,7 +51,8 @@ export async function searchSemanticScholar(query: string, limit = 10): Promise<
     return (data as Record<string, unknown>[]).slice(0, limit).map((item) => {
       const title = typeof item.title === 'string' ? item.title : 'Untitled';
       const pId = typeof item.paperId === 'string' ? item.paperId : '';
-      const link = typeof item.url === 'string' ? item.url : `https://www.semanticscholar.org/paper/${pId}`;
+      const link =
+        typeof item.url === 'string' ? item.url : `https://www.semanticscholar.org/paper/${pId}`;
       const snippet = typeof item.abstract === 'string' ? item.abstract.slice(0, 500) : '';
 
       // Extract authors

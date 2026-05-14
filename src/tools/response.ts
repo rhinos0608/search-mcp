@@ -103,7 +103,6 @@ function findLargeTextFields(obj: unknown, path = ''): string[] {
     return matches;
   }
 
-
   for (const [key, value] of Object.entries(obj)) {
     if (typeof value !== 'string') continue;
 

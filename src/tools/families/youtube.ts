@@ -45,7 +45,10 @@ const transcriptSchema = z.object({
   action: z.literal('transcript').describe('Get the transcript/captions for a video'),
   // Accept either videoId (ID only) or url (full YouTube URL) - both work
   videoId: z.string().optional().describe('YouTube video ID (the part after ?v=)'),
-  url: z.url().optional().describe('Full YouTube URL (https://youtube.com/watch?v=... or youtu.be/...)'),
+  url: z
+    .url()
+    .optional()
+    .describe('Full YouTube URL (https://youtube.com/watch?v=... or youtu.be/...)'),
   language: z
     .string()
     .optional()

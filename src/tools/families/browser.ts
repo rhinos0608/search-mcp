@@ -187,8 +187,14 @@ const sessionSchema = z.object({
     .describe('Enable CloakBrowser human-like input patches for Cloak sessions'),
   cloakHumanPreset: z.enum(['default', 'careful']).optional().describe('CloakBrowser human preset'),
   cloakLocale: z.string().optional().describe('CloakBrowser locale flag, e.g. en-US'),
-  cloakTimezone: z.string().optional().describe('CloakBrowser timezone flag, e.g. America/New_York'),
-  cloakGeoip: z.boolean().optional().describe('Let CloakBrowser infer locale/timezone from proxy IP'),
+  cloakTimezone: z
+    .string()
+    .optional()
+    .describe('CloakBrowser timezone flag, e.g. America/New_York'),
+  cloakGeoip: z
+    .boolean()
+    .optional()
+    .describe('Let CloakBrowser infer locale/timezone from proxy IP'),
   cloakStealthArgs: z
     .boolean()
     .optional()

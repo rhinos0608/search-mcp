@@ -48,9 +48,7 @@ export async function searchCrossref(query: string, limit = 10): Promise<Crossre
     return (items as Record<string, unknown>[]).slice(0, limit).map((item) => {
       const titleArr = item.title;
       const title =
-        Array.isArray(titleArr) && typeof titleArr[0] === 'string'
-          ? titleArr[0]
-          : 'Untitled';
+        Array.isArray(titleArr) && typeof titleArr[0] === 'string' ? titleArr[0] : 'Untitled';
 
       const doi = typeof item.DOI === 'string' ? item.DOI : '';
       const link = doi ? `https://doi.org/${doi}` : '';
@@ -62,11 +60,13 @@ export async function searchCrossref(query: string, limit = 10): Promise<Crossre
       const authorEntries = item.author;
       let authors: string[] | undefined;
       if (Array.isArray(authorEntries)) {
-        authors = (authorEntries as Record<string, unknown>[]).map((a) => {
-          const given = typeof a.given === 'string' ? a.given : '';
-          const family = typeof a.family === 'string' ? a.family : '';
-          return [given, family].filter(Boolean).join(' ');
-        }).filter(Boolean);
+        authors = (authorEntries as Record<string, unknown>[])
+          .map((a) => {
+            const given = typeof a.given === 'string' ? a.given : '';
+            const family = typeof a.family === 'string' ? a.family : '';
+            return [given, family].filter(Boolean).join(' ');
+          })
+          .filter(Boolean);
       }
 
       // Extract date from created, published-print, or issued

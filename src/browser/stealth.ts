@@ -159,7 +159,9 @@ export function buildContextOptions(config: BrowserSessionConfig): BrowserContex
  * This is advisory — it reports known gaps in the stealth stack so users
  * can make informed tradeoffs between stealth mode and user-browser mode.
  */
-export function getStealthHealth(engine: BrowserSessionConfig['browserEngine'] = 'playwright'): StealthHealthReport {
+export function getStealthHealth(
+  engine: BrowserSessionConfig['browserEngine'] = 'playwright',
+): StealthHealthReport {
   if (engine === 'cloak') {
     return {
       status: 'pass',

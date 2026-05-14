@@ -17,10 +17,7 @@ import {
   normalizeLlmForValidation,
   buildLlmFallback,
 } from '../../utils/ragaFallback.js';
-import {
-  readabilityFallbackResult,
-  extractionWarnings,
-} from '../../utils/crawlResultShaping.js';
+import { readabilityFallbackResult, extractionWarnings } from '../../utils/crawlResultShaping.js';
 import { extractionConfigSchema, validateExtractionConfig } from '../../utils/extractionConfig.js';
 
 export function registerWebRead(server: McpServer, cfg: SearchConfig): void {
