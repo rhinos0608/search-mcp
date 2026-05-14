@@ -56,20 +56,20 @@ const deepResearchSchema = z.object({
     .default('standard')
     .describe(
       'Research depth profile:\n' +
-        '- quick: 5-10 sources, 1 gap loop (~3min)\n' +
+        '- quick: 5-10 sources, 1 gap loop (~5min)\n' +
         '- standard: 15-25 sources, 2 gap loops (~8min)\n' +
-        '- deep: 30-60 sources, 3 gap loops (~15min)\n' +
-        '- exhaustive: 100+ sources, comprehensive coverage (~30min)\n' +
-        '- tree: breadth×depth recursive exploration (4 sub-queries × 2 levels, ~12min)',
+        '- deep: 30-60 sources, 3 gap loops (~30min)\n' +
+        '- exhaustive: 100+ sources, comprehensive coverage (~45min)\n' +
+        '- tree: breadth×depth recursive exploration (4 sub-queries × 2 levels, ~15min)',
     ),
   maxTimeMs: z
     .number()
     .int()
     .min(10_000)
-    .max(600_000)
+    .max(2_700_000)
     .optional()
     .describe(
-      'Maximum runtime in milliseconds (10s to 10min). If omitted, the depth profile default is used.',
+      'Maximum runtime in milliseconds (10s to 45min). If omitted, the depth profile default is used.',
     ),
   strategy: z
     .enum(['agent', 'pipeline', 'tree'])
@@ -418,13 +418,13 @@ function ensureResultLoaded(jobId: string): ResearchResult | undefined {
         if (anyLoaded.report) {
           return loaded as ResearchResult;
         }
-          if (anyLoaded.query && (anyLoaded as { narrativeMarkdown?: string }).narrativeMarkdown) {
-            // It's a legacy ResearchReport — wrap it in ResearchResult
-            return {
-              report: anyLoaded as unknown as ResearchReport,
-              timeline: [],
-            };
-          }
+        if (anyLoaded.query && (anyLoaded as { narrativeMarkdown?: string }).narrativeMarkdown) {
+          // It's a legacy ResearchReport — wrap it in ResearchResult
+          return {
+            report: anyLoaded as unknown as ResearchReport,
+            timeline: [],
+          };
+        }
       }
     } catch (err) {
       logger.warn({ err, jobId, path: resultFile }, 'Failed to load offloaded result from disk');
@@ -620,11 +620,11 @@ export function registerDeepResearchTool(server: McpServer, cfg: SearchConfig): 
         '  1. Saved Results: Permanent hierarchical storage (results/YYYY/MM/DD/jobId.json). Results are offloaded from memory but reloaded on demand.\n' +
         '  2. Unsaved Results: Held in memory for 24 hours then expired. Always auto-saves by default unless save=false is set.\n\n' +
         'Depth profiles and estimated durations:\n' +
-        '  quick   — 3 minutes (5-10 sources, 1 gap loop, fast overview)\n' +
-        '  standard — 8 minutes (15-25 sources, 2 gap loops, balanced approach)\n' +
-        '  deep    — 15 minutes (30-60 sources, 3 gap loops, thorough investigation)\n' +
-        '  exhaustive — 30 minutes (100+ sources, comprehensive coverage, maximum depth)\n' +
-        '  tree    — 12 minutes (4 sub-queries × 2 levels, breadth×depth recursive exploration)\n\n' +
+        '  quick   — 5 minutes (5-10 sources, 1 gap loop, fast overview)\n' +
+        '  standard — 12 minutes (15-25 sources, 2 gap loops, balanced approach)\n' +
+        '  deep    — 30 minutes (30-60 sources, 3 gap loops, thorough investigation)\n' +
+        '  exhaustive — 45 minutes (100+ sources, comprehensive coverage, maximum depth)\n' +
+        '  tree    — 15 minutes (4 sub-queries × 2 levels, breadth×depth recursive exploration)\n\n' +
         'Uses strategy-based research: agent (LLM-driven ReAct, default when LLM configured), pipeline (fixed 7-phase), or tree (recursive).\n' +
         'The agent strategy adapts tactics mid-research using tool-calling.\n' +
         'The pipeline strategy uses a fixed 7-phase pipeline: decomposition → discovery → extraction → gap analysis → audit → synthesis.\n\n' +
