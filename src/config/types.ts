@@ -17,9 +17,7 @@ export const MUTABLE_CONFIG_KEYS = new Set([
 
 export type MutableConfigKey = typeof MUTABLE_CONFIG_KEYS extends Set<infer K> ? K : never;
 
-export type ConfigPatch = {
-  [K in MutableConfigKey]?: Record<string, FieldPatch> | FieldPatch;
-};
+export type ConfigPatch = Partial<Record<MutableConfigKey, Record<string, FieldPatch> | FieldPatch>>;
 
 // ---------- Access block ----------
 
