@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import type { ReactNode } from 'react';
 import { getAccess, updateAccess } from '../api/client.js';
 import type { AccessConfig } from '../api/client.js';
 
@@ -50,11 +51,13 @@ export default function Access() {
 
   async function handleEnableFunnel() {
     if (!access) return;
-    await updateAccess({ ...access, tailscale: { ...access.tailscale, funnelConfigured: true } });
-    const r = await getAccess();
-    setAccess(r.access);
-    setShowFunnelModal(false);
-    setFunnelConfirmText('');
+    try {
+      await updateAccess({ ...access, tailscale: { ...access.tailscale, funnelConfigured: true } });
+      const r = await getAccess();
+      setAccess(r.access);
+      setShowFunnelModal(false);
+      setFunnelConfirmText('');
+    } catch (e) { setError(String(e)); }
   }
 
   if (!access) return <div style={{ padding: 24 }}>Loading…</div>;
@@ -183,7 +186,7 @@ function Row({ label, value }: { label: string; value: string }) {
   );
 }
 
-function InfoBox({ children, warning }: { children: React.ReactNode; warning?: boolean }) {
+function InfoBox({ children, warning }: { children: ReactNode; warning?: boolean }) {
   return (
     <div style={{ padding: '10px 14px', borderRadius: 8, background: '#0f0f0f', border: `1px solid ${warning ? '#ca8a04' : '#27272a'}` }}>
       {children}
