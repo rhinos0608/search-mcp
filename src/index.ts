@@ -2,11 +2,13 @@
 import 'dotenv/config';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { logger } from './logger.js';
+import { loadConfig } from './config.js';
 import { createServer } from './server.js';
 
 async function main(): Promise<void> {
   logger.info('Starting search-mcp server');
-  const server = createServer();
+  const cfg = loadConfig();
+  const server = createServer(cfg);
   const transport = new StdioServerTransport();
   await server.connect(transport);
   logger.info('search-mcp server connected via stdio');

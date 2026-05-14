@@ -5,8 +5,8 @@
  * starts the MCP server. No inline schemas or handlers.
  */
 
+import type { SearchConfig } from './config.js';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { loadConfig } from './config.js';
 import { getGatedTools, configHealth } from './health.js';
 import { logger } from './logger.js';
 
@@ -30,8 +30,7 @@ import { registerBrowserTool } from './tools/families/browser.js';
 // Deep research (standalone but not in standalone/ directory)
 import { registerDeepResearchTool } from './tools/deepResearch.js';
 
-export function createServer(): McpServer {
-  const cfg = loadConfig();
+export function createServer(cfg: SearchConfig): McpServer {
   logger.info({ backend: cfg.searchBackend }, 'Primary search backend');
 
   const gated = getGatedTools(cfg);

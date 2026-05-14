@@ -11,6 +11,7 @@ import assert from 'node:assert/strict';
 import { z } from 'zod/v4';
 
 import { createServer } from '../src/server.js';
+import { loadConfig } from '../src/config.js';
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -65,7 +66,7 @@ function getRegisteredTool(
 // ── Consolidated count ──────────────────────────────────────────────────────
 
 test('total registered tools is under 20 (consolidated)', () => {
-  const server = createServer();
+  const server = createServer(loadConfig());
   const tools = getAllRegisteredTools(server);
   const names = Object.keys(tools);
 
@@ -79,7 +80,7 @@ test('total registered tools is under 20 (consolidated)', () => {
 // ── No leaked per-action tools ───────────────────────────────────────────────
 
 test('no per-action leaked tools exist (no github_repo, reddit_search etc.)', () => {
-  const server = createServer();
+  const server = createServer(loadConfig());
   const tools = getAllRegisteredTools(server);
 
   // Common old patterns that should NOT exist
@@ -107,7 +108,7 @@ test('no per-action leaked tools exist (no github_repo, reddit_search etc.)', ()
 
 for (const [familyName, actions] of FAMILY_TOOLS) {
   test(`${familyName} family registers as a single tool (not ${actions.length} separate tools)`, () => {
-    const server = createServer();
+    const server = createServer(loadConfig());
     const tools = getAllRegisteredTools(server);
 
     // The family tool exists
@@ -130,7 +131,7 @@ for (const [familyName, actions] of FAMILY_TOOLS) {
 
 for (const [familyName, actions] of FAMILY_TOOLS) {
   test(`${familyName} input schema validates every known action via discriminated union`, () => {
-    const entry = getRegisteredTool(createServer(), familyName);
+    const entry = getRegisteredTool(createServer(loadConfig()), familyName);
     const schema = entry.inputSchema!;
 
     // Each known action should parse successfully
@@ -212,7 +213,7 @@ for (const [familyName, actions] of FAMILY_TOOLS) {
 
 for (const toolName of STANDALONE_TOOLS) {
   test(`standalone tool "${toolName}" is registered (unchanged)`, () => {
-    const server = createServer();
+    const server = createServer(loadConfig());
     const tools = getAllRegisteredTools(server);
     assert.ok(
       toolName in tools,
@@ -223,7 +224,7 @@ for (const toolName of STANDALONE_TOOLS) {
 
 for (const toolName of GATED_STANDALONE_TOOLS) {
   test(`gated standalone tool "${toolName}" is either registered or gated (not leaked per-action)`, () => {
-    const server = createServer();
+    const server = createServer(loadConfig());
     const tools = getAllRegisteredTools(server);
     // Gated tools may or may not be registered depending on env, but they should
     // never have leaked per-action variants.
@@ -239,7 +240,7 @@ for (const toolName of GATED_STANDALONE_TOOLS) {
 // ── Full tool list sanity check ─────────────────────────────────────────────
 
 test('all family tools are present in the consolidated tool list', () => {
-  const server = createServer();
+  const server = createServer(loadConfig());
   const tools = getAllRegisteredTools(server);
 
   for (const familyName of FAMILY_TOOLS.keys()) {

@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { searchWithBackends, type WebSearchDeps } from '../src/tools/webSearch.js';
 import { createServer } from '../src/server.js';
-import { resetConfig } from '../src/config.js';
+import { resetConfig, loadConfig } from '../src/config.js';
 import type { SearchResult } from '../src/types.js';
 
 function makeResult(
@@ -37,7 +37,7 @@ function getRegisteredTool(server: ReturnType<typeof createServer>, name: string
 }
 
 test('web_search input schema defaults expansion and backend merging to true', () => {
-  const server = createServer();
+  const server = createServer(loadConfig());
   const entry = getRegisteredTool(server, 'web_search');
   assert.ok(entry.inputSchema !== undefined);
 

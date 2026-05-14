@@ -10,6 +10,7 @@ import assert from 'node:assert/strict';
 import { z } from 'zod/v4';
 
 import { createServer } from '../src/server.js';
+import { loadConfig } from '../src/config.js';
 
 interface RegisteredToolEntry {
    description?: string;
@@ -29,7 +30,7 @@ function getRegisteredTool(
 }
 
 test('reddit family actions are registered on the MCP server', () => {
-   const server = createServer();
+   const server = createServer(loadConfig());
    const entry = getRegisteredTool(server, 'reddit');
 
    assert.ok(entry.description !== undefined && entry.description.length > 0);
@@ -37,7 +38,7 @@ test('reddit family actions are registered on the MCP server', () => {
 });
 
 test('reddit.comments accepts a valid url post locator', () => {
-   const server = createServer();
+   const server = createServer(loadConfig());
    const entry = getRegisteredTool(server, 'reddit');
    assert.ok(entry.inputSchema !== undefined);
 
@@ -62,7 +63,7 @@ test('reddit.comments accepts a valid url post locator', () => {
 });
 
 test('reddit.comments accepts a valid id post locator', () => {
-   const server = createServer();
+   const server = createServer(loadConfig());
    const entry = getRegisteredTool(server, 'reddit');
    assert.ok(entry.inputSchema !== undefined);
 
@@ -79,7 +80,7 @@ test('reddit.comments accepts a valid id post locator', () => {
 });
 
 test('reddit.comments accepts a valid permalink post locator', () => {
-   const server = createServer();
+   const server = createServer(loadConfig());
    const entry = getRegisteredTool(server, 'reddit');
    assert.ok(entry.inputSchema !== undefined);
 
@@ -94,7 +95,7 @@ test('reddit.comments accepts a valid permalink post locator', () => {
 });
 
 test('reddit.comments rejects an invalid post locator (missing fields)', () => {
-   const server = createServer();
+   const server = createServer(loadConfig());
    const entry = getRegisteredTool(server, 'reddit');
    assert.ok(entry.inputSchema !== undefined);
 
@@ -111,7 +112,7 @@ test('reddit.comments rejects an invalid post locator (missing fields)', () => {
 });
 
 test('reddit.comments rejects context without comment', () => {
-   const server = createServer();
+   const server = createServer(loadConfig());
    const entry = getRegisteredTool(server, 'reddit');
    assert.ok(entry.inputSchema !== undefined);
 
@@ -128,7 +129,7 @@ test('reddit.comments rejects context without comment', () => {
 });
 
 test('reddit.comments rejects depth outside 1..10', () => {
-   const server = createServer();
+   const server = createServer(loadConfig());
    const entry = getRegisteredTool(server, 'reddit');
    assert.ok(entry.inputSchema !== undefined);
 
@@ -148,7 +149,7 @@ test('reddit.comments rejects depth outside 1..10', () => {
 });
 
 test('reddit.comments rejects limit outside 1..100', () => {
-   const server = createServer();
+   const server = createServer(loadConfig());
    const entry = getRegisteredTool(server, 'reddit');
    assert.ok(entry.inputSchema !== undefined);
 
@@ -168,7 +169,7 @@ test('reddit.comments rejects limit outside 1..100', () => {
 });
 
 test('reddit.comments rejects malformed subreddit in id locator', () => {
-   const server = createServer();
+   const server = createServer(loadConfig());
    const entry = getRegisteredTool(server, 'reddit');
    assert.ok(entry.inputSchema !== undefined);
 
@@ -180,7 +181,7 @@ test('reddit.comments rejects malformed subreddit in id locator', () => {
 });
 
 test('reddit.search accepts basic params', () => {
-   const server = createServer();
+   const server = createServer(loadConfig());
    const entry = getRegisteredTool(server, 'reddit');
    assert.ok(entry.inputSchema !== undefined);
 
@@ -199,7 +200,7 @@ test('reddit.search accepts basic params', () => {
 });
 
 test('reddit.semantic accepts basic params', () => {
-   const server = createServer();
+   const server = createServer(loadConfig());
    const entry = getRegisteredTool(server, 'reddit');
    assert.ok(entry.inputSchema !== undefined);
 

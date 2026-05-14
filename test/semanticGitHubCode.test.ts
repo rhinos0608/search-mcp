@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { resetConfig } from '../src/config.js';
+import { resetConfig, loadConfig } from '../src/config.js';
 import { createServer } from '../src/server.js';
 import { semanticGitHubCode } from '../src/tools/semanticGitHubCode.js';
 import type { GitHubCorpusDocument } from '../src/utils/githubCorpus.js';
@@ -128,6 +128,6 @@ test('semanticGitHubCode forwards maxFileBytes to corpus collection', async () =
 
 test('github family is registered in the MCP server', () => {
    resetConfig();
-   const server = createServer() as unknown as { _registeredTools?: Record<string, unknown> };
+   const server = createServer(loadConfig()) as unknown as { _registeredTools?: Record<string, unknown> };
    assert.ok(server._registeredTools?.github);
 });
