@@ -1,9 +1,15 @@
 import * as http from 'node:http';
-import { createReadStream, existsSync, statSync } from 'node:fs';
-import { join, extname } from 'node:path';
+import { createReadStream, existsSync } from 'node:fs';
+import { stat } from 'node:fs/promises';
+import { join, extname, resolve } from 'node:path';
 import type { ConfigManager } from '../config/manager.js';
 import type { SessionStore, LoginRateLimiter } from './auth.js';
-import { parseCookieHeader, getCookieName, buildSetCookieHeader, buildClearCookieHeader } from './auth.js';
+import {
+  parseCookieHeader,
+  getCookieName,
+  buildSetCookieHeader,
+  buildClearCookieHeader,
+} from './auth.js';
 import { classifyRequestOrigin, dashboardAllowed } from './access-provider.js';
 import type { HttpTransportManager } from './mcp-transport.js';
 import { timingSafeEqual } from 'node:crypto';
@@ -19,12 +25,12 @@ export interface DashboardContext {
 
 const MIME: Record<string, string> = {
   '.html': 'text/html; charset=utf-8',
-  '.js':   'application/javascript',
-  '.css':  'text/css',
+  '.js': 'application/javascript',
+  '.css': 'text/css',
   '.json': 'application/json',
-  '.svg':  'image/svg+xml',
-  '.png':  'image/png',
-  '.ico':  'image/x-icon',
+  '.svg': 'image/svg+xml',
+  '.png': 'image/png',
+  '.ico': 'image/x-icon',
   '.woff2': 'font/woff2',
 };
 
@@ -35,20 +41,47 @@ export async function readBody(
   return new Promise((resolve) => {
     const chunks: Buffer[] = [];
     let total = 0;
-    req.on('data', (chunk: Buffer | string) => {
+
+    function cleanup(): void {
+      req.off('data', onData);
+      req.off('end', onEnd);
+      req.off('error', onError);
+    }
+
+    function onData(chunk: Buffer | string): void {
       const buf = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
       total += buf.length;
-      if (total > maxBytes) { req.destroy(); resolve(null); return; }
+      if (total > maxBytes) {
+        cleanup();
+        req.destroy();
+        resolve(null);
+        return;
+      }
       chunks.push(buf);
-    });
-    req.on('end', () => { resolve(Buffer.concat(chunks)); });
-    req.on('error', () => { resolve(null); });
+    }
+
+    function onEnd(): void {
+      cleanup();
+      resolve(Buffer.concat(chunks));
+    }
+
+    function onError(): void {
+      cleanup();
+      resolve(null);
+    }
+
+    req.on('data', onData);
+    req.on('end', onEnd);
+    req.on('error', onError);
   });
 }
 
 function json(res: http.ServerResponse, status: number, data: unknown): void {
   const body = JSON.stringify(data);
-  res.writeHead(status, { 'Content-Type': 'application/json', 'Content-Length': String(Buffer.byteLength(body)) });
+  res.writeHead(status, {
+    'Content-Type': 'application/json',
+    'Content-Length': String(Buffer.byteLength(body)),
+  });
   res.end(body);
 }
 
@@ -67,17 +100,27 @@ function validateOriginHeader(req: http.IncomingMessage, port: number): boolean 
   if (!origin) return true;
   try {
     const o = new URL(origin);
-    return o.hostname === 'localhost' || o.hostname === '127.0.0.1' ||
-           o.port === String(port) || origin.includes(`localhost:${String(port)}`);
-  } catch { return false; }
+    if (o.hostname !== 'localhost' && o.hostname !== '127.0.0.1') return false;
+    const originPort = o.port || (o.protocol === 'https:' ? '443' : '80');
+    return originPort === String(port);
+  } catch {
+    return false;
+  }
 }
 
-function serveStatic(res: http.ServerResponse, filePath: string): void {
-  const ext = extname(filePath);
-  const mime = MIME[ext] ?? 'application/octet-stream';
-  const stat = statSync(filePath);
-  res.writeHead(200, { 'Content-Type': mime, 'Content-Length': String(stat.size) });
-  createReadStream(filePath).pipe(res);
+async function serveStatic(res: http.ServerResponse, filePath: string): Promise<void> {
+  try {
+    const ext = extname(filePath);
+    const mime = MIME[ext] ?? 'application/octet-stream';
+    const stats = await stat(filePath);
+    res.writeHead(200, { 'Content-Type': mime, 'Content-Length': String(stats.size) });
+    createReadStream(filePath).pipe(res);
+  } catch {
+    if (!res.headersSent) {
+      res.writeHead(404);
+      res.end('Not found');
+    }
+  }
 }
 
 export async function handleDashboard(
@@ -109,7 +152,11 @@ export async function handleDashboard(
     if (req.method === 'POST') {
       const limit = pathname === '/dashboard/api/login' ? 1024 : 65536;
       body = await readBody(req, limit);
-      if (body === null) { res.writeHead(413); res.end('Request too large'); return; }
+      if (body === null) {
+        res.writeHead(413);
+        res.end('Request too large');
+        return;
+      }
 
       if (!validateOriginHeader(req, port)) {
         res.writeHead(403, { 'Content-Type': 'text/plain' });
@@ -130,19 +177,33 @@ export async function handleDashboard(
   }
 
   if (pathname === '/dashboard' || pathname === '/dashboard/') {
-    serveStatic(res, indexPath);
+    await serveStatic(res, indexPath);
     return;
   }
 
+  // Sanitize: prevent path traversal outside dashboardDistDir
   const relative = pathname.replace(/^\/dashboard/, '');
-  const filePath = join(dashboardDistDir, relative);
-  if (existsSync(filePath) && statSync(filePath).isFile()) {
-    serveStatic(res, filePath);
+  const candidatePath = join(dashboardDistDir, relative);
+  const resolvedPath = resolve(candidatePath);
+  const resolvedRoot = resolve(dashboardDistDir);
+  if (!resolvedPath.startsWith(resolvedRoot + '/') && resolvedPath !== resolvedRoot) {
+    res.writeHead(404);
+    res.end('Not found');
     return;
+  }
+
+  try {
+    const candidateStat = await stat(resolvedPath);
+    if (candidateStat.isFile()) {
+      await serveStatic(res, resolvedPath);
+      return;
+    }
+  } catch {
+    /* not a file or not found */
   }
 
   // SPA fallback
-  serveStatic(res, indexPath);
+  await serveStatic(res, indexPath);
 }
 
 function parseBody(body: Buffer | null, endpoint: string): unknown {
@@ -161,22 +222,58 @@ async function handleApi(
   const endpoint = url.pathname.replace('/dashboard/api', '');
   const ip = req.socket.remoteAddress ?? 'unknown';
 
+  // --- Setup endpoints (loopback-only, no session required) ---
+  if (endpoint === '/setup' && req.method === 'GET') {
+    if (classifyRequestOrigin(req) !== 'loopback') {
+      json(res, 403, { error: 'Setup is only accessible from localhost' });
+      return;
+    }
+    const cfg = configManager.get();
+    if (cfg.apiKeyClaimed) {
+      json(res, 200, { claimed: true });
+    } else {
+      json(res, 200, { claimed: false, apiKey: cfg.mcpApiKey ?? '' });
+    }
+    return;
+  }
+
+  if (endpoint === '/setup/claim' && req.method === 'POST') {
+    if (classifyRequestOrigin(req) !== 'loopback') {
+      json(res, 403, { error: 'Setup is only accessible from localhost' });
+      return;
+    }
+    configManager.claimApiKey();
+    const session = sessionStore.create();
+    const rawTtl = process.env.SESSION_TTL_HOURS;
+    const ttlHours = rawTtl !== undefined ? Number.parseFloat(rawTtl) : 12;
+    const ttl = (Number.isFinite(ttlHours) && ttlHours > 0 ? ttlHours : 12) * 3600 * 1000;
+    res.setHeader('Set-Cookie', buildSetCookieHeader(session.id, ttl, https));
+    json(res, 200, { ok: true });
+    return;
+  }
+
   // --- Unauthenticated endpoints ---
   if (endpoint === '/login' && req.method === 'POST') {
-    const data = parseBody(body, endpoint) as { apiKey?: string };
-    const apiKey = data.apiKey ?? '';
+    let parsedLogin: unknown;
+    try {
+      parsedLogin = parseBody(body, endpoint);
+    } catch (err) {
+      json(res, 400, { error: 'Invalid request body' });
+      return;
+    }
+    const loginData = parsedLogin as { apiKey?: string };
+    const apiKey = loginData.apiKey ?? '';
     const check = rateLimiter.check(ip);
     if (!check.allowed) {
       json(res, 429, { error: 'Too many login attempts', retryAfter: check.retryAfter });
       return;
     }
     const expected = configManager.get().mcpApiKey ?? '';
-    await new Promise(r => setTimeout(r, 500));
+    await new Promise((r) => setTimeout(r, 500));
     let match = false;
-    try {
-      match = expected.length > 0 &&
-        timingSafeEqual(Buffer.from(apiKey), Buffer.from(expected));
-    } catch { match = false; }
+    if (expected.length > 0 && apiKey.length === expected.length) {
+      match = timingSafeEqual(Buffer.from(apiKey), Buffer.from(expected));
+    }
     if (!match) {
       rateLimiter.recordFailure(ip);
       json(res, 401, { error: 'Invalid API key' });
@@ -184,7 +281,9 @@ async function handleApi(
     }
     rateLimiter.recordSuccess(ip);
     const session = sessionStore.create();
-    const ttl = Number(process.env.SESSION_TTL_HOURS ?? 12) * 3600 * 1000;
+    const rawTtl = process.env.SESSION_TTL_HOURS;
+    const ttlHours = rawTtl !== undefined ? Number.parseFloat(rawTtl) : 12;
+    const ttl = (Number.isFinite(ttlHours) && ttlHours > 0 ? ttlHours : 12) * 3600 * 1000;
     res.setHeader('Set-Cookie', buildSetCookieHeader(session.id, ttl, https));
     json(res, 200, { ok: true });
     return;
@@ -242,8 +341,15 @@ async function handleApi(
   }
 
   if (endpoint === '/config/test-connection' && req.method === 'POST') {
-    const data = parseBody(body, endpoint) as { provider: string };
-    const result = await configManager.testConnection(data.provider);
+    let parsedTest: unknown;
+    try {
+      parsedTest = parseBody(body, endpoint);
+    } catch (err) {
+      json(res, 400, { error: 'Invalid request body' });
+      return;
+    }
+    const testData = parsedTest as { provider: string };
+    const result = await configManager.testConnection(testData.provider);
     json(res, 200, result);
     return;
   }

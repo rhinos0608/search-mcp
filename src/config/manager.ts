@@ -6,7 +6,6 @@ import { loadConfig, resetConfig } from '../config.js';
 import type { SearchConfig } from '../config.js';
 import { MUTABLE_CONFIG_KEYS } from './types.js';
 import type { ConfigPatch, FieldPatch, ProviderTestResult, RedactedConfig } from './types.js';
-import { logger } from '../logger.js';
 
 /** Fields whose string values are redacted in getRedacted() output. */
 const SECRET_LEAF_PATHS = new Set([
@@ -73,16 +72,12 @@ export class ConfigManager {
     }
 
     if (!encExists) {
-      // First run: generate fresh config + API key
+      // First run: generate fresh config + API key; key is shown via dashboard setup screen
       resetConfig();
       const fresh = loadConfig();
-      const apiKey = randomBytes(32).toString('base64url');
-      fresh.mcpApiKey = apiKey;
+      fresh.mcpApiKey = randomBytes(32).toString('base64url');
+      fresh.apiKeyClaimed = false;
       this._writeEncrypted(fresh, password);
-      logger.warn(
-        { mcpApiKey: apiKey },
-        'First run: MCP API key generated — save this, it will not be shown again',
-      );
       this.config = fresh;
       return;
     }
@@ -132,6 +127,14 @@ export class ConfigManager {
     if (!password) throw new Error('SEARCH_MCP_CONFIG_KEY not set; cannot persist config update');
     this._writeEncrypted(updated, password);
     this.config = updated;
+  }
+
+  claimApiKey(): void {
+    const cfg = { ...this.get(), apiKeyClaimed: true };
+    const password = process.env.SEARCH_MCP_CONFIG_KEY;
+    if (!password) throw new Error('SEARCH_MCP_CONFIG_KEY not set');
+    this._writeEncrypted(cfg, password);
+    this.config = cfg;
   }
 
   rotateApiKey(): string {

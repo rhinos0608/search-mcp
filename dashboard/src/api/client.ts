@@ -7,9 +7,15 @@ export class ApiError extends Error {
   }
 }
 
+/**
+ * Create a typed request with optional runtime response validation.
+ * If `validate` is provided, the parsed JSON is run through it before returning.
+ * On validation failure, an ApiError with status 502 is thrown.
+ */
 async function request<T>(
   path: string,
   init: RequestInit = {},
+  validate?: (data: unknown) => T,
 ): Promise<T> {
   const res = await fetch(`${BASE}${path}`, {
     credentials: 'same-origin',
@@ -21,7 +27,19 @@ async function request<T>(
     const body = await res.json().catch(() => ({ error: res.statusText })) as { error?: string };
     throw new ApiError(res.status, body.error ?? res.statusText);
   }
-  return res.json() as Promise<T>;
+  const data: unknown = await res.json();
+  if (validate) return validate(data);
+  return data as T;
+}
+
+// ---- Setup (first-run, no auth required) ----
+
+export function checkSetup(): Promise<{ claimed: boolean; apiKey?: string }> {
+  return request('/setup');
+}
+
+export function claimKey(): Promise<{ ok: boolean }> {
+  return request('/setup/claim', { method: 'POST', body: '{}' });
 }
 
 // ---- Auth ----
@@ -44,7 +62,7 @@ export function getConfigStatus(): Promise<{ config: Record<string, unknown> }> 
   return request('/config/status');
 }
 
-export function getProviders(): Promise<{ providers: Array<{ id: string; configured: boolean }> }> {
+export function getProviders(): Promise<{ providers: { id: string; configured: boolean }[] }> {
   return request('/providers');
 }
 

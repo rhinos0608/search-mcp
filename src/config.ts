@@ -266,6 +266,7 @@ export interface SearchConfig {
   rescoreWeights: RescoreConfig;
   challengeLatencyThreshold: number;
   mcpApiKey?: string;   // Generated on first run; stored encrypted.
+  apiKeyClaimed: boolean; // True once the setup screen has been dismissed.
   access: AccessConfig; // External access configuration.
 }
 
@@ -337,6 +338,7 @@ const DEFAULTS: Omit<SearchConfig, 'rescoreWeights'> = {
   },
   challengeLatencyThreshold: 5000,
   mcpApiKey: '',
+  apiKeyClaimed: true, // Existing installs already have the key; only first-run sets false.
   access: {
     provider: 'localhost',
     exposeDashboardExternally: false,
@@ -1194,6 +1196,7 @@ export function loadConfig(): SearchConfig {
     },
     rescoreWeights: DEFAULT_RESCORE_WEIGHTS,
     mcpApiKey: (fileConfig as Partial<SearchConfig>).mcpApiKey ?? '',
+    apiKeyClaimed: (fileConfig as Partial<SearchConfig>).apiKeyClaimed ?? DEFAULTS.apiKeyClaimed,
     access: {
       provider:
         ((fileConfig as Partial<SearchConfig>).access?.provider) ??

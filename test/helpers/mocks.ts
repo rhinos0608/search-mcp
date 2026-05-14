@@ -1,0 +1,117 @@
+import type { SearchMcpRuntime } from '../../src/config/types.js';
+import type { SearchConfig } from '../../src/config.js';
+
+/**
+ * Create a minimal SearchMcpRuntime for tests.
+ * Returns a runtime whose getConfig() returns the defaults merged with any overrides.
+ */
+export function createMockRuntime(overrides?: Partial<SearchMcpRuntime>): SearchMcpRuntime {
+  const baseConfig: SearchConfig = {
+    searchBackend: 'searxng',
+    brave: { apiKey: '' },
+    searxng: { baseUrl: '' },
+    exa: { apiKey: '' },
+    tavily: { apiKey: '' },
+    youtube: { apiKey: '' },
+    stackexchange: { apiKey: '' },
+    github: { token: '' },
+    reddit: {
+      clientId: '',
+      clientSecret: '',
+      userAgent: '',
+      oauthEnabled: false,
+      oauthConfigValid: true,
+    },
+    crawl4ai: { baseUrl: '', apiToken: '' },
+    embeddingSidecar: {
+      provider: 'sidecar',
+      baseUrl: '',
+      apiToken: '',
+      dimensions: 768,
+      codeModel: '',
+    },
+    semanticCrawl: { defaultMaxBytes: 50_000_000, maxMaxBytes: 50_000_000 },
+    domainTrust: { enabled: false, trustedDomains: [], blockedDomains: [] },
+    scrubContent: false,
+    llm: { provider: '', apiToken: '', baseUrl: '' },
+    raga: {
+      enabled: false,
+      baseUrl: '',
+      timeoutMs: 30000,
+      maxRetries: 2,
+      cacheEnabled: true,
+      defaultParser: 'auto',
+    },
+    duckduckgo: { region: 'us-en', safeSearch: 'moderate' },
+    ollamaSearch: { baseUrl: '', apiKey: '' },
+    deepResearch: {
+      enabled: false,
+      defaultDepth: 'standard',
+      maxDepth: 'deep',
+      maxToolCalls: 200,
+      maxTokens: 500_000,
+      maxTimeMs: 300_000,
+      baseUrl: '',
+      workerBaseUrl: '',
+      model: '',
+      workerModel: '',
+      apiToken: '',
+      treeBreadth: 4,
+      treeDepth: 2,
+      treeConcurrency: 2,
+      treeContextWordLimit: 25000,
+      agentMaxIterations: 30,
+      agentMaxSubIterations: 8,
+      agentDefaultFetchMode: 'summary_focus_query',
+      autoSave: true,
+    },
+    challengeLatencyThreshold: 5000,
+    mcpApiKey: '',
+    apiKeyClaimed: true,
+    access: {
+      provider: 'localhost',
+      exposeDashboardExternally: false,
+      tailscale: {
+        serveConfigured: false,
+        funnelConfigured: false,
+        allowDashboardOverFunnel: false,
+      },
+    },
+    browser: {
+      enabled: false,
+      executablePath: '',
+      headless: true,
+      viewport: { width: 1280, height: 720 },
+      userAgent: '',
+      proxyServer: '',
+      cdpEndpoint: '',
+      profileDir: '',
+      maxSessionTimeMs: 300_000,
+      stealthEnabled: true,
+      rebrowser: false,
+      bypassCSP: false,
+      browserEngine: 'playwright',
+      cloakHumanize: false,
+      cloakHumanPreset: 'default',
+      cloakLocale: '',
+      cloakTimezone: '',
+      cloakGeoip: false,
+      cloakStealthArgs: true,
+      credentials: {},
+      mode: 'stealth',
+      browserPort: 9222,
+      autoConnect: false,
+    },
+    rescoreWeights: {
+      webSearch: { rrfAnchor: 60 },
+      academicSearch: { rrfAnchor: 60 },
+      hackernewsSearch: { rrfAnchor: 60 },
+      redditSearch: { rrfAnchor: 60 },
+    },
+  };
+
+  return {
+    ...overrides,
+    getConfig: () => overrides?.getConfig?.() ?? baseConfig,
+  } satisfies SearchMcpRuntime;
+}
