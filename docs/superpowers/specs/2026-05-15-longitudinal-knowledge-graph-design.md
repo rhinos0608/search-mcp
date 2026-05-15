@@ -31,7 +31,7 @@ A persistent, event-sourced knowledge graph that accumulates longitudinal "micro
 
 ## Architecture Overview
 
-```
+```text
 search-mcp tool calls
         │
         ▼
@@ -532,7 +532,7 @@ const Pass1OutputZ = z.object({
 
 Pass 1 output is queued into `kg_pending_families`/`kg_pending_assignments`, not emitted as events. A candidate solidifies when:
 
-```
+```text
 distinct run_ids >= 2  AND  entity_count >= 5
 ```
 
@@ -901,7 +901,7 @@ interface KnowledgeGraphConfig {
 
 ### KnowledgeGraphHook
 
-```
+```text
 tool call received
   │
   ├─ KG disabled? → pass through
@@ -982,7 +982,7 @@ On flush: all buffered results batch-extracted under one `run_id` with `session_
 
 ## File Layout
 
-```
+```text
 src/knowledge/
   store/
     events.ts          -- kg_events table, append + query
