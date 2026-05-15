@@ -18,8 +18,9 @@ import {
 } from '../../utils/ragaFallback.js';
 import { readabilityFallbackResult, extractionWarnings } from '../../utils/crawlResultShaping.js';
 import { extractionConfigSchema, validateExtractionConfig } from '../../utils/extractionConfig.js';
+import type { KnowledgeGraphHook } from '../../knowledge/hook.js';
 
-export function registerWebCrawl(server: McpServer, cfg: SearchConfig): void {
+export function registerWebCrawl(server: McpServer, cfg: SearchConfig, kgHook?: KnowledgeGraphHook): void {
   server.registerTool(
     'web_crawl',
     {
@@ -149,6 +150,14 @@ export function registerWebCrawl(server: McpServer, cfg: SearchConfig): void {
             };
             const data = readabilityFallbackResult(url, article, strategy, maxDepth, maxPages);
             const result = makeResult('web_crawl', data, Date.now() - start, { warnings });
+
+            // KG passive capture (fire-and-forget, never fails the tool call)
+            if (kgHook && cfg.knowledgeGraph.enabled) {
+              void kgHook.onToolCall('web_crawl', data).catch((err: unknown) => {
+                logger.warn({ err, tool: 'web_crawl' }, 'KG passive capture failed (non-fatal)');
+              });
+            }
+
             return successResponse(result);
           }
         }
@@ -170,6 +179,14 @@ export function registerWebCrawl(server: McpServer, cfg: SearchConfig): void {
         const result = makeResult('web_crawl', data, Date.now() - start, {
           warnings,
         });
+
+        // KG passive capture (fire-and-forget, never fails the tool call)
+        if (kgHook && cfg.knowledgeGraph.enabled) {
+          void kgHook.onToolCall('web_crawl', data).catch((err: unknown) => {
+            logger.warn({ err, tool: 'web_crawl' }, 'KG passive capture failed (non-fatal)');
+          });
+        }
+
         return successResponse(result);
       } catch (err: unknown) {
         logger.error({ err, tool: 'web_crawl' }, 'Tool failed');

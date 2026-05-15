@@ -11,7 +11,12 @@ import type { SearchConfig } from '../../config.js';
 import { logger } from '../../logger.js';
 import { webSearch } from '../webSearch.js';
 import { makeResult, errorResponse, successResponse } from '../response.js';
-export function registerWebSearch(server: McpServer, _cfg: SearchConfig): void {
+import type { KnowledgeGraphHook } from '../../knowledge/hook.js';
+export function registerWebSearch(
+  server: McpServer,
+  cfg: SearchConfig,
+  kgHook?: KnowledgeGraphHook,
+): void {
   server.registerTool(
     'web_search',
     {
@@ -57,6 +62,14 @@ export function registerWebSearch(server: McpServer, _cfg: SearchConfig): void {
       try {
         const data = await webSearch(query, limit, safeSearch, expandQuery, mergeSearchBackends);
         const result = makeResult('web_search', data, Date.now() - start);
+
+        // KG passive capture (fire-and-forget, never fails the tool call)
+        if (kgHook && cfg.knowledgeGraph.enabled) {
+          void kgHook.onToolCall('web_search', data).catch((err: unknown) => {
+            logger.warn({ err, tool: 'web_search' }, 'KG passive capture failed (non-fatal)');
+          });
+        }
+
         return successResponse(result);
       } catch (err: unknown) {
         logger.error({ err, tool: 'web_search' }, 'Tool failed');

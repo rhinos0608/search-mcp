@@ -26,6 +26,7 @@
 import { z } from 'zod/v4';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { SearchConfig } from '../../config.js';
+import type { KnowledgeGraphHook } from '../../knowledge/hook.js';
 import { academicSearch } from '../academicSearch.js';
 import { arxivSearch } from '../arxivSearch.js';
 import { hackernewsSearch } from '../hackernewsSearch.js';
@@ -507,8 +508,8 @@ const researchFamily: FamilyDefinition = {
 
 // ── Registration ─────────────────────────────────────────────────────────────
 
-export function registerResearchTool(server: McpServer, cfg: SearchConfig): void {
-  registerFamily(server, researchFamily, cfg);
+export function registerResearchTool(server: McpServer, cfg: SearchConfig, kgHook?: KnowledgeGraphHook): void {
+  registerFamily(server, researchFamily, cfg, kgHook);
 }
 
 export function researchCapabilities(cfg: SearchConfig) {

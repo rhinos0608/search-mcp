@@ -19,8 +19,9 @@ import {
 } from '../../utils/ragaFallback.js';
 import { readabilityFallbackResult } from '../../utils/crawlResultShaping.js';
 import { extractionConfigSchema, validateExtractionConfig } from '../../utils/extractionConfig.js';
+import type { KnowledgeGraphHook } from '../../knowledge/hook.js';
 
-export function registerSemanticCrawl(server: McpServer, cfg: SearchConfig): void {
+export function registerSemanticCrawl(server: McpServer, cfg: SearchConfig, kgHook?: KnowledgeGraphHook): void {
   server.registerTool(
     'semantic_crawl',
     {
@@ -264,6 +265,14 @@ export function registerSemanticCrawl(server: McpServer, cfg: SearchConfig): voi
             const result = makeResult('semantic_crawl', singlePage, Date.now() - start, {
               warnings,
             });
+
+            // KG passive capture (fire-and-forget, never fails the tool call)
+            if (kgHook && cfg.knowledgeGraph.enabled) {
+              void kgHook.onToolCall('semantic_crawl', singlePage).catch((err: unknown) => {
+                logger.warn({ err, tool: 'semantic_crawl' }, 'KG passive capture failed (non-fatal)');
+              });
+            }
+
             return successResponse(result);
           }
         }
@@ -303,6 +312,14 @@ export function registerSemanticCrawl(server: McpServer, cfg: SearchConfig): voi
         const result = makeResult('semantic_crawl', data, Date.now() - start, {
           warnings: [...warnings, ...(data.warnings ?? [])],
         });
+
+        // KG passive capture (fire-and-forget, never fails the tool call)
+        if (kgHook && cfg.knowledgeGraph.enabled) {
+          void kgHook.onToolCall('semantic_crawl', data).catch((err: unknown) => {
+            logger.warn({ err, tool: 'semantic_crawl' }, 'KG passive capture failed (non-fatal)');
+          });
+        }
+
         return successResponse(result);
       } catch (err: unknown) {
         logger.error({ err, tool: 'semantic_crawl' }, 'Tool failed');

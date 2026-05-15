@@ -19,6 +19,7 @@ import { z } from 'zod/v4';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { SearchConfig } from '../config.js';
 import { logger } from '../logger.js';
+import type { KnowledgeGraphHook } from '../knowledge/hook.js';
 import {
   makeResult,
   errorResponse,
@@ -119,6 +120,7 @@ export function registerFamily(
   server: McpServer,
   family: FamilyDefinition,
   cfg: SearchConfig,
+  kgHook?: KnowledgeGraphHook,
 ): void {
   const mergedSchema = buildMergedSchema(family);
 
@@ -175,6 +177,14 @@ export function registerFamily(
           Date.now() - start,
           ws !== undefined ? { warnings: ws } : undefined,
         );
+
+        // KG passive capture (fire-and-forget, never fails the tool call)
+        if (kgHook && cfg.knowledgeGraph.enabled) {
+          void kgHook.onToolCall(toolLabel, responseData).catch((err: unknown) => {
+            logger.warn({ err, tool: toolLabel }, 'KG passive capture failed (non-fatal)');
+          });
+        }
+
         return successResponse(full);
       } catch (err: unknown) {
         logger.error({ err, tool: family.name, action: actionName }, 'Action failed');

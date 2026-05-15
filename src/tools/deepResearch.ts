@@ -32,6 +32,7 @@ import type { ResearchJobSnapshot } from '../research/jobManager.js';
 import type { ResearchResult, ResearchReport } from '../research/types.js';
 import { makeResult, errorResponse, successResponse } from './response.js';
 import { logger } from '../logger.js';
+import type { KnowledgeGraphHook } from '../knowledge/hook.js';
 
 // ── Schema (flat object — MCP clients render flat properties) ──────────────
 
@@ -118,7 +119,8 @@ const POLL_INTERVAL_MS = 2_000;
 async function handleStart(
   args: DeepResearchArgs,
   cfg: SearchConfig,
-  extra?: DeepResearchExtra,
+  extra: DeepResearchExtra | undefined,
+  kgHook: KnowledgeGraphHook | undefined,
 ): Promise<ReturnType<typeof successResponse> | ReturnType<typeof errorResponse>> {
   const start = Date.now();
 
@@ -233,6 +235,16 @@ async function handleStart(
   promise
     .then(async (result) => {
       researchJobManager.complete(jobId, result);
+
+      // KG extraction from deep research synthesis (uses persistent hook for proper
+      // active-run routing during research)
+      if (cfg.knowledgeGraph.enabled && kgHook) {
+        try {
+          await kgHook.onDeepResearchComplete(jobId, result);
+        } catch (err) {
+          logger.warn({ err, jobId }, 'KG extraction after deep research failed (non-fatal)');
+        }
+      }
 
       if (autoSave) {
         try {
@@ -508,7 +520,8 @@ async function handleCancel(
 async function handleDeepResearch(
   rawArgs: unknown,
   cfg: SearchConfig,
-  extra?: DeepResearchExtra,
+  extra: DeepResearchExtra | undefined,
+  kgHook: KnowledgeGraphHook | undefined,
 ): Promise<ReturnType<typeof successResponse> | ReturnType<typeof errorResponse>> {
   // Validate the args through Zod for type coercion (defaults applied)
   const parsed = deepResearchSchema.safeParse(rawArgs);
@@ -522,7 +535,7 @@ async function handleDeepResearch(
 
   switch (args.action) {
     case 'start':
-      return handleStart(args, cfg, extra);
+      return handleStart(args, cfg, extra, kgHook);
     case 'poll':
       return handlePoll(args);
     case 'list':
@@ -598,7 +611,11 @@ function rehydratePersistentJobs(baseDir: string): void {
   }
 }
 
-export function registerDeepResearchTool(server: McpServer, cfg: SearchConfig): void {
+export function registerDeepResearchTool(
+  server: McpServer,
+  cfg: SearchConfig,
+  kgHook?: KnowledgeGraphHook,
+): void {
   // Bootstrap: Re-hydrate persistent jobs on registration
   if (cfg.deepResearch.enabled) {
     const resultsDir = getDefaultResultsDir();
@@ -632,7 +649,7 @@ export function registerDeepResearchTool(server: McpServer, cfg: SearchConfig): 
       inputSchema: deepResearchSchema,
     },
     async (rawArgs: unknown, extra) => {
-      return handleDeepResearch(rawArgs, cfg, extra as DeepResearchExtra | undefined);
+      return handleDeepResearch(rawArgs, cfg, extra as DeepResearchExtra | undefined, kgHook);
     },
   );
 
