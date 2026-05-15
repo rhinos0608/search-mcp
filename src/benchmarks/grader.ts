@@ -9,8 +9,8 @@
  *    research output using case-insensitive substring matching.
  */
 
-import { assertSafeUrl, safeResponseJson } from '../httpGuards.js';
 import { logger } from '../logger.js';
+import { callOpenAiChatCompletion } from '../utils/llmChat.js';
 import type { BenchmarkQuestion, GradeResult, GradeVerdict, GradeMethod } from './types.js';
 
 // ── Grader configuration ───────────────────────────────────────────────────
@@ -124,7 +124,7 @@ function heuristicGrade(input: GradingInput): GradeResult {
 
   // no required terms — check for answer substring
   const answerLower = question.answer.toLowerCase();
-  if (combinedText.includes(answerLower) || executiveSummary.toLowerCase().includes(answerLower)) {
+  if (combinedText.includes(answerLower)) {
     return {
       questionId: question.id,
       verdict: 'correct',
@@ -206,46 +206,26 @@ export class BenchmarkGrader {
     }
     const prompt = buildGradingPrompt(input);
 
-    const endpoint = `${config.baseUrl.replace(/\/+$/, '')}/v1/chat/completions`;
-    assertSafeUrl(endpoint);
-
-    const headers: Record<string, string> = {
-      'Content-Type': 'application/json',
-    };
-    if (config.apiToken) {
-      headers.Authorization = `Bearer ${config.apiToken}`;
-    }
-
-    const controller = new AbortController();
-    const timeoutMs = config.timeoutMs ?? 30_000;
-    const timeoutId = setTimeout(() => {
-      controller.abort();
-    }, timeoutMs);
-
     try {
-      const response = await fetch(endpoint, {
-        method: 'POST',
-        headers,
-        body: JSON.stringify({
-          model: config.model,
-          messages: [
-            { role: 'system', content: GRADER_SYSTEM_PROMPT },
-            { role: 'user', content: prompt },
-          ],
-          temperature: 0,
-          max_tokens: 300,
-          response_format: { type: 'json_object' },
-        }),
-        signal: controller.signal,
+      const response = await callOpenAiChatCompletion({
+        baseUrl: config.baseUrl,
+        model: config.model,
+        messages: [
+          { role: 'system', content: GRADER_SYSTEM_PROMPT },
+          { role: 'user', content: prompt },
+        ],
+        ...(config.apiToken ? { apiToken: config.apiToken } : {}),
+        temperature: 0,
+        maxTokens: 300,
+        responseFormat: 'json_object',
+        ...(config.timeoutMs !== undefined ? { totalTimeoutMs: config.timeoutMs } : {}),
       });
 
-      const json = (await safeResponseJson(response, '')) as
-        | { choices?: { message?: { content?: string } }[] }
-        | undefined;
-      const content = json?.choices?.[0]?.message?.content;
-      if (typeof content !== 'string') {
-        throw new Error('Invalid LLM response: no content');
+      if (!response.success) {
+        throw new Error(response.error ?? 'LLM grading failed');
       }
+
+      const content = response.content;
 
       const parsed = JSON.parse(content) as {
         verdict?: string;
@@ -270,8 +250,6 @@ export class BenchmarkGrader {
       logger.warn({ qid: input.question.id, err: message }, 'LLM grading call failed');
       // Fall back to heuristic on LLM failure
       return heuristicGrade(input);
-    } finally {
-      clearTimeout(timeoutId);
     }
   }
 }

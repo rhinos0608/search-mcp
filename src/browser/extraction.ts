@@ -1,8 +1,10 @@
-/* eslint-disable @typescript-eslint/no-unnecessary-condition, @typescript-eslint/restrict-template-expressions */
+/* eslint-disable @typescript-eslint/no-unnecessary-condition */
 import type { Page } from 'playwright-core';
 import type { ExtractionResult } from './types.js';
 import { BrowserError } from './types.js';
 import { logger } from '../logger.js';
+import { callOpenAiChatCompletion } from '../utils/llmChat.js';
+import { safeRegex } from 'safe-regex2';
 import type {
   ExtractionConfig,
   CssSchemaConfig,
@@ -255,11 +257,11 @@ function extractRegex(text: string, config: RegexConfig): Record<string, string[
   // Reject patterns that could cause catastrophic backtracking (ReDoS)
   const isSafeRegex = (s: string): boolean => {
     if (s.length > 500) return false;
-    // Disallow nested quantifiers (e.g., (a+)+, (a*)*, (a+)*, (a*)+)
-    // Simple heuristic: count consecutive quantifier-heavy groups
-    const nestedQuantifier = /\([^)]+[+*][^){{]*\)[+*?]/.test(s);
-    if (nestedQuantifier) return false;
-    return true;
+    try {
+      return safeRegex(s);
+    } catch {
+      return false;
+    }
   };
 
   for (const patternName of activePatterns) {
@@ -339,55 +341,30 @@ async function extractLlm(
     );
   }
 
-  const endpoint = `${(baseUrl ?? 'https://api.openai.com').replace(/\/+$/, '')}/v1/chat/completions`;
+  const response = await callOpenAiChatCompletion({
+    baseUrl: baseUrl ?? 'https://api.openai.com',
+    model: provider,
+    apiToken,
+    messages: [
+      {
+        role: 'system',
+        content:
+          'You are a data extraction assistant. Extract structured data from HTML based on the instruction. Return ONLY valid JSON — no explanation, no markdown fences.',
+      },
+      {
+        role: 'user',
+        content: `Instruction: ${config.instruction}\n\nHTML:\n${html.slice(0, 100_000)}`,
+      },
+    ],
+    temperature: 0.3,
+    maxTokens: 4096,
+  });
 
-  const headers: Record<string, string> = {
-    'Content-Type': 'application/json',
-  };
-  if (apiToken) {
-    headers.Authorization = `Bearer ${apiToken}`;
+  if (!response.success) {
+    throw new Error(response.error ?? 'LLM extraction failed');
   }
 
-  const controller = new AbortController();
-  const timeout = setTimeout(() => {
-    controller.abort();
-  }, 60_000);
-
-  let response: Response;
-  try {
-    response = await fetch(endpoint, {
-      method: 'POST',
-      headers,
-      signal: controller.signal,
-      body: JSON.stringify({
-        model: provider,
-        messages: [
-          {
-            role: 'system',
-            content:
-              'You are a data extraction assistant. Extract structured data from HTML based on the instruction. Return ONLY valid JSON — no explanation, no markdown fences.',
-          },
-          {
-            role: 'user',
-            content: `Instruction: ${config.instruction}\n\nHTML:\n${html.slice(0, 100_000)}`,
-          },
-        ],
-        temperature: 0.3,
-        max_tokens: 4096,
-      }),
-    });
-  } finally {
-    clearTimeout(timeout);
-  }
-
-  if (!response.ok) {
-    throw new Error(`LLM API error: ${response.status} ${response.statusText}`);
-  }
-
-  const json = (await response.json()) as {
-    choices: { message: { content: string } }[];
-  };
-  const content = json.choices?.[0]?.message?.content ?? '';
+  const content = response.content;
 
   // Attempt to parse as JSON; return raw string on failure
   try {

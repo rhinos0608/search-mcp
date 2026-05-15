@@ -32,7 +32,7 @@ export interface LlmCallOptions {
   responseFormat?: 'text' | 'json_object';
   /** AbortSignal to cancel in-flight requests. Merged with the internal timeout. */
   signal?: AbortSignal;
-  /** Request timeout in ms. Defaults to REQUEST_TIMEOUT_MS (300s / 5 min). */
+  /** Total logical call timeout in ms. Defaults to REQUEST_TIMEOUT_MS (300s / 5 min). */
   timeoutMs?: number;
 }
 
@@ -57,7 +57,7 @@ export interface TokenBudget {
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
-/** Default per-request timeout (can be overridden per-call via LlmCallOptions.timeoutMs). */
+/** Default logical call timeout (can be overridden per-call via LlmCallOptions.timeoutMs). */
 const REQUEST_TIMEOUT_MS = 300_000; // 5 minutes
 const ORCHESTRATOR_DEFAULT_TEMPERATURE = 0.7;
 const WORKER_DEFAULT_TEMPERATURE = 0.3;
@@ -66,10 +66,33 @@ const MAX_RETRIES = 8;
 const RETRY_BASE_DELAY_MS = 1_000;
 /** Cap on exponential backoff delay in ms. */
 const RETRY_MAX_DELAY_MS = 60_000;
+const RETRYABLE_HTTP_STATUSES = new Set([408, 409, 425, 429, 500, 502, 503, 504]);
 
 /** Compute exponential backoff delay: min(base * 2^attempt, maxDelay). */
 function backoffDelay(attempt: number): number {
   return Math.min(RETRY_BASE_DELAY_MS * 2 ** attempt, RETRY_MAX_DELAY_MS);
+}
+
+function sleep(ms: number, signal?: AbortSignal): Promise<void> {
+  if (ms <= 0) return Promise.resolve();
+  return new Promise((resolve, reject) => {
+    let abortListener: (() => void) | null = null;
+    const timeout = setTimeout(() => {
+      if (abortListener) signal?.removeEventListener('abort', abortListener);
+      resolve();
+    }, ms);
+    if (!signal) return;
+    if (signal.aborted) {
+      clearTimeout(timeout);
+      reject(new Error('LLM retry sleep aborted'));
+      return;
+    }
+    abortListener = () => {
+      clearTimeout(timeout);
+      reject(new Error('LLM retry sleep aborted'));
+    };
+    signal.addEventListener('abort', abortListener, { once: true });
+  });
 }
 
 // ── Token estimation ─────────────────────────────────────────────────────────
@@ -230,8 +253,8 @@ export class DeepResearchLlmClient {
    *
    * Retry policy:
    *   - Up to 8 retries with exponential backoff (1s, 2s, 4s, …, 60s cap).
-   *   - Retries on: 429 (rate limit), 5xx (server error), network errors.
-   *   - Per-request timeout: 5 minutes (300s).
+   *   - Retries on: 408/409/425/429/5xx/network errors.
+   *   - Total logical call timeout: 5 minutes (300s), including retries/backoff.
    * All other statuses return immediately with `success: false`.
    */
   private async callModel(
@@ -241,6 +264,8 @@ export class DeepResearchLlmClient {
     baseUrl?: string,
   ): Promise<LlmResponse> {
     const startTime = Date.now();
+    const timeoutMs = options.timeoutMs ?? REQUEST_TIMEOUT_MS;
+    const deadline = startTime + timeoutMs;
     const endpoint = `${baseUrl ?? this.baseUrl}/v1/chat/completions`;
     logger.info(
       { endpoint, model, baseUrl, hasWorkerBaseUrl: !!this.workerBaseUrl },
@@ -267,6 +292,19 @@ export class DeepResearchLlmClient {
 
     for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
       try {
+        const remainingMs = deadline - Date.now();
+        if (remainingMs <= 0) {
+          const durationMs = Date.now() - startTime;
+          return {
+            content: '',
+            model,
+            tokensUsed: 0,
+            durationMs,
+            success: false,
+            error: `LLM request timed out after ${String(timeoutMs)}ms`,
+          };
+        }
+
         assertSafeUrl(endpoint, true);
         const headers: Record<string, string> = {
           'Content-Type': 'application/json',
@@ -274,10 +312,9 @@ export class DeepResearchLlmClient {
         };
 
         const controller = new AbortController();
-        const timeoutMs = options.timeoutMs ?? REQUEST_TIMEOUT_MS;
         const timeout = setTimeout(() => {
           controller.abort(new Error('LLM request timed out'));
-        }, timeoutMs);
+        }, remainingMs);
 
         // Merge external abort signal with local timeout
         const externalSignal = options.signal;
@@ -312,11 +349,23 @@ export class DeepResearchLlmClient {
           const status = response.status;
           const errorText = await response.text().catch(() => '');
 
-          // Retry with exponential backoff on rate-limit or server errors
-          if (attempt < MAX_RETRIES && (status === 429 || status >= 500)) {
-            const delay = backoffDelay(attempt);
+          // Retry with exponential backoff on transient gateway, rate-limit, or server errors.
+          if (attempt < MAX_RETRIES && RETRYABLE_HTTP_STATUSES.has(status)) {
+            const delay = Math.min(backoffDelay(attempt), Math.max(0, deadline - Date.now()));
             logger.warn({ status, attempt, delay }, 'LLM request returned error; retrying with backoff');
-            await new Promise((resolve) => setTimeout(resolve, delay));
+            try {
+              await sleep(delay, options.signal);
+            } catch (err) {
+              const durationMs = Date.now() - startTime;
+              return {
+                content: '',
+                model,
+                tokensUsed: 0,
+                durationMs,
+                success: false,
+                error: err instanceof Error ? err.message : String(err),
+              };
+            }
             continue;
           }
 
@@ -352,10 +401,22 @@ export class DeepResearchLlmClient {
         };
       } catch (err) {
         const isLastAttempt = attempt >= MAX_RETRIES;
-        if (!isLastAttempt) {
-          const delay = backoffDelay(attempt);
+        if (!isLastAttempt && !options.signal?.aborted) {
+          const delay = Math.min(backoffDelay(attempt), Math.max(0, deadline - Date.now()));
           logger.warn({ err, attempt, delay }, 'LLM request threw; retrying with backoff');
-          await new Promise((resolve) => setTimeout(resolve, delay));
+          try {
+            await sleep(delay, options.signal);
+          } catch (sleepErr) {
+            const durationMs = Date.now() - startTime;
+            return {
+              content: '',
+              model,
+              tokensUsed: 0,
+              durationMs,
+              success: false,
+              error: sleepErr instanceof Error ? sleepErr.message : String(sleepErr),
+            };
+          }
           continue;
         }
 

@@ -1,4 +1,5 @@
 import { loadConfig } from '../config.js';
+import type { EmbeddingSidecarConfig } from '../config.js';
 import { networkError, parseError, unavailableError, timeoutError } from '../errors.js';
 import { logger } from '../logger.js';
 
@@ -187,7 +188,7 @@ export async function embedTexts(request: EmbedRequest): Promise<EmbedResponse> 
     }
 
     case 'openai':
-      return embedWithOpenAICompatible(request);
+      return embedWithOpenAICompatible(request, config.embeddingSidecar);
 
     default:
       return embedWithSidecar(request, config.embeddingSidecar.baseUrl);
@@ -289,12 +290,32 @@ async function embedWithSidecar(
 /**
  * OpenAI-compatible embedding implementation.
  */
-async function embedWithOpenAICompatible(request: EmbedRequest): Promise<EmbedResponse> {
-  const baseUrl =
+async function embedWithOpenAICompatible(
+  request: EmbedRequest,
+  sidecarConfig?: EmbeddingSidecarConfig,
+): Promise<EmbedResponse> {
+  // Resolve base URL: env var → request → config → OpenAI default
+  const resolvedRawBase =
     process.env.EMBEDDING_OPENAI_BASE_URL ??
-    (request.baseUrl ? `${request.baseUrl.replace(/\/+$/u, '')}/v1` : 'https://api.openai.com/v1');
-  const model = process.env.EMBEDDING_OPENAI_MODEL ?? 'text-embedding-3-small';
-  const apiKey = (process.env.EMBEDDING_OPENAI_API_KEY ?? request.apiToken ?? '').trim();
+    request.baseUrl ??
+    sidecarConfig?.baseUrl ??
+    'https://api.openai.com/v1';
+  // If the resolved base doesn't already include /v1 as a path segment, append it
+  const baseUrl = /\/v1(?:\/|$)/u.test(resolvedRawBase)
+    ? resolvedRawBase
+    : `${resolvedRawBase.replace(/\/+$/u, '')}/v1`;
+  // Resolve model: env var → config.codeModel → OpenAI default
+  const model =
+    process.env.EMBEDDING_OPENAI_MODEL ??
+    sidecarConfig?.codeModel ??
+    'text-embedding-3-small';
+  // Resolve API key: env var → request → config (empty = no auth for local servers)
+  const apiKey = (
+    process.env.EMBEDDING_OPENAI_API_KEY ??
+    request.apiToken ??
+    sidecarConfig?.apiToken ??
+    ''
+  ).trim();
 
   const endpoint = `${baseUrl.replace(/\/+$/u, '')}/embeddings`;
 

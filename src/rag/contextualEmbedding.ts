@@ -15,8 +15,8 @@
  */
 
 import { logger } from '../logger.js';
-import { assertSafeUrl, safeResponseJson, safeResponseText } from '../httpGuards.js';
 import type { LlmConfig } from '../config.js';
+import { callOpenAiChatCompletion } from '../utils/llmChat.js';
 import type { CorpusChunk } from '../types.js';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -66,8 +66,6 @@ export async function enrichChunkWithContext(
     return { embedText: chunk, originalText: chunk, context: '', enriched: false };
   }
 
-  const baseUrl = llm.baseUrl.replace(/\/+$/, '');
-  const endpoint = `${baseUrl}/v1/chat/completions`;
   const model = llm.provider || 'gpt-4o-mini';
 
   const systemPrompt =
@@ -82,55 +80,29 @@ export async function enrichChunkWithContext(
     'Write 1-2 sentences of context for this chunk (within the document above).';
 
   try {
-    assertSafeUrl(endpoint);
+    const response = await callOpenAiChatCompletion({
+      baseUrl: llm.baseUrl,
+      model,
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: userPrompt },
+      ],
+      ...(llm.apiToken ? { apiToken: llm.apiToken } : {}),
+      maxTokens: MAX_CONTEXT_TOKENS,
+      temperature: CONTEXT_TEMPERATURE,
+    });
 
-    const headers: Record<string, string> = {
-      'Content-Type': 'application/json',
-      ...(llm.apiToken ? { Authorization: `Bearer ${llm.apiToken}` } : {}),
-    };
-    const controller = new AbortController();
-    const timeout = setTimeout(() => {
-      controller.abort();
-    }, 30_000);
-
-    let response: Response | undefined;
-    try {
-      response = await fetch(endpoint, {
-        method: 'POST',
-        headers,
-        body: JSON.stringify({
-          model,
-          messages: [
-            { role: 'system', content: systemPrompt },
-            { role: 'user', content: userPrompt },
-          ],
-          max_tokens: MAX_CONTEXT_TOKENS,
-          temperature: CONTEXT_TEMPERATURE,
-        }),
-        signal: controller.signal,
-      });
-    } finally {
-      clearTimeout(timeout);
-    }
-
-    if (!response.ok) {
-      const status = response.status;
-      const text = await safeResponseText(response, endpoint).catch(() => '');
-      logger.warn({ status, text }, 'LLM contextual enrichment request failed');
+    if (!response.success) {
+      logger.warn({ error: response.error, status: response.status }, 'LLM contextual enrichment request failed');
       return { embedText: chunk, originalText: chunk, context: '', enriched: false };
     }
 
-    const data = (await safeResponseJson(response, endpoint)) as {
-      choices?: [{ message?: { content?: string } }];
-    };
-    const rawContent = data.choices?.[0]?.message?.content ?? '';
-
-    if (!rawContent.trim()) {
+    if (!response.content.trim()) {
       logger.debug('LLM returned empty context; falling back to original chunk text');
       return { embedText: chunk, originalText: chunk, context: '', enriched: false };
     }
 
-    const trimmedContext = rawContent.trim();
+    const trimmedContext = response.content.trim();
     return {
       embedText: `${trimmedContext}\n---\n${chunk}`,
       originalText: chunk,
