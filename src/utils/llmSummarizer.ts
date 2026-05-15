@@ -5,6 +5,7 @@
 
 import { logger } from '../logger.js';
 import type { LlmConfig } from '../config.js';
+import { callOpenAiChatCompletion } from './llmChat.js';
 
 interface SummarizationOptions {
   maxTokens?: number;
@@ -159,10 +160,10 @@ async function callLlm(
     throw new Error('llmSummarizer: apiToken required but not provided');
   }
   const apiToken: string = config.apiToken;
-  const endpoint = config.baseUrl.replace(/\/$/, '') + '/v1/chat/completions';
-
-  const body = {
+  const response = await callOpenAiChatCompletion({
+    baseUrl: config.baseUrl,
     model: config.provider || 'default',
+    apiToken,
     messages: [
       {
         role: 'system',
@@ -171,34 +172,15 @@ async function callLlm(
       },
       { role: 'user', content: prompt },
     ],
-    max_tokens: maxTokens,
-    temperature: temperature,
-  };
-
-  const response = await fetch(endpoint, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${apiToken}`,
-    },
-    body: JSON.stringify(body),
+    maxTokens,
+    temperature,
   });
 
-  if (!response.ok) {
-    const error = await response.text();
-    throw new Error(`LLM API error: ${String(response.status)} - ${error}`);
+  if (!response.success) {
+    throw new Error(response.error ?? 'LLM summarization failed');
   }
 
-  const data = (await response.json()) as {
-    choices?: [{ message?: { content?: string } }];
-  };
-
-  const content = data.choices?.[0]?.message?.content;
-  if (!content) {
-    throw new Error('LLM response missing content');
-  }
-
-  return content;
+  return response.content;
 }
 
 /**

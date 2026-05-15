@@ -38,6 +38,7 @@ import type { DownloadResult } from '../../browser/types.js';
 import { assertSafeUrl } from '../../httpGuards.js';
 import { registerFamily, type FamilyDefinition } from '../registry.js';
 import { logger } from '../../logger.js';
+import { callOpenAiChatCompletion } from '../../utils/llmChat.js';
 
 // ── Action schemas (discriminated on "action") ──────────────────────────────
 
@@ -782,70 +783,51 @@ const browserFamily: FamilyDefinition = {
             instr: string,
             stateSnippetArg: string,
           ): Promise<unknown[]> {
-            const endpoint = `${(cfg.llm.baseUrl || 'https://api.openai.com').replace(/\/+$/, '')}/v1/chat/completions`;
-            const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-            if (cfg.llm.apiToken) {
-              headers.Authorization = `Bearer ${cfg.llm.apiToken}`;
-            }
-            const controller = new AbortController();
-            const timeoutId = setTimeout(() => {
-              controller.abort();
-            }, 30_000);
-            try {
-              const url = page.url();
-              const title = await page.title();
-              const promptContent =
-                'Page URL: ' +
-                url +
-                '\n' +
-                'Page Title: ' +
-                title +
-                '\n' +
-                'Page snapshot: ' +
-                stateSnippetArg +
-                '\n' +
-                'Instruction: ' +
-                instr;
+            const url = page.url();
+            const title = await page.title();
+            const promptContent =
+              'Page URL: ' +
+              url +
+              '\n' +
+              'Page Title: ' +
+              title +
+              '\n' +
+              'Page snapshot: ' +
+              stateSnippetArg +
+              '\n' +
+              'Instruction: ' +
+              instr;
 
-              const response = await fetch(endpoint, {
-                method: 'POST',
-                headers,
-                signal: controller.signal,
-                body: JSON.stringify({
-                  model: cfg.llm.provider,
-                  messages: [
-                    {
-                      role: 'system',
-                      content:
-                        'You are a browser automation assistant. Given a page state and a natural language instruction, return a JSON array of actions to perform. Each action has: { "action": string (one of: navigate, click, type, wait, scroll, press, screenshot, extract, select), "target": string (CSS selector or visible text, omit for screenshot/wait), "value": string (text for type, seconds for wait, pixel amount for scroll, key name for press), "submit": boolean (optional, for type actions to press Enter after). Return ONLY valid JSON — no explanation, no markdown fences. Respond with an empty array if no actions are needed.',
-                    },
-                    {
-                      role: 'user',
-                      content: promptContent,
-                    },
-                  ],
-                  temperature: 0.3,
-                  max_tokens: 2048,
-                }),
-              });
-              if (!response.ok) {
-                throw new Error(`LLM API error: ${String(response.status)} ${response.statusText}`);
-              }
-              const json = (await response.json()) as {
-                choices: { message: { content: string } }[];
-              };
-              const content = json.choices[0]?.message.content ?? '';
-              try {
-                return JSON.parse(content) as unknown[];
-              } catch (parseErr) {
-                logger.error(
-                  { err: String(parseErr), content: content.slice(0, 200) },
-                  'LLM act response is not valid JSON',
-                );
-                return [];
-              }
-            } finally {
-              clearTimeout(timeoutId);
+            const response = await callOpenAiChatCompletion({
+              baseUrl: cfg.llm.baseUrl || 'https://api.openai.com',
+              model: cfg.llm.provider,
+              messages: [
+                {
+                  role: 'system',
+                  content:
+                    'You are a browser automation assistant. Given a page state and a natural language instruction, return a JSON array of actions to perform. Each action has: { "action": string (one of: navigate, click, type, wait, scroll, press, screenshot, extract, select), "target": string (CSS selector or visible text, omit for screenshot/wait), "value": string (text for type, seconds for wait, pixel amount for scroll, key name for press), "submit": boolean (optional, for type actions to press Enter after). Return ONLY valid JSON — no explanation, no markdown fences. Respond with an empty array if no actions are needed.',
+                },
+                {
+                  role: 'user',
+                  content: promptContent,
+                },
+              ],
+              ...(cfg.llm.apiToken ? { apiToken: cfg.llm.apiToken } : {}),
+              temperature: 0.3,
+              maxTokens: 2048,
+            });
+            if (!response.success) {
+              throw new Error(response.error ?? 'LLM action planning failed');
+            }
+            const content = response.content;
+            try {
+              return JSON.parse(content) as unknown[];
+            } catch (parseErr) {
+              logger.error(
+                { err: String(parseErr), content: content.slice(0, 200) },
+                'LLM act response is not valid JSON',
+              );
+              return [];
             }
           }
 
