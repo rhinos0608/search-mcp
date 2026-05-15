@@ -102,6 +102,30 @@ export function createMockRuntime(overrides?: Partial<SearchMcpRuntime>): Search
       browserPort: 9222,
       autoConnect: false,
     },
+    knowledgeGraph: {
+      enabled: false,
+      dbPath: ':memory:',
+      projection: {
+        maxEvents: 500,
+        maxAgeMs: 86_400_000,
+      },
+      solidification: {
+        minRuns: 2,
+        minEntities: 5,
+        highConfidenceOverride: 0.85,
+        minVerbatimRatio: 0.7,
+        minSourceCount: 3,
+      },
+      session: {
+        maxBufferItems: 20,
+        maxIdleMs: 300_000,
+        captureStdio: true,
+      },
+      consolidation: {
+        cadenceMs: 604_800_000,
+        annThreshold: 200,
+      },
+    },
     rescoreWeights: {
       webSearch: { rrfAnchor: 60 },
       academicSearch: { rrfAnchor: 60 },

@@ -30,7 +30,27 @@ import { registerBrowserTool } from './tools/families/browser.js';
 // Deep research (standalone but not in standalone/ directory)
 import { registerDeepResearchTool } from './tools/deepResearch.js';
 
-export function createServer(cfg: SearchConfig): McpServer {
+// Knowledge graph tools
+import { registerGraphIngestTool } from './tools/graph-ingest.js';
+import { registerGraphQueryTool } from './tools/graph-query.js';
+import { registerEntityLookupBatchTool } from './tools/entity-lookup-batch.js';
+import { registerGraphStatusTool } from './tools/graph-status.js';
+import { registerGraphRebuildTool } from './tools/graph-rebuild.js';
+import { registerFamilyListTool } from './tools/family-list.js';
+import { registerFamilyGetTool } from './tools/family-get.js';
+import { registerFamilyMergeTool } from './tools/family-merge.js';
+import { registerRunListTool } from './tools/run-list.js';
+import { registerRunRollbackTool } from './tools/run-rollback.js';
+
+// Knowledge graph
+import { initKgDb } from './knowledge/store/db.js';
+import { resolveKgDbPath } from './knowledge/config.js';
+import { KnowledgeGraphHook } from './knowledge/hook.js';
+
+export function createServer(cfg: SearchConfig, existingHook?: KnowledgeGraphHook): {
+  server: McpServer;
+  kgHook: KnowledgeGraphHook | null;
+} {
   logger.info({ backend: cfg.searchBackend }, 'Primary search backend');
 
   const gated = getGatedTools(cfg);
@@ -47,27 +67,50 @@ export function createServer(cfg: SearchConfig): McpServer {
     version: '1.0.0',
   });
 
-  // Standalone tools
-  registerWebSearch(server, cfg);
-  registerWebRead(server, cfg);
-  registerWebCrawl(server, cfg);
+  // Initialize KG database and hook
+  let kgHook: KnowledgeGraphHook | null = existingHook ?? null;
+  if (cfg.knowledgeGraph.enabled) {
+    if (kgHook === null) {
+      initKgDb(resolveKgDbPath(cfg.knowledgeGraph));
+      kgHook = new KnowledgeGraphHook(cfg);
+    }
+  }
+
+  // Standalone tools (pass kgHook for passive capture)
+  registerWebSearch(server, cfg, kgHook ?? undefined);
+  registerWebRead(server, cfg, kgHook ?? undefined);
+  registerWebCrawl(server, cfg, kgHook ?? undefined);
 
   // Gated standalone tools
   if (!gated.has('semantic_jobs')) registerSemanticJobs(server, cfg);
-  if (!gated.has('semantic_crawl')) registerSemanticCrawl(server, cfg);
-  if (!gated.has('deep_research')) registerDeepResearchTool(server, cfg);
+  if (!gated.has('semantic_crawl')) registerSemanticCrawl(server, cfg, kgHook ?? undefined);
+  if (!gated.has('deep_research')) registerDeepResearchTool(server, cfg, kgHook ?? undefined);
 
-  // Family tools
-  registerYoutubeTool(server, cfg);
-  registerRedditTool(server, cfg);
-  registerGitHubTool(server, cfg);
-  registerPackagesTool(server, cfg);
-  registerResearchTool(server, cfg);
+  // Family tools (pass kgHook for passive capture)
+  registerYoutubeTool(server, cfg, kgHook ?? undefined);
+  registerRedditTool(server, cfg, kgHook ?? undefined);
+  registerGitHubTool(server, cfg, kgHook ?? undefined);
+  registerPackagesTool(server, cfg, kgHook ?? undefined);
+  registerResearchTool(server, cfg, kgHook ?? undefined);
   registerBrowserTool(server, cfg);
 
   // Conditional / gated tools
   registerFetchFocus(server, cfg);
   registerHealthCheck(server, cfg);
 
-  return server;
+  // Knowledge graph tools (conditional on KG enabled)
+  if (cfg.knowledgeGraph.enabled) {
+    registerGraphIngestTool(server, cfg);
+    registerGraphQueryTool(server, cfg);
+    registerEntityLookupBatchTool(server, cfg);
+    registerGraphStatusTool(server, cfg);
+    registerGraphRebuildTool(server, cfg);
+    registerFamilyListTool(server, cfg);
+    registerFamilyGetTool(server, cfg);
+    registerFamilyMergeTool(server, cfg);
+    registerRunListTool(server, cfg);
+    registerRunRollbackTool(server, cfg);
+  }
+
+  return { server, kgHook };
 }

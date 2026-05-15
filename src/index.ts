@@ -8,6 +8,7 @@ import { ConfigManager } from './config/manager.js';
 import * as http from 'node:http';
 import { startHttpServer } from './server/http.js';
 import type { SearchMcpRuntime } from './config/types.js';
+import { closeKgDb } from './knowledge/store/db.js';
 
 async function main(): Promise<void> {
   logger.info('Starting search-mcp server');
@@ -26,10 +27,19 @@ async function main(): Promise<void> {
     configManager.load();
     const cfg = configManager.get();
 
-    const stdioServer = createServer(cfg);
+    const { server: stdioServer, kgHook } = createServer(cfg);
     const stdioTransport = new StdioServerTransport();
     await stdioServer.connect(stdioTransport);
     logger.info('search-mcp server connected via stdio');
+
+    // KG startup recovery
+    if (cfg.knowledgeGraph.enabled && kgHook) {
+      try {
+        await kgHook.recover();
+      } catch (err) {
+        logger.warn({ err }, 'KG startup recovery failed (non-fatal)');
+      }
+    }
 
     const runtime: SearchMcpRuntime = {
       getConfig: () => configManager.get(),
@@ -40,7 +50,9 @@ async function main(): Promise<void> {
       httpServer = await startHttpServer(runtime, configManager, port);
     } catch (err) {
       logger.error({ err: err as Error }, 'HTTP server startup failed');
-      await stdioServer.close().catch(() => {});
+      await stdioServer.close().catch(() => {
+        // Ignore errors during shutdown
+      });
       throw err;
     }
     logger.info({ port }, 'HTTP MCP transport active');
@@ -62,6 +74,7 @@ async function main(): Promise<void> {
       } catch (err) {
         logger.error({ err }, 'http close error');
       }
+      closeKgDb();
       if (exitCode !== 0) process.exit(exitCode);
     }
 
@@ -85,10 +98,19 @@ async function main(): Promise<void> {
     });
   } else {
     const cfg = loadConfig();
-    const server = createServer(cfg);
+    const { server, kgHook } = createServer(cfg);
     const transport = new StdioServerTransport();
     await server.connect(transport);
     logger.info('search-mcp server connected via stdio');
+
+    // KG startup recovery
+    if (cfg.knowledgeGraph.enabled && kgHook) {
+      try {
+        await kgHook.recover();
+      } catch (err) {
+        logger.warn({ err }, 'KG startup recovery failed (non-fatal)');
+      }
+    }
 
     async function shutdown(exitCode = 0): Promise<void> {
       logger.info('Shutting down search-mcp server');
@@ -97,6 +119,7 @@ async function main(): Promise<void> {
       } catch (err) {
         logger.error({ err }, 'Error during server close');
       }
+      closeKgDb();
       if (exitCode !== 0) process.exit(exitCode);
     }
 

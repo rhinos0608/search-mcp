@@ -128,6 +128,6 @@ export function dashboardAllowed(
 ): boolean {
   if (origin === 'loopback' || origin === 'tailscale_serve') return true;
   if (origin === 'public' && access.exposeDashboardExternally) return true;
-  if (origin === 'public' && access.tailscale?.allowDashboardOverFunnel) return true;
+  if (origin === 'public' && access.tailscale.allowDashboardOverFunnel) return true;
   return false;
 }

@@ -13,6 +13,8 @@ import { logger } from './logger.js';
 import { DEFAULT_SEMANTIC_MAX_BYTES } from './semanticLimits.js';
 import type { AccessConfig } from './config/types.js';
 import { decryptConfig } from './config/crypto.js';
+import type { KnowledgeGraphConfig } from './knowledge/types.js';
+import { DEFAULT_KG_CONFIG } from './knowledge/config.js';
 
 /** Load .env from the project root if present. Only sets vars not already in the environment. */
 function loadDotEnv(pkgRoot: string): void {
@@ -268,7 +270,7 @@ export interface SearchConfig {
   mcpApiKey?: string;   // Generated on first run; stored encrypted.
   apiKeyClaimed: boolean; // True once the setup screen has been dismissed.
   access: AccessConfig; // External access configuration.
-}
+  knowledgeGraph: KnowledgeGraphConfig;}
 
 const DEFAULTS: Omit<SearchConfig, 'rescoreWeights'> = {
   searchBackend: 'searxng',
@@ -373,6 +375,7 @@ const DEFAULTS: Omit<SearchConfig, 'rescoreWeights'> = {
     browserPort: 9222,
     autoConnect: false,
   },
+  knowledgeGraph: DEFAULT_KG_CONFIG,
 };
 
 const VALID_BACKENDS = new Set<string>([
@@ -417,6 +420,7 @@ type EnvConfig = Omit<
   scrubContent?: boolean;
   duckduckgo?: Partial<{ region: string; safeSearch: string }>;
   ollamaSearch?: Partial<{ baseUrl: string; apiKey: string }>;
+  knowledgeGraph?: Partial<KnowledgeGraphConfig>;
 };
 
 function loadFromEnv(): EnvConfig {
@@ -823,6 +827,28 @@ function loadFromEnv(): EnvConfig {
     if (!isNaN(n)) cfg.challengeLatencyThreshold = n;
   }
 
+  // ── Knowledge Graph env vars ────────────────────────────────────────────
+  {
+    const partial: Partial<KnowledgeGraphConfig> = {};
+    let hasAny = false;
+    const kgEnabled = process.env.KG_ENABLED;
+    if (kgEnabled !== undefined) {
+      partial.enabled = kgEnabled === 'true';
+      hasAny = true;
+    }
+    const kgDbPath = process.env.KG_DB_PATH;
+    if (kgDbPath !== undefined) {
+      partial.dbPath = kgDbPath;
+      hasAny = true;
+    }
+    if (hasAny) {
+      cfg.knowledgeGraph = {
+        ...(cfg.knowledgeGraph ?? {}),
+        ...partial,
+      } as unknown as KnowledgeGraphConfig;
+    }
+  }
+
   return cfg;
 }
 
@@ -1171,6 +1197,31 @@ export function loadConfig(): SearchConfig {
         fileConfig.deepResearch?.autoSave ??
         envConfig.deepResearch?.autoSave ??
         DEFAULTS.deepResearch.autoSave,
+    },
+    knowledgeGraph: {
+      ...DEFAULTS.knowledgeGraph,
+      ...fileConfig.knowledgeGraph,
+      ...envConfig.knowledgeGraph,
+      projection: {
+        ...DEFAULTS.knowledgeGraph.projection,
+        ...(fileConfig.knowledgeGraph?.projection ?? {}),
+        ...(envConfig.knowledgeGraph?.projection ?? {}),
+      },
+      solidification: {
+        ...DEFAULTS.knowledgeGraph.solidification,
+        ...(fileConfig.knowledgeGraph?.solidification ?? {}),
+        ...(envConfig.knowledgeGraph?.solidification ?? {}),
+      },
+      session: {
+        ...DEFAULTS.knowledgeGraph.session,
+        ...(fileConfig.knowledgeGraph?.session ?? {}),
+        ...(envConfig.knowledgeGraph?.session ?? {}),
+      },
+      consolidation: {
+        ...DEFAULTS.knowledgeGraph.consolidation,
+        ...(fileConfig.knowledgeGraph?.consolidation ?? {}),
+        ...(envConfig.knowledgeGraph?.consolidation ?? {}),
+      },
     },
     rescoreWeights: DEFAULT_RESCORE_WEIGHTS,
     mcpApiKey: (fileConfig as Partial<SearchConfig>).mcpApiKey ?? '',

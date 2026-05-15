@@ -65,6 +65,37 @@
     "cacheEnabled": true,
     "defaultParser": "auto"
   },
+  "knowledgeGraph": {
+    "//": "Knowledge graph configuration. Disabled by default; set KG_ENABLED=true (or enabled=true here) to register the knowledge_graph family.",
+    "//dbPath": "Resolved by resolveKgDbPath(); ~ expands to your home directory. Override with KG_DB_PATH.",
+    "enabled": false,
+    "dbPath": "~/.cache/search-mcp/kg/kg.sqlite",
+    "projection": {
+      "maxEvents": 500,
+      "maxAgeMs": 86400000
+    },
+    "solidification": {
+      "minRuns": 2,
+      "minEntities": 5,
+      "highConfidenceOverride": 0.85,
+      "minVerbatimRatio": 0.7,
+      "minSourceCount": 3
+    },
+    "session": {
+      "maxBufferItems": 20,
+      "maxIdleMs": 300000,
+      "captureStdio": true
+    },
+    "consolidation": {
+      "cadenceMs": 604800000,
+      "annThreshold": 200,
+      "maxFamilies": 300
+    },
+    "relations": {
+      "maxFamilies": 100,
+      "maxNodesPerFamily": 100
+    }
+  },
   "duckduckgo": {
     "//": "Zero-key fallback search (V3.3.1). Region / safeSearch configurable via env vars.",
     "region": "us-en",

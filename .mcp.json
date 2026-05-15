@@ -12,12 +12,24 @@
         "web_search",
         "web_crawl",
         "semantic_crawl",
+        "deep_research",
         "youtube",
         "reddit",
         "github",
         "packages",
         "research",
-        "browser"
+        "browser",
+        "fetch_focus",
+        "graph_ingest",
+        "graph_query",
+        "entity_lookup_batch",
+        "graph_status",
+        "graph_rebuild",
+        "family_list",
+        "family_get",
+        "family_merge",
+        "run_list",
+        "run_rollback"
       ]
     }
   }

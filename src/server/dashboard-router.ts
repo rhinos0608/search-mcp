@@ -355,7 +355,7 @@ async function handleApi(
     let parsedTest: unknown;
     try {
       parsedTest = parseBody(body, endpoint);
-    } catch (err) {
+    } catch (_err) {
       json(res, 400, { error: 'Invalid request body' });
       return;
     }
