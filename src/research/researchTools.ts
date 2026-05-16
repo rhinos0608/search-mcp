@@ -320,6 +320,7 @@ export function createResearchTools(options?: ResearchToolsOptions): ResearchToo
           language: options?.language,
           maxFiles: options?.maxFiles ?? 50,
           topK: options?.topK ?? 10,
+          preFilterByContent: true,
         });
         return {
           results: result.results.map((r) => ({

@@ -103,7 +103,10 @@ const OPTIONAL_CONFIG: Record<string, OptionalRule> = {
 
 // (stackoverflow_search moved to research family — see researchCapabilities)
 
-// Free tools — no config required
+// Free tools — no external API or service dependency required.
+// These tools operate entirely locally (e.g. Readability extraction).
+// If a tool gains a new dependency (sidecar, API key), move it out of
+// FREE_TOOLS into GATED_TOOLS or OPTIONAL_CONFIG accordingly.
 export const FREE_TOOLS = ['web_read'] as const;
 
 // ── configHealth (sync, startup) ────────────────────────────────────────────

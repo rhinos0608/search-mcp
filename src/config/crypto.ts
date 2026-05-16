@@ -9,7 +9,12 @@ const SCRYPT_SALT_LEN = 32;
 const NONCE_LEN = 12;
 const AUTH_TAG_LEN = 16;
 
-// Scrypt params: N=16384, r=8, p=1 (OWASP recommended minimum)
+// Scrypt params: OWASP recommended minimum (N=16384, r=8, p=1).
+// These are the floor values for interactive logins per OWASP ASVS v4.0.3.
+// Bumping these (e.g. N=2^17) would increase memory/CPU cost ~2x with minimal
+// security gain for a local-tool config file — the threat model is offline
+// brute-force of a config.enc file, not an online auth system. Keep at min
+// to avoid noticeable startup latency.
 const SCRYPT_N = 16384;
 const SCRYPT_R = 8;
 const SCRYPT_P = 1;

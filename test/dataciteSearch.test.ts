@@ -1,6 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { searchDataCite } from '../src/tools/dataciteSearch.js';
+import { dataciteMockResponse } from './helpers/backendMocks.js';
+
+// Mock fetch for this test file
+globalThis.fetch = (async () => dataciteMockResponse()) as typeof fetch;
 
 test('searchDataCite returns results for a valid query', async () => {
   const results = await searchDataCite('machine learning', 3);

@@ -413,13 +413,34 @@ export class KnowledgeGraphHook {
 /**
  * Fast non-cryptographic 32-bit hash, returns up to 8 hex chars for deduplication.
  * Based on DJB2 string hashing. We don't need cryptographic guarantees for dedup.
+ *
+ * Samples three regions of the content (beginning, middle, end) to avoid
+ * false-positive dedup matches when pages share boilerplate headers/footers
+ * (nav, cookie banners, metadata) but have different body content.
  */
 function simpleHash(content: string): string {
+  const len = content.length;
+  if (len === 0) return '0';
+
   let hash = 0;
-  for (let i = 0; i < content.length && i < 1000; i++) {
-    const char = content.charCodeAt(i);
-    hash = ((hash << 5) - hash) + char;
-    hash |= 0; // Convert to 32bit integer
+  const sample = (start: number, count: number): void => {
+    const end = Math.min(start + count, len);
+    for (let i = start; i < end; i++) {
+      const char = content.charCodeAt(i);
+      hash = ((hash << 5) - hash) + char;
+      hash |= 0; // Convert to 32bit integer
+    }
+  };
+
+  // Sample up to 500 chars from each of beginning, middle, and end
+  const window = 500;
+  sample(0, window); // beginning
+  if (len > window * 2) {
+    sample(Math.floor(len / 2) - Math.floor(window / 2), window); // middle
   }
+  if (len > window) {
+    sample(len - window, window); // end
+  }
+
   return Math.abs(hash).toString(16);
 }

@@ -1,6 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { searchCrossref } from '../src/tools/crossrefSearch.js';
+import { crossrefMockResponse } from './helpers/backendMocks.js';
+
+// Mock fetch for this test file
+globalThis.fetch = (async () => crossrefMockResponse()) as typeof fetch;
 
 test('searchCrossref returns results for a valid query', async () => {
   const results = await searchCrossref('machine learning', 3);

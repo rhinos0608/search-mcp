@@ -1,6 +1,16 @@
-import test from 'node:test';
+import test, { after } from 'node:test';
 import assert from 'node:assert/strict';
 import { attemptExternalRecovery } from '../src/utils/externalRecovery.js';
+
+// Mock global fetch to avoid real calls to Wayback Machine / Google Cache
+const originalFetch = globalThis.fetch;
+globalThis.fetch = (async () => {
+  return new Response('', { status: 404 });
+}) as typeof fetch;
+
+after(() => {
+  globalThis.fetch = originalFetch;
+});
 
 test('attemptExternalRecovery constructs recovery URLs correctly', async () => {
   // This test verifies that the function runs without throwing

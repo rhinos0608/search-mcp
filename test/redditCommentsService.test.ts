@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import { redditComments } from '../src/tools/redditComments.js';
 import { resetTrackers } from '../src/rateLimit.js';
 import { redditCommentsListingFixture } from './fixtures/redditFixtures.js';
+import { getVersion } from '../src/version.js';
 
 afterEach(() => {
   resetTrackers();
@@ -39,7 +40,7 @@ test('redditComments fetches the public .json endpoint for a url locator with ra
   assert.equal(parsedUrl.searchParams.get('sort'), 'top');
   assert.equal(parsedUrl.searchParams.get('depth'), '3');
   assert.equal(parsedUrl.searchParams.get('limit'), '25');
-  assert.equal(requestHeaders.get('user-agent'), 'search-mcp/1.0 (MCP server for local use)');
+  assert.equal(requestHeaders.get('user-agent'), `search-mcp/${getVersion()} (MCP server for local use)`);
 
   assert.equal(result.post.id, 'abc123');
   assert.equal(result.post.subreddit, 'typescript');

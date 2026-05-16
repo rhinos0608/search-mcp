@@ -1,6 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { searchOpenAlex } from '../src/tools/openalexSearch.js';
+import { openalexMockResponse } from './helpers/backendMocks.js';
+
+// Mock fetch for this test file
+globalThis.fetch = (async () => openalexMockResponse()) as typeof fetch;
 
 test('searchOpenAlex returns results for a valid query', async () => {
   const results = await searchOpenAlex('machine learning', 3);

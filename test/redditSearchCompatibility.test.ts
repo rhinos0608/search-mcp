@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 
 import { redditSearch, resetRedditSearchCache } from '../src/tools/redditSearch.js';
 import { resetTrackers } from '../src/rateLimit.js';
+import { getVersion } from '../src/version.js';
 import { TRUNCATED_MARKER } from '../src/httpGuards.js';
 import { redditSearchListingFixture } from './fixtures/redditFixtures.js';
 
@@ -41,7 +42,7 @@ test('redditSearch preserves global-search heuristics and result shape through t
   assert.equal(parsedUrl.searchParams.get('t'), 'week');
   assert.equal(parsedUrl.searchParams.get('limit'), '2');
   assert.equal(parsedUrl.searchParams.get('include_over_18'), '0');
-  assert.equal(requestHeaders.get('user-agent'), 'search-mcp/1.0 (MCP server for local use)');
+  assert.equal(requestHeaders.get('user-agent'), `search-mcp/${getVersion()} (MCP server for local use)`);
   assert.deepEqual(results, [
     {
       title: 'TypeScript 5.8 released',

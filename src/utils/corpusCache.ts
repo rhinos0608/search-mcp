@@ -884,7 +884,7 @@ export function listCorpora(opts?: CacheOpts): CorpusSummary[] {
           const source = JSON.parse(row.source_json) as SemanticCrawlSource;
           const chunkRows = db
             .prepare('SELECT chunk_json FROM chunks WHERE corpus_id = ? ORDER BY position ASC')
-            .all(row.corpus_id) as Array<{ chunk_json: string }>;
+            .all(row.corpus_id) as { chunk_json: string }[];
           const chunks = chunkRows.map((chunkRow) => JSON.parse(chunkRow.chunk_json) as CorpusChunk);
           const urlSummary = summarizeChunkUrls(chunks);
           return [

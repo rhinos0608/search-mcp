@@ -1,6 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { searchRor } from '../src/tools/rorSearch.js';
+import { rorMockResponse } from './helpers/backendMocks.js';
+
+// Mock fetch for this test file
+globalThis.fetch = (async () => rorMockResponse()) as typeof fetch;
 
 test('searchRor returns results for a valid query', async () => {
   const results = await searchRor('machine learning', 3);

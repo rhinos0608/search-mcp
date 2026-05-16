@@ -10,6 +10,42 @@ import { startHttpServer } from './server/http.js';
 import type { SearchMcpRuntime } from './config/types.js';
 import { closeKgDb } from './knowledge/store/db.js';
 
+// ── Shutdown handler registration ──────────────────────────────────────────
+
+/**
+ * Register OS signal and error handlers that call `close` on shutdown,
+ * always running `closeKgDb()` in a finally block so the KG database
+ * is flushed even if server close throws.
+ */
+function registerShutdownHandlers(close: () => Promise<void>): void {
+  async function shutdown(exitCode = 0): Promise<void> {
+    logger.info('Shutting down search-mcp server');
+    try {
+      await close();
+    } catch (err) {
+      logger.error({ err }, 'Error during server close');
+    } finally {
+      closeKgDb();
+      if (exitCode !== 0) process.exit(exitCode);
+    }
+  }
+
+  process.on('SIGINT', () => void shutdown(0));
+  process.on('SIGTERM', () => void shutdown(0));
+
+  process.on('uncaughtException', (err) => {
+    logger.fatal({ err }, 'Uncaught exception — shutting down');
+    void shutdown(1).finally(() => process.exit(1));
+  });
+
+  process.on('unhandledRejection', (reason) => {
+    logger.fatal({ reason }, 'Unhandled promise rejection — shutting down');
+    void shutdown(1).finally(() => process.exit(1));
+  });
+}
+
+// ── Main ───────────────────────────────────────────────────────────────────
+
 async function main(): Promise<void> {
   logger.info('Starting search-mcp server');
 
@@ -57,13 +93,8 @@ async function main(): Promise<void> {
     }
     logger.info({ port }, 'HTTP MCP transport active');
 
-    async function shutdown(exitCode = 0): Promise<void> {
-      logger.info('Shutting down search-mcp server');
-      try {
-        await stdioServer.close();
-      } catch (err) {
-        logger.error({ err }, 'stdio close error');
-      }
+    registerShutdownHandlers(async () => {
+      // Close HTTP server first to stop new connections.
       try {
         await new Promise<void>((resolve, reject) => {
           httpServer.close((err) => {
@@ -72,29 +103,13 @@ async function main(): Promise<void> {
           });
         });
       } catch (err) {
-        logger.error({ err }, 'http close error');
+        logger.error({ err }, 'Error closing HTTP server');
       }
-      closeKgDb();
-      if (exitCode !== 0) process.exit(exitCode);
-    }
-
-    process.on('SIGINT', () => {
-      void shutdown(0);
-    });
-    process.on('SIGTERM', () => {
-      void shutdown(0);
-    });
-    process.on('uncaughtException', (err) => {
-      logger.fatal({ err }, 'Uncaught exception');
-      void shutdown(1).finally(() => {
-        process.exit(1);
-      });
-    });
-    process.on('unhandledRejection', (reason) => {
-      logger.fatal({ reason }, 'Unhandled rejection');
-      void shutdown(1).finally(() => {
-        process.exit(1);
-      });
+      try {
+        await stdioServer.close();
+      } catch (err) {
+        logger.error({ err }, 'Error closing stdio server');
+      }
     });
   } else {
     const cfg = loadConfig();
@@ -112,28 +127,8 @@ async function main(): Promise<void> {
       }
     }
 
-    async function shutdown(exitCode = 0): Promise<void> {
-      logger.info('Shutting down search-mcp server');
-      try {
-        await server.close();
-      } catch (err) {
-        logger.error({ err }, 'Error during server close');
-      }
-      closeKgDb();
-      if (exitCode !== 0) process.exit(exitCode);
-    }
-
-    process.on('SIGINT', () => void shutdown(0));
-    process.on('SIGTERM', () => void shutdown(0));
-
-    process.on('uncaughtException', (err) => {
-      logger.fatal({ err }, 'Uncaught exception — shutting down');
-      void shutdown(1).finally(() => process.exit(1));
-    });
-
-    process.on('unhandledRejection', (reason) => {
-      logger.fatal({ reason }, 'Unhandled promise rejection — shutting down');
-      void shutdown(1).finally(() => process.exit(1));
+    registerShutdownHandlers(async () => {
+      await server.close();
     });
   }
 }

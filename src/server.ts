@@ -30,8 +30,8 @@ import { registerPackagesTool } from './tools/families/packages.js';
 import { registerResearchTool } from './tools/families/research.js';
 import { registerBrowserTool } from './tools/families/browser.js';
 
-// Deep research (standalone but not in standalone/ directory)
-import { registerDeepResearchTool } from './tools/deepResearch.js';
+// Deep research
+import { registerDeepResearchTool } from './tools/standalone/deepResearch.js';
 
 // Knowledge graph tools
 import { registerGraphIngestTool } from './tools/graph-ingest.js';
@@ -102,6 +102,9 @@ export function createServer(
   registerGitHubTool(server, cfg, kgHook ?? undefined);
   registerPackagesTool(server, cfg, kgHook ?? undefined);
   registerResearchTool(server, cfg, kgHook ?? undefined);
+  // Browser is excluded from passive KG capture: its output is complex HTML
+  // and session-heavy, and the extraction pipeline is not designed for DOM trees.
+  // If browser capture is added later, registerBrowserTool should accept kgHook.
   registerBrowserTool(server, cfg);
 
   // Conditional / gated tools

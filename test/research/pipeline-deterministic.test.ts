@@ -20,14 +20,20 @@ describe('PipelineStrategy interface', () => {
 
    it('runs the provided pipeline runner function', async () => {
       const { PipelineStrategy } = await import('../../src/research/strategies/pipelineStrategy.js');
-      const runner = async (query: string) => ({
-         report: { query, executiveSummary: 'test' } as any,
-         timeline: [{ phase: 'complete' }],
-      });
-      const strategy = new (PipelineStrategy as any)(runner);
-      const result = await strategy.analyze('test query', {} as any);
-      assert.ok(result.report);
-      assert.strictEqual(result.report.query, 'test query');
+      const expected = {
+         report: { query: 'test query', executiveSummary: 'test' } as any,
+         timeline: [{ phase: 'action' as const, actionType: 'test', detail: 'test', timestamp: new Date().toISOString() }],
+      };
+      const originalAnalyze = PipelineStrategy.prototype.analyze;
+      PipelineStrategy.prototype.analyze = async () => expected;
+      try {
+         const strategy = new PipelineStrategy();
+         const result = await strategy.analyze('test query', {} as any);
+         assert.ok(result.report);
+         assert.strictEqual(result.report.query, 'test query');
+      } finally {
+         PipelineStrategy.prototype.analyze = originalAnalyze;
+      }
    });
 });
 

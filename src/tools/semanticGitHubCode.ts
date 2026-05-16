@@ -23,7 +23,7 @@ export interface SemanticGitHubCodeInput {
   topK?: number | undefined;
   profile?: RetrievalProfileName | undefined;
   includeContext?: boolean | undefined;
-  preFilterByContent?: boolean | undefined;
+  preFilterByContent: boolean;
   minScore?: number | undefined;
   debug?: boolean | undefined;
 }
@@ -144,9 +144,7 @@ export async function semanticGitHubCode(
     ...(input.maxFileBytes !== undefined ? { maxFileBytes: input.maxFileBytes } : {}),
     ...(extensions !== undefined ? { extensions } : {}),
     ...(input.query.length > 0 ? { query: input.query } : {}),
-    ...(input.preFilterByContent !== undefined
-      ? { preFilterByContent: input.preFilterByContent }
-      : {}),
+    preFilterByContent: input.preFilterByContent,
   });
 
   const scopedDocs = docs.filter((doc) => matchesFileFilter(doc.path, input.fileFilter));
@@ -219,7 +217,7 @@ export async function semanticGitHubCode(
     metadata: { repo: input.repo },
   });
 
-  const queryEmbeddingItem = queryEmbedding.embeddings?.[0];
+  const queryEmbeddingItem = queryEmbedding.embeddings[0];
   if (!queryEmbeddingItem) {
     throw new Error('queryEmbedding.embeddings is empty');
   }

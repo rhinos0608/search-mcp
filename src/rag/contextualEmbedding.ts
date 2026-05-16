@@ -36,6 +36,8 @@ export interface ContextualEnrichment {
 
 const MAX_CONTEXT_TOKENS = 200;
 const CONTEXT_TEMPERATURE = 0.3;
+const CONTEXT_TIMEOUT_MS = 30_000;
+const CONTEXT_MAX_RETRIES = 1;
 
 // ── Core Enrichment ──────────────────────────────────────────────────────────
 
@@ -90,6 +92,8 @@ export async function enrichChunkWithContext(
       ...(llm.apiToken ? { apiToken: llm.apiToken } : {}),
       maxTokens: MAX_CONTEXT_TOKENS,
       temperature: CONTEXT_TEMPERATURE,
+      totalTimeoutMs: CONTEXT_TIMEOUT_MS,
+      maxRetries: CONTEXT_MAX_RETRIES,
     });
 
     if (!response.success) {

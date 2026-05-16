@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import { createRedditClient } from '../src/tools/redditClient.js';
+import { getVersion } from '../src/version.js';
 
 test('createRedditClient builds public reddit json URLs and sends the shared user agent', async () => {
   let requestUrl = '';
@@ -29,7 +30,7 @@ test('createRedditClient builds public reddit json URLs and sends the shared use
     requestUrl,
     'https://www.reddit.com/r/typescript/comments/abc123/example_post.json?sort=new&depth=4&limit=20',
   );
-  assert.equal(requestHeaders.get('user-agent'), 'search-mcp/1.0 (MCP server for local use)');
+  assert.equal(requestHeaders.get('user-agent'), `search-mcp/${getVersion()} (MCP server for local use)`);
 });
 
 test('createRedditClient preserves canonical trailing-slash permalinks when appending .json', () => {

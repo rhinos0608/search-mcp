@@ -24,8 +24,9 @@ test('createServer registers fetch_focus when Crawl4AI and deep research LLM are
     resetConfig();
     const cfg = loadConfig();
 
-    const server = createServer(cfg) as unknown as RegisteredToolsShape;
-    assert.ok(server._registeredTools.fetch_focus, 'fetch_focus should be registered');
+    const { server } = createServer(cfg);
+    const registeredTools = (server as unknown as RegisteredToolsShape)._registeredTools;
+    assert.ok(registeredTools.fetch_focus, 'fetch_focus should be registered');
   } finally {
     if (previous.crawl4ai === undefined) delete process.env.CRAWL4AI_BASE_URL;
     else process.env.CRAWL4AI_BASE_URL = previous.crawl4ai;

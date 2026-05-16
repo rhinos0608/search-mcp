@@ -86,6 +86,7 @@ test('semanticGitHubCode rejects malformed repo identifiers', async () => {
       await semanticGitHubCode({
          query: 'formatName',
          repo: 'not-a-valid-repo',
+         preFilterByContent: true,
       });
    }, /owner\/repo/i);
 });
@@ -99,6 +100,7 @@ test('semanticGitHubCode filters files and returns structured code results', asy
          fileFilter: ['src/'],
          includeContext: true,
          topK: 5,
+         preFilterByContent: true,
       },
       { fetchCorpus },
    );
@@ -128,6 +130,7 @@ test('semanticGitHubCode omits source text unless includeContext is requested', 
          language: 'typescript',
          fileFilter: ['src/'],
          includeContext: false,
+         preFilterByContent: true,
       },
       { fetchCorpus },
    );
@@ -142,6 +145,7 @@ test('semanticGitHubCode returns controlled warning for empty corpora', async ()
          query: 'missing',
          repo: 'owner/repo',
          fileFilter: ['does-not-match/'],
+         preFilterByContent: true,
       },
       { fetchCorpus },
    );

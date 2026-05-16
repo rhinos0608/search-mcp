@@ -16,7 +16,7 @@ test('buildNodeTestArgs keeps flag values separate from explicit test targets', 
   const outDir = '/tmp/search-mcp-test-out';
   const args = buildNodeTestArgs!( ['--test-name-pattern', 'redditSearch'], outDir);
 
-  assert.deepEqual(args, ['--test', '--test-name-pattern', 'redditSearch', path.join(outDir, 'test', '**', '*.test.js')]);
+  assert.deepEqual(args, ['--import', path.join(outDir, 'test', 'setup.js'), '--test', '--test-name-pattern', 'redditSearch', path.join(outDir, 'test', '**', '*.test.js')]);
 });
 
 test('buildNodeTestArgs preserves specific test file targets alongside flags with separate values', () => {
@@ -26,6 +26,8 @@ test('buildNodeTestArgs preserves specific test file targets alongside flags wit
   const args = buildNodeTestArgs!( ['--test-name-pattern', 'redditSearch', 'test/redditSearchCompatibility.test.ts'], outDir);
 
   assert.deepEqual(args, [
+    '--import',
+    path.join(outDir, 'test', 'setup.js'),
     '--test',
     '--test-name-pattern',
     'redditSearch',

@@ -97,7 +97,7 @@ export async function startHttpServer(
         }
 
         if (req.method === 'DELETE') {
-          transportManager.close(result.sessionId);
+          await transportManager.close(result.sessionId);
           res.writeHead(200);
           res.end();
           return;
@@ -158,6 +158,22 @@ export async function startHttpServer(
   });
 
   logger.info({ port }, 'HTTP server listening');
+
+  // Warn if no TLS termination indicator is present — the MCP endpoint
+  // uses plaintext Bearer auth over HTTP, which is only safe behind a
+  // reverse proxy or in isolated dev/Docker networks.
+  if (
+    !process.env.TLS_CERT_PATH &&
+    !process.env.TLS_KEY_PATH &&
+    process.env.NODE_ENV !== 'development' &&
+    process.env.SETUP_MODE !== 'true'
+  ) {
+    logger.warn(
+      'HTTP_PORT is active but no TLS_CERT_PATH/TLS_KEY_PATH set. ' +
+        'The MCP endpoint (/mcp) uses plaintext Bearer auth over HTTP. ' +
+        'Place a reverse proxy with TLS termination in front for production deployments.',
+    );
+  }
 
   return server;
 }

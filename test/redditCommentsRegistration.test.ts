@@ -18,7 +18,7 @@ interface RegisteredToolEntry {
 }
 
 function getRegisteredTool(
-   server: ReturnType<typeof createServer>,
+   server: ReturnType<typeof createServer>['server'],
    name: string,
 ): RegisteredToolEntry {
    const tools = (server as unknown as {
@@ -30,7 +30,7 @@ function getRegisteredTool(
 }
 
 test('reddit family actions are registered on the MCP server', () => {
-   const server = createServer(loadConfig());
+   const { server } = createServer(loadConfig());
    const entry = getRegisteredTool(server, 'reddit');
 
    assert.ok(entry.description !== undefined && entry.description.length > 0);
@@ -38,7 +38,7 @@ test('reddit family actions are registered on the MCP server', () => {
 });
 
 test('reddit.comments accepts a valid url post locator', () => {
-   const server = createServer(loadConfig());
+   const { server } = createServer(loadConfig());
    const entry = getRegisteredTool(server, 'reddit');
    assert.ok(entry.inputSchema !== undefined);
 
@@ -63,14 +63,14 @@ test('reddit.comments accepts a valid url post locator', () => {
 });
 
 test('reddit.comments accepts a valid id post locator', () => {
-   const server = createServer(loadConfig());
+   const { server } = createServer(loadConfig());
    const entry = getRegisteredTool(server, 'reddit');
    assert.ok(entry.inputSchema !== undefined);
 
    const parsed = entry.inputSchema.parse({
       action: 'comments',
       post: { type: 'id', subreddit: 'typescript', postId: 'abc123' },
-      sort: 'confidence',
+      sort: 'new',
    }) as { action: string; post: { type: string; subreddit: string; postId: string } };
 
    assert.equal(parsed.action, 'comments');
@@ -80,7 +80,7 @@ test('reddit.comments accepts a valid id post locator', () => {
 });
 
 test('reddit.comments accepts a valid permalink post locator', () => {
-   const server = createServer(loadConfig());
+   const { server } = createServer(loadConfig());
    const entry = getRegisteredTool(server, 'reddit');
    assert.ok(entry.inputSchema !== undefined);
 
@@ -95,7 +95,7 @@ test('reddit.comments accepts a valid permalink post locator', () => {
 });
 
 test('reddit.comments rejects an invalid post locator (missing fields)', () => {
-   const server = createServer(loadConfig());
+   const { server } = createServer(loadConfig());
    const entry = getRegisteredTool(server, 'reddit');
    assert.ok(entry.inputSchema !== undefined);
 
@@ -112,7 +112,7 @@ test('reddit.comments rejects an invalid post locator (missing fields)', () => {
 });
 
 test('reddit.comments rejects context without comment', () => {
-   const server = createServer(loadConfig());
+   const { server } = createServer(loadConfig());
    const entry = getRegisteredTool(server, 'reddit');
    assert.ok(entry.inputSchema !== undefined);
 
@@ -129,7 +129,7 @@ test('reddit.comments rejects context without comment', () => {
 });
 
 test('reddit.comments rejects depth outside 1..10', () => {
-   const server = createServer(loadConfig());
+   const { server } = createServer(loadConfig());
    const entry = getRegisteredTool(server, 'reddit');
    assert.ok(entry.inputSchema !== undefined);
 
@@ -149,7 +149,7 @@ test('reddit.comments rejects depth outside 1..10', () => {
 });
 
 test('reddit.comments rejects limit outside 1..100', () => {
-   const server = createServer(loadConfig());
+   const { server } = createServer(loadConfig());
    const entry = getRegisteredTool(server, 'reddit');
    assert.ok(entry.inputSchema !== undefined);
 
@@ -169,7 +169,7 @@ test('reddit.comments rejects limit outside 1..100', () => {
 });
 
 test('reddit.comments rejects malformed subreddit in id locator', () => {
-   const server = createServer(loadConfig());
+   const { server } = createServer(loadConfig());
    const entry = getRegisteredTool(server, 'reddit');
    assert.ok(entry.inputSchema !== undefined);
 
@@ -181,7 +181,7 @@ test('reddit.comments rejects malformed subreddit in id locator', () => {
 });
 
 test('reddit.search accepts basic params', () => {
-   const server = createServer(loadConfig());
+   const { server } = createServer(loadConfig());
    const entry = getRegisteredTool(server, 'reddit');
    assert.ok(entry.inputSchema !== undefined);
 
@@ -200,7 +200,7 @@ test('reddit.search accepts basic params', () => {
 });
 
 test('reddit.semantic accepts basic params', () => {
-   const server = createServer(loadConfig());
+   const { server } = createServer(loadConfig());
    const entry = getRegisteredTool(server, 'reddit');
    assert.ok(entry.inputSchema !== undefined);
 

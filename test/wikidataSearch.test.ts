@@ -1,6 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { searchWikidata } from '../src/tools/wikidataSearch.js';
+import { wikidataMockResponse } from './helpers/backendMocks.js';
+
+// Mock fetch for this test file
+globalThis.fetch = (async () => wikidataMockResponse()) as typeof fetch;
 
 test('searchWikidata returns results for a valid query', async () => {
   const results = await searchWikidata('machine learning', 'en', 3);

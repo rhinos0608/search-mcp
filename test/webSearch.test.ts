@@ -28,7 +28,7 @@ interface RegisteredToolEntry {
   inputSchema?: { parse: (value: unknown) => unknown };
 }
 
-function getRegisteredTool(server: ReturnType<typeof createServer>, name: string): RegisteredToolEntry {
+function getRegisteredTool(server: ReturnType<typeof createServer>['server'], name: string): RegisteredToolEntry {
   const tools = (server as unknown as { _registeredTools: Record<string, RegisteredToolEntry> })
     ._registeredTools;
   const entry = tools[name];
@@ -37,7 +37,7 @@ function getRegisteredTool(server: ReturnType<typeof createServer>, name: string
 }
 
 test('web_search input schema defaults expansion and backend merging to true', () => {
-  const server = createServer(loadConfig());
+  const { server } = createServer(loadConfig());
   const entry = getRegisteredTool(server, 'web_search');
   assert.ok(entry.inputSchema !== undefined);
 

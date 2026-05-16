@@ -21,18 +21,18 @@ import * as path from 'node:path';
 import * as os from 'node:os';
 import { z } from 'zod/v4';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import type { SearchConfig } from '../config.js';
+import type { SearchConfig } from '../../config.js';
 import {
   ResearchOrchestrator,
   type OrchestratorLlmConfig,
   type ProgressCallback,
-} from '../research/orchestrator.js';
-import { researchJobManager } from '../research/jobManager.js';
-import type { ResearchJobSnapshot } from '../research/jobManager.js';
-import type { ResearchResult, ResearchReport } from '../research/types.js';
-import { makeResult, errorResponse, successResponse } from './response.js';
-import { logger } from '../logger.js';
-import type { KnowledgeGraphHook } from '../knowledge/hook.js';
+} from '../../research/orchestrator.js';
+import { researchJobManager } from '../../research/jobManager.js';
+import type { ResearchJobSnapshot } from '../../research/jobManager.js';
+import type { ResearchResult, ResearchReport } from '../../research/types.js';
+import { makeResult, errorResponse, successResponse } from '../response.js';
+import { logger } from '../../logger.js';
+import type { KnowledgeGraphHook } from '../../knowledge/hook.js';
 
 // ── Schema (flat object — MCP clients render flat properties) ──────────────
 

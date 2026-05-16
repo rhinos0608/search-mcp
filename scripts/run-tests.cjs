@@ -23,7 +23,11 @@ function mapTestTarget(arg, outDir) {
 }
 
 function buildNodeTestArgs(args, outDir) {
-  const forwarded = ['--test'];
+  const forwarded = [
+    '--import',
+    path.join(outDir, 'test', 'setup.js'),
+    '--test',
+  ];
   let hasExplicitTarget = false;
 
   for (let index = 0; index < args.length; index += 1) {
@@ -69,6 +73,15 @@ function main(args) {
     fs.mkdirSync(outDir, { recursive: true });
     if (fs.existsSync(modelsSource)) {
        fs.symlinkSync(modelsSource, modelsTarget);
+    }
+
+    // Copy package.json so version.ts can read it via ../package.json
+    // Note: with rootDir=".", version.ts compiles to dist/src/version.js,
+    // so ../package.json resolves to dist/package.json.
+    const pkgSrc = path.join(repoRoot, 'package.json');
+    const pkgDst = path.join(outDir, 'package.json');
+    if (fs.existsSync(pkgSrc)) {
+      fs.copyFileSync(pkgSrc, pkgDst);
     }
 
     const compileResult = run(process.execPath, [

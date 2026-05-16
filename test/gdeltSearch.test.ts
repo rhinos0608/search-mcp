@@ -2,6 +2,9 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { searchGdelt } from '../src/tools/gdeltSearch.js';
 
+// Mock fetch for this test file
+globalThis.fetch = (async () => new Response(JSON.stringify({ articles: [{ title: 'Test', url: 'https://example.com', seendate: '20240101' }] }), { status: 200, headers: { 'content-type': 'application/json' } })) as typeof fetch;
+
 test('searchGdelt returns results for a valid query', async () => {
   const results = await searchGdelt('machine learning', '30d', 3);
   assert.ok(Array.isArray(results), 'should return an array');
