@@ -97,12 +97,15 @@ This is your dashboard login password and MCP Bearer token. Store it securely �
 
 Open `http://localhost:8050/dashboard`, log in with the key above, then:
 
-- **Providers** — configure search backends (Brave/Exa/SearXNG/GitHub/etc.), test connections
-- **Overview** — copy the `/mcp` URL for your MCP client, rotate the API key
-- **Access** — switch between localhost / Tailscale / manual external URL
+- **Overview** — auto-generated connection URLs (with embedded API key for instant paste), ready-to-copy client config snippets for HTTP / Stdio (npx) / Tailscale (mcp-remote), provider status, and API key rotation
+- **Providers** — configure search backends (Brave/Exa/SearXNG/Tavily), Reddit, YouTube, GitHub, Stack Exchange, Crawl4AI, and embedding (sidecar/Ollama/OpenAI); test connections live
+- **Access** — switch between localhost / Tailscale / manual external URL, auto-generated Tailscale connection snippets
 
 ### Connect an MCP client
 
+The dashboard **Overview** page auto-generates ready-to-paste config snippets for every client type:
+
+**HTTP (SSE)** — for Claude.ai, Cursor, and other HTTP-capable clients:
 ```json
 {
   "mcpServers": {
@@ -110,6 +113,42 @@ Open `http://localhost:8050/dashboard`, log in with the key above, then:
       "type": "http",
       "url": "http://localhost:8050/mcp",
       "headers": { "Authorization": "Bearer smcp_..." }
+    }
+  }
+}
+```
+
+**Quick Connect URL** — enabled by default. The dashboard shows a single URL with your API key embedded that works in most clients (disable with `MCP_ALLOW_QUERY_KEY=false`):
+```
+http://localhost:8050/mcp?key=smcp_xxxxxxxxxxxx
+```
+
+**Stdio (npx)** — for Claude Desktop and other stdio-only clients:
+```json
+{
+  "mcpServers": {
+    "search-mcp": {
+      "command": "npx",
+      "args": ["-y", "search-mcp"],
+      "env": {
+        "BRAVE_API_KEY": "your_brave_key"
+      }
+    }
+  }
+}
+```
+
+**Remote (mcp-remote)** — bridge stdio → HTTP for remote servers:
+```json
+{
+  "mcpServers": {
+    "search-mcp": {
+      "command": "npx",
+      "args": [
+        "-y", "mcp-remote",
+        "http://localhost:8050/mcp",
+        "--header", "Authorization: Bearer smcp_..."
+      ]
     }
   }
 }
@@ -143,45 +182,47 @@ tailscale serve --service=svc:mcp-server --https=443 http://localhost:8050
 tailscale serve status
 ```
 
-Then in the dashboard: **Access** → select **tailscale** → click **"I configured it"**.
-
-The Access page will show your shareable connection URL and auto-generated client config snippets with your real hostname and API key.
+Then in the dashboard:
+- **Access** → select **tailscale** → click **"I configured it"** — the page auto-populates connection URLs and config snippets with your real hostname and API key.
+- **Overview** → the **Tailscale Quick Connect** card shows a single copy-paste URL like `https://<machine>.<tailnet>.ts.net/mcp?key=smcp_...`
 
 ### Connect from the other device
 
-For clients that support HTTP (Claude.ai, Cursor, etc.):
+The dashboard auto-generates all snippets with your real values. Typical formats:
 
+**Quick Connect (Tavily-style URL)** — paste this single URL into any client that supports query-param auth:
+```
+https://<machine>.<tailnet>.ts.net/mcp?key=smcp_xxxxxxxxxxxx
+```
+
+**HTTP (SSE)** — for Claude.ai, Cursor, etc.:
 ```json
 {
   "mcpServers": {
     "search-mcp": {
       "type": "http",
-      "url": "https://svc-mcp-server.<tailnet>.ts.net/mcp",
-      "headers": { "Authorization": "Bearer <api-key>" }
+      "url": "https://<machine>.<tailnet>.ts.net/mcp",
+      "headers": { "Authorization": "Bearer smcp_..." }
     }
   }
 }
 ```
 
-For stdio-only clients (Claude Desktop, etc.), use [mcp-remote](https://github.com/geelen/mcp-remote):
-
+**Stdio via mcp-remote** — for Claude Desktop and other stdio-only clients:
 ```json
 {
   "mcpServers": {
     "search-mcp": {
       "command": "npx",
       "args": [
-        "mcp-remote",
-        "https://svc-mcp-server.<tailnet>.ts.net/mcp",
-        "--header",
-        "Authorization: Bearer <api-key>"
+        "-y", "mcp-remote",
+        "https://<machine>.<tailnet>.ts.net/mcp",
+        "--header", "Authorization: Bearer smcp_..."
       ]
     }
   }
 }
 ```
-
-Replace `<tailnet>` with your tailnet name (visible in `tailscale status` or at [tailscale.com/machines](https://tailscale.com/machines)). The dashboard **Access** page auto-populates these snippets with your actual values.
 
 ### Optional: Tailscale Funnel (public internet)
 

@@ -42,6 +42,11 @@ export class HttpTransportManager {
     const newId = randomUUID();
     const transport = new StreamableHTTPServerTransport({
       sessionIdGenerator: () => newId,
+      // Use direct JSON responses instead of SSE for POST requests.
+      // Avoids SSE stream termination errors with large payloads (e.g. 150KB tools/list).
+      // Per the MCP Streamable HTTP spec, servers MAY return JSON directly when
+      // all responses are immediately available.
+      enableJsonResponse: true,
     });
     // Each HTTP session gets its own McpServer instance
     const { server, kgHook } = createServer(this.runtime.getConfig());

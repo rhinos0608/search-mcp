@@ -36,7 +36,7 @@ function validateMcpKey(req: http.IncomingMessage, apiKey: string): boolean {
       if (configKey.length > 0 && safeTimingEqual(token, configKey)) return true;
     }
   }
-  if (process.env.MCP_ALLOW_QUERY_KEY === 'true') {
+  if (process.env.MCP_ALLOW_QUERY_KEY !== 'false') {
     const url = new URL(req.url ?? '/', 'http://localhost');
     const qKey = url.searchParams.get('key') ?? '';
     return safeTimingEqual(qKey, apiKey);
@@ -49,9 +49,9 @@ export async function startHttpServer(
   configManager: ConfigManager,
   port: number,
 ): Promise<http.Server> {
-  if (process.env.MCP_ALLOW_QUERY_KEY === 'true') {
-    logger.warn(
-      'MCP_ALLOW_QUERY_KEY=true: query-param auth is enabled. API key may appear in logs and browser history.',
+  if (process.env.MCP_ALLOW_QUERY_KEY !== 'false') {
+    logger.info(
+      'Query-param auth enabled (default). Set MCP_ALLOW_QUERY_KEY=false to disable. API key may appear in URLs and browser history.',
     );
   }
 

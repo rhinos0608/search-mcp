@@ -1,35 +1,23 @@
 {
   "mcpServers": {
-    "search-mcp": {
-      "command": "node",
-      "args": [
-        "/Users/rhinesharar/search-mcp/dist/index.js"
-      ],
-      "env": {
-        "SEARCH_MCP_CONFIG_KEY": "secret"
-      },
+    "context-mode": {
+      "command": "context-mode",
       "directTools": [
-        "web_search",
-        "web_crawl",
-        "semantic_crawl",
-        "deep_research",
-        "youtube",
-        "reddit",
-        "github",
-        "packages",
-        "research",
-        "browser",
-        "fetch_focus",
-        "graph_ingest",
-        "graph_query",
-        "entity_lookup_batch",
-        "graph_status",
-        "graph_rebuild",
-        "family_list",
-        "family_get",
-        "family_merge",
-        "run_list",
-        "run_rollback"
+        "ctx_execute",
+        "ctx_execute_file",
+        "ctx_index",
+        "ctx_search",
+        "ctx_batch_execute"
+      ]
+    },
+    "search-mcp": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "mcp-remote",
+        "https://macbook-pro.taila2c1ae.ts.net/mcp",
+        "--header",
+        "Authorization: Bearer WIDNpDFdxP11Dn5Gw6sbUXqA5uVcp-COeS0opTHwe6I"
       ]
     }
   }

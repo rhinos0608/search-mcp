@@ -389,7 +389,7 @@ async function handleApi(
     json(res, 200, {
       mcpUrl,
       apiKey: cfg.mcpApiKey ?? '',
-      allowQueryKey: process.env.MCP_ALLOW_QUERY_KEY === 'true',
+      allowQueryKey: process.env.MCP_ALLOW_QUERY_KEY !== 'false',
       localPort: port,
     });
     return;

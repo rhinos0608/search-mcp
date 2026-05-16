@@ -33,7 +33,7 @@ services:
       - HTTP_PORT=8050
       - SEARCH_MCP_CONFIG_KEY=${SEARCH_MCP_CONFIG_KEY}
       - SESSION_TTL_HOURS=${SESSION_TTL_HOURS:-12}
-      - MCP_ALLOW_QUERY_KEY=${MCP_ALLOW_QUERY_KEY:-false}
+      - MCP_ALLOW_QUERY_KEY=${MCP_ALLOW_QUERY_KEY:-true}
       # Optional API keys (uncomment to enable premium backends)
       # - BRAVE_API_KEY=your_brave_key
       # - EXA_API_KEY=your_exa_key

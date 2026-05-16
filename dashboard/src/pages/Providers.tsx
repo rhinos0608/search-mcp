@@ -36,12 +36,30 @@ function MaskedField({ label, fieldKey, state, onChange }: {
 }
 
 const PROVIDER_GROUPS = [
+  // ── Search backends ──
   { id: 'brave', label: 'Brave Search', fields: [{ key: 'apiKey', label: 'API Key' }] },
   { id: 'searxng', label: 'SearXNG', fields: [{ key: 'baseUrl', label: 'Base URL' }] },
   { id: 'exa', label: 'Exa', fields: [{ key: 'apiKey', label: 'API Key' }] },
-  { id: 'crawl4ai', label: 'Crawl4AI', fields: [{ key: 'baseUrl', label: 'Base URL' }] },
+  { id: 'tavily', label: 'Tavily', fields: [{ key: 'apiKey', label: 'API Key' }] },
+  // ── Crawl ──
+  { id: 'crawl4ai', label: 'Crawl4AI', fields: [{ key: 'baseUrl', label: 'Base URL' }, { key: 'apiToken', label: 'API Token' }] },
+  // ── Social / Video ──
   { id: 'youtube', label: 'YouTube', fields: [{ key: 'apiKey', label: 'API Key' }] },
+  { id: 'reddit', label: 'Reddit', fields: [
+    { key: 'clientId', label: 'Client ID' },
+    { key: 'clientSecret', label: 'Client Secret' },
+    { key: 'userAgent', label: 'User Agent' },
+  ]},
+  // ── Developer ──
   { id: 'github', label: 'GitHub', fields: [{ key: 'token', label: 'Token' }] },
+  { id: 'stackexchange', label: 'Stack Exchange', fields: [{ key: 'apiKey', label: 'API Key' }] },
+  // ── Embedding ──
+  { id: 'embeddingSidecar', label: 'Embedding', fields: [
+    { key: 'provider', label: 'Provider (sidecar/ollama/transformers/openai)' },
+    { key: 'baseUrl', label: 'Base URL' },
+    { key: 'apiToken', label: 'API Token' },
+    { key: 'dimensions', label: 'Dimensions' },
+  ]},
 ];
 
 /** Pure helper: given previous fields state, return updated fields for a change event. */
@@ -109,7 +127,7 @@ export default function Providers() {
       patch[key] = { op: 'set', value: state.edit };
     }
     try {
-      await updateConfig({ [groupId]: patch });
+      await updateConfig({ [groupId]: patch } as Record<string, unknown>);
       // Reset dirty state
       setFields(prev => {
         const updated = { ...prev[groupId] };
