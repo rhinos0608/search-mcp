@@ -4,9 +4,10 @@ import { ToolCache, cacheKey } from '../cache.js';
 import { retryWithBackoff } from '../retry.js';
 import { unavailableError, timeoutError, validationError } from '../errors.js';
 import type { YouTubeVideo } from '../types.js';
+import { getUserAgent } from '../version.js';
 
 const YOUTUBE_API_URL = 'https://www.googleapis.com/youtube/v3/search';
-const USER_AGENT = 'search-mcp/1.0';
+const USER_AGENT = getUserAgent();
 const REQUEST_TIMEOUT_MS = 15_000;
 
 const cache = new ToolCache<YouTubeVideo[]>({ maxSize: 100, ttlMs: 10 * 60 * 1000 });

@@ -4,9 +4,10 @@ import { ToolCache, cacheKey } from '../cache.js';
 import { retryWithBackoff } from '../retry.js';
 import { unavailableError, timeoutError } from '../errors.js';
 import type { NpmPackage } from '../types.js';
+import { getUserAgent } from '../version.js';
 
 const NPM_REGISTRY_URL = 'https://registry.npmjs.org/-/v1/search';
-const USER_AGENT = 'search-mcp/1.0';
+const USER_AGENT = getUserAgent();
 const REQUEST_TIMEOUT_MS = 15_000;
 
 const cache = new ToolCache<NpmPackage[]>({ maxSize: 100, ttlMs: 10 * 60 * 1000 });

@@ -4,9 +4,10 @@ import { ToolCache, cacheKey } from '../cache.js';
 import { retryWithBackoff } from '../retry.js';
 import { unavailableError, timeoutError } from '../errors.js';
 import type { ArXivPaper } from '../types.js';
+import { getUserAgent } from '../version.js';
 
 const ARXIV_API_URL = 'https://export.arxiv.org/api/query';
-const USER_AGENT = 'search-mcp/1.0';
+const USER_AGENT = getUserAgent();
 const REQUEST_TIMEOUT_MS = 20_000;
 const ABSTRACT_MAX_LENGTH = 2000;
 

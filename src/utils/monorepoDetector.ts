@@ -21,6 +21,7 @@ import { retryWithBackoff } from '../retry.js';
 import { getTracker } from '../rateLimit.js';
 import { timeoutError, unavailableError } from '../errors.js';
 import type { GitHubTreeEntry, MonorepoDetectResult, MonorepoPackage } from '../types.js';
+import { getUserAgent } from '../version.js';
 
 const GITHUB_API = 'https://api.github.com';
 
@@ -55,7 +56,7 @@ const MAX_FETCH_PACKAGES = 20;
 function buildHeaders(): Record<string, string> {
   const headers: Record<string, string> = {
     Accept: 'application/vnd.github+json',
-    'User-Agent': 'search-mcp/1.0',
+    'User-Agent': getUserAgent(),
     'X-GitHub-Api-Version': '2022-11-28',
   };
   const token = loadConfig().github.token;

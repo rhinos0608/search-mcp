@@ -10,6 +10,7 @@ import type { SearchConfig } from './config.js';
 import { getTracker, type RateLimitedBackend } from './rateLimit.js';
 import { safeResponseText, safeResponseJson } from './httpGuards.js';
 import { logger } from './logger.js';
+import { getUserAgent } from './version.js';
 import { jobSpyHealth } from './utils/jobspyClient.js';
 import { youtubeCapabilities } from './tools/families/youtube.js';
 import { redditCapabilities } from './tools/families/reddit.js';
@@ -371,7 +372,7 @@ async function probeExtractionSupport(
 
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
-    'User-Agent': 'search-mcp/1.0',
+    'User-Agent': getUserAgent(),
   };
   if (apiToken) headers.Authorization = `Bearer ${apiToken}`;
 
@@ -442,7 +443,7 @@ async function probeUrl(url: string): Promise<number> {
 
   try {
     const res = await fetch(url, {
-      headers: { 'User-Agent': 'search-mcp/1.0 health-check' },
+      headers: { 'User-Agent': getUserAgent('health-check') },
       signal: controller.signal,
     });
     if (!res.ok) throw new Error(`HTTP ${String(res.status)}`);
@@ -474,7 +475,7 @@ async function probeSidecarUrl(
 
   try {
     const res = await fetch(url, {
-      headers: { 'User-Agent': 'search-mcp/1.0 health-check' },
+      headers: { 'User-Agent': getUserAgent('health-check') },
       signal: controller.signal,
     });
     const latencyMs = Date.now() - start;

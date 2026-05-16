@@ -43,7 +43,7 @@ search-mcp/
 │   │   ├── fusion.ts        # RRF + weighted linear fusion
 │   │   ├── rerank.ts        # cross-encoder reranking (ONNX)
 │   │   ├── corpusCache.ts   # SQLite-backed corpus cache
-│   │   ├── contextualEmbedding.ts # LLM-based chunk enrichment (V3.3.0)
+│   │   ├── contextualEmbedding.ts # LLM-based chunk enrichment
 │   │   ├── jobRanking.ts    # weighted composite job scoring
 │   │   ├── jobDedup.ts      # three-layer job dedup
 │   │   ├── lexicalConstraint.ts # IDF-weighted soft token coverage
@@ -93,47 +93,34 @@ search-mcp/
 │   │   ├── searchMerge.ts        # cross-backend search result merging
 │   │   ├── semanticResponse.ts   # response compaction
 │   │   ├── sitemap.ts            # XML sitemap parser
-│   │   ├── contentScrubber.ts      # threat detection & redaction (V3.3.0)
+│   │   ├── contentScrubber.ts      # threat detection & redaction
 │   │   ├── smartExtraction.ts    # quality-based escalation
 │   │   ├── transformersEmbedding.ts # Transformers.js in-process
 │   │   └── url.ts                # URL dedup
-│   └── tools/               # one file per tool (28 tools)
-│       ├── webSearch.ts
-│       ├── webRead.ts
-│       ├── webCrawl.ts
-│       ├── githubRepo.ts
-│       ├── githubRepoFile.ts
-│       ├── githubRepoSearch.ts
-│       ├── githubRepoTree.ts
-│       ├── githubTrending.ts
-│       ├── semanticGitHubCode.ts
-│       ├── semanticCrawl.ts
-│       ├── semanticJobs.ts
-│       ├── semanticReddit.ts
-│       ├── semanticYoutube.ts
-│       ├── youtubeSearch.ts
-│       ├── youtubeTranscript.ts
-│       ├── redditSearch.ts
-│       ├── redditComments.ts
-│       ├── redditClient.ts
-│       ├── redditAuth.ts
-│       ├── redditSearchParser.ts
-│       ├── redditThreadParser.ts
-│       ├── redditPermalink.ts
-│       ├── twitterSearch.ts
-│       ├── producthuntSearch.ts
-│       ├── patentSearch.ts
-│       ├── podcastSearch.ts
-│       ├── academicSearch.ts
-│       ├── arxivSearch.ts
-│       ├── hackernewsSearch.ts
-│       ├── stackoverflowSearch.ts
-│       ├── npmSearch.ts
-│       ├── pypiSearch.ts
-│       ├── queryExpansion.ts      # V3.3.0: rule-based query variation generation
-│       ├── newsSearch.ts (deprecated, removed from server registration)
-│       ├── searxngSearch.ts
-│       └── healthCheck.ts
+│   └── tools/               # tool registration (25 tools: 9 standalone + 6 family + 10 KG)
+│       ├── standalone/      # standalone tools
+│       │   ├── webSearch.ts
+│       │   ├── webRead.ts
+│       │   ├── webCrawl.ts
+│       │   ├── semanticCrawl.ts
+│       │   ├── semanticCrawlListCorpora.ts
+│       │   ├── semanticJobs.ts
+│       │   ├── fetchFocus.ts
+│       │   └── healthCheck.ts
+│       ├── families/        # family tools (action-discriminated)
+│       │   ├── youtube.ts
+│       │   ├── reddit.ts
+│       │   ├── github.ts
+│       │   ├── packages.ts
+│       │   ├── research.ts
+│       │   └── browser.ts
+│       ├── deepResearch.ts  # job/poll protocol deep research
+│       ├── graph-*.ts       # knowledge graph tools (opt-in)
+│       ├── family-*.ts      # family management
+│       ├── run-*.ts         # run management
+│       ├── registry.ts      # registerFamily() helper
+│       ├── response.ts      # shared response helpers
+│       └── queryExpansion.ts # rule-based query variation generation
 ├── services/               # Python bridge services
 │   └── rag-anything-bridge/  # multimodal document extraction
 ├── sidecar/                # local service sidecars
@@ -212,7 +199,13 @@ Start: `docker compose up -d`
 
 ### `src/tools/`
 
-One file per MCP tool. Each file exports a single registration function that accepts the `McpServer` instance and calls `server.tool(name, schema, handler)`. Splitting tools into separate files keeps each file small, makes individual tools easy to find and modify, and avoids merge conflicts when multiple tools are developed in parallel.
+Tool registration follows two patterns:
+- **Standalone tools** (`standalone/`) — one file per tool, exports a `register*` function
+- **Family tools** (`families/`) — one file per family, uses `registerFamily()` for action-discriminated tools (e.g. `youtube` with `search | transcript | semantic` actions)
+
+Knowledge graph tools (`graph-*.ts`, `family-*.ts`, `run-*.ts`) are conditionally registered when `knowledgeGraph.enabled` is set.
+
+Splitting tools into separate files keeps each file small, makes individual tools easy to find and modify, and avoids merge conflicts when multiple tools are developed in parallel.
 
 ---
 

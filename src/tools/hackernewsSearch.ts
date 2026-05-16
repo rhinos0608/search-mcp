@@ -7,9 +7,10 @@ import type { HackerNewsItem } from '../types.js';
 import { rrfMerge } from '../utils/fusion.js';
 import { multiSignalRescore, extractHNSignals } from '../utils/rescore.js';
 import { loadConfig } from '../config.js';
+import { getUserAgent } from '../version.js';
 
 const HN_ALGOLIA_URL = 'https://hn.algolia.com/api/v1';
-const USER_AGENT = 'search-mcp/1.0';
+const USER_AGENT = getUserAgent();
 const REQUEST_TIMEOUT_MS = 15_000;
 const TEXT_MAX_LENGTH = 2000;
 

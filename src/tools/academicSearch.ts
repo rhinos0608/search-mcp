@@ -22,12 +22,13 @@ import { searchRor } from './rorSearch.js';
 import { searchSemanticScholar } from './semanticScholarSearch.js';
 import { searchGdelt } from './gdeltSearch.js';
 import { searchWikidata } from './wikidataSearch.js';
+import { getUserAgent } from '../version.js';
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
 const ARXIV_API_URL = 'https://export.arxiv.org/api/query';
 const SEMANTIC_SCHOLAR_API_URL = 'https://api.semanticscholar.org/graph/v1/paper/search';
-const USER_AGENT = 'search-mcp/1.0';
+const USER_AGENT = getUserAgent();
 const REQUEST_TIMEOUT_MS = 30_000;
 const ABSTRACT_MAX_LENGTH = 2000;
 

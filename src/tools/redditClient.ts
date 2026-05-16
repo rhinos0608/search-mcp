@@ -10,8 +10,9 @@ import {
   type RedditAuthCredentials,
   type RedditClock,
 } from './redditAuth.js';
+import { getUserAgent } from '../version.js';
 
-export const DEFAULT_REDDIT_USER_AGENT = 'search-mcp/1.0 (MCP server for local use)';
+export const DEFAULT_REDDIT_USER_AGENT = `${getUserAgent()} (MCP server for local use)`;
 const REDDIT_PUBLIC_BASE_URL = 'https://www.reddit.com';
 const REDDIT_OAUTH_BASE_URL = 'https://oauth.reddit.com';
 

@@ -5,6 +5,7 @@ import { unavailableError, parseError, timeoutError } from '../errors.js';
 import { ToolCache, cacheKey } from '../cache.js';
 import { retryWithBackoff } from '../retry.js';
 import type { TrendingRepo, TrendingResult } from '../types.js';
+import { getUserAgent } from '../version.js';
 
 // ── Cache ────────────────────────────────────────────────────────────────────
 
@@ -123,7 +124,7 @@ export async function getGitHubTrending(
     html = await retryWithBackoff(
       async () => {
         const response = await fetch(url, {
-          headers: { 'User-Agent': 'search-mcp/1.0' },
+          headers: { 'User-Agent': getUserAgent() },
           signal: controller.signal,
         });
 

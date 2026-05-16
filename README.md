@@ -5,7 +5,7 @@
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.8-blue)](https://www.typescriptlang.org/)
 [![MCP Compatible](https://img.shields.io/badge/MCP-Compatible-green)](https://modelcontextprotocol.io)
 
-> **14 MCP tools** (7 standalone + 6 family tools + 1 deep research job-poll tool) for web search, semantic RAG, code analysis, job search, academic research, social media, and browser automation — all in one MCP server.
+> **25 MCP tools** (15 core + 10 knowledge graph) for web search, semantic RAG, code analysis, knowledge graph, job search, academic research, social media, and browser automation — all in one MCP server.
 
 ## Features at a Glance
 
@@ -18,7 +18,8 @@
 | **Research** | `research` family (academic/arxiv/hackernews/stackoverflow/pubmed/wikipedia), `deep_research` (agent/pipeline/tree via job-poll protocol) |
 | **Packages** | `packages` family (npm/pypi) |
 | **Jobs** | `semantic_jobs` — structured extraction from 20+ boards (SEEK, Indeed, LinkedIn, etc.) with constraint filtering and weighted ranking |
-| **Browser** | `browser` family (navigate/snapshot/click/type/evaluate/screenshot/extract/act/wait/pdf/storage/network/tabs/session) with CDP stealth or CloakBrowser backend |
+| **Browser** | `browser` family (navigate/snapshot/click/type/evaluate/screenshot/extract/act/wait/pdf/storage/network/tabs/session/wait_for/dialog_handle/iframe_context/scroll_to_load/paginate/download/table_extract/network_intercept/resource_timing/diff) with CDP stealth or CloakBrowser backend |
+| **Knowledge Graph** | `graph_ingest`, `graph_query`, `entity_lookup_batch`, `graph_status`, `graph_rebuild`, `family_list`, `family_get`, `family_merge`, `run_list`, `run_rollback` — entity extraction, querying, and family management (opt-in via `KNOWLEDGE_GRAPH_ENABLED`) |
 | **System** | `health_check` — live probe of all backends |
 
 ## Quick Start
@@ -111,7 +112,7 @@ Copy [`config.example.json`](config.example.json) to `config.json` and fill in y
 | `STACKEXCHANGE_API_KEY` | Stack Exchange API key (optional — degrades gracefully) |
 | `GITHUB_TOKEN` | GitHub personal access token (higher API rate limits) |
 
-### Browser / CDP (V5.2)
+### Browser / CDP
 
 | Variable | Default | Description |
 |---|---|---|
@@ -140,7 +141,7 @@ Copy [`config.example.json`](config.example.json) to `config.json` and fill in y
 | `CLOAKBROWSER_GEOIP` | `false` | Auto-detect locale/timezone from proxy IP |
 | `CLOAKBROWSER_STEALTH_ARGS` | `true` | Include CloakBrowser default stealth fingerprint flags |
 
-### Deep Research (V4.0.0 — opt-in)
+### Deep Research (opt-in)
 
 | Variable | Default | Description |
 |---|---|---|
@@ -179,7 +180,7 @@ Copy [`config.example.json`](config.example.json) to `config.json` and fill in y
 | `SEARCH_MCP_CONFIG_KEY` | — | Password for decrypting `config.enc` |
 | `CHALLENGE_LATENCY_THRESHOLD` | `5000` | Latency threshold in ms for challenge detection |
 
-## HTTP Mode & Browser Dashboard (V6.0)
+## HTTP Mode & Browser Dashboard
 
 Set `HTTP_PORT` to enable an HTTP MCP transport and a React browser dashboard for managing API keys and provider configuration.
 
@@ -248,7 +249,7 @@ cd dashboard && npm run dev
 
 ### stdio-only mode (original, unchanged)
 
-Leave `HTTP_PORT` unset. The server reads config from `config.enc` (with `SEARCH_MCP_CONFIG_KEY`), `config.json`, or environment variables — same as before V6.0.
+Leave `HTTP_PORT` unset. The server reads config from `config.enc` (with `SEARCH_MCP_CONFIG_KEY`), `config.json`, or environment variables.
 
 ## Tailscale Access
 
@@ -335,11 +336,11 @@ docker compose up -d
 ```
 
 
-See the [Full Tool Reference](docs/tools.md) for the full tool reference.
+See the [Full Tool Reference](docs/tools.md) for the complete tool reference.
 
 ## Documentation
 
-- [Full Tool Reference](docs/tools.md) — Detailed docs for all 14 tools
+- [Full Tool Reference](docs/tools.md) — Detailed docs for all tools
 - [Architecture Overview](docs/architecture.md) — System architecture and data flow
 - [Quick Start Guide](docs/quickstart.md) — Getting started with examples
 

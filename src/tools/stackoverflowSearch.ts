@@ -5,9 +5,10 @@ import { retryWithBackoff } from '../retry.js';
 import { unavailableError, timeoutError, ToolError } from '../errors.js';
 import type { StackOverflowQuestion } from '../types.js';
 import { safeStructuredFromHtml } from '../utils/elementHelpers.js';
+import { getUserAgent } from '../version.js';
 
 const SE_API_URL = 'https://api.stackexchange.com/2.3';
-const USER_AGENT = 'search-mcp/1.0';
+const USER_AGENT = getUserAgent();
 const REQUEST_TIMEOUT_MS = 15_000;
 const BODY_MAX_LENGTH = 3000;
 

@@ -9,6 +9,7 @@ import type { SearchConfig } from './config.js';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { getGatedTools, configHealth } from './health.js';
 import { logger } from './logger.js';
+import { getVersion } from './version.js';
 
 // Standalone tools
 import { registerWebSearch } from './tools/standalone/webSearch.js';
@@ -16,6 +17,7 @@ import { registerWebRead } from './tools/standalone/webRead.js';
 import { registerWebCrawl } from './tools/standalone/webCrawl.js';
 import { registerSemanticCrawl } from './tools/standalone/semanticCrawl.js';
 import { registerSemanticCrawlListCorpora } from './tools/standalone/semanticCrawlListCorpora.js';
+import { registerSemanticCrawlInspectCorpus } from './tools/standalone/semanticCrawlInspectCorpus.js';
 import { registerSemanticJobs } from './tools/standalone/semanticJobs.js';
 import { registerFetchFocus } from './tools/standalone/fetchFocus.js';
 import { registerHealthCheck } from './tools/standalone/healthCheck.js';
@@ -68,7 +70,7 @@ export function createServer(
 
   const server = new McpServer({
     name: 'search-mcp',
-    version: '1.0.0',
+    version: getVersion(),
   });
 
   // Initialize KG database and hook
@@ -90,6 +92,7 @@ export function createServer(
   if (!gated.has('semantic_crawl')) {
     registerSemanticCrawl(server, cfg, kgHook ?? undefined);
     registerSemanticCrawlListCorpora(server);
+    registerSemanticCrawlInspectCorpus(server);
   }
   if (!gated.has('deep_research')) registerDeepResearchTool(server, cfg, kgHook ?? undefined);
 

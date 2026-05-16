@@ -2,6 +2,7 @@ import { loadConfig } from '../config.js';
 import type { EmbeddingSidecarConfig } from '../config.js';
 import { networkError, parseError, unavailableError, timeoutError } from '../errors.js';
 import { logger } from '../logger.js';
+import { getUserAgent } from '../version.js';
 
 export interface EmbedRequest {
   baseUrl?: string | undefined;
@@ -224,7 +225,7 @@ async function embedWithSidecar(
 
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
-    'User-Agent': 'search-mcp/1.0',
+    'User-Agent': getUserAgent(),
   };
   if (request.apiToken) {
     headers.Authorization = `Bearer ${request.apiToken}`;
@@ -321,7 +322,7 @@ async function embedWithOpenAICompatible(
 
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
-    'User-Agent': 'search-mcp/1.0',
+    'User-Agent': getUserAgent(),
   };
   if (apiKey) {
     headers.Authorization = `Bearer ${apiKey}`;

@@ -9,11 +9,12 @@ import { ToolCache, cacheKey } from '../cache.js';
 import { retryWithBackoff } from '../retry.js';
 import { unavailableError, timeoutError } from '../errors.js';
 import type { PypiPackage } from '../types.js';
+import { getUserAgent } from '../version.js';
 
 const PYPI_JSON_URL = 'https://pypi.org/pypi';
 const TOP_PACKAGES_URL =
   'https://hugovk.github.io/top-pypi-packages/top-pypi-packages-30-days.min.json';
-const USER_AGENT = 'search-mcp/1.0';
+const USER_AGENT = getUserAgent();
 const REQUEST_TIMEOUT_MS = 15_000;
 const DESCRIPTION_MAX_LENGTH = 500;
 

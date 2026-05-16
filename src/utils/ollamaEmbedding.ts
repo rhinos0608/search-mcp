@@ -9,6 +9,7 @@
 
 import { networkError, parseError } from '../errors.js';
 import type { EmbedResponse } from '../rag/embedding.js';
+import { getUserAgent } from '../version.js';
 
 export interface OllamaEmbedderConfig {
   baseUrl: string;
@@ -67,7 +68,7 @@ export async function embedWithOllama(
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'User-Agent': 'search-mcp/1.0',
+        'User-Agent': getUserAgent(),
       },
       body: JSON.stringify({
         model: config.model,

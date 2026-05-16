@@ -37,7 +37,7 @@ npm run config:decrypt   # config.enc -> config.json
 - `src/config.ts` resolves config in this order: encrypted config → env vars → defaults, then caches it.
 - Tool handlers return `ToolResult<T>` as JSON text content. Errors are sanitized and returned with `isError: true`.
 
-## Main Tools (15 total)
+## Main Tools (25 total — 15 core + 10 knowledge graph)
 
 ### Search/Read/Crawl
 - `web_search`: Exa, Brave, or SearXNG with fallback chain, optional query expansion and cross-backend merging.
@@ -93,6 +93,40 @@ npm run config:decrypt   # config.enc -> config.json
   - `npm` — search npm registry
   - `pypi` — search Python Package Index
 
+### Browser
+- `browser` (family tool with `action` discriminator):
+  - `navigate` — navigate to a URL
+  - `snapshot` — capture page structure as accessible elements
+  - `click` / `type` — interact with page elements
+  - `evaluate` — run JavaScript on the page
+  - `screenshot` — capture page images
+  - `extract` — pull structured data
+  - `act` — natural-language instructions
+  - `wait` / `wait_for` — wait for conditions
+  - `dialog_handle` — handle alert/confirm/prompt
+  - `iframe_context` — switch frames
+  - `scroll_to_load` — infinite scroll
+  - `paginate` — walk paginated content
+  - `download` — intercept file downloads
+  - `table_extract` — structured tables
+  - `network_intercept` — block/inject/modify requests
+  - `resource_timing` — performance data
+  - `diff` — DOM change detection
+  - `session` / `tabs` / `storage` / `network` / `pdf` — lifecycle management
+  - Backends: Playwright + CDP (stealth mode), optional CloakBrowser
+
+### Knowledge Graph (opt-in via `KNOWLEDGE_GRAPH_ENABLED`)
+- `graph_ingest` — text or URL → entities and relationships via LLM pipeline
+- `graph_query` — full-text search, entity lookup, traversal
+- `entity_lookup_batch` — resolve up to 100 entity IDs
+- `graph_status` — event count, projection stats, storage size
+- `graph_rebuild` — rebuild projection tables from event store
+- `family_list` — list families with node counts and merge candidates
+- `family_get` — retrieve family detail with entities and runs
+- `family_merge` — merge one family into another (one-way, irreversible)
+- `run_list` — list extraction runs with filters and pagination
+- `run_rollback` — roll back a run with compensation plan preview
+
 ### System
 - `health_check`: verify server status, config health, backend connectivity.
 
@@ -119,7 +153,7 @@ npm run config:decrypt   # config.enc -> config.json
 - `corpusCache.ts`: SQLite-backed persistent corpus cache.
 - `jobRanking.ts`, `jobDedup.ts`, `types/job.ts`, `sources/jobSources.ts`: job search support.
 
-## Deep Research Modules (V4.0.0)
+## Deep Research Modules
 
 `src/research/` implements the deep research orchestration engine. The tool (`deep_research`) uses a job/poll protocol — `start` returns a jobId immediately, research runs asynchronously, and `poll` retrieves progress or the final result. Results are held in memory for 24 hours, and the `save` action persists them to disk.
 
@@ -233,7 +267,7 @@ Provider selection via `EMBEDDING_PROVIDER` env var (default `sidecar`):
 
 Code search may use `EMBEDDING_CODE_MODEL` for a code-tuned model endpoint.
 
-## V3.3.0 Features
+## V3.3+ Features (contextual embeddings, query expansion, content scrubbing)
 
 ### Contextual Embeddings (`src/rag/contextualEmbedding.ts`)
 Optional LLM-based chunk enrichment for `semantic_crawl`. When `useContextualEmbeddings: true` and LLM config is present, each chunk is prefixed with a short LLM-generated context string before embedding. Original chunk text is preserved for display; enriched text is used only for embedding. Gracefully degrades to raw chunks if the LLM call fails.
@@ -313,7 +347,7 @@ LLM_PROVIDER                # model name (e.g. 'gpt-4o-mini', 'llama3'), passed 
 LLM_API_TOKEN               # optional — omit for local servers without auth
 LLM_BASE_URL                # base URL for /v1/chat/completions (required)
 
-# Security (V3.3.0 — all opt-in, off by default)
+# Security (opt-in, off by default)
 DOMAIN_TRUST_ENABLED        # 'true' | 'false' (default: false)
 TRUSTED_DOMAINS             # comma-separated trusted domains
 BLOCKED_DOMAINS             # comma-separated blocked domains
@@ -337,7 +371,7 @@ CLOAKBROWSER_TIMEZONE      # optional timezone flag, e.g. America/New_York
 CLOAKBROWSER_GEOIP         # 'true' | 'false' to infer locale/timezone from proxy IP
 CLOAKBROWSER_STEALTH_ARGS  # 'true' | 'false' to include default CloakBrowser stealth flags
 
-# Deep Research (V4.0.0 — opt-in, off by default)
+# Deep Research (opt-in, off by default)
 DEEP_RESEARCH_ENABLED       # 'true' | 'false' (default: false)
 DEEP_RESEARCH_BASE_URL      # OpenAI-compatible base URL for LLM calls
 DEEP_RESEARCH_MODEL         # Main orchestrator model (e.g. 'gpt-4o', 'claude-sonnet-4')

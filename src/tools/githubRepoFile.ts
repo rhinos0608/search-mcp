@@ -24,6 +24,7 @@ import {
 } from '../errors.js';
 import type { GitHubFileResult } from '../types.js';
 import { wrapCodeAsStructuredContent } from '../utils/elementHelpers.js';
+import { getUserAgent } from '../version.js';
 
 const GITHUB_API = 'https://api.github.com';
 
@@ -32,7 +33,7 @@ const GITHUB_API = 'https://api.github.com';
 function buildHeaders(): Record<string, string> {
   const headers: Record<string, string> = {
     Accept: 'application/vnd.github+json',
-    'User-Agent': 'search-mcp/1.0',
+    'User-Agent': getUserAgent(),
     'X-GitHub-Api-Version': '2022-11-28',
   };
   const token = loadConfig().github.token;
@@ -228,7 +229,7 @@ async function fetchRawContent(
   assertSafeUrl(url);
 
   const headers: Record<string, string> = {
-    'User-Agent': 'search-mcp/1.0',
+    'User-Agent': getUserAgent(),
   };
   const token = loadConfig().github.token;
   if (token) {
