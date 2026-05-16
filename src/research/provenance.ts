@@ -28,15 +28,20 @@ import {
   type TemporalEventType,
 } from './types.js';
 import type { EmbedRequest, EmbedResponse } from '../rag/embedding.js';
+import {
+  type ProjectContext,
+  buildDefaultProjectContext,
+  domainMatches,
+  matchDomainRule,
+} from './projectContext.js';
+
+// ── General-purpose regexes (project-agnostic) ─────────────────────────────
 
 const PROTOCOL_RELEASE_RE =
   /\b(released|release|launched|introduced|deprecated|stable|beta|major redesign|latest|now supports|no longer|version|v\d+(?:\.\d+)*(?:-[\w.]+)?)\b/i;
 const VERSION_RE =
   /(?:\bv\d+(?:\.\d+)*(?:-[\w.]+)?\b|\b\d{4}-\d{2}-\d{2}\b|\b\d+\.\d+\.\d+(?:-[\w.]+)?\b)/i;
 const PACKAGE_RE = /@[a-z0-9][\w.-]*\/[a-z0-9][\w.-]*/i;
-const MARKETING_RE =
-  /\b(tcp\/ip of|agentic web|game[- ]changer|revolutionary|paradigm shift|most substantial redesign|transformative)\b/i;
-const MCP_RE = /\b(?:mcp|model context protocol)\b/i;
 const STOP_WORDS = new Set([
   'about',
   'after',
@@ -87,6 +92,13 @@ const OFFICIAL_AUTHORITY = new Set<AuthorityClass>([
   'official_vendor',
 ]);
 
+// ── Default context (lazy-built, no hardcoded projects) ────────────────────
+
+let _defaultCtx: ProjectContext | undefined;
+function defaultCtx(): ProjectContext {
+  return (_defaultCtx ??= buildDefaultProjectContext());
+}
+
 function hostname(url: string): string {
   try {
     return new URL(url).hostname.replace(/^www\./, '').toLowerCase();
@@ -105,32 +117,49 @@ function pathname(url: string): string {
 
 export function classifySourceAuthority(
   source: Pick<SourceEntry, 'url' | 'domain' | 'sourceType'>,
+  projectContext?: ProjectContext,
 ): AuthorityClass {
   const domain = (source.domain || hostname(source.url)).toLowerCase();
   const path = pathname(source.url);
+  const ctx = projectContext ?? defaultCtx();
 
-  if (domain === 'modelcontextprotocol.io' && path.includes('/specification')) {
-    return path.includes('changelog') ? 'official_changelog' : 'official_spec';
+  // 1. Check project-specific domain authority rules (highest priority, checked in order)
+  for (const rule of ctx.domainAuthorityRules) {
+    if (matchDomainRule(rule, domain, path)) {
+      return rule.authority;
+    }
   }
-  if (domain === 'github.com' && path.startsWith('/modelcontextprotocol/')) {
-    return 'official_repo';
+
+  // 2. Check project-specific GitHub repo patterns
+  if (domain === 'github.com') {
+    const pathParts = path.split('/').filter(Boolean);
+    if (pathParts.length >= 2) {
+      const owner = pathParts[0] ?? '';
+      const repo = pathParts[1] ?? '';
+      for (const rule of ctx.repoAuthorityRules) {
+        if (rule.owner.toLowerCase() === owner.toLowerCase()) {
+          const repoGlob = rule.repoPattern.replace(/\*/g, '.*');
+          if (new RegExp(`^${repoGlob}$`, 'i').test(repo)) {
+            return rule.authority;
+          }
+        }
+      }
+    }
   }
-  if (domain === 'blog.modelcontextprotocol.io') return 'official_vendor';
-  if (domain === 'anthropic.com' && (path.startsWith('/news') || path.startsWith('/engineering'))) {
-    return 'official_vendor';
+
+  // 3. Check vendor SDK domains
+  for (const rule of ctx.vendorSdkDomains) {
+    if (matchDomainRule(rule, domain, path)) {
+      return rule.authority;
+    }
   }
-  if (domain === 'npmjs.com' || domain === 'pypi.org' || domain === 'crates.io') {
+
+  // 4. Check package registries
+  if (ctx.registries.some((r) => domainMatches(r.domain, domain))) {
     return 'package_registry';
   }
-  if (
-    domain === 'sdk.vercel.ai' ||
-    (domain === 'vercel.com' && path.includes('/docs')) ||
-    domain.endsWith('.microsoft.com') ||
-    domain === 'developers.cloudflare.com' ||
-    domain === 'docs.anthropic.com'
-  ) {
-    return 'vendor_sdk_docs';
-  }
+
+  // 5. Source-type-based fallback
   if (source.sourceType === 'official_docs') return 'official_spec';
   if (source.sourceType === 'documentation') return 'vendor_sdk_docs';
   if (source.sourceType === 'wikipedia') return 'encyclopedia';
@@ -149,27 +178,37 @@ export function classifySourceAuthority(
   return 'third_party_analysis';
 }
 
-export function inferSourceTypeFromUrl(url: string, fallback: SourceType): SourceType {
+export function inferSourceTypeFromUrl(
+  url: string,
+  fallback: SourceType,
+  projectContext?: ProjectContext,
+): SourceType {
   const domain = hostname(url);
   const path = pathname(url);
+  const ctx = projectContext ?? defaultCtx();
 
-  if (domain === 'modelcontextprotocol.io' && path.includes('/specification'))
-    return 'official_docs';
-  if (domain === 'blog.modelcontextprotocol.io') return 'official_blog';
+  // 1. Check project-specific sourceType rules first
+  for (const rule of ctx.sourceTypeRules) {
+    if (!domainMatches(rule.domain, domain)) continue;
+    if (rule.pathPrefix !== undefined && !path.startsWith(rule.pathPrefix)) continue;
+    return rule.sourceType as SourceType;
+  }
+
+  // 2. Common well-known domains (project-agnostic)
   if (domain === 'github.com') return 'github';
-  if (domain === 'npmjs.com' || domain === 'pypi.org' || domain === 'crates.io') {
+  if (ctx.registries.some((r) => domainMatches(r.domain, domain))) {
     return 'package_registry';
   }
   if (domain === 'wikipedia.org' || domain.endsWith('.wikipedia.org')) return 'wikipedia';
   if (domain === 'reddit.com' || domain.endsWith('.reddit.com')) return 'reddit';
   if (domain === 'news.ycombinator.com' || domain === 'ycombinator.com') return 'hackernews';
   if (domain === 'stackoverflow.com') return 'stackoverflow';
+
+  // 3. Heuristic: domains containing docs/learn/developer are likely vendor docs
   if (domain.includes('docs.') || domain.includes('learn.') || domain.includes('developer.')) {
     return 'vendor_docs';
   }
-  if (domain === 'anthropic.com' || domain === 'vercel.com' || domain === 'sdk.vercel.ai') {
-    return 'vendor_docs';
-  }
+
   return fallback;
 }
 
@@ -177,7 +216,8 @@ export function isPrimaryAuthority(authorityClass: AuthorityClass): boolean {
   return OFFICIAL_AUTHORITY.has(authorityClass);
 }
 
-function bestAuthority(sources: SourceEntry[]): AuthorityClass {
+function bestAuthority(sources: SourceEntry[], projectContext?: ProjectContext): AuthorityClass {
+  const ctx = projectContext ?? defaultCtx();
   const order: AuthorityClass[] = [
     'official_spec',
     'official_changelog',
@@ -194,7 +234,7 @@ function bestAuthority(sources: SourceEntry[]): AuthorityClass {
   let best: AuthorityClass = 'unknown';
   let bestIdx: number = order.length;
   for (const source of sources) {
-    const cls: AuthorityClass = source.authorityClass ?? classifySourceAuthority(source);
+    const cls: AuthorityClass = source.authorityClass ?? classifySourceAuthority(source, ctx);
     const idx: number = order.indexOf(cls);
     if (idx !== -1 && idx < bestIdx) {
       best = cls;
@@ -428,17 +468,97 @@ const SINGLE_PROPER_RE = /\b[A-Z][a-z]{2,}\b/g;
 
 // Words that are commonly capitalized by grammar, not by proper-noun status.
 const SENTENCE_INITIAL_BLACKLIST = new Set([
-  'The', 'This', 'That', 'These', 'Those', 'It', 'They', 'We', 'You',
-  'He', 'She', 'His', 'Her', 'Our', 'Their', 'Its', 'If', 'When',
-  'Where', 'While', 'Since', 'Because', 'Although', 'However', 'But',
-  'And', 'For', 'With', 'From', 'Into', 'After', 'Before', 'During',
-  'In', 'On', 'At', 'To', 'By', 'As', 'Or', 'Not', 'No', 'Yes',
-  'Each', 'Every', 'Any', 'Some', 'All', 'Both', 'Many', 'Much',
-  'Few', 'More', 'Most', 'Other', 'Such', 'Only', 'Just', 'Also',
-  'Then', 'Now', 'Yet', 'So', 'Thus', 'Therefore', 'There', 'Here',
-  'An', 'Is', 'Was', 'Are', 'Were', 'Be', 'Been', 'Has', 'Have',
-  'Had', 'Do', 'Does', 'Did', 'Can', 'Could', 'Will', 'Would',
-  'Should', 'May', 'Might', 'Must', 'Shall', 'Being', 'Having',
+  'The',
+  'This',
+  'That',
+  'These',
+  'Those',
+  'It',
+  'They',
+  'We',
+  'You',
+  'He',
+  'She',
+  'His',
+  'Her',
+  'Our',
+  'Their',
+  'Its',
+  'If',
+  'When',
+  'Where',
+  'While',
+  'Since',
+  'Because',
+  'Although',
+  'However',
+  'But',
+  'And',
+  'For',
+  'With',
+  'From',
+  'Into',
+  'After',
+  'Before',
+  'During',
+  'In',
+  'On',
+  'At',
+  'To',
+  'By',
+  'As',
+  'Or',
+  'Not',
+  'No',
+  'Yes',
+  'Each',
+  'Every',
+  'Any',
+  'Some',
+  'All',
+  'Both',
+  'Many',
+  'Much',
+  'Few',
+  'More',
+  'Most',
+  'Other',
+  'Such',
+  'Only',
+  'Just',
+  'Also',
+  'Then',
+  'Now',
+  'Yet',
+  'So',
+  'Thus',
+  'Therefore',
+  'There',
+  'Here',
+  'An',
+  'Is',
+  'Was',
+  'Are',
+  'Were',
+  'Be',
+  'Been',
+  'Has',
+  'Have',
+  'Had',
+  'Do',
+  'Does',
+  'Did',
+  'Can',
+  'Could',
+  'Will',
+  'Would',
+  'Should',
+  'May',
+  'Might',
+  'Must',
+  'Shall',
+  'Being',
+  'Having',
 ]);
 
 /** Extract dates (ISO + named), numbers, and proper-noun entities from text. */
@@ -632,50 +752,65 @@ function eventTypeFor(text: string): TemporalEventType {
   return 'unknown';
 }
 
-export function normalizeReleaseEntity(text: string, sources: SourceEntry[] = []): ReleaseEntity {
+export function normalizeReleaseEntity(
+  text: string,
+  sources: SourceEntry[] = [],
+  projectContext?: ProjectContext,
+): ReleaseEntity {
   const sourceText: string = sources.map((s: SourceEntry) => `${s.title} ${s.url}`).join(' ');
   const combined = `${text} ${sourceText}`;
   const pkg: string | undefined = PACKAGE_RE.exec(combined)?.[0];
   const version: string | undefined = extractVersion(combined);
   const sourceIds: string[] = sources.map((s: SourceEntry) => s.id);
+  const ctx = projectContext ?? defaultCtx();
+  const projectPattern = ctx.projectTextPattern;
 
+  // 1. Known package match
   if (pkg) {
-    const owner: string | undefined = pkg.toLowerCase().startsWith('@ai-sdk/')
-      ? 'Vercel'
-      : undefined;
-    const ecosystem: string | undefined = pkg.toLowerCase().startsWith('@ai-sdk/')
-      ? 'AI SDK'
-      : undefined;
+    const known = ctx.knownPackages[pkg.toLowerCase()];
+    if (known) {
+      return {
+        canonicalName: known.projectCanonicalName ?? known.packageName,
+        entityType: known.entityType ?? 'package',
+        ...(known.owner ? { owner: known.owner } : {}),
+        ...(known.ecosystem ? { ecosystem: known.ecosystem } : {}),
+        packageName: known.packageName,
+        ...(version ? { version } : {}),
+        sourceIds,
+        confidence: 0.92,
+      };
+    }
+    // Unknown package — still treat as package entity
     return {
       canonicalName: pkg,
       entityType: 'package',
-      ...(owner ? { owner } : {}),
-      ...(ecosystem ? { ecosystem } : {}),
       packageName: pkg,
       ...(version ? { version } : {}),
       sourceIds,
-      confidence: 0.92,
+      confidence: 0.78,
     };
   }
 
-  const officialSpec: boolean = sources.some((s: SourceEntry) => {
-    const cls: AuthorityClass = s.authorityClass ?? classifySourceAuthority(s);
-    return cls === 'official_spec' || cls === 'official_changelog';
-  });
-  if (MCP_RE.test(combined) && (officialSpec || /\b\d{4}-\d{2}-\d{2}\b/.test(combined))) {
-    return {
-      canonicalName: 'Model Context Protocol',
-      entityType: officialSpec ? 'specification' : 'protocol',
-      owner: 'Model Context Protocol',
-      ...(version ? { version } : {}),
-      sourceIds,
-      confidence: officialSpec ? 0.9 : 0.72,
-    };
-  }
+  // 2. Project match (if the text mentions the research subject and we have official sources)
+  if (projectPattern?.test(combined)) {
+    const officialSpec: boolean = sources.some((s: SourceEntry) => {
+      const cls: AuthorityClass = s.authorityClass ?? classifySourceAuthority(s, ctx);
+      return cls === 'official_spec' || cls === 'official_changelog';
+    });
 
-  if (MCP_RE.test(combined)) {
+    if (officialSpec || /\b\d{4}-\d{2}-\d{2}\b/.test(combined)) {
+      return {
+        canonicalName: ctx.canonicalName,
+        entityType: officialSpec ? 'specification' : 'protocol',
+        owner: ctx.canonicalName,
+        ...(version ? { version } : {}),
+        sourceIds,
+        confidence: officialSpec ? 0.9 : 0.72,
+      };
+    }
+
     return {
-      canonicalName: 'Model Context Protocol',
+      canonicalName: ctx.canonicalName,
       entityType: 'protocol',
       ...(version ? { version } : {}),
       sourceIds,
@@ -695,18 +830,31 @@ export function normalizeReleaseEntity(text: string, sources: SourceEntry[] = []
 export function authorityRequirementForClaim(
   text: string,
   entity: ReleaseEntity,
+  projectContext?: ProjectContext,
 ): ClaimAuthorityRequirement {
+  const ctx = projectContext ?? defaultCtx();
+  const isProjectMentioned = ctx.projectTextPattern?.test(text) === true;
+
+  // Protocol/specification release claims require primary authority
+  if (entity.entityType === 'protocol' || entity.entityType === 'specification') {
+    if (PROTOCOL_RELEASE_RE.test(text)) return 'primary_required';
+    if (VERSION_RE.test(text)) return 'primary_preferred';
+  }
+
+  // Package entity framed as a protocol-level release also demands primary authority.
+  // Catches: "Project X released v2 beta as a protocol release" backed by package sources.
   if (
-    ((entity.entityType === 'protocol' || entity.entityType === 'specification') &&
-      PROTOCOL_RELEASE_RE.test(text)) ||
-    /\b(protocol release|anthropic released|mcp v\d|mcp .*beta)\b/i.test(text)
+    entity.entityType === 'package' &&
+    isProjectMentioned &&
+    /\b(?:released?|introduced?|protocol release|spec release)\b/i.test(text)
   ) {
     return 'primary_required';
   }
+
   if (VERSION_RE.test(text) || /\b(latest|first|stable|production-ready)\b/i.test(text)) {
     return 'primary_preferred';
   }
-  if (MARKETING_RE.test(text)) return 'secondary_ok';
+  if (ctx.marketingPhrases.some((p) => p.test(text))) return 'secondary_ok';
   return 'any_ok';
 }
 
@@ -733,35 +881,46 @@ function riskForClaim(
   authorityClass: AuthorityClass,
   requirement: ClaimAuthorityRequirement,
   sources: SourceEntry[],
+  projectContext?: ProjectContext,
 ): ClaimRisk[] {
   const risks = new Set<ClaimRisk>();
   const lower: string = text.toLowerCase();
+  const ctx = projectContext ?? defaultCtx();
 
-  if (MARKETING_RE.test(text)) risks.add('marketing_language');
+  if (ctx.marketingPhrases.some((p) => p.test(text))) risks.add('marketing_language');
   if (requirement === 'primary_required' && !isPrimaryAuthority(authorityClass))
     risks.add('weak_authority');
 
   const packageSource: boolean = sources.some((s: SourceEntry) => {
-    const cls: AuthorityClass = s.authorityClass ?? classifySourceAuthority(s);
+    const cls: AuthorityClass = s.authorityClass ?? classifySourceAuthority(s, ctx);
     return (
       cls === 'package_registry' ||
       cls === 'vendor_sdk_docs' ||
       PACKAGE_RE.test(`${s.title} ${s.url}`)
     );
   });
+
+  // Entity mismatch: package-backed sources claiming protocol/spec release.
+  // Detects when a package source is used to make claims about the project
+  // as a whole (protocol/spec) rather than the package itself.
+  const projectPattern = ctx.projectTextPattern;
+  const isProjectMentioned = projectPattern?.test(text) === true;
+  // Framing signals: "protocol", "specification", or versioned project references
   const protocolFraming: boolean =
-    MCP_RE.test(text) &&
-    /\b(protocol|spec(?:ification)?|anthropic(?:'s)? mcp|mcp v\d|mcp .*beta)\b/i.test(text);
+    isProjectMentioned &&
+    (/\b(?:protocol|spec(?:ification)?)\b/i.test(text) || PROTOCOL_RELEASE_RE.test(text));
   if (packageSource && protocolFraming && entity.entityType !== 'package') {
     risks.add('entity_mismatch');
   }
+  // Also flag when entity is a package but the claim frames it as a protocol/spec release
   const packageNameMentioned: boolean = entity.packageName
     ? lower.includes(entity.packageName.toLowerCase())
     : false;
   if (
     entity.entityType === 'package' &&
     !packageNameMentioned &&
-    /\bprotocol release|anthropic released|official protocol|mcp v\d|mcp .*beta\b/i.test(lower)
+    isProjectMentioned &&
+    /\b(?:released?|introduced?|launched?)\b/i.test(lower)
   ) {
     risks.add('entity_mismatch');
   }
@@ -772,7 +931,7 @@ function riskForClaim(
       (s: SourceEntry) => s.publishedDate?.slice(0, 10) === eventDate,
     );
     const hasOfficialReleaseSource: boolean = sources.some((s: SourceEntry) =>
-      isPrimaryAuthority(s.authorityClass ?? classifySourceAuthority(s)),
+      isPrimaryAuthority(s.authorityClass ?? classifySourceAuthority(s, ctx)),
     );
     if (onlyPublicationMatch && !hasOfficialReleaseSource && /\breleased?\b/i.test(text)) {
       risks.add('temporal_misattribution');
@@ -807,18 +966,21 @@ export function buildClaimLedger(
   findings: Finding[],
   sources: SourceEntry[],
   query = '',
+  projectContext?: ProjectContext,
 ): ResearchClaim[] {
+  const ctx = projectContext ?? defaultCtx();
   const sourceById = new Map<string, SourceEntry>(sources.map((s: SourceEntry) => [s.id, s]));
   return findings.map((finding: Finding): ResearchClaim => {
     const claimSources: SourceEntry[] = finding.sourceIds
       .map((sid: string) => sourceById.get(sid))
       .filter((s): s is SourceEntry => Boolean(s));
     const entity: ReleaseEntity =
-      finding.subjectEntity ?? normalizeReleaseEntity(finding.claim, claimSources);
-    const authorityClass: AuthorityClass = finding.authorityClass ?? bestAuthority(claimSources);
+      finding.subjectEntity ?? normalizeReleaseEntity(finding.claim, claimSources, ctx);
+    const authorityClass: AuthorityClass =
+      finding.authorityClass ?? bestAuthority(claimSources, ctx);
     const authorityRequirement: ClaimAuthorityRequirement =
       finding.authorityRequirement ??
-      authorityRequirementForClaim(`${query} ${finding.claim}`, entity);
+      authorityRequirementForClaim(`${query} ${finding.claim}`, entity, ctx);
     const risks = new Set<ClaimRisk>(finding.provenanceRisks ?? []);
     for (const risk of riskForClaim(
       finding.claim,
@@ -826,6 +988,7 @@ export function buildClaimLedger(
       authorityClass,
       authorityRequirement,
       claimSources,
+      ctx,
     )) {
       risks.add(risk);
     }
@@ -860,19 +1023,25 @@ export function buildClaimLedger(
   });
 }
 
-export function buildSourceRegistry(sources: SourceEntry[], findings: Finding[]): SourceRecord[] {
+export function buildSourceRegistry(
+  sources: SourceEntry[],
+  findings: Finding[],
+  projectContext?: ProjectContext,
+): SourceRecord[] {
+  const ctx = projectContext ?? defaultCtx();
   return sources.map((source: SourceEntry, index: number): SourceRecord => {
     const cited: Finding[] = findings.filter((finding: Finding) =>
       finding.sourceIds.includes(source.id),
     );
-    const authorityClass: AuthorityClass = source.authorityClass ?? classifySourceAuthority(source);
+    const authorityClass: AuthorityClass =
+      source.authorityClass ?? classifySourceAuthority(source, ctx);
     return {
       id: source.id,
       index: index + 1,
       title: source.title,
       url: source.url,
       domain: source.domain,
-      sourceType: inferSourceTypeFromUrl(source.url, source.sourceType),
+      sourceType: inferSourceTypeFromUrl(source.url, source.sourceType, ctx),
       authorityClass,
       usedInReport: cited.length > 0 || source.usageStatus === 'used',
       citedClaimIds: cited.map((finding: Finding) => finding.id),
@@ -884,18 +1053,25 @@ export function buildSourceRegistry(sources: SourceEntry[], findings: Finding[])
 export function detectLatestOfficialVersion(
   sources: SourceEntry[],
   query = '',
+  projectContext?: ProjectContext,
 ): LatestOfficialVersion | undefined {
-  if (!MCP_RE.test(query + ' ' + sources.map((s: SourceEntry) => s.url).join(' ')))
+  const ctx = projectContext ?? defaultCtx();
+  const projectPattern = ctx.projectTextPattern;
+
+  // Only detect versions when the query/sources are about the research subject
+  if (!projectPattern?.test(query + ' ' + sources.map((s: SourceEntry) => s.url).join(' '))) {
     return undefined;
+  }
+
   const candidates: LatestOfficialVersion[] = [];
   for (const source of sources) {
-    const cls: AuthorityClass = source.authorityClass ?? classifySourceAuthority(source);
+    const cls: AuthorityClass = source.authorityClass ?? classifySourceAuthority(source, ctx);
     if (cls !== 'official_spec' && cls !== 'official_changelog') continue;
     const text = `${source.title} ${source.url}`;
     const versions: string[] = text.match(/\b\d{4}-\d{2}-\d{2}\b/g) ?? [];
     for (const version of versions) {
       candidates.push({
-        entity: 'Model Context Protocol',
+        entity: ctx.canonicalName,
         version,
         sourceId: source.id,
         changelogUrl: source.url,
@@ -955,7 +1131,9 @@ function sourcesForNarrativeSentence(
   sentence: string,
   report: ResearchReport,
   sources: SourceEntry[],
+  projectContext?: ProjectContext,
 ): SourceEntry[] {
+  const ctx = projectContext ?? defaultCtx();
   const refRegex = /\[Source (\d+)\]/g;
   const matchedByCitation: SourceEntry[] = [];
   let match: RegExpExecArray | null;
@@ -970,6 +1148,7 @@ function sourcesForNarrativeSentence(
   }
   if (matchedByCitation.length > 0) return [...new Set(matchedByCitation)];
 
+  // Try to find sources that mention a package reference in the sentence
   const pkg: string | undefined = PACKAGE_RE.exec(sentence)?.[0]?.toLowerCase();
   if (pkg) {
     const packageSources: SourceEntry[] = sources.filter((source: SourceEntry) =>
@@ -978,13 +1157,18 @@ function sourcesForNarrativeSentence(
     if (packageSources.length > 0) return packageSources;
   }
 
-  const domainHints: string[] = ['vercel', 'ai sdk', 'npm', 'package', 'sdk'];
-  if (domainHints.some((hint: string) => sentence.toLowerCase().includes(hint))) {
-    const sdkSources: SourceEntry[] = sources.filter((source: SourceEntry) => {
-      const cls: AuthorityClass = source.authorityClass ?? classifySourceAuthority(source);
-      return cls === 'package_registry' || cls === 'vendor_sdk_docs';
-    });
-    if (sdkSources.length > 0) return sdkSources;
+  // If the sentence mentions any known package owner or ecosystem, prefer SDK/doc sources
+  const lower = sentence.toLowerCase();
+  for (const known of Object.values(ctx.knownPackages)) {
+    const hints = [known.owner, known.ecosystem].filter(Boolean) as string[];
+    if (hints.some((hint) => lower.includes(hint.toLowerCase()))) {
+      const sdkSources: SourceEntry[] = sources.filter((source: SourceEntry) => {
+        const cls: AuthorityClass = source.authorityClass ?? classifySourceAuthority(source, ctx);
+        return cls === 'package_registry' || cls === 'vendor_sdk_docs';
+      });
+      if (sdkSources.length > 0) return sdkSources;
+      break;
+    }
   }
 
   return sources;
@@ -994,11 +1178,13 @@ export function validateResearchReport(
   report: ResearchReport,
   sources: SourceEntry[],
   findings: Finding[],
+  projectContext?: ProjectContext,
 ): ReportAuditResult {
+  const ctx = projectContext ?? defaultCtx();
   const issues: ReportAuditIssue[] = [];
   const requiredRevisions: string[] = [];
   const ledger: ResearchClaim[] =
-    report.claimLedger ?? buildClaimLedger(findings, sources, report.query);
+    report.claimLedger ?? buildClaimLedger(findings, sources, report.query, ctx);
 
   for (const claim of ledger) {
     for (const risk of claim.risks) {
@@ -1070,7 +1256,7 @@ export function validateResearchReport(
   }
 
   for (const sentence of splitSentences(report.narrativeMarkdown)) {
-    if (MARKETING_RE.test(sentence)) {
+    if (ctx.marketingPhrases.some((p) => p.test(sentence))) {
       issues.push({
         type: 'marketing_language',
         severity: 'medium',
@@ -1079,16 +1265,26 @@ export function validateResearchReport(
         suggestedFix: 'Omit the phrase or attribute it explicitly as rhetoric from commentators.',
       });
     }
-    const sentenceSources: SourceEntry[] = sourcesForNarrativeSentence(sentence, report, sources);
-    const entity: ReleaseEntity = normalizeReleaseEntity(sentence, sentenceSources);
-    const requirement: ClaimAuthorityRequirement = authorityRequirementForClaim(sentence, entity);
-    const authorityClass: AuthorityClass = bestAuthority(sentenceSources);
+    const sentenceSources: SourceEntry[] = sourcesForNarrativeSentence(
+      sentence,
+      report,
+      sources,
+      ctx,
+    );
+    const entity: ReleaseEntity = normalizeReleaseEntity(sentence, sentenceSources, ctx);
+    const requirement: ClaimAuthorityRequirement = authorityRequirementForClaim(
+      sentence,
+      entity,
+      ctx,
+    );
+    const authorityClass: AuthorityClass = bestAuthority(sentenceSources, ctx);
     const risks: ClaimRisk[] = riskForClaim(
       sentence,
       entity,
       authorityClass,
       requirement,
       sentenceSources,
+      ctx,
     );
     for (const risk of risks.filter(
       (r: ClaimRisk) => r === 'entity_mismatch' || r === 'temporal_misattribution',
@@ -1116,7 +1312,7 @@ export function validateResearchReport(
   }
 
   const citedEvidence = report.evidenceSources.length;
-  const registry = report.sourceRegistry ?? buildSourceRegistry(sources, findings);
+  const registry = report.sourceRegistry ?? buildSourceRegistry(sources, findings, ctx);
   const usedSources = registry.filter((s) => s.usedInReport).length;
   if (report.sourceCount !== sources.length || citedEvidence !== usedSources) {
     issues.push({
@@ -1346,12 +1542,15 @@ export function applyReportValidation(
   report: ResearchReport,
   sources: SourceEntry[],
   findings: Finding[],
+  projectContext?: ProjectContext,
 ): ResearchReport {
-  const sourceRegistry: SourceRecord[] = buildSourceRegistry(sources, findings);
-  const claimLedger: ResearchClaim[] = buildClaimLedger(findings, sources, report.query);
+  const ctx = projectContext ?? defaultCtx();
+  const sourceRegistry: SourceRecord[] = buildSourceRegistry(sources, findings, ctx);
+  const claimLedger: ResearchClaim[] = buildClaimLedger(findings, sources, report.query, ctx);
   const latestOfficialVersion: LatestOfficialVersion | undefined = detectLatestOfficialVersion(
     sources,
     report.query,
+    ctx,
   );
   const sourceDiversity: { type: string; count: number }[] = [
     ...new Set(sourceRegistry.map((s: SourceRecord) => s.sourceType)),
@@ -1401,7 +1600,7 @@ export function applyReportValidation(
       }));
   }
 
-  const audit: ReportAuditResult = validateResearchReport(normalizedReport, sources, findings);
+  const audit: ReportAuditResult = validateResearchReport(normalizedReport, sources, findings, ctx);
   const blockedClaims = new Set<string>(
     audit.issues
       .filter(
@@ -1424,7 +1623,9 @@ export function applyReportValidation(
     ];
   }
   const finalAudit: ReportAuditResult =
-    blockedClaims.size > 0 ? validateResearchReport(normalizedReport, sources, findings) : audit;
+    blockedClaims.size > 0
+      ? validateResearchReport(normalizedReport, sources, findings, ctx)
+      : audit;
   const enforcedCaveats: string[] = finalAudit.issues
     .filter(
       (issue: ReportAuditIssue) =>
