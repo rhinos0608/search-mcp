@@ -4,6 +4,7 @@ import { resetConfig, loadConfig } from '../src/config.js';
 import { createServer } from '../src/server.js';
 import { semanticGitHubCode } from '../src/tools/semanticGitHubCode.js';
 import type { GitHubCorpusDocument } from '../src/utils/githubCorpus.js';
+import { buildMockResponse } from './helpers.js';
 
 const DOCS: GitHubCorpusDocument[] = [
    {
@@ -38,13 +39,6 @@ void fs.existsSync;
 
 async function fetchCorpus(): Promise<GitHubCorpusDocument[]> {
    return DOCS;
-}
-
-function buildMockResponse(body: unknown): Response {
-   return new Response(JSON.stringify(body), {
-      status: 200,
-      headers: { 'content-type': 'application/json' },
-   });
 }
 
 const originalFetch = globalThis.fetch;

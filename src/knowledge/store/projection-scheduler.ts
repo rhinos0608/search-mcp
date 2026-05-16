@@ -18,6 +18,7 @@ import { CURRENT_PROJECTION_VERSION } from '../extractor/versions/v1.js';
 // ────────────────────────────────────────────────────────────────────
 
 let _rebuildInProgress = false;
+let _rebuildQueued = false; // true when a trigger arrived while a rebuild was in progress
 let _lastRebuildTime = 0;
 
 /** Default thresholds — 500 events or 24 hours since last rebuild. */
@@ -39,8 +40,9 @@ export function triggerProjectionRebuildOnRunComplete(runId: string): void {
   if (_rebuildInProgress) {
     logger.info(
       { runId },
-      'kg: projection rebuild already in progress; skipping trigger for run',
+      'kg: projection rebuild already in progress; queueing follow-up trigger for run',
     );
+    _rebuildQueued = true;
     return;
   }
 
@@ -63,7 +65,8 @@ export function triggerProjectionRebuildOnRunComplete(runId: string): void {
  */
 export function maybeTriggerPeriodicRebuild(): void {
   if (_rebuildInProgress) {
-    logger.info('kg: periodic rebuild skipped — rebuild already in progress');
+    logger.info('kg: periodic rebuild trigger queued — rebuild already in progress');
+    _rebuildQueued = true;
     return;
   }
 
@@ -126,6 +129,13 @@ async function scheduleRebuild(runId: string): Promise<void> {
     );
   } finally {
     _rebuildInProgress = false;
+
+    // If another trigger arrived while we were rebuilding, run one more rebuild
+    if (_rebuildQueued) {
+      _rebuildQueued = false;
+      logger.info('kg: running queued follow-up projection rebuild');
+      void triggerRebuildInternal();
+    }
   }
 }
 
@@ -139,7 +149,6 @@ async function triggerRebuildInternal(): Promise<void> {
     const result = rebuildProjection({});
 
     _lastRebuildTime = Date.now();
-    _rebuildInProgress = false;
 
     logger.info(
       {
@@ -151,6 +160,14 @@ async function triggerRebuildInternal(): Promise<void> {
     );
   } catch (err) {
     logger.warn({ err }, 'kg: periodic projection rebuild failed');
+  } finally {
     _rebuildInProgress = false;
+
+    // If another trigger arrived while we were rebuilding, run one more rebuild
+    if (_rebuildQueued) {
+      _rebuildQueued = false;
+      logger.info('kg: running queued follow-up projection rebuild (from periodic)');
+      void triggerRebuildInternal();
+    }
   }
 }

@@ -97,7 +97,7 @@ search-mcp/
 │   │   ├── smartExtraction.ts    # quality-based escalation
 │   │   ├── transformersEmbedding.ts # Transformers.js in-process
 │   │   └── url.ts                # URL dedup
-│   └── tools/               # tool registration (25 tools: 9 standalone + 6 family + 10 KG)
+│   └── tools/               # tool registration (26 tools: 10 standalone + 6 family + 10 KG)
 │       ├── standalone/      # standalone tools
 │       │   ├── webSearch.ts
 │       │   ├── webRead.ts
@@ -106,6 +106,7 @@ search-mcp/
 │       │   ├── semanticCrawlListCorpora.ts
 │       │   ├── semanticJobs.ts
 │       │   ├── fetchFocus.ts
+│       │   ├── semanticCrawlInspectCorpus.ts
 │       │   └── healthCheck.ts
 │       ├── families/        # family tools (action-discriminated)
 │       │   ├── youtube.ts

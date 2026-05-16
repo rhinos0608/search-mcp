@@ -119,6 +119,16 @@ export class KnowledgeGraphHook {
     return this._sessionId;
   }
 
+  /**
+   * Override the auto-generated session ID with an external ID.
+   * Must be called before the first passive capture in HTTP mode
+   * so that pending extractions are written under the HTTP session UUID
+   * and flushSession() can find them.
+   */
+  setSessionId(id: string): void {
+    this._sessionId = id;
+  }
+
   // ── Deep research completion ──────────────────────────────────────
 
   async onDeepResearchComplete(

@@ -140,6 +140,22 @@ export function registerFamily(
         return errorResponse(new Error(`${family.name}: unknown action "${actionName}"`));
       }
 
+      // Strict per-action validation — run the selected action's own
+      // Zod schema so that missing required fields are caught before
+      // the handler runs.  The merged schema has all fields optional
+      // for client compatibility; this is the actual runtime gate.
+      const parsed = (action.schema as z.ZodObject<z.ZodRawShape>).safeParse(rawArgs);
+      if (!parsed.success) {
+        const issues = parsed.error.issues.map(
+          (i) => `${(i as { path: (string | number)[] }).path.join('.')}: ${(i as { message: string }).message}`,
+        );
+        return errorResponse(
+          new Error(
+            `${family.name}.${actionName} validation error: ${issues.join('; ')}`,
+          ),
+        );
+      }
+
       // Check config availability
       const actionIssue = action.configIssue?.(cfg) ?? null;
       if (actionIssue) {

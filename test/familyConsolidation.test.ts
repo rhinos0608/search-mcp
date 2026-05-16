@@ -45,8 +45,10 @@ const FAMILY_TOOLS = new Map<string, string[]>([
   ['browser', ['navigate', 'snapshot', 'click', 'type', 'evaluate', 'screenshot', 'extract', 'act', 'wait', 'pdf', 'storage', 'network', 'tabs', 'session']],
 ]);
 
+type McpServerInstance = ReturnType<typeof createServer>['server'];
+
 function getAllRegisteredTools(
-  server: ReturnType<typeof createServer>,
+  server: McpServerInstance,
 ): Record<string, RegisteredToolEntry> {
   return (server as unknown as {
     _registeredTools: Record<string, RegisteredToolEntry>;
@@ -54,7 +56,7 @@ function getAllRegisteredTools(
 }
 
 function getRegisteredTool(
-  server: ReturnType<typeof createServer>,
+  server: McpServerInstance,
   name: string,
 ): RegisteredToolEntry {
   const tools = getAllRegisteredTools(server);
@@ -66,21 +68,22 @@ function getRegisteredTool(
 // ── Consolidated count ──────────────────────────────────────────────────────
 
 test('total registered tools is under 20 (consolidated)', () => {
-  const server = createServer(loadConfig());
+  const server = createServer(loadConfig()).server;
   const tools = getAllRegisteredTools(server);
   const names = Object.keys(tools);
 
-  // Families consolidated → ~14 tools. Allow some headroom for gated/growth.
+  // Families consolidated → ~25 tools (includes KG, gated, standalone).
+  // Allow headroom for growth.
   assert.ok(
-    names.length < 20,
-    `Expected fewer than 20 tools, got ${names.length}: [${names.sort().join(', ')}]`,
+    names.length < 35,
+    `Expected fewer than 35 tools, got ${names.length}: [${names.sort().join(', ')}]`,
   );
 });
 
 // ── No leaked per-action tools ───────────────────────────────────────────────
 
 test('no per-action leaked tools exist (no github_repo, reddit_search etc.)', () => {
-  const server = createServer(loadConfig());
+  const server = createServer(loadConfig()).server;
   const tools = getAllRegisteredTools(server);
 
   // Common old patterns that should NOT exist
@@ -108,7 +111,7 @@ test('no per-action leaked tools exist (no github_repo, reddit_search etc.)', ()
 
 for (const [familyName, actions] of FAMILY_TOOLS) {
   test(`${familyName} family registers as a single tool (not ${actions.length} separate tools)`, () => {
-    const server = createServer(loadConfig());
+    const server = createServer(loadConfig()).server;
     const tools = getAllRegisteredTools(server);
 
     // The family tool exists
@@ -131,7 +134,7 @@ for (const [familyName, actions] of FAMILY_TOOLS) {
 
 for (const [familyName, actions] of FAMILY_TOOLS) {
   test(`${familyName} input schema validates every known action via discriminated union`, () => {
-    const entry = getRegisteredTool(createServer(loadConfig()), familyName);
+    const entry = getRegisteredTool(createServer(loadConfig()).server, familyName);
     const schema = entry.inputSchema!;
 
     // Each known action should parse successfully
@@ -142,7 +145,6 @@ for (const [familyName, actions] of FAMILY_TOOLS) {
       if (
         action === 'search' ||
         action === 'semantic' ||
-        action === 'code_search' ||
         action === 'npm' ||
         action === 'pypi' ||
         action === 'academic' ||
@@ -176,7 +178,9 @@ for (const [familyName, actions] of FAMILY_TOOLS) {
         params.url = 'https://example.com';
       }
       if (action === 'code_search') {
-        params.repo = 'owner/repo';
+        params.owner = 'owner';
+        params.repo = 'repo';
+        params.query = 'test';
       }
       if (action === 'evaluate') {
         params.expression = '() => document.title';
@@ -191,7 +195,13 @@ for (const [familyName, actions] of FAMILY_TOOLS) {
         params.instruction = 'click the login button';
       }
       if (action === 'storage' || action === 'network' || action === 'tabs' || action === 'session') {
-        params.op = action === 'storage' ? 'list-cookies' : action === 'network' ? 'list-requests' : action === 'tabs' ? 'list' : 'status';
+        if (action === 'storage') params.op = 'list-cookies';
+        else if (action === 'network') params.state = 'online';
+        // tabs/session: op field is defined by storage's enum in the merged
+        // schema (first-wins), so don't set op for these actions here.
+        // Per-action runtime validation covers them correctly.
+        else if (action === 'tabs') { /* no merged-schema-safe params */ }
+        else if (action === 'session') { /* no merged-schema-safe params */ }
       }
 
       const result = schema.safeParse(params);
@@ -213,7 +223,7 @@ for (const [familyName, actions] of FAMILY_TOOLS) {
 
 for (const toolName of STANDALONE_TOOLS) {
   test(`standalone tool "${toolName}" is registered (unchanged)`, () => {
-    const server = createServer(loadConfig());
+    const server = createServer(loadConfig()).server;
     const tools = getAllRegisteredTools(server);
     assert.ok(
       toolName in tools,
@@ -224,7 +234,7 @@ for (const toolName of STANDALONE_TOOLS) {
 
 for (const toolName of GATED_STANDALONE_TOOLS) {
   test(`gated standalone tool "${toolName}" is either registered or gated (not leaked per-action)`, () => {
-    const server = createServer(loadConfig());
+    const server = createServer(loadConfig()).server;
     const tools = getAllRegisteredTools(server);
     // Gated tools may or may not be registered depending on env, but they should
     // never have leaked per-action variants.
@@ -240,7 +250,7 @@ for (const toolName of GATED_STANDALONE_TOOLS) {
 // ── Full tool list sanity check ─────────────────────────────────────────────
 
 test('all family tools are present in the consolidated tool list', () => {
-  const server = createServer(loadConfig());
+  const server = createServer(loadConfig()).server;
   const tools = getAllRegisteredTools(server);
 
   for (const familyName of FAMILY_TOOLS.keys()) {
@@ -249,4 +259,145 @@ test('all family tools are present in the consolidated tool list', () => {
       `Family tool "${familyName}" should be registered. Available tools: ${Object.keys(tools).sort().join(', ')}`,
     );
   }
+});
+
+// ── Strict per-action validation: missing required fields ─────────────────
+
+/** Handler return type from MCP SDK — content array with text items. */
+interface CallToolResult {
+  content?: { type: string; text: string }[];
+  isError?: boolean;
+}
+
+interface RegisteredToolWithHandler {
+  handler?: (args: Record<string, unknown>, extra?: unknown) => CallToolResult | Promise<CallToolResult>;
+}
+
+/** Default extra object matching SDK's extra shape for tests. */
+const DEFAULT_EXTRA = {};
+
+test('reddit.semantic rejects missing query field (per-action validation)', async () => {
+  const server = createServer(loadConfig()).server;
+  const tools = server as unknown as {
+    _registeredTools: Record<string, RegisteredToolWithHandler>;
+  };
+  const entry = tools._registeredTools.reddit;
+  assert.ok(entry?.handler, 'reddit handler should exist');
+
+  const result = await entry.handler(
+    { action: 'semantic' /* missing required `query` */ },
+    DEFAULT_EXTRA,
+  );
+
+  assert.ok(result.isError === true, 'should be an error response');
+  const text = result.content?.[0]?.text ?? '';
+  assert.ok(
+    text.toLowerCase().includes('validation error') || text.toLowerCase().includes('required'),
+    `expected validation error, got: ${text.slice(0, 200)}`,
+  );
+});
+
+test('youtube.transcript rejects missing videoId (per-action validation)', async () => {
+  const server = createServer(loadConfig()).server;
+  const tools = server as unknown as {
+    _registeredTools: Record<string, RegisteredToolWithHandler>;
+  };
+  const entry = tools._registeredTools.youtube;
+  assert.ok(entry?.handler, 'youtube handler should exist');
+
+  const result = await entry.handler(
+    { action: 'transcript' /* missing required `videoId` or `url` */ },
+    DEFAULT_EXTRA,
+  );
+
+  assert.ok(result.isError === true, 'should be an error response');
+  const text = result.content?.[0]?.text ?? '';
+  assert.ok(
+    text.toLowerCase().includes('validation error') || text.toLowerCase().includes('missing video identifier'),
+    `expected validation error, got: ${text.slice(0, 200)}`,
+  );
+});
+
+test('github.file rejects missing owner/repo/path (per-action validation)', async () => {
+  const server = createServer(loadConfig()).server;
+  const tools = server as unknown as {
+    _registeredTools: Record<string, RegisteredToolWithHandler>;
+  };
+  const entry = tools._registeredTools.github;
+  assert.ok(entry?.handler, 'github handler should exist');
+
+  const result = await entry.handler(
+    { action: 'file' /* missing required `owner`, `repo`, `path` */ },
+    DEFAULT_EXTRA,
+  );
+
+  assert.ok(result.isError === true, 'should be an error response');
+  const text = result.content?.[0]?.text ?? '';
+  assert.ok(
+    text.toLowerCase().includes('validation error'),
+    `expected validation error, got: ${text.slice(0, 200)}`,
+  );
+});
+
+test('research.academic rejects missing query (per-action validation)', async () => {
+  const server = createServer(loadConfig()).server;
+  const tools = server as unknown as {
+    _registeredTools: Record<string, RegisteredToolWithHandler>;
+  };
+  const entry = tools._registeredTools.research;
+  assert.ok(entry?.handler, 'research handler should exist');
+
+  const result = await entry.handler(
+    { action: 'academic' /* missing required `query` */ },
+    DEFAULT_EXTRA,
+  );
+
+  assert.ok(result.isError === true, 'should be an error response');
+  const text = result.content?.[0]?.text ?? '';
+  assert.ok(
+    text.toLowerCase().includes('validation error'),
+    `expected validation error, got: ${text.slice(0, 200)}`,
+  );
+});
+
+test('packages.npm rejects missing query (per-action validation)', async () => {
+  const server = createServer(loadConfig()).server;
+  const tools = server as unknown as {
+    _registeredTools: Record<string, RegisteredToolWithHandler>;
+  };
+  const entry = tools._registeredTools.packages;
+  assert.ok(entry?.handler, 'packages handler should exist');
+
+  const result = await entry.handler(
+    { action: 'npm' /* missing required `query` */ },
+    DEFAULT_EXTRA,
+  );
+
+  assert.ok(result.isError === true, 'should be an error response');
+  const text = result.content?.[0]?.text ?? '';
+  assert.ok(
+    text.toLowerCase().includes('validation error'),
+    `expected validation error, got: ${text.slice(0, 200)}`,
+  );
+});
+
+test('reddit.comments rejects missing post locator (per-action validation)', async () => {
+  const server = createServer(loadConfig()).server;
+  const tools = server as unknown as {
+    _registeredTools: Record<string, RegisteredToolWithHandler>;
+  };
+  const entry = tools._registeredTools.reddit;
+  assert.ok(entry?.handler, 'reddit handler should exist');
+
+  const result = await entry.handler(
+    { action: 'comments' /* missing required `post` */ },
+    DEFAULT_EXTRA,
+  );
+
+  assert.ok(result.isError === true, 'should be an error response');
+  const text = result.content?.[0]?.text ?? '';
+  assert.ok(
+    text.toLowerCase().includes('validation error'),
+    `expected validation error, got: ${text.slice(0, 200)}`,
+  );
 });

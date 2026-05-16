@@ -45,6 +45,11 @@ export class HttpTransportManager {
     });
     // Each HTTP session gets its own McpServer instance
     const { server, kgHook } = createServer(this.runtime.getConfig());
+    // Bind hook's internal session ID to the HTTP session UUID so
+    // passive captures and flushSession() use the same ID.
+    if (kgHook) {
+      kgHook.setSessionId(newId);
+    }
     await server.connect(transport as unknown as Transport);
     const now = Date.now();
     this.sessions.set(newId, { transport, kgHook, createdAt: now, lastUsedAt: now });

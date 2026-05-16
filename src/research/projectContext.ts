@@ -9,7 +9,7 @@
  * Custom profiles can be passed through the research config.
  */
 
-import type { AuthorityClass } from './types.js';
+import type { AuthorityClass, ReleaseEntityType } from './types.js';
 
 // ── Domain & Path Rules ─────────────────────────────────────────────────────
 
@@ -43,8 +43,6 @@ export interface RepoAuthorityRule {
   /** Authority class for matching repos. */
   authority: AuthorityClass;
 }
-
-import type { ReleaseEntityType } from './types.js';
 
 /** A known package (npm, PyPI, crates.io, etc.) with ownership metadata. */
 export interface KnownPackage {
@@ -155,10 +153,6 @@ export function domainMatches(pattern: string, domain: string): boolean {
   if (pattern === domain) return true;
   if (pattern.includes('*')) {
     return globToRegex(pattern).test(domain);
-  }
-  // Support suffix matching: "*.microsoft.com" patterns
-  if (pattern.startsWith('*.')) {
-    return domain.endsWith(pattern.slice(1));
   }
   // Support "endsWith" for wikipedia and reddit patterns
   // Handled implicitly by the rules: domain === 'wikipedia.org' || domain.endsWith('.wikipedia.org')

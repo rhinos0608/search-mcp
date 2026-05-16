@@ -7,6 +7,7 @@
  */
 
 import { readFileSync } from 'node:fs';
+import { logger } from './logger.js';
 
 let cached: string | null = null;
 
@@ -21,7 +22,8 @@ export function getVersion(): string {
       readFileSync(new URL('../package.json', import.meta.url), 'utf-8'),
     ) as { version?: string };
     cached = typeof pkg.version === 'string' && pkg.version.length > 0 ? pkg.version : '0.0.0';
-  } catch {
+  } catch (err) {
+    logger.error(err, 'Failed to read package.json for version');
     cached = '0.0.0';
   }
 

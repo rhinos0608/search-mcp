@@ -135,7 +135,7 @@ export class KnowledgeGraphExtractor {
     const claimEvents = this.buildClaimExtractedEvents(result, runId, input);
 
     // ── Step 5: Canonicalize ──
-    const canonicalization = await canonicalize(result.entities, []);
+    const canonicalization = await canonicalize(result.entities);
 
     // ── Build local_id → canonical node ID map ──
     const localToCanonical = new Map<string, string>();

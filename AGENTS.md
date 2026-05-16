@@ -93,6 +93,7 @@ npm run config:decrypt   # config.enc -> config.json
   - `npm` — search npm registry
   - `pypi` — search Python Package Index
 
+
 ### Browser
 - `browser` (family tool with `action` discriminator):
   - `navigate` — navigate to a URL
@@ -114,6 +115,7 @@ npm run config:decrypt   # config.enc -> config.json
   - `diff` — DOM change detection
   - `session` / `tabs` / `storage` / `network` / `pdf` — lifecycle management
   - Backends: Playwright + CDP (stealth mode), optional CloakBrowser
+
 
 ### Knowledge Graph (opt-in via `KNOWLEDGE_GRAPH_ENABLED`)
 - `graph_ingest` — text or URL → entities and relationships via LLM pipeline

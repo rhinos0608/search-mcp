@@ -157,7 +157,7 @@ export async function semanticGitHubCode(
     candidateCount: docs.length,
     selectedPaths: scopedDocs.map((doc) => doc.path),
   });
-  const configWarning = getCodeEmbeddingFallbackWarning(loadConfig());
+  const configWarning = getCodeEmbeddingFallbackWarning(cfg);
   const warnings = [...corpusWarnings, ...(configWarning !== undefined ? [configWarning] : [])];
 
   if (scopedDocs.length === 0) {
@@ -219,11 +219,15 @@ export async function semanticGitHubCode(
     metadata: { repo: input.repo },
   });
 
+  const queryEmbeddingItem = queryEmbedding.embeddings?.[0];
+  if (!queryEmbeddingItem) {
+    throw new Error('queryEmbedding.embeddings is empty');
+  }
   const response = retrieveCorpus(corpus, {
     query: input.query,
     topK: chunks.length,
     profile: profile.profile,
-    queryEmbedding: queryEmbedding.embeddings[0],
+    queryEmbedding: queryEmbeddingItem,
   });
   const minScore = input.minScore;
   const filteredResults =

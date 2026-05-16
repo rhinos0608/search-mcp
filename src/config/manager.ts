@@ -81,6 +81,89 @@ function applyFieldPatch(existing: unknown, patch: FieldPatch): unknown {
   }
 }
 
+// ── Config value validation ────────────────────────────────────────────
+
+const VALID_SEARCH_BACKENDS = new Set([
+  'brave', 'searxng', 'exa', 'duckduckgo', 'ollama-search', 'tavily',
+]);
+
+const VALID_EMBEDDING_PROVIDERS = new Set([
+  'sidecar', 'ollama', 'transformers', 'openai',
+]);
+
+const VALID_RAGA_PARSERS = new Set([
+  'auto', 'docling', 'paddleocr', 'mineru',
+]);
+
+/**
+ * Validate critical config values after a dashboard patch.
+ * Returns null if valid, or an error message string.
+ *
+ * This is a lightweight gate — it doesn't check every field exhaustively.
+ * The goal is to catch obviously-wrong values before they're persisted
+ * (e.g. a bad search backend name set via the dashboard).
+ */
+function validateConfigValues(cfg: Record<string, unknown>): string | null {
+  // searchBackend MUST be a recognized value
+  if (typeof cfg.searchBackend === 'string') {
+    if (!VALID_SEARCH_BACKENDS.has(cfg.searchBackend)) {
+      return `searchBackend must be one of: ${[...VALID_SEARCH_BACKENDS].join(', ')}`;
+    }
+  }
+
+  // embeddingSidecar.provider
+  const esc = cfg.embeddingSidecar as Record<string, unknown> | undefined;
+  if (esc && typeof esc.provider === 'string') {
+    if (!VALID_EMBEDDING_PROVIDERS.has(esc.provider)) {
+      return `embeddingSidecar.provider must be one of: ${[...VALID_EMBEDDING_PROVIDERS].join(', ')}`;
+    }
+  }
+
+  // raga.defaultParser
+  const raga = cfg.raga as Record<string, unknown> | undefined;
+  if (raga && typeof raga.defaultParser === 'string') {
+    if (!VALID_RAGA_PARSERS.has(raga.defaultParser)) {
+      return `raga.defaultParser must be one of: ${[...VALID_RAGA_PARSERS].join(', ')}`;
+    }
+  }
+
+  // Boolean fields must actually be booleans (not strings like "true")
+  const booleanFields = [
+    'scrubContent',
+    'apiKeyClaimed',
+  ];
+  for (const field of booleanFields) {
+    const val = cfg[field];
+    if (val !== undefined && val !== null && typeof val !== 'boolean') {
+      return `${field} must be a boolean, got ${typeof val}`;
+    }
+  }
+
+  // URL-ish fields: empty string is fine (not configured), but non-empty
+  // strings should not be obviously garbage
+  const urlFields: [string, string | undefined][] = [];
+  if (esc) {
+    urlFields.push(['embeddingSidecar.baseUrl', esc.baseUrl as string | undefined]);
+  }
+  const crawl4ai = cfg.crawl4ai as Record<string, unknown> | undefined;
+  if (crawl4ai) {
+    urlFields.push(['crawl4ai.baseUrl', crawl4ai.baseUrl as string | undefined]);
+  }
+  const searxng = cfg.searxng as Record<string, unknown> | undefined;
+  if (searxng) {
+    urlFields.push(['searxng.baseUrl', searxng.baseUrl as string | undefined]);
+  }
+  for (const [name, value] of urlFields) {
+    if (typeof value === 'string' && value.length > 0) {
+      if (!value.startsWith('http://') && !value.startsWith('https://')) {
+        return `${name} must start with http:// or https://`;
+      }
+    }
+  }
+
+  return null;
+}
+
 export interface ConfigManagerOptions {
   configDir?: string;  // defaults to process.cwd()
 }
@@ -180,6 +263,14 @@ export class ConfigManager {
     }
 
     const updated = cfg as unknown as SearchConfig;
+
+    // Validate the patched config before persisting.
+    // This catches invalid values that MUTABLE_CONFIG_KEYS alone doesn't guard.
+    const validationError = validateConfigValues(updated as unknown as Record<string, unknown>);
+    if (validationError !== null) {
+      throw new Error(`Invalid config: ${validationError}`);
+    }
+
     this.persistEncryptedConfig(updated);
   }
 

@@ -246,25 +246,31 @@ async function rerankByContent(
   const headByteLimit = Math.min(opts.maxFileBytes ?? 50_000, 4_000);
   const sampleEntries = entries.slice(0, sampleLimit);
   const contentScores = new Map<string, number>();
-
-  for (const entry of sampleEntries) {
-    try {
-      const result = await getFile(
-        opts.owner,
-        opts.repo,
-        entry.path,
-        opts.branch,
-        true,
-        undefined,
-        undefined,
-        0,
-        headByteLimit,
-      );
-      if (result.isBinary) continue;
-      contentScores.set(entry.path, scoreSnippetForQuery(result.content, terms));
-    } catch (err) {
-      logger.debug({ err, path: entry.path }, 'fetchGitHubCorpus: content prefilter fetch failed');
-    }
+  // Parallel fetch with concurrency limit of 4
+  const results = await Promise.all(
+    sampleEntries.map(async (entry) => {
+      try {
+        const result = await getFile(
+          opts.owner,
+          opts.repo,
+          entry.path,
+          opts.branch,
+          true,
+          undefined,
+          undefined,
+          0,
+          headByteLimit,
+        );
+        if (result.isBinary) return { path: entry.path, score: 0 };
+        return { path: entry.path, score: scoreSnippetForQuery(result.content, terms) };
+      } catch (err) {
+        logger.debug({ err, path: entry.path }, 'fetchGitHubCorpus: content prefilter fetch failed');
+        return { path: entry.path, score: 0 };
+      }
+    }),
+  );
+  for (const result of results) {
+    contentScores.set(result.path, result.score);
   }
 
   return [...entries].sort((a, b) => {

@@ -5,13 +5,7 @@ import {
   filterByPathPrefix,
 } from '../src/tools/semanticCrawl.js';
 import type { CorpusChunk, CrawlPageResult, SemanticCrawlWarning } from '../src/types.js';
-
-function buildMockResponse(body: unknown): Response {
-  return new Response(JSON.stringify(body), {
-    status: 200,
-    headers: { 'content-type': 'application/json' },
-  });
-}
+import { buildMockResponse } from './helpers.js';
 
 function makePage(url: string): CrawlPageResult {
   return {

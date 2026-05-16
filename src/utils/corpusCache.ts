@@ -54,7 +54,7 @@ export interface CorpusSummary {
   dimensions: number;
   totalBytes: number;
   urlCount: number;
-  topUrls: Array<{ url: string; chunkCount: number }>;
+  topUrls: { url: string; chunkCount: number }[];
   recentQueries: string[];
 }
 
@@ -67,13 +67,13 @@ export interface CorpusInspection {
   model: string;
   dimensions: number;
   totalBytes: number;
-  urls: Array<{ url: string; chunkCount: number }>;
-  recentQueries: Array<{
+  urls: { url: string; chunkCount: number }[];
+  recentQueries: {
     query: string;
     topK: number;
     resultsReturned: number;
     queriedAt: number;
-  }>;
+  }[];
 }
 
 // ────────────────────────────────────────────────────────────────────
@@ -648,7 +648,7 @@ function findInSourceIndex(db: BetterSqliteDatabase, sourceKey: string): SourceI
   }));
 }
 
-function summarizeChunkUrls(chunks: CorpusChunk[]): Array<{ url: string; chunkCount: number }> {
+function summarizeChunkUrls(chunks: CorpusChunk[]): { url: string; chunkCount: number }[] {
   const counts = new Map<string, number>();
   for (const chunk of chunks) {
     counts.set(chunk.url, (counts.get(chunk.url) ?? 0) + 1);
@@ -662,7 +662,12 @@ function readRecentQueries(
   db: BetterSqliteDatabase,
   corpusId: string,
   limit: number,
-): Array<{ query: string; topK: number; resultsReturned: number; queriedAt: number }> {
+): {
+  query: string;
+  topK: number;
+  resultsReturned: number;
+  queriedAt: number;
+}[] {
   const rows = db
     .prepare(
       `

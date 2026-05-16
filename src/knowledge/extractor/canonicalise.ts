@@ -202,15 +202,22 @@ async function llmJudgesSameEntity(
  * For each new entity:
  * 1. Compute an embedding vector
  * 2. Search for similar existing entities by type-aware threshold
+ *    (queries the kg_embeddings table directly — no pre-loaded node list needed)
  * 3. Use LLM judgment (or fallback) to decide if same entity
  * 4. Classify as new or merge
  *
  * When the embedding provider is unavailable, all entities are treated
  * as new (no canonicalization).
+ *
+ * ## ID stability
+ * Node IDs are stable across projection rebuilds.  The local_id assigned
+ * at extraction time is persisted as the event's entityId in NODE_ADDED
+ * events, and the projection builder uses that entityId as the node's
+ * primary key.  Embeddings are stored under the same local_id, so the
+ * embedding → node mapping survives rebuilds.
  */
 export async function canonicalize(
   newEntities: NormalizedEntity[],
-  _existingNodes: KgNode[],
 ): Promise<CanonicalizationResult> {
   const newNodes: NormalizedEntity[] = [];
   const merges: CanonicalizationResult['merges'] = [];

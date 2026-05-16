@@ -138,9 +138,14 @@ export function classifySourceAuthority(
       const repo = pathParts[1] ?? '';
       for (const rule of ctx.repoAuthorityRules) {
         if (rule.owner.toLowerCase() === owner.toLowerCase()) {
-          const repoGlob = rule.repoPattern.replace(/\*/g, '.*');
-          if (new RegExp(`^${repoGlob}$`, 'i').test(repo)) {
-            return rule.authority;
+          const repoPattern = rule.repoPattern;
+          try {
+            const escapedPattern = repoPattern.replace(/[.*+?^${}()|[]\\]/g, '\\$&').replace(/\\\*/g, '[^/]*');
+            if (new RegExp(`^${escapedPattern}$`, 'i').test(repo)) {
+              return rule.authority;
+            }
+          } catch {
+            // Invalid pattern, skip this rule
           }
         }
       }

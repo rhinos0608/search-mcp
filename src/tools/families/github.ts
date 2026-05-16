@@ -405,7 +405,7 @@ const githubFamily: FamilyDefinition = {
           maxFiles: number;
           maxFileBytes: number;
           fileFilter?: string[];
-          preFilterByContent?: boolean;
+          preFilterByContent: boolean;
           topK: number;
           profile: string;
           minScore?: number;
@@ -421,7 +421,7 @@ const githubFamily: FamilyDefinition = {
           maxFiles,
           maxFileBytes,
           ...(fileFilter !== undefined ? { fileFilter } : {}),
-          ...(preFilterByContent !== undefined ? { preFilterByContent } : {}),
+          preFilterByContent,
           topK,
           ...(minScore !== undefined ? { minScore } : {}),
           profile: profile as

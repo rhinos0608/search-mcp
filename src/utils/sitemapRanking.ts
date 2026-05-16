@@ -29,7 +29,7 @@ const STOP_WORDS = new Set([
   'with',
 ]);
 
-const LOCALE_RE = /^[a-z]{2}(?:-[a-z]{2})?$/iu;
+const LOCALE_RE = /^[a-z]{2}(?:-[a-z]{2})?$/u;
 
 function tokenize(value: string): string[] {
   return value
@@ -57,7 +57,11 @@ function extractLocaleFromUrl(parsed: URL): string | undefined {
   }
 
   const hostPrefix = parsed.hostname.split('.')[0];
-  return normalizeLocale(hostPrefix);
+  // Skip known non-locale subdomain tokens
+  if (hostPrefix && ['www', 'api', 'cdn', 'static', 'assets'].includes(hostPrefix)) {
+    return undefined;
+  }
+  return hostPrefix ? normalizeLocale(hostPrefix) : undefined;
 }
 
 function stripLocaleFromUrl(parsed: URL): string {
@@ -70,7 +74,7 @@ function stripLocaleFromUrl(parsed: URL): string {
   for (const key of ['lang', 'locale', 'hl']) {
     next.searchParams.delete(key);
   }
-  return next.origin.toLowerCase() + next.pathname.replace(/\/+$/u, '') + next.search;
+  return next.origin.toLowerCase() + next.pathname.replace(/\/+$/u, '') + next.search + next.hash;
 }
 
 function localePreferenceScore(locale: string | undefined, preferredLocale: string | undefined): number {
