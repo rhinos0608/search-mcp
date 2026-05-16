@@ -4,13 +4,13 @@ import { webCrawl, type WebCrawlOptions } from './webCrawl.js';
 import { webSearch } from './webSearch.js';
 import { chunkMarkdown } from '../chunking.js';
 import { parseSitemap, isSitemapIndex } from '../utils/sitemap.js';
-import { rankSitemapUrls } from '../utils/sitemapRanking.js';
+import { collapseSitemapLocaleDuplicates, rankSitemapUrls } from '../utils/sitemapRanking.js';
 import { dedupPages } from '../utils/url.js';
 import { isCookieBannerPage } from '../utils/cookieBanner.js';
 import { rrfMerge } from '../utils/fusion.js';
 import { applySoftLexicalConstraint } from '../utils/lexicalConstraint.js';
 import { buildBm25Index, type Bm25Index } from '../utils/bm25.js';
-import { getOrBuildCorpus, loadCorpusById } from '../utils/corpusCache.js';
+import { getOrBuildCorpus, loadCorpusById, logCorpusQuery } from '../utils/corpusCache.js';
 import { embedTexts, embedTextsBatched } from '../rag/embedding.js';
 import { prepareCorpus, retrieveCorpus } from '../rag/pipeline.js';
 import { enrichChunksBatched } from '../rag/contextualEmbedding.js';
@@ -21,6 +21,7 @@ import { scrubContent } from '../utils/contentScrubber.js';
 import { recordOutcome } from '../utils/extractionStats.js';
 import { documentFallbackUrls, isDocumentUrl } from '../utils/documentUtils.js';
 import { extractWithRAGA } from '../utils/ragAnythingClient.js';
+import { getUserAgent } from '../version.js';
 import type { ContentElement, StructuredContent } from '../types.js';
 import type {
   SemanticCrawlResult,
@@ -29,6 +30,7 @@ import type {
   SemanticCrawlSource,
   CrawlPageResult,
   SemanticCrawlWarning,
+  SemanticCrawlPageMetadata,
 } from '../types.js';
 import type { Crawl4aiConfig, DomainTrustConfig, LlmConfig, RAGAConfig } from '../config.js';
 import { loadConfig } from '../config.js';
@@ -109,6 +111,7 @@ interface EmbedAndRankOptions {
   query: string;
   topK: number;
   useReranker?: boolean;
+  minScore?: number;
   embeddingBaseUrl: string;
   embeddingApiToken: string;
   embeddingDimensions: number;
@@ -138,6 +141,7 @@ interface RetrieveSemanticChunksOptions {
   query: string;
   topK: number;
   useReranker?: boolean;
+  minScore?: number;
   embeddingBaseUrl: string;
   embeddingApiToken: string;
   embeddingDimensions: number;
@@ -262,18 +266,33 @@ export async function retrieveSemanticChunks(
     },
   }));
 
+  let scoreFiltered = scoredChunks;
+  const minScore = opts.minScore;
+  if (minScore !== undefined) {
+    scoreFiltered = scoredChunks.filter((chunk) => chunk.scores.biEncoder.raw >= minScore);
+    if (scoreFiltered.length < scoredChunks.length) {
+      opts.structuredWarnings?.push({
+        code: 'SEMANTIC_CRAWL_MIN_SCORE_FILTER',
+        message:
+          `Filtered ${String(scoredChunks.length - scoreFiltered.length)} chunk(s) below minScore=${String(minScore)}.`,
+        minScore,
+        removedCount: scoredChunks.length - scoreFiltered.length,
+      });
+    }
+  }
+
   // Semantic coherence filter (removes off-topic borderline chunks)
   const fusedPaired: ChunkWithEmbedding[] = [];
-  for (const chunk of scoredChunks) {
+  for (const chunk of scoreFiltered) {
     const emb = embeddingByIndex.get(chunk.chunkIndex);
     if (emb !== undefined) fusedPaired.push({ chunk, embedding: emb });
   }
 
-  const beforeCoherence = scoredChunks.length;
-  const coherent = fusedPaired.length > 0 ? filterBySemanticCoherence(fusedPaired) : scoredChunks;
-  if (coherent.length < scoredChunks.length) {
+  const beforeCoherence = scoreFiltered.length;
+  const coherent = fusedPaired.length > 0 ? filterBySemanticCoherence(fusedPaired) : scoreFiltered;
+  if (coherent.length < scoreFiltered.length) {
     logger.info(
-      { before: scoredChunks.length, after: coherent.length },
+      { before: scoreFiltered.length, after: coherent.length },
       'Semantic coherence filter removed off-topic chunks',
     );
   }
@@ -289,7 +308,7 @@ export async function retrieveSemanticChunks(
       'Soft lexical constraint filtered chunks',
     );
   }
-  const afterLexical = lexicalResult.filtered;
+  const afterLexical = lexicalResult.filtered.length >= opts.topK ? lexicalResult.filtered : coherent;
 
   // Optional cross-encoder reranking
   let topChunks: SemanticCrawlChunk[];
@@ -523,6 +542,21 @@ export async function embedAndRank(
     });
   }
 
+  let scoreFiltered = scoredChunks;
+  const minScore = opts.minScore;
+  if (minScore !== undefined) {
+    scoreFiltered = scoredChunks.filter((chunk) => chunk.scores.biEncoder.raw >= minScore);
+    if (scoreFiltered.length < scoredChunks.length) {
+      opts.structuredWarnings?.push({
+        code: 'SEMANTIC_CRAWL_MIN_SCORE_FILTER',
+        message:
+          `Filtered ${String(scoredChunks.length - scoreFiltered.length)} chunk(s) below minScore=${String(minScore)}.`,
+        minScore,
+        removedCount: scoredChunks.length - scoreFiltered.length,
+      });
+    }
+  }
+
   // 8. Semantic coherence filter (borderline off-topic chunks)
   const chunkToEmbedding = new Map<string, number[]>();
   for (const p of paired) {
@@ -530,15 +564,15 @@ export async function embedAndRank(
   }
 
   const fusedPaired: ChunkWithEmbedding[] = [];
-  for (const chunk of scoredChunks) {
+  for (const chunk of scoreFiltered) {
     const emb = chunkToEmbedding.get(chunk.url + '|' + chunk.text);
     if (emb) {
       fusedPaired.push({ chunk, embedding: emb });
     }
   }
 
-  const beforeCoherence = scoredChunks.length;
-  const coherent = filterBySemanticCoherence(fusedPaired);
+  const beforeCoherence = scoreFiltered.length;
+  const coherent = fusedPaired.length > 0 ? filterBySemanticCoherence(fusedPaired) : scoreFiltered;
   if (coherent.length < fusedPaired.length) {
     logger.info(
       { before: fusedPaired.length, after: coherent.length },
@@ -557,7 +591,7 @@ export async function embedAndRank(
       'Soft lexical constraint filtered chunks',
     );
   }
-  const afterLexical = lexicalResult.filtered;
+  const afterLexical = lexicalResult.filtered.length >= opts.topK ? lexicalResult.filtered : coherent;
 
   // 9. Optional cross-encoder re-ranking (opt-in, default false)
   let topChunks: SemanticCrawlChunk[];
@@ -794,17 +828,25 @@ export function filterByPathPrefix(
   pages: CrawlPageResult[],
   seedUrl: string,
   allowPathDrift = false,
-): CrawlPageResult[] {
-  if (allowPathDrift) return pages;
+): {
+  kept: CrawlPageResult[];
+  droppedCount: number;
+  malformedCount: number;
+  droppedUrls: string[];
+} {
+  if (allowPathDrift) {
+    return { kept: pages, droppedCount: 0, malformedCount: 0, droppedUrls: [] };
+  }
   let seedPath: string;
   try {
     seedPath = new URL(seedUrl).pathname;
   } catch {
     logger.warn({ url: seedUrl }, 'semantic_crawl: invalid seed URL; skipping path filter');
-    return pages;
+    return { kept: pages, droppedCount: 0, malformedCount: 0, droppedUrls: [] };
   }
   const prefix = seedPath.endsWith('/') ? seedPath : `${seedPath}/`;
   const kept: CrawlPageResult[] = [];
+  const droppedUrls: string[] = [];
   let dropped = 0;
   let malformed = 0;
   for (const page of pages) {
@@ -814,12 +856,14 @@ export function filterByPathPrefix(
     } catch {
       logger.warn({ url: page.url }, 'semantic_crawl: dropping page with malformed URL');
       malformed++;
+      droppedUrls.push(page.url);
       continue;
     }
     if (pagePath === seedPath || pagePath.startsWith(prefix)) {
       kept.push(page);
     } else {
       dropped++;
+      droppedUrls.push(page.url);
     }
   }
   if (dropped > 0 || malformed > 0) {
@@ -828,7 +872,7 @@ export function filterByPathPrefix(
       'semantic_crawl: dropped pages outside seed path or with malformed URLs',
     );
   }
-  return kept;
+  return { kept, droppedCount: dropped, malformedCount: malformed, droppedUrls };
 }
 
 export type SemanticCrawlSeedsOptions = Pick<
@@ -921,11 +965,12 @@ export async function crawlSeeds(
 
   // ── Concurrent crawl with pre-divided budget ────────────────────────────
   const numSeeds = seedUrls.length;
-  const perSeedPages = divideBudget(resolvedMaxPages, numSeeds);
+  const targetPageMode = opts.sourceType === 'search' || opts.sourceType === 'sitemap';
+  const perSeedPages = targetPageMode ? 1 : divideBudget(resolvedMaxPages, numSeeds);
   const perSeedBytes =
-    opts.maxBytes !== undefined ? divideBudget(opts.maxBytes, numSeeds) : undefined;
+    opts.maxBytes !== undefined && !targetPageMode ? divideBudget(opts.maxBytes, numSeeds) : undefined;
 
-  if (numSeeds > 1) {
+  if (numSeeds > 1 && !targetPageMode) {
     const msg =
       `semantic_crawl: maxPages is a total budget divided across ${String(numSeeds)} seed URLs ` +
       `(${String(perSeedPages)} pages per seed).`;
@@ -1058,7 +1103,24 @@ export async function crawlSeeds(
     warnings.push(...(result.warnings ?? []));
 
     // Path focus filter
-    let pages = filterByPathPrefix(result.pages, entry.seedUrl, opts.allowPathDrift ?? false);
+    const pathFilter = filterByPathPrefix(result.pages, entry.seedUrl, opts.allowPathDrift ?? false);
+    let pages = pathFilter.kept;
+    if (pathFilter.droppedCount > 0) {
+      structuredWarnings.push({
+        code: 'SEMANTIC_CRAWL_PATH_DRIFT_FILTERED',
+        message:
+          `Dropped ${String(pathFilter.droppedCount)} page(s) outside the seed path for ${entry.seedUrl}.`,
+        seedUrl: entry.seedUrl,
+        droppedCount: pathFilter.droppedCount,
+        droppedUrls: pathFilter.droppedUrls.slice(0, 10),
+      });
+      omittedPages.push(
+        ...pathFilter.droppedUrls.map((url) => ({
+          url,
+          reason: 'path_prefix_filtered',
+        })),
+      );
+    }
 
     // maxPages client-side enforcement (guarantee seed-first, then truncate)
     const seedIdx = pages.findIndex((p) => p.url === entry.seedUrl);
@@ -1342,6 +1404,88 @@ function aggregateExtractedData(
   return Object.keys(byUrl).length > 0 ? byUrl : undefined;
 }
 
+function detectPageQuality(page: CrawlPageResult): {
+  paywallSuspected: boolean;
+  loginWallSuspected: boolean;
+  truncatedSuspected: boolean;
+  consentWallSuspected: boolean;
+} {
+  const normalized = page.markdown.toLowerCase();
+  const paywallSuspected =
+    /subscribe to read|become a subscriber|members only|premium content|paywall/i.test(normalized) ||
+    (Buffer.byteLength(page.markdown, 'utf8') < 800 && /subscribe|sign up|membership/i.test(normalized));
+  const loginWallSuspected =
+    /sign in to continue|log in to continue|create an account|please sign in|please log in/i.test(
+      normalized,
+    );
+  const truncatedSuspected =
+    Buffer.byteLength(page.markdown, 'utf8') < 800 && /continue reading|read more|subscribe|sign in/i.test(normalized);
+  const consentWallSuspected = isConsentWallRedirect(page.url, page.markdown);
+  return {
+    paywallSuspected,
+    loginWallSuspected,
+    truncatedSuspected,
+    consentWallSuspected,
+  };
+}
+
+function buildPageMetadata(
+  pages: CrawlPageResult[],
+  corpusChunks: CorpusChunk[],
+  topChunks: SemanticCrawlChunk[],
+): SemanticCrawlPageMetadata[] {
+  const chunkCounts = new Map<string, number>();
+  for (const chunk of corpusChunks) {
+    chunkCounts.set(chunk.url, (chunkCounts.get(chunk.url) ?? 0) + 1);
+  }
+  const topChunkCounts = new Map<string, number>();
+  const bestRanks = new Map<string, number>();
+  topChunks.forEach((chunk, index) => {
+    const rank = index + 1;
+    topChunkCounts.set(chunk.url, (topChunkCounts.get(chunk.url) ?? 0) + 1);
+    const current = bestRanks.get(chunk.url);
+    if (current === undefined || rank < current) {
+      bestRanks.set(chunk.url, rank);
+    }
+  });
+
+  return pages.map((page) => {
+    const quality = detectPageQuality(page);
+    return {
+      url: page.url,
+      statusCode: page.statusCode,
+      contentBytes: Buffer.byteLength(page.markdown, 'utf8'),
+      chunksProduced: chunkCounts.get(page.url) ?? 0,
+      topChunkCount: topChunkCounts.get(page.url) ?? 0,
+      topChunkBestRank: bestRanks.get(page.url) ?? null,
+      paywallSuspected: quality.paywallSuspected,
+      loginWallSuspected: quality.loginWallSuspected,
+      truncatedSuspected: quality.truncatedSuspected,
+      consentWallSuspected: quality.consentWallSuspected,
+      errorMessage: page.errorMessage,
+      ...(page.recoverySource !== undefined ? { recoverySource: page.recoverySource } : {}),
+    } satisfies SemanticCrawlPageMetadata;
+  });
+}
+
+function pushPageQualityWarnings(
+  structuredWarnings: SemanticCrawlWarning[],
+  pageMetadata: SemanticCrawlPageMetadata[],
+): void {
+  const affected = pageMetadata.filter(
+    (page) => page.paywallSuspected || page.loginWallSuspected || page.truncatedSuspected,
+  );
+  if (affected.length === 0) return;
+  structuredWarnings.push({
+    code: 'SEMANTIC_CRAWL_PAGE_QUALITY',
+    message: `Detected potential paywall, login-wall, or truncation issues on ${String(affected.length)} page(s).`,
+    affectedUrls: affected.map((page) => page.url).slice(0, 10),
+    paywalledCount: affected.filter((page) => page.paywallSuspected).length,
+    loginWallCount: affected.filter((page) => page.loginWallSuspected).length,
+    truncatedCount: affected.filter((page) => page.truncatedSuspected).length,
+  });
+}
+
 // ── Semantic Crawl Orchestrator ─────────────────────────────────────────
 
 export interface SemanticCrawlOptions {
@@ -1349,6 +1493,7 @@ export interface SemanticCrawlOptions {
   source: SemanticCrawlSource;
   query: string;
   topK: number;
+  minScore?: number | undefined;
   strategy: 'bfs' | 'dfs';
   maxDepth: number;
   maxPages: number;
@@ -1469,7 +1614,7 @@ export async function semanticCrawl(
       seedUrl = opts.source.url;
       assertSafeUrl(seedUrl);
       const response = await fetch(seedUrl, {
-        headers: { 'User-Agent': 'search-mcp/1.0' },
+        headers: { 'User-Agent': getUserAgent() },
         signal: AbortSignal.timeout(30_000),
       });
       if (!response.ok) {
@@ -1489,7 +1634,7 @@ export async function semanticCrawl(
           try {
             assertSafeUrl(subUrl);
             const subResponse = await fetch(subUrl, {
-              headers: { 'User-Agent': 'search-mcp/1.0' },
+              headers: { 'User-Agent': getUserAgent() },
               signal: AbortSignal.timeout(30_000),
             });
             if (subResponse.ok) {
@@ -1509,7 +1654,19 @@ export async function semanticCrawl(
       }
 
       const safeUrls = filterSafeUrls(sitemapUrls, opts.domainTrust);
-      const rankedUrls = rankSitemapUrls(safeUrls, opts.query);
+      const localeCollapsed = collapseSitemapLocaleDuplicates(safeUrls, opts.source.preferLocale);
+      if (localeCollapsed.collapsedCount > 0) {
+        crawlStructuredWarnings.push({
+          code: 'SEMANTIC_CRAWL_SITEMAP_LOCALE_COLLAPSED',
+          message:
+            `Collapsed ${String(localeCollapsed.collapsedCount)} locale-duplicate sitemap URL(s) before ranking.`,
+          urlsBefore: safeUrls.length,
+          urlsAfter: localeCollapsed.urls.length,
+          collapsedCount: localeCollapsed.collapsedCount,
+          selectedUrls: localeCollapsed.urls.slice(0, 10),
+        });
+      }
+      const rankedUrls = rankSitemapUrls(localeCollapsed.urls, opts.query);
       const selectedUrls = rankedUrls.slice(0, opts.maxPages);
       if (selectedUrls.length > 0 && selectedUrls[0] !== safeUrls[0]) {
         const msg =
@@ -1649,6 +1806,9 @@ export async function semanticCrawl(
       if (opts.source.query !== undefined) ghOpts.query = opts.source.query;
       if (opts.source.includePaths !== undefined) ghOpts.includePaths = opts.source.includePaths;
       if (opts.source.excludePaths !== undefined) ghOpts.excludePaths = opts.source.excludePaths;
+      if (opts.source.preFilterByContent !== undefined) {
+        ghOpts.preFilterByContent = opts.source.preFilterByContent;
+      }
       const docs = await fetchGitHubCorpus(ghOpts);
       const selectedPaths = docs.map((doc) => doc.path);
       if (selectedPaths.length > 0) {
@@ -1747,12 +1907,22 @@ export async function semanticCrawl(
       query: opts.query,
       topK: opts.topK,
       ...(opts.useReranker !== undefined ? { useReranker: opts.useReranker } : {}),
+      ...(opts.minScore !== undefined ? { minScore: opts.minScore } : {}),
       embeddingBaseUrl,
       embeddingApiToken,
       embeddingDimensions,
       precomputedEmbeddings: precomputedEmbeddings ?? [],
       structuredWarnings: crawlStructuredWarnings,
     });
+    if (topChunks.length < opts.topK) {
+      crawlStructuredWarnings.push({
+        code: 'SEMANTIC_CRAWL_TOPK_UNMET',
+        message: `Requested topK=${String(opts.topK)} but only ${String(topChunks.length)} chunk(s) were returned.`,
+        requestedTopK: opts.topK,
+        deliveredTopK: topChunks.length,
+      });
+    }
+    logCorpusQuery(resolvedCorpusId, opts.query, opts.topK, topChunks.length);
 
     return {
       seedUrl,
@@ -1761,6 +1931,8 @@ export async function semanticCrawl(
       totalChunks: corpusChunks.length,
       successfulPages,
       corpusId: resolvedCorpusId,
+      topKRequested: opts.topK,
+      topKDelivered: topChunks.length,
       chunks: topChunks,
       ...(crawlWarnings.length > 0 ? { warnings: crawlWarnings } : {}),
       ...(crawlStructuredWarnings.length > 0
@@ -1843,12 +2015,24 @@ export async function semanticCrawl(
     query: opts.query,
     topK: opts.topK,
     ...(opts.useReranker !== undefined ? { useReranker: opts.useReranker } : {}),
+    ...(opts.minScore !== undefined ? { minScore: opts.minScore } : {}),
     embeddingBaseUrl,
     embeddingApiToken,
     embeddingDimensions,
     precomputedEmbeddings: corpus.embeddings,
     structuredWarnings: crawlStructuredWarnings,
   });
+  if (topChunks.length < opts.topK) {
+    crawlStructuredWarnings.push({
+      code: 'SEMANTIC_CRAWL_TOPK_UNMET',
+      message: `Requested topK=${String(opts.topK)} but only ${String(topChunks.length)} chunk(s) were returned.`,
+      requestedTopK: opts.topK,
+      deliveredTopK: topChunks.length,
+    });
+  }
+  const pageMetadata = buildPageMetadata(lastPages, deduped, topChunks);
+  pushPageQualityWarnings(crawlStructuredWarnings, pageMetadata);
+  logCorpusQuery(resolvedCorpusId, opts.query, opts.topK, topChunks.length);
 
   return {
     seedUrl,
@@ -1857,9 +2041,12 @@ export async function semanticCrawl(
     totalChunks: corpus.chunks.length,
     successfulPages,
     corpusId: resolvedCorpusId,
+    topKRequested: opts.topK,
+    topKDelivered: topChunks.length,
     chunks: topChunks,
     ...(crawlWarnings.length > 0 ? { warnings: crawlWarnings } : {}),
     ...(crawlStructuredWarnings.length > 0 ? { structuredWarnings: crawlStructuredWarnings } : {}),
+    ...(opts.outputMode !== 'passages' && pageMetadata.length > 0 ? { pageMetadata } : {}),
     ...(opts.outputMode !== 'passages' && crawlOmittedPages.length > 0
       ? { omittedPages: crawlOmittedPages }
       : {}),

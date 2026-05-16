@@ -10,6 +10,7 @@
 import { logger } from '../logger.js';
 import { assertSafeUrl, safeResponseText } from '../httpGuards.js';
 import { parseSitemap, isSitemapIndex } from '../utils/sitemap.js';
+import { getUserAgent } from '../version.js';
 import type { SearchResult } from '../types.js';
 import type { CrawlPageResult, SemanticCrawlSource } from '../types.js';
 import type { CorpusSpider } from './types.js';
@@ -50,7 +51,7 @@ export class SitemapSpider implements CorpusSpider {
     assertSafeUrl(seedUrl);
 
     const response = await fetch(seedUrl, {
-      headers: { 'User-Agent': 'search-mcp/1.0' },
+      headers: { 'User-Agent': getUserAgent() },
       signal: AbortSignal.timeout(30_000),
     });
 
@@ -72,7 +73,7 @@ export class SitemapSpider implements CorpusSpider {
         try {
           assertSafeUrl(subUrl);
           const subResponse = await fetch(subUrl, {
-            headers: { 'User-Agent': 'search-mcp/1.0' },
+            headers: { 'User-Agent': getUserAgent() },
             signal: AbortSignal.timeout(30_000),
           });
           if (subResponse.ok) {

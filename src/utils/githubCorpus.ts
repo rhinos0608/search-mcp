@@ -14,6 +14,7 @@ export interface GitHubCorpusOptions {
   excludePaths?: string[];
   maxFiles?: number;
   maxFileBytes?: number;
+  preFilterByContent?: boolean;
 }
 
 export interface GitHubCorpusDependencies {
@@ -221,6 +222,60 @@ function scoreGitHubPathForQuery(entry: GitHubTreeEntry, terms: string[]): numbe
   return score;
 }
 
+function scoreSnippetForQuery(snippet: string, terms: string[]): number {
+  if (terms.length === 0 || snippet.length === 0) return 0;
+  const normalized = snippet.toLowerCase();
+  let score = 0;
+  for (const term of terms) {
+    if (normalized.includes(term)) score += 3;
+    if (new RegExp(`\\b${escapeRegExp(term)}\\b`, 'u').test(normalized)) score += 2;
+  }
+  const phrase = terms.join(' ');
+  if (phrase.length >= 6 && normalized.includes(phrase)) score += 4;
+  return score;
+}
+
+async function rerankByContent(
+  entries: GitHubTreeEntry[],
+  opts: GitHubCorpusOptions,
+  getFile: typeof getGitHubRepoFile,
+  terms: string[],
+): Promise<GitHubTreeEntry[]> {
+  if (entries.length <= 1 || terms.length === 0) return entries;
+  const sampleLimit = Math.min(Math.max((opts.maxFiles ?? 100) * 4, 20), 40, entries.length);
+  const headByteLimit = Math.min(opts.maxFileBytes ?? 50_000, 4_000);
+  const sampleEntries = entries.slice(0, sampleLimit);
+  const contentScores = new Map<string, number>();
+
+  for (const entry of sampleEntries) {
+    try {
+      const result = await getFile(
+        opts.owner,
+        opts.repo,
+        entry.path,
+        opts.branch,
+        true,
+        undefined,
+        undefined,
+        0,
+        headByteLimit,
+      );
+      if (result.isBinary) continue;
+      contentScores.set(entry.path, scoreSnippetForQuery(result.content, terms));
+    } catch (err) {
+      logger.debug({ err, path: entry.path }, 'fetchGitHubCorpus: content prefilter fetch failed');
+    }
+  }
+
+  return [...entries].sort((a, b) => {
+    const aScore = (contentScores.get(a.path) ?? 0) * 4 + scoreGitHubPathForQuery(a, terms) * 2 + scoreBroadCorpusFile(a) * 0.25;
+    const bScore = (contentScores.get(b.path) ?? 0) * 4 + scoreGitHubPathForQuery(b, terms) * 2 + scoreBroadCorpusFile(b) * 0.25;
+    const delta = bScore - aScore;
+    if (delta !== 0) return delta;
+    return a.path.localeCompare(b.path);
+  });
+}
+
 export function prioritizeBroadGitHubCorpus(entries: GitHubTreeEntry[]): GitHubTreeEntry[] {
   return [...entries].sort((a, b) => {
     const delta = scoreBroadCorpusFile(b) - scoreBroadCorpusFile(a);
@@ -348,6 +403,7 @@ export async function fetchGitHubCorpus(
   const getTree = deps.getGitHubRepoTree ?? getGitHubRepoTree;
   const getFile = deps.getGitHubRepoFile ?? getGitHubRepoFile;
   const getSearch = deps.getGitHubRepoSearch ?? getGitHubRepoSearch;
+  const queryTerms = tokenizeQuery(opts.query);
 
   // Phase 1: Always fetch the full repo tree first — exhaustive file listing.
   let treeFiles: GitHubTreeEntry[] = [];
@@ -416,7 +472,10 @@ export async function fetchGitHubCorpus(
     }
   }
 
-  const candidateFiles = rankGitHubFilesByQuery(merged, opts.query);
+  let candidateFiles = rankGitHubFilesByQuery(merged, opts.query);
+  if ((opts.preFilterByContent ?? true) && queryTerms.length > 0) {
+    candidateFiles = await rerankByContent(candidateFiles, opts, getFile, queryTerms);
+  }
   const selectedFiles = candidateFiles.slice(0, maxFiles);
   const docs: GitHubCorpusDocument[] = [];
 

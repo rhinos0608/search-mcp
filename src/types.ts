@@ -514,6 +514,21 @@ export interface SemanticCrawlChunk {
   };
 }
 
+export interface SemanticCrawlPageMetadata {
+  url: string;
+  statusCode: number | null;
+  contentBytes: number;
+  chunksProduced: number;
+  topChunkCount: number;
+  topChunkBestRank: number | null;
+  paywallSuspected: boolean;
+  loginWallSuspected: boolean;
+  truncatedSuspected: boolean;
+  consentWallSuspected: boolean;
+  errorMessage: string | null;
+  recoverySource?: 'wayback' | 'google-cache' | 'aggressive-render';
+}
+
 export type SemanticCrawlWarning =
   | {
       code: 'SEMANTIC_CRAWL_RESPONSE_SIZE_GUARD';
@@ -554,6 +569,8 @@ export type SemanticCrawlWarning =
       code: 'SEMANTIC_CRAWL_GITHUB_FILE_SELECTION';
       message: string;
       selectedPaths: string[];
+      preFilterByContent?: boolean;
+      prefilteredCandidates?: number;
     }
   | {
       code: 'SEMANTIC_CRAWL_RANKING_FILTER';
@@ -571,6 +588,41 @@ export type SemanticCrawlWarning =
       message: string;
       originalUrl: string;
       fallbackUrl: string;
+    }
+  | {
+      code: 'SEMANTIC_CRAWL_TOPK_UNMET';
+      message: string;
+      requestedTopK: number;
+      deliveredTopK: number;
+    }
+  | {
+      code: 'SEMANTIC_CRAWL_SITEMAP_LOCALE_COLLAPSED';
+      message: string;
+      urlsBefore: number;
+      urlsAfter: number;
+      collapsedCount: number;
+      selectedUrls: string[];
+    }
+  | {
+      code: 'SEMANTIC_CRAWL_PATH_DRIFT_FILTERED';
+      message: string;
+      seedUrl: string;
+      droppedCount: number;
+      droppedUrls: string[];
+    }
+  | {
+      code: 'SEMANTIC_CRAWL_PAGE_QUALITY';
+      message: string;
+      affectedUrls: string[];
+      paywalledCount: number;
+      loginWallCount: number;
+      truncatedCount: number;
+    }
+  | {
+      code: 'SEMANTIC_CRAWL_MIN_SCORE_FILTER';
+      message: string;
+      minScore: number;
+      removedCount: number;
     };
 
 export interface SemanticCrawlResult extends StructuredContent {
@@ -582,11 +634,31 @@ export interface SemanticCrawlResult extends StructuredContent {
   successfulPages: number;
   /** Deterministic corpus ID — pass as `source: { type: 'cached', corpusId }` to skip re-crawl. */
   corpusId: string;
+  topKRequested: number;
+  topKDelivered: number;
   chunks: SemanticCrawlChunk[];
+  pageMetadata?: SemanticCrawlPageMetadata[];
   extractedData?: Record<string, Record<string, unknown>[]>;
   warnings?: string[];
   structuredWarnings?: SemanticCrawlWarning[];
   omittedPages?: { url: string; reason: string; estimatedBytes?: number }[];
+}
+
+export interface SemanticCrawlBatchQueryResult {
+  query: string;
+  topKRequested: number;
+  topKDelivered: number;
+  chunks: SemanticCrawlChunk[];
+}
+
+export interface SemanticCrawlBatchResult {
+  seedUrl: string;
+  corpusId: string;
+  totalChunks: number;
+  topKRequested: number;
+  results: SemanticCrawlBatchQueryResult[];
+  warnings?: string[];
+  structuredWarnings?: SemanticCrawlWarning[];
 }
 
 // ── Semantic Crawl Sources ────────────────────────────────────────────────
@@ -603,6 +675,7 @@ export interface UrlSource {
 export interface SitemapSource {
   type: 'sitemap';
   url: string;
+  preferLocale?: string | undefined;
 }
 
 export interface SearchSeedSource {
@@ -625,6 +698,8 @@ export interface GitHubSource {
   includePaths?: string[] | undefined;
   /** Exclude files whose path contains one of these substrings. */
   excludePaths?: string[] | undefined;
+  /** Run a lightweight content-based prefilter before downloading full files. */
+  preFilterByContent?: boolean | undefined;
 }
 
 export interface CachedSource {

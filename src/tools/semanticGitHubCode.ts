@@ -1,6 +1,7 @@
 import { getCodeEmbeddingFallbackWarning, loadConfig } from '../config.js';
 import { validationError } from '../errors.js';
 import { chunksFromCodeFilesAsync } from '../rag/adapters/code.js';
+import { embedTexts, embedTextsBatched } from '../rag/embedding.js';
 import { prepareCorpus, retrieveCorpus } from '../rag/pipeline.js';
 import { getProfileSettings } from '../rag/profiles.js';
 import type { RetrievalProfileName, RetrievalScore } from '../rag/types.js';
@@ -22,6 +23,8 @@ export interface SemanticGitHubCodeInput {
   topK?: number | undefined;
   profile?: RetrievalProfileName | undefined;
   includeContext?: boolean | undefined;
+  preFilterByContent?: boolean | undefined;
+  minScore?: number | undefined;
   debug?: boolean | undefined;
 }
 
@@ -45,6 +48,8 @@ export interface SemanticGitHubCodeResult {
   query: string;
   repo: string;
   profile: RetrievalProfileName;
+  topKRequested: number;
+  topKDelivered: number;
   results: SemanticGitHubCodeResultItem[];
   warnings: string[];
   debug?:
@@ -122,10 +127,15 @@ export async function semanticGitHubCode(
   if (input.topK !== undefined && (input.topK < 1 || input.topK > 50)) {
     throw validationError('topK must be between 1 and 50');
   }
+  if (input.minScore !== undefined && (input.minScore < 0 || input.minScore > 1)) {
+    throw validationError('minScore must be between 0 and 1');
+  }
 
+  const cfg = loadConfig();
   const extensions = languageExtensions(input.language);
   const fetchCorpus = deps.fetchCorpus ?? fetchGitHubCorpus;
   const maxFiles = input.maxFiles ?? 100;
+  const requestedTopK = input.topK ?? getProfileSettings(input.profile ?? 'lexical-heavy').topK;
   const docs = await fetchCorpus({
     owner,
     repo,
@@ -134,6 +144,9 @@ export async function semanticGitHubCode(
     ...(input.maxFileBytes !== undefined ? { maxFileBytes: input.maxFileBytes } : {}),
     ...(extensions !== undefined ? { extensions } : {}),
     ...(input.query.length > 0 ? { query: input.query } : {}),
+    ...(input.preFilterByContent !== undefined
+      ? { preFilterByContent: input.preFilterByContent }
+      : {}),
   });
 
   const scopedDocs = docs.filter((doc) => matchesFileFilter(doc.path, input.fileFilter));
@@ -156,6 +169,8 @@ export async function semanticGitHubCode(
       query: input.query,
       repo: input.repo,
       profile: input.profile ?? 'lexical-heavy',
+      topKRequested: requestedTopK,
+      topKDelivered: 0,
       results: [],
       warnings: [noFilesMsg, ...warnings],
       ...(input.debug === true ? { debug: { collectedFiles: docs.length, chunkCount: 0 } } : {}),
@@ -171,24 +186,71 @@ export async function semanticGitHubCode(
   );
 
   const profile = getProfileSettings(input.profile ?? 'lexical-heavy');
+  const chunkTexts = chunks.map((chunk) => chunk.text);
+  const chunkTitles = chunks.map((chunk) => {
+    const path = stringMetadata(chunk.metadata?.path);
+    const symbolName = stringMetadata(chunk.metadata?.symbolName);
+    return symbolName !== undefined && path !== undefined ? `${path} > ${symbolName}` : path ?? chunk.section;
+  });
+  const [docEmbeddings, queryEmbedding] = await Promise.all([
+    embedTextsBatched({
+      baseUrl: cfg.embeddingSidecar.baseUrl,
+      apiToken: cfg.embeddingSidecar.apiToken ?? '',
+      texts: chunkTexts,
+      titles: chunkTitles,
+      mode: 'document',
+      dimensions: cfg.embeddingSidecar.dimensions,
+    }),
+    embedTexts({
+      baseUrl: cfg.embeddingSidecar.baseUrl,
+      apiToken: cfg.embeddingSidecar.apiToken ?? '',
+      texts: [input.query],
+      mode: 'query',
+      dimensions: cfg.embeddingSidecar.dimensions,
+    }),
+  ]);
   const corpus = prepareCorpus({
     adapter: 'code',
     chunks,
+    embeddings: docEmbeddings.embeddings,
     profile: profile.profile,
+    model: docEmbeddings.model,
+    dimensions: docEmbeddings.dimensions,
     metadata: { repo: input.repo },
   });
 
   const response = retrieveCorpus(corpus, {
     query: input.query,
-    topK: input.topK,
+    topK: chunks.length,
     profile: profile.profile,
+    queryEmbedding: queryEmbedding.embeddings[0],
   });
+  const minScore = input.minScore;
+  const filteredResults =
+    minScore !== undefined
+      ? response.results.filter((result) => (result.score.vector ?? 0) >= minScore)
+      : response.results;
+  const topResults = filteredResults.slice(0, requestedTopK);
+  const thresholdWarnings =
+    minScore !== undefined && filteredResults.length < response.results.length
+      ? [
+          `github.code_search filtered ${String(response.results.length - filteredResults.length)} result(s) below minScore=${String(minScore)}.`,
+        ]
+      : [];
+  const topKWarnings =
+    topResults.length < requestedTopK
+      ? [
+          `github.code_search requested topK=${String(requestedTopK)} but returned ${String(topResults.length)} result(s).`,
+        ]
+      : [];
 
   return {
     query: input.query,
     repo: input.repo,
     profile: profile.profile,
-    results: response.results.map((result) => {
+    topKRequested: requestedTopK,
+    topKDelivered: topResults.length,
+    results: topResults.map((result) => {
       const metadata = result.item.metadata ?? {};
       return {
         rank: result.rank,
@@ -206,7 +268,7 @@ export async function semanticGitHubCode(
         ...(input.includeContext === true ? { text: result.item.text } : {}),
       };
     }),
-    warnings: [...warnings, ...(response.warnings ?? [])],
+    warnings: [...warnings, ...thresholdWarnings, ...topKWarnings, ...(response.warnings ?? [])],
     ...(input.debug === true
       ? { debug: { collectedFiles: docs.length, chunkCount: chunks.length } }
       : {}),

@@ -1,4 +1,4 @@
-import test from 'node:test';
+import test, { beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { resetConfig, loadConfig } from '../src/config.js';
 import { createServer } from '../src/server.js';
@@ -40,6 +40,53 @@ async function fetchCorpus(): Promise<GitHubCorpusDocument[]> {
    return DOCS;
 }
 
+function buildMockResponse(body: unknown): Response {
+   return new Response(JSON.stringify(body), {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+   });
+}
+
+const originalFetch = globalThis.fetch;
+
+beforeEach(() => {
+   process.env.EMBEDDING_SIDECAR_BASE_URL = 'https://embed.example.com';
+   resetConfig();
+   globalThis.fetch = async (_input: RequestInfo | URL, init?: RequestInit) => {
+      const body = init?.body
+         ? (JSON.parse(String(init.body)) as { texts?: string[]; input?: string[] })
+         : {};
+      const texts = body.texts ?? body.input ?? [];
+      const embeddings = texts.map((text) => {
+         const normalized = text.toLowerCase();
+         if (normalized.includes('formatname') || normalized.includes('format names for display')) {
+            return [1, 0, 0, 0];
+         }
+         if (normalized.includes('exampleonly')) {
+            return [0, 1, 0, 0];
+         }
+         if (normalized.includes('format_name')) {
+            return [0.8, 0.1, 0, 0];
+         }
+         return [0.2, 0.2, 0, 0];
+      });
+      return buildMockResponse({
+         embeddings,
+         model: 'test-embedding-model',
+         modelRevision: 'test',
+         dimensions: 4,
+         mode: 'document',
+         truncatedIndices: [],
+      });
+   };
+});
+
+afterEach(() => {
+   globalThis.fetch = originalFetch;
+   delete process.env.EMBEDDING_SIDECAR_BASE_URL;
+   resetConfig();
+});
+
 test('semanticGitHubCode rejects malformed repo identifiers', async () => {
    await assert.rejects(async () => {
       await semanticGitHubCode({
@@ -63,6 +110,8 @@ test('semanticGitHubCode filters files and returns structured code results', asy
    );
 
    assert.equal(result.profile, 'lexical-heavy');
+   assert.equal(result.topKRequested, 5);
+   assert.ok(result.topKDelivered > 0);
    assert.ok(result.results.length > 0);
    const first = result.results[0];
    assert.ok(first);
@@ -128,6 +177,8 @@ test('semanticGitHubCode forwards maxFileBytes to corpus collection', async () =
 
 test('github family is registered in the MCP server', () => {
    resetConfig();
-   const server = createServer(loadConfig()) as unknown as { _registeredTools?: Record<string, unknown> };
+   const { server } = createServer(loadConfig()) as unknown as {
+      server: { _registeredTools?: Record<string, unknown> };
+   };
    assert.ok(server._registeredTools?.github);
 });

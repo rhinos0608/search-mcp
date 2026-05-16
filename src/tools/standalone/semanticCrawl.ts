@@ -8,6 +8,7 @@
 import { z } from 'zod/v4';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { SearchConfig } from '../../config.js';
+import type { SemanticCrawlBatchResult, SemanticCrawlSource } from '../../types.js';
 import { logger } from '../../logger.js';
 import { DEFAULT_SEMANTIC_MAX_BYTES } from '../../semanticLimits.js';
 import { semanticCrawl } from '../semanticCrawl.js';
@@ -55,6 +56,10 @@ export function registerSemanticCrawl(
                 .literal('sitemap')
                 .describe('Parse sitemap.xml, rank URLs against query, then crawl selected URLs'),
               url: z.url().describe('URL of a sitemap.xml to parse for seed URLs'),
+              preferLocale: z
+                .string()
+                .optional()
+                .describe('Preferred locale when collapsing locale-duplicate sitemap URLs, e.g. en or en-US'),
             }),
             z.object({
               type: z
@@ -90,6 +95,11 @@ export function registerSemanticCrawl(
                 .array(z.string())
                 .optional()
                 .describe('Exclude files whose path contains one of these substrings'),
+              preFilterByContent: z
+                .boolean()
+                .optional()
+                .default(true)
+                .describe('Run a lightweight content-based prefilter before downloading full files'),
             }),
             z.object({
               type: z
@@ -106,7 +116,13 @@ export function registerSemanticCrawl(
             'Source of the corpus to crawl. Valid source.type values: "url", "sitemap", "search", "github", "cached". ' +
               'Use "cached" with a corpusId returned by semantic_crawl, or call semantic_crawl_list_corpora to discover cached corpora.',
           ),
-        query: z.string().describe('The semantic search query — what are you looking for?'),
+        query: z.string().optional().describe('The semantic search query — what are you looking for?'),
+        queries: z
+          .array(z.string())
+          .min(1)
+          .max(10)
+          .optional()
+          .describe('Batch query mode for cached corpora. Provide multiple queries in one call.'),
         topK: z
           .number()
           .int()
@@ -162,6 +178,12 @@ export function registerSemanticCrawl(
           .optional()
           .default(false)
           .describe('Apply cross-encoder re-ranking to top candidates (default false)'),
+        minScore: z
+          .number()
+          .min(0)
+          .max(1)
+          .optional()
+          .describe('Minimum bi-encoder score required for returned chunks (0–1)'),
         useContextualEmbeddings: z
           .boolean()
           .optional()
@@ -244,10 +266,11 @@ export function registerSemanticCrawl(
           ),
       },
     },
-    async (
-      {
+    async (rawArgs, extra) => {
+      const {
         source,
         query,
+        queries,
         topK,
         strategy,
         maxDepth,
@@ -255,6 +278,7 @@ export function registerSemanticCrawl(
         includeExternalLinks,
         maxBytes,
         useReranker,
+        minScore,
         useContextualEmbeddings,
         maxChunkTokens,
         allowPathDrift,
@@ -266,42 +290,76 @@ export function registerSemanticCrawl(
         delayBeforeReturnHtml,
         pageTimeout,
         jsCode,
-      },
-      extra,
-    ) => {
-      logger.info({ tool: 'semantic_crawl', sourceType: source.type, query, topK }, 'Tool invoked');
+      } = rawArgs as {
+        source: {
+          type: 'url' | 'sitemap' | 'search' | 'github' | 'cached';
+          [key: string]: unknown;
+        };
+        query?: string;
+        queries?: string[];
+        topK: number;
+        strategy: 'bfs' | 'dfs';
+        maxDepth: number;
+        maxPages: number;
+        includeExternalLinks: boolean;
+        maxBytes: number;
+        useReranker: boolean;
+        minScore?: number;
+        useContextualEmbeddings: boolean;
+        maxChunkTokens?: number;
+        allowPathDrift: boolean;
+        includeElements: boolean;
+        elementsLimit?: number;
+        outputMode: 'full' | 'passages';
+        extractionConfig?: import('../../utils/extractionConfig.js').ExtractionConfig;
+        waitFor?: string;
+        delayBeforeReturnHtml: number;
+        pageTimeout: number;
+        jsCode?: string;
+      };
+      logger.info(
+        { tool: 'semantic_crawl', sourceType: source.type, query, queryCount: queries?.length, topK },
+        'Tool invoked',
+      );
       const start = Date.now();
       try {
         if (extractionConfig) {
           validateExtractionConfig(extractionConfig, normalizeLlmForValidation(cfg.llm));
         }
 
+        const singleQuery = query?.trim();
+        const batchQueries = queries?.map((value) => value.trim()).filter((value) => value.length > 0);
+        if ((singleQuery ? 1 : 0) + (batchQueries && batchQueries.length > 0 ? 1 : 0) !== 1) {
+          throw new Error('Provide exactly one of `query` or `queries`.');
+        }
+
+        const typedSource = source as unknown as SemanticCrawlSource;
         const warnings: string[] = [];
-        if (source.type === 'cached' && extractionConfig) {
+        if (typedSource.type === 'cached' && extractionConfig) {
           warnings.push(
             'extractionConfig is ignored when using cached source (cached sources skip crawling)',
           );
         }
 
         if (
-          source.type === 'url' &&
+          typedSource.type === 'url' &&
           cfg.raga.enabled &&
           typeof cfg.raga.baseUrl === 'string' &&
           cfg.raga.baseUrl.trim() !== ''
         ) {
           const ragaResult = await tryRagaFallback(
-            source.url,
+            typedSource.url,
             { baseUrl: cfg.raga.baseUrl, timeoutMs: cfg.raga.timeoutMs },
             extra,
           );
           if (ragaResult) {
             logger.info(
-              { tool: 'semantic_crawl', url: source.url },
+              { tool: 'semantic_crawl', url: typedSource.url },
               'Document URL detected — using RAG-Anything extraction',
             );
             warnings.push(...ragaResult.warnings);
             const article: import('../../types.js').ArticleResult = {
-              url: source.url,
+              url: typedSource.url,
               title: null,
               textContent: ragaResult.markdown,
               content: ragaResult.markdown,
@@ -314,7 +372,7 @@ export function registerSemanticCrawl(
               elements: [],
             };
             const singlePage = readabilityFallbackResult(
-              source.url,
+              typedSource.url,
               article,
               strategy,
               maxDepth,
@@ -339,13 +397,81 @@ export function registerSemanticCrawl(
         }
 
         const llmFallback = buildLlmFallback(extractionConfig, cfg.llm);
+        const resolvedQuery = singleQuery ?? '';
 
         const effectiveMaxBytes = maxBytes;
+        if (batchQueries !== undefined) {
+          if (typedSource.type !== 'cached') {
+            throw new Error('`queries` batch mode is currently supported only for cached corpora.');
+          }
+          const batchResults = await Promise.all(
+            batchQueries.map((batchQuery) =>
+              semanticCrawl(
+                {
+                  source: typedSource,
+                  query: batchQuery,
+                  topK,
+                  ...(minScore !== undefined ? { minScore } : {}),
+                  strategy,
+                  maxDepth,
+                  maxPages,
+                  includeExternalLinks,
+                  maxBytes: effectiveMaxBytes,
+                  useReranker,
+                  maxChunkTokens,
+                  allowPathDrift,
+                  includeElements,
+                  ...(elementsLimit !== undefined ? { elementsLimit } : {}),
+                  outputMode,
+                  waitFor,
+                  delayBeforeReturnHtml,
+                  pageTimeout,
+                  jsCode,
+                  ...(extractionConfig ? { extractionConfig } : {}),
+                  ...(llmFallback ? { llmFallback } : {}),
+                  ...(useContextualEmbeddings
+                    ? { useContextualEmbeddings, contextualEmbedding: cfg.llm }
+                    : {}),
+                },
+                cfg.crawl4ai,
+                cfg.embeddingSidecar.baseUrl,
+                cfg.embeddingSidecar.apiToken ?? '',
+                cfg.embeddingSidecar.dimensions,
+                cfg.raga,
+              ),
+            ),
+          );
+          const data: SemanticCrawlBatchResult = {
+            seedUrl: batchResults[0]?.seedUrl ?? `corpus:${typedSource.corpusId}`,
+            corpusId: batchResults[0]?.corpusId ?? typedSource.corpusId,
+            totalChunks: batchResults[0]?.totalChunks ?? 0,
+            topKRequested: topK,
+            results: batchResults.map((result) => ({
+              query: result.query,
+              topKRequested: result.topKRequested,
+              topKDelivered: result.topKDelivered,
+              chunks: result.chunks,
+            })),
+            warnings: [...new Set(batchResults.flatMap((result) => result.warnings ?? []))],
+            structuredWarnings: batchResults.flatMap((result) => result.structuredWarnings ?? []),
+          };
+          const result = makeResult('semantic_crawl', data, Date.now() - start, {
+            warnings: [...warnings, ...(data.warnings ?? [])],
+          });
+          if (kgHook && cfg.knowledgeGraph.enabled) {
+            void kgHook.onToolCall('semantic_crawl', data).catch((err: unknown) => {
+              logger.warn({ err, tool: 'semantic_crawl' }, 'KG passive capture failed (non-fatal)');
+            });
+          }
+          return successResponse(result);
+        }
+
         const data = await semanticCrawl(
           {
-            source,
-            query,
+            source: typedSource,
+            query: resolvedQuery,
             topK,
+            ...(minScore !== undefined ? { minScore } : {}),
             strategy,
             maxDepth,
             maxPages,

@@ -8,6 +8,7 @@
 import { logger } from '../logger.js';
 import { assertSafeUrl } from '../httpGuards.js';
 import { retryWithBackoff } from '../retry.js';
+import { getUserAgent } from '../version.js';
 import { assessMarkdownBatchQuality, compareQuality } from '../utils/renderRecovery.js';
 import { safeStructuredFromMarkdown } from '../utils/elementHelpers.js';
 import { attemptExternalRecovery } from '../utils/externalRecovery.js';
@@ -287,7 +288,7 @@ export class Crawl4aiClientMiddleware implements CrawlMiddleware {
 
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
-      'User-Agent': 'search-mcp/1.0',
+      'User-Agent': getUserAgent(),
     };
     if (this.apiToken) {
       headers.Authorization = `Bearer ${this.apiToken}`;

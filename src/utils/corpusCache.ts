@@ -24,7 +24,7 @@ import { MAX_TOKENS, MIN_TOKENS, TOKEN_RATIO, OVERLAP_RATIO } from '../chunking.
 // Schema version — increment when the SQLite schema changes
 // ────────────────────────────────────────────────────────────────────
 
-const SCHEMA_VERSION = 2;
+const SCHEMA_VERSION = 3;
 
 // ────────────────────────────────────────────────────────────────────
 // Public types
@@ -53,6 +53,27 @@ export interface CorpusSummary {
   model: string;
   dimensions: number;
   totalBytes: number;
+  urlCount: number;
+  topUrls: Array<{ url: string; chunkCount: number }>;
+  recentQueries: string[];
+}
+
+export interface CorpusInspection {
+  corpusId: string;
+  source: SemanticCrawlSource;
+  createdAt: number;
+  lastAccessedAt: number;
+  chunkCount: number;
+  model: string;
+  dimensions: number;
+  totalBytes: number;
+  urls: Array<{ url: string; chunkCount: number }>;
+  recentQueries: Array<{
+    query: string;
+    topK: number;
+    resultsReturned: number;
+    queriedAt: number;
+  }>;
 }
 
 // ────────────────────────────────────────────────────────────────────
@@ -113,6 +134,14 @@ interface CorpusSummaryRow {
   last_accessed_at: number;
   total_bytes: number;
   chunk_count: number;
+}
+
+interface QueryLogRow {
+  corpus_id: string;
+  query_text: string;
+  topk: number;
+  results_returned: number;
+  queried_at: number;
 }
 
 interface CacheOpts {
@@ -177,7 +206,11 @@ function normalizeSource(source: SemanticCrawlSource): SemanticCrawlSource {
     return { type: 'search', query: source.query, maxSeedUrls: source.maxSeedUrls };
   }
   if (source.type === 'sitemap') {
-    return { type: 'sitemap', url: source.url };
+    return {
+      type: 'sitemap',
+      url: source.url,
+      ...(source.preferLocale !== undefined ? { preferLocale: source.preferLocale } : {}),
+    };
   }
   if (source.type === 'github') {
     return {
@@ -189,6 +222,7 @@ function normalizeSource(source: SemanticCrawlSource): SemanticCrawlSource {
       query: source.query,
       includePaths: source.includePaths !== undefined ? [...source.includePaths].sort() : undefined,
       excludePaths: source.excludePaths !== undefined ? [...source.excludePaths].sort() : undefined,
+      preFilterByContent: source.preFilterByContent,
     };
   }
   return { type: 'cached', corpusId: source.corpusId };
@@ -327,6 +361,20 @@ function initSchema(db: BetterSqliteDatabase): void {
       ON source_index(source_key, created_at DESC);
     CREATE INDEX IF NOT EXISTS idx_corpora_lru
       ON corpora(last_accessed_at ASC, created_at ASC);
+
+    CREATE TABLE IF NOT EXISTS query_log (
+      corpus_id TEXT NOT NULL,
+      query_hash TEXT NOT NULL,
+      query_text TEXT NOT NULL,
+      topk INTEGER NOT NULL,
+      results_returned INTEGER NOT NULL,
+      queried_at INTEGER NOT NULL,
+      PRIMARY KEY (corpus_id, query_hash),
+      FOREIGN KEY (corpus_id) REFERENCES corpora(corpus_id) ON DELETE CASCADE
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_query_log_corpus
+      ON query_log(corpus_id, queried_at DESC);
   `);
 
   const current = db.prepare('SELECT value FROM cache_meta WHERE key = ?').get('schemaVersion') as
@@ -600,6 +648,40 @@ function findInSourceIndex(db: BetterSqliteDatabase, sourceKey: string): SourceI
   }));
 }
 
+function summarizeChunkUrls(chunks: CorpusChunk[]): Array<{ url: string; chunkCount: number }> {
+  const counts = new Map<string, number>();
+  for (const chunk of chunks) {
+    counts.set(chunk.url, (counts.get(chunk.url) ?? 0) + 1);
+  }
+  return [...counts.entries()]
+    .map(([url, chunkCount]) => ({ url, chunkCount }))
+    .sort((a, b) => b.chunkCount - a.chunkCount || a.url.localeCompare(b.url));
+}
+
+function readRecentQueries(
+  db: BetterSqliteDatabase,
+  corpusId: string,
+  limit: number,
+): Array<{ query: string; topK: number; resultsReturned: number; queriedAt: number }> {
+  const rows = db
+    .prepare(
+      `
+      SELECT corpus_id, query_text, topk, results_returned, queried_at
+      FROM query_log
+      WHERE corpus_id = ?
+      ORDER BY queried_at DESC
+      LIMIT ?
+    `,
+    )
+    .all(corpusId, limit) as QueryLogRow[];
+  return rows.map((row) => ({
+    query: row.query_text,
+    topK: row.topk,
+    resultsReturned: row.results_returned,
+    queriedAt: row.queried_at,
+  }));
+}
+
 // ────────────────────────────────────────────────────────────────────
 // Eviction
 // ────────────────────────────────────────────────────────────────────
@@ -795,6 +877,11 @@ export function listCorpora(opts?: CacheOpts): CorpusSummary[] {
       return rows.flatMap((row) => {
         try {
           const source = JSON.parse(row.source_json) as SemanticCrawlSource;
+          const chunkRows = db
+            .prepare('SELECT chunk_json FROM chunks WHERE corpus_id = ? ORDER BY position ASC')
+            .all(row.corpus_id) as Array<{ chunk_json: string }>;
+          const chunks = chunkRows.map((chunkRow) => JSON.parse(chunkRow.chunk_json) as CorpusChunk);
+          const urlSummary = summarizeChunkUrls(chunks);
           return [
             {
               corpusId: row.corpus_id,
@@ -806,15 +893,86 @@ export function listCorpora(opts?: CacheOpts): CorpusSummary[] {
               model: row.model,
               dimensions: row.dimensions,
               totalBytes: row.total_bytes,
+              urlCount: urlSummary.length,
+              topUrls: urlSummary.slice(0, 5),
+              recentQueries: readRecentQueries(db, row.corpus_id, 3).map((entry) => entry.query),
             } satisfies CorpusSummary,
           ];
         } catch (err) {
-          logger.warn({ err, corpusId: row.corpus_id }, 'corpusCache: failed to parse source JSON');
+          logger.warn({ err, corpusId: row.corpus_id }, 'corpusCache: failed to summarize corpus');
           return [];
         }
       });
     }) ?? []
   );
+}
+
+export function inspectCorpus(corpusId: string, opts?: CacheOpts): CorpusInspection | null {
+  const ttlMs = opts?.ttlMs ?? DEFAULT_TTL_MS;
+  const databasePath = resolveDatabasePath(opts);
+  return (
+    withDatabase(databasePath, (db) => {
+      const corpus = readCorpusFromDatabase(db, corpusId, ttlMs, false);
+      if (corpus === null) return null;
+      return {
+        corpusId: corpus.corpusId,
+        source: corpus.source,
+        createdAt: corpus.createdAt,
+        lastAccessedAt: corpus.lastAccessedAt,
+        chunkCount: corpus.chunks.length,
+        model: corpus.model,
+        dimensions: corpus.dimensions,
+        totalBytes: estimateCorpusBytes({
+          sourceKey: stableStringify(normalizeSource(corpus.source)),
+          source: corpus.source,
+          chunks: corpus.chunks,
+          embeddings: corpus.embeddings,
+          contentHash: corpus.contentHash,
+          model: corpus.model,
+        }),
+        urls: summarizeChunkUrls(corpus.chunks),
+        recentQueries: readRecentQueries(db, corpus.corpusId, 10),
+      } satisfies CorpusInspection;
+    }) ?? null
+  );
+}
+
+export function logCorpusQuery(
+  corpusId: string,
+  query: string,
+  topK: number,
+  resultsReturned: number,
+  opts?: CacheOpts,
+): void {
+  const trimmedQuery = query.trim();
+  if (trimmedQuery.length === 0) return;
+  const databasePath = resolveDatabasePath(opts);
+  withDatabase(databasePath, (db) => {
+    const exists = db
+      .prepare('SELECT 1 AS found FROM corpora WHERE corpus_id = ?')
+      .get(corpusId) as { found: 1 } | undefined;
+    if (exists === undefined) return false;
+    db.prepare(
+      `
+      INSERT OR REPLACE INTO query_log (
+        corpus_id,
+        query_hash,
+        query_text,
+        topk,
+        results_returned,
+        queried_at
+      ) VALUES (?, ?, ?, ?, ?, ?)
+    `,
+    ).run(
+      corpusId,
+      crypto.createHash('sha256').update(trimmedQuery).digest('hex'),
+      trimmedQuery,
+      topK,
+      resultsReturned,
+      Date.now(),
+    );
+    return true;
+  });
 }
 
 /**

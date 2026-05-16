@@ -190,6 +190,11 @@ const codeSearchAction = z.object({
     .array(z.string())
     .optional()
     .describe('Path prefixes, substrings, or * globs to keep'),
+  preFilterByContent: z
+    .boolean()
+    .optional()
+    .default(true)
+    .describe('Run a lightweight content-based prefilter before downloading full files'),
   topK: z
     .number()
     .int()
@@ -211,6 +216,12 @@ const codeSearchAction = z.object({
     .optional()
     .default('lexical-heavy')
     .describe('Retrieval profile (defaults to lexical-heavy for code)'),
+  minScore: z
+    .number()
+    .min(0)
+    .max(1)
+    .optional()
+    .describe('Minimum bi-encoder score required for returned chunks (0–1)'),
   includeContext: z
     .boolean()
     .optional()
@@ -380,8 +391,10 @@ const githubFamily: FamilyDefinition = {
           maxFiles,
           maxFileBytes,
           fileFilter,
+          preFilterByContent,
           topK,
           profile,
+          minScore,
           includeContext,
           debug,
         } = args as {
@@ -392,8 +405,10 @@ const githubFamily: FamilyDefinition = {
           maxFiles: number;
           maxFileBytes: number;
           fileFilter?: string[];
+          preFilterByContent?: boolean;
           topK: number;
           profile: string;
+          minScore?: number;
           includeContext: boolean;
           debug: boolean;
         };
@@ -406,7 +421,9 @@ const githubFamily: FamilyDefinition = {
           maxFiles,
           maxFileBytes,
           ...(fileFilter !== undefined ? { fileFilter } : {}),
+          ...(preFilterByContent !== undefined ? { preFilterByContent } : {}),
           topK,
+          ...(minScore !== undefined ? { minScore } : {}),
           profile: profile as
             | 'balanced'
             | 'lexical-heavy'

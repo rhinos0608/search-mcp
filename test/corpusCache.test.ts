@@ -16,6 +16,9 @@ import {
   getOrBuildCorpus,
   loadCorpusById,
   invalidateCorpus,
+  listCorpora,
+  inspectCorpus,
+  logCorpusQuery,
 } from '../src/utils/corpusCache.js';
 import type { CorpusChunk, SemanticCrawlSource } from '../src/types.js';
 
@@ -662,4 +665,54 @@ test('byte-weighted LRU eviction uses maxTotalBytes, not only corpus count', asy
     await loadCorpusById(second.corpusId, { cacheDir }),
     'Expected newest corpus to remain',
   );
+});
+
+test('listCorpora and inspectCorpus expose URL summaries and recent queries', async () => {
+  const cacheDir = makeTmpCacheDir();
+  const chunks = [
+    {
+      text: 'alpha',
+      url: 'https://example.com/a',
+      section: 'A',
+      charOffset: 0,
+      chunkIndex: 0,
+      totalChunks: 3,
+    },
+    {
+      text: 'beta',
+      url: 'https://example.com/a',
+      section: 'A2',
+      charOffset: 10,
+      chunkIndex: 1,
+      totalChunks: 3,
+    },
+    {
+      text: 'gamma',
+      url: 'https://example.com/b',
+      section: 'B',
+      charOffset: 20,
+      chunkIndex: 2,
+      totalChunks: 3,
+    },
+  ] satisfies CorpusChunk[];
+  const embeddings = makeEmbeddings(chunks);
+  const corpus = await getOrBuildCorpus(
+    TEST_SOURCE,
+    async () => ({ chunks, embeddings, model: 'm', contentHash: computeContentHash(chunks) }),
+    { cacheDir },
+  );
+
+  logCorpusQuery(corpus.corpusId, 'first query', 5, 3, { cacheDir });
+  logCorpusQuery(corpus.corpusId, 'second query', 5, 2, { cacheDir });
+
+  const summaries = listCorpora({ cacheDir });
+  assert.equal(summaries.length, 1);
+  assert.equal(summaries[0]?.urlCount, 2);
+  assert.equal(summaries[0]?.topUrls[0]?.url, 'https://example.com/a');
+  assert.deepEqual(summaries[0]?.recentQueries, ['second query', 'first query']);
+
+  const inspection = inspectCorpus(corpus.corpusId, { cacheDir });
+  assert.ok(inspection);
+  assert.equal(inspection?.urls[0]?.chunkCount, 2);
+  assert.equal(inspection?.recentQueries[0]?.query, 'second query');
 });

@@ -166,6 +166,8 @@ describe('SemanticCrawlResult shape', () => {
       totalChunks: 10,
       successfulPages: 1,
       corpusId: 'some-corpus-id',
+      topKRequested: 5,
+      topKDelivered: 0,
       chunks: [],
     };
     assert.strictEqual(result.corpusId, 'some-corpus-id');
@@ -590,10 +592,11 @@ describe('filterByPathPrefix', () => {
       makePage('https://docs.docker.com/cli/config/'),
     ];
     const filtered = filterByPathPrefix(pages, seed);
-    assert.strictEqual(filtered.length, 3);
-    assert.ok(filtered.some((p) => p.url.includes('dockerfile/')));
-    assert.ok(!filtered.some((p) => p.url.includes('cli/config')));
-    assert.ok(filtered.some((p) => p.url.includes('args')));
+    assert.strictEqual(filtered.kept.length, 3);
+    assert.ok(filtered.kept.some((p) => p.url.includes('dockerfile/')));
+    assert.ok(!filtered.kept.some((p) => p.url.includes('cli/config')));
+    assert.ok(filtered.kept.some((p) => p.url.includes('args')));
+    assert.strictEqual(filtered.droppedCount, 1);
   });
 
   it('allows drift when allowPathDrift is true', () => {
@@ -603,7 +606,8 @@ describe('filterByPathPrefix', () => {
       makePage('https://docs.docker.com/cli/config/'),
     ];
     const filtered = filterByPathPrefix(pages, seed, true);
-    assert.strictEqual(filtered.length, 2);
+    assert.strictEqual(filtered.kept.length, 2);
+    assert.strictEqual(filtered.droppedCount, 0);
   });
 });
 
@@ -1147,9 +1151,9 @@ describe('filterByPathPrefix nested paths', () => {
       makePage('https://example.com/blog/post'),
     ];
     const filtered = filterByPathPrefix(pages, seed);
-    assert.strictEqual(filtered.length, 4);
-    assert.ok(filtered.some((p) => p.url === 'https://example.com/docs/guides/install/step1'));
-    assert.ok(!filtered.some((p) => p.url === 'https://example.com/blog/post'));
+    assert.strictEqual(filtered.kept.length, 4);
+    assert.ok(filtered.kept.some((p) => p.url === 'https://example.com/docs/guides/install/step1'));
+    assert.ok(!filtered.kept.some((p) => p.url === 'https://example.com/blog/post'));
   });
 
   it('keeps pages when seed path ends with trailing slash', () => {
@@ -1159,7 +1163,7 @@ describe('filterByPathPrefix nested paths', () => {
       makePage('https://example.com/docs/getting-started'),
     ];
     const filtered = filterByPathPrefix(pages, seed);
-    assert.strictEqual(filtered.length, 2);
+    assert.strictEqual(filtered.kept.length, 2);
   });
 });
 
