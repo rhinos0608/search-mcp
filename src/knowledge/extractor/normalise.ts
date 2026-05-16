@@ -100,10 +100,12 @@ function extractFromToolResult(
   }
 
   // ── Array-based results ──
-  const arraysToTry = ['results', 'articles', 'pages', 'posts', 'items', 'data'];
+  const arraysToTry: unknown[] = Array.isArray(result) ? [result] : [];
+  for (const key of ['results', 'articles', 'pages', 'posts', 'items', 'data']) {
+    arraysToTry.push(result[key]);
+  }
 
-  for (const key of arraysToTry) {
-    const arr = result[key];
+  for (const arr of arraysToTry) {
     if (!Array.isArray(arr) || arr.length === 0) continue;
 
     // Concatenate all text content from the array
@@ -114,13 +116,17 @@ function extractFromToolResult(
     for (const item of arr) {
       if (item === null || typeof item !== 'object') continue;
       const obj = item as Record<string, unknown>;
+      const itemParts: string[] = [];
 
-      if (typeof obj.content === 'string' && obj.content.trim().length > 0) {
-        parts.push(obj.content);
-      } else if (typeof obj.text === 'string' && obj.text.trim().length > 0) {
-        parts.push(obj.text);
-      } else if (typeof obj.snippet === 'string' && obj.snippet.trim().length > 0) {
-        parts.push(obj.snippet);
+      for (const key of ['content', 'text', 'textContent', 'snippet', 'description', 'extraSnippet']) {
+        const value = obj[key];
+        if (typeof value === 'string' && value.trim().length > 0) {
+          itemParts.push(value.trim());
+        }
+      }
+
+      if (itemParts.length > 0) {
+        parts.push(itemParts.join('\n'));
       }
 
       if (firstUrl === undefined && typeof obj.url === 'string') {
