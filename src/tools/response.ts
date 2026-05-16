@@ -10,6 +10,7 @@
 
 import { logger } from '../logger.js';
 import { isToolError } from '../errors.js';
+import { outputBudget } from '../utils/outputBudget.js';
 import type { ToolResult } from '../types.js';
 import type { RateLimitInfo } from '../rateLimit.js';
 
@@ -187,6 +188,15 @@ export function wrapResponse<T>(data: T, warnings?: string[]): ToolWrappedRespon
 export interface MakeResultOpts {
   warnings?: string[];
   rateLimit?: RateLimitInfo;
+  correction?: { original: string; corrected: string; changes: { original: string; corrected: string; distance: number }[] };
+  intentFilter?: {
+    filtered: boolean;
+    totalResults: number;
+    filteredCount: number;
+    searchableTerms: string[];
+    bytesBefore: number;
+    bytesAfter: number;
+  };
 }
 
 export function makeResult<T>(
@@ -203,6 +213,8 @@ export function makeResult<T>(
       timestamp: new Date().toISOString(),
       ...(opts?.warnings && opts.warnings.length > 0 ? { warnings: opts.warnings } : {}),
       ...(opts?.rateLimit ? { rateLimit: opts.rateLimit } : {}),
+      ...(opts?.correction ? { correction: opts.correction } : {}),
+      ...(opts?.intentFilter ? { intentFilter: opts.intentFilter } : {}),
     },
   };
 }
@@ -237,7 +249,7 @@ function sanitizeErrorMessage(err: unknown): string {
   return baseMessage;
 }
 
-export function errorResponse(err: unknown): {
+export function errorResponse(err: unknown, toolName?: string): {
   content: { type: 'text'; text: string }[];
   isError: true;
 } {
@@ -248,15 +260,10 @@ export function errorResponse(err: unknown): {
     if (err.statusCode !== undefined) payload.statusCode = err.statusCode;
     if (err.backend !== undefined) payload.backend = err.backend;
   }
-  return {
-    content: [
-      {
-        type: 'text' as const,
-        text: JSON.stringify(payload, null, 2),
-      },
-    ],
-    isError: true,
-  };
+  const text = JSON.stringify(payload, null, 2);
+  const content = [{ type: 'text' as const, text }];
+  outputBudget.recordResponse(toolName ?? 'unknown', Buffer.byteLength(text));
+  return { content, isError: true };
 }
 
 export function successResponse<T>(result: ToolResult<T>): {
@@ -264,6 +271,7 @@ export function successResponse<T>(result: ToolResult<T>): {
 } {
   // Use hybrid serialization for large text fields (> 8KB), default to indented JSON
   const formatted = formatHybridResult(result);
+  outputBudget.recordResponse(result.meta.tool, Buffer.byteLength(formatted));
   return {
     content: [
       {
@@ -305,6 +313,6 @@ export async function handleToolCall<T>(
     return successResponse(result);
   } catch (err: unknown) {
     logger.error({ err, tool, action }, 'Tool failed');
-    return errorResponse(err);
+    return errorResponse(err, tool);
   }
 }

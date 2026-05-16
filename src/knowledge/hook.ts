@@ -54,7 +54,7 @@ const PASSIVE_CAPTURE_ALLOWLIST = new Set([
   'packages.pypi',
 ]);
 
-const NOT_CAPTURED_PREFIXES = ['graph_', 'family_', 'run_', 'entity_', 'deep_research'];
+const NOT_CAPTURED_PREFIXES = ['graph_', 'family_', 'run_', 'entity_', 'deep_research', 'knowledge_graph'];
 
 function isToolCaptured(toolName: string): boolean {
   for (const prefix of NOT_CAPTURED_PREFIXES) {

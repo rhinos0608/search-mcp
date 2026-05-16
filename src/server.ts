@@ -33,17 +33,8 @@ import { registerBrowserTool } from './tools/families/browser.js';
 // Deep research
 import { registerDeepResearchTool } from './tools/standalone/deepResearch.js';
 
-// Knowledge graph tools
-import { registerGraphIngestTool } from './tools/graph-ingest.js';
-import { registerGraphQueryTool } from './tools/graph-query.js';
-import { registerEntityLookupBatchTool } from './tools/entity-lookup-batch.js';
-import { registerGraphStatusTool } from './tools/graph-status.js';
-import { registerGraphRebuildTool } from './tools/graph-rebuild.js';
-import { registerFamilyListTool } from './tools/family-list.js';
-import { registerFamilyGetTool } from './tools/family-get.js';
-import { registerFamilyMergeTool } from './tools/family-merge.js';
-import { registerRunListTool } from './tools/run-list.js';
-import { registerRunRollbackTool } from './tools/run-rollback.js';
+// Knowledge graph tool family
+import { registerKnowledgeGraphTool } from './tools/families/knowledgeGraph.js';
 
 // Knowledge graph
 import { initKgDb } from './knowledge/store/db.js';
@@ -111,18 +102,9 @@ export function createServer(
   registerFetchFocus(server, cfg);
   registerHealthCheck(server, cfg);
 
-  // Knowledge graph tools (conditional on KG enabled)
+  // Knowledge graph family (conditional on KG enabled)
   if (cfg.knowledgeGraph.enabled) {
-    registerGraphIngestTool(server, cfg);
-    registerGraphQueryTool(server, cfg);
-    registerEntityLookupBatchTool(server, cfg);
-    registerGraphStatusTool(server, cfg);
-    registerGraphRebuildTool(server, cfg);
-    registerFamilyListTool(server, cfg);
-    registerFamilyGetTool(server, cfg);
-    registerFamilyMergeTool(server, cfg);
-    registerRunListTool(server, cfg);
-    registerRunRollbackTool(server, cfg);
+    registerKnowledgeGraphTool(server, cfg, kgHook ?? undefined);
   }
 
   return { server, kgHook };

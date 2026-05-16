@@ -90,7 +90,7 @@ export async function runConsolidationPass(config: KnowledgeGraphConfig): Promis
   logger.info('kg: runConsolidationPass starting');
   const result: ConsolidationResult = { pairsChecked: 0, autoMerged: 0, candidatesCreated: 0, llmCalls: 0, durationMs: 0 };
   try {
-    const families = queryFamilies({ limit: config.consolidation.maxFamilies ?? 300 }).families;
+    const families = queryFamilies({ limit: config.consolidation.maxFamilies }).families;
     if (families.length < 2) return result;
     if (families.length >= config.consolidation.annThreshold) { logger.warn({ familyCount: families.length }, 'kg: consolidation skipped — exceeds ANN threshold, V7.1+ required'); return result; }
     const cfgGlobal = loadConfig();

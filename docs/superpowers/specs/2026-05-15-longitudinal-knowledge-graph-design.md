@@ -4,6 +4,8 @@
 **Status:** Approved, pending implementation plan  
 **Replaces:** V5.0.0 "Persistent Corpus Indexes" (retired — superseded by this design)
 
+> **Implementation note (2026-05-17):** The V7 MCP tool surface was consolidated after this design was written. Historical standalone tool names map to the single `knowledge_graph` family tool: `graph_ingest` → `knowledge_graph.ingest`, `graph_query` → `knowledge_graph.query`, `graph_status` → `knowledge_graph.status`, `graph_rebuild` → `knowledge_graph.rebuild`; `entity_lookup_batch`, `family_list`, `family_get`, `family_merge`, `run_list`, and `run_rollback` are actions on that same family tool.
+
 ---
 
 ## Context
@@ -47,7 +49,7 @@ kg_events  (append-only SQLite, source of truth)
 Projection Rebuild  ──► kg_nodes, kg_edges, kg_families, kg_sources, kg_node_families
         │
         ▼
-MCP Tools  (graph_query, family_list, run_list, ...)
+MCP Tool   (`knowledge_graph` actions: query, family_list, run_list, ...)
 ```
 
 LightRAG/RAG-Anything is **not** in the write path. It may be wired as a downstream read-side projection for hybrid retrieval in V7.1+.
@@ -430,7 +432,7 @@ Alias-aware to prevent duplicates after merges. Each `kg_node` carries an `alias
 
 **Bad-merge recovery:** `ENTITY_SPLIT { split_node_id, merged_event_id, reason, restored_label }`. V7.0 projection rule: restores original node and its pre-merge edges. Post-merge evidence/aliases remain on `into_id`; a `ROLLBACK_FAMILY_REATTRIBUTED` warning is emitted for any post-merge evidence that cannot be cleanly split.
 
-**Idempotency:** `graph_ingest` accepts an optional `idempotency_key`. Internal passive flushes derive one from `session_id + sorted_content_hash_list + flush_window`. If a non-failed run with the same key already exists, returns the existing `run_id` without re-ingesting.
+**Idempotency:** `knowledge_graph.ingest` accepts an optional `idempotency_key`. Internal passive flushes derive one from `session_id + sorted_content_hash_list + flush_window`. If a non-failed run with the same key already exists, returns the existing `run_id` without re-ingesting.
 
 ### Temporal Attribution
 
@@ -475,7 +477,7 @@ Before writing to `kg_pending_extractions`, content passes through the existing 
 
 **Hook failure isolation:**
 - Passive capture failure: log warning + metric; never fail the tool call
-- Explicit `graph_ingest` failure: structured error in tool result
+- Explicit `knowledge_graph.ingest` failure: structured error in tool result
 - `deep_research` KG failure: append warning to `meta.knowledgeGraph`; return normal research result
 
 ---
@@ -610,22 +612,22 @@ All graph read tools include `warnings: StructuredWarning[]` in their output.
 
 | Tool | Description |
 |---|---|
-| `graph_ingest` | Ingest content into the knowledge graph |
-| `graph_query` | Semantic search, entity lookup, relationship traversal |
-| `entity_lookup_batch` | Resolve a list of entity IDs → labeled nodes |
-| `graph_status` | Health, run state, projection age, storage |
-| `graph_rebuild` | On-demand projection rebuild |
-| `family_list` | All families with stats and merge candidates |
-| `family_get` | Full family detail: entities, sources, run history, relations |
-| `family_merge` | Manually emit `FAMILY_MERGED` |
-| `run_list` | Filterable, paginated list of research runs |
-| `run_rollback` | Compensating-event rollback with dry-run mode |
+| `knowledge_graph.ingest` | Ingest content into the knowledge graph |
+| `knowledge_graph.query` | Semantic search, entity lookup, relationship traversal |
+| `knowledge_graph.entity_lookup_batch` | Resolve a list of entity IDs → labeled nodes |
+| `knowledge_graph.status` | Health, run state, projection age, storage |
+| `knowledge_graph.rebuild` | On-demand projection rebuild |
+| `knowledge_graph.family_list` | All families with stats and merge candidates |
+| `knowledge_graph.family_get` | Full family detail: entities, sources, run history, relations |
+| `knowledge_graph.family_merge` | Manually emit `FAMILY_MERGED` |
+| `knowledge_graph.run_list` | Filterable, paginated list of research runs |
+| `knowledge_graph.run_rollback` | Compensating-event rollback with dry-run mode |
 
 **Deferred V7.1+:** `graph_query_temporal`, `graph_diff`, `graph_consolidate`, `graph_export`.
 
 ### Tool Schemas
 
-**`graph_ingest`:**
+**`knowledge_graph.ingest`:**
 
 ```typescript
 // Input
@@ -652,9 +654,9 @@ All graph read tools include `warnings: StructuredWarning[]` in their output.
 { status: 'processing', run_id: string }
 ```
 
-Timeout does not lose the job. Run row in `kg_runs` persists; caller polls `graph_status` or `run_list`.
+Timeout does not lose the job. Run row in `kg_runs` persists; caller polls `knowledge_graph.status` or `knowledge_graph.run_list`.
 
-**`graph_query`:**
+**`knowledge_graph.query`:**
 
 Exactly **one** of `entity_id`, `entity_label`, or `query` must be provided. Zero or more than one returns a validation error.
 
@@ -737,7 +739,7 @@ Exactly **one** of `entity_id`, `entity_label`, or `query` must be provided. Zer
 }
 ```
 
-**`graph_status`:**
+**`knowledge_graph.status`:**
 
 ```typescript
 {
@@ -761,7 +763,7 @@ Exactly **one** of `entity_id`, `entity_label`, or `query` must be provided. Zer
 }
 ```
 
-**`graph_rebuild`:**
+**`knowledge_graph.rebuild`:**
 
 ```typescript
 // Input

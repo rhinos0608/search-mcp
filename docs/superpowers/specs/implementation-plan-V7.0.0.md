@@ -3,6 +3,8 @@
 **Created:** 2026-05-15
 **Status:** In progress
 
+> **Implementation note (2026-05-17):** The V7 knowledge graph MCP surface has been consolidated into a single `knowledge_graph` family tool. Historical references to standalone tools map to actions: `graph_ingest` → `knowledge_graph.ingest`, `graph_query` → `knowledge_graph.query`, `graph_status` → `knowledge_graph.status`, `graph_rebuild` → `knowledge_graph.rebuild`, while `entity_lookup_batch`, `family_list`, `family_get`, `family_merge`, `run_list`, and `run_rollback` are actions on the same family tool.
+
 ## Phase Structure
 
 6 sequential phases. Each phase produces reviewable, testable output. Phase 1 must complete before Phase 2, etc.
@@ -146,7 +148,7 @@
 - Run completion (async after extractor)
 - Every 500 events (configurable)
 - 24h fallback timer
-- On-demand via `graph_rebuild` tool
+- On-demand via `knowledge_graph` action `rebuild`
 
 ### Deliverables
 - `src/knowledge/store/projections.ts` (build + query)
@@ -206,16 +208,16 @@ Each tool follows the pattern: standalone registration via `server.registerTool(
 
 | # | Tool | File | Description |
 |---|------|------|-------------|
-| 1 | `graph_ingest` | `src/tools/graph-ingest.ts` | Ingest text/URL, sync/async, idempotency |
-| 2 | `graph_query` | `src/tools/graph-query.ts` | Entity lookup, semantic search, traversal |
-| 3 | `entity_lookup_batch` | `src/tools/entity-lookup-batch.ts` | Resolve entity IDs → labeled nodes |
-| 4 | `graph_status` | `src/tools/graph-status.ts` | Health, run state, projection age |
-| 5 | `graph_rebuild` | `src/tools/graph-rebuild.ts` | On-demand projection rebuild |
-| 6 | `family_list` | `src/tools/family-list.ts` | All families with stats + merge candidates |
-| 7 | `family_get` | `src/tools/family-get.ts` | Full family detail |
-| 8 | `family_merge` | `src/tools/family-merge.ts` | Manual FAMILY_MERGED emission |
-| 9 | `run_list` | `src/tools/run-list.ts` | Filterable run listing |
-| 10 | `run_rollback` | `src/tools/run-rollback.ts` | Compensating-event rollback |
+| 1 | `knowledge_graph.ingest` | `src/tools/families/knowledgeGraph.ts` | Ingest text/URL, sync/async, idempotency |
+| 2 | `knowledge_graph.query` | `src/tools/families/knowledgeGraph.ts` | Entity lookup, semantic search, traversal |
+| 3 | `knowledge_graph.entity_lookup_batch` | `src/tools/families/knowledgeGraph.ts` | Resolve entity IDs → labeled nodes |
+| 4 | `knowledge_graph.status` | `src/tools/families/knowledgeGraph.ts` | Health, run state, projection age |
+| 5 | `knowledge_graph.rebuild` | `src/tools/families/knowledgeGraph.ts` | On-demand projection rebuild |
+| 6 | `knowledge_graph.family_list` | `src/tools/families/knowledgeGraph.ts` | All families with stats + merge candidates |
+| 7 | `knowledge_graph.family_get` | `src/tools/families/knowledgeGraph.ts` | Full family detail |
+| 8 | `knowledge_graph.family_merge` | `src/tools/families/knowledgeGraph.ts` | Manual FAMILY_MERGED emission |
+| 9 | `knowledge_graph.run_list` | `src/tools/families/knowledgeGraph.ts` | Filterable run listing |
+| 10 | `knowledge_graph.run_rollback` | `src/tools/families/knowledgeGraph.ts` | Compensating-event rollback |
 
 ### Deliverables
 - 10 tool files in `src/tools/`

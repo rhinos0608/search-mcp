@@ -25,7 +25,11 @@ import {
   errorResponse,
   successResponse,
   type ToolWrappedResponse,
+  type MakeResultOpts,
 } from './response.js';
+import { correctQuery } from '../utils/fuzzyCorrection.js';
+import { applyIntentFilter } from '../utils/intentFilter.js';
+import type { IntentFilterResult } from '../utils/intentFilter.js';
 
 // ── Types ──────────────────────────────────────
 
@@ -93,18 +97,46 @@ function buildMergedSchema(family: FamilyDefinition): z.ZodObject<z.ZodRawShape>
     const objSchema = action.schema as z.ZodObject<z.ZodRawShape>;
     const rawShape = objSchema._zod.def.shape;
     for (const [key, fieldType] of Object.entries(rawShape)) {
-      if (!allFields.has(key)) allFields.set(key, fieldType);
+      if (key === 'action') {
+        if (!allFields.has(key)) allFields.set(key, fieldType);
+        continue;
+      }
+      if (allFields.has(key)) {
+        // Different actions often reuse names with incompatible schemas (e.g.
+        // `sort`, `repo`, `op`). Keep the discovery schema permissive and let
+        // the selected action's strict schema validate in superRefine/runtime.
+        allFields.set(key, z.unknown());
+      } else {
+        allFields.set(key, fieldType);
+      }
     }
   }
   const names = family.actions.map((a) => a.name) as [string, ...string[]];
   const merged: Record<string, unknown> = {
     action: z.enum(names).describe(family.name + ' action: ' + names.join(', ')),
+    fuzzyCorrect: z.boolean().optional().default(true).describe('Auto-correct typos in query using fuzzy matching'),
+    intent: z.string().optional().describe('Natural language intent for result filtering when output exceeds ~5KB'),
   };
   for (const [key, fieldType] of allFields) {
     if (key === 'action') continue;
     merged[key] = (fieldType as z.ZodType).optional();
   }
-  return z.object(merged) as z.ZodObject<z.ZodRawShape>;
+  return z.object(merged).superRefine((value, ctx) => {
+    const actionName = typeof value.action === 'string' ? value.action : '';
+    const action = family.actions.find((a) => a.name === actionName);
+    if (!action) return;
+
+    const parsed = (action.schema as z.ZodObject<z.ZodRawShape>).safeParse(value);
+    if (parsed.success) return;
+
+    for (const issue of parsed.error.issues) {
+      ctx.addIssue({
+        code: 'custom',
+        path: issue.path,
+        message: issue.message,
+      });
+    }
+  }) as z.ZodObject<z.ZodRawShape>;
 }
 
 /**
@@ -137,7 +169,7 @@ export function registerFamily(
       // Find the matching action
       const action = family.actions.find((a) => a.name === actionName);
       if (!action) {
-        return errorResponse(new Error(`${family.name}: unknown action "${actionName}"`));
+        return errorResponse(new Error(`${family.name}: unknown action "${actionName}"`), family.name);
       }
 
       // Strict per-action validation — run the selected action's own
@@ -153,6 +185,7 @@ export function registerFamily(
           new Error(
             `${family.name}.${actionName} validation error: ${issues.join('; ')}`,
           ),
+          `${family.name}.${actionName}`,
         );
       }
 
@@ -160,7 +193,7 @@ export function registerFamily(
       const actionIssue = action.configIssue?.(cfg) ?? null;
       if (actionIssue) {
         logger.warn({ tool: family.name, action: actionName, actionIssue }, 'Action unavailable');
-        return errorResponse(new Error(`${family.name}.${actionName} unavailable: ${actionIssue}`));
+        return errorResponse(new Error(`${family.name}.${actionName} unavailable: ${actionIssue}`), `${family.name}.${actionName}`);
       }
 
       const start = Date.now();
@@ -169,8 +202,25 @@ export function registerFamily(
         `${family.name}.${actionName} invoked`,
       );
 
+      // ── Context protection: fuzzy correction ──
+      let correction: { original: string; corrected: string; changes: { original: string; corrected: string; distance: number }[] } | undefined;
+      const fuzzyOpt = parsed.data.fuzzyCorrect !== false;
+      const rawQuery = typeof parsed.data.query === 'string' ? parsed.data.query : undefined;
+      if (fuzzyOpt && rawQuery) {
+        const cr = correctQuery(rawQuery);
+        if (cr.changes.length > 0) {
+          correction = { original: rawQuery, corrected: cr.corrected, changes: cr.changes };
+        }
+      }
+
+      // Build handler args from parsed.data (honours Zod defaults)
+      const handlerArgs = { ...parsed.data } as Record<string, unknown>;
+      if (correction && typeof handlerArgs.query === 'string') {
+        handlerArgs.query = correction.corrected;
+      }
+
       try {
-        const result = await action.handler(rawArgs as Record<string, unknown>, cfg, extra);
+        const result = await action.handler(handlerArgs, cfg, extra);
 
         // Type-narrow the result with a proper guard
         const isWrapped =
@@ -181,17 +231,88 @@ export function registerFamily(
         const wrapped: ToolWrappedResponse<unknown> | null = isWrapped
           ? (result as ToolWrappedResponse<unknown>)
           : null;
-        const responseData = wrapped !== null ? wrapped.data : result;
+        let responseData = wrapped !== null ? wrapped.data : result;
         const rawWs = wrapped !== null ? wrapped.warnings : undefined;
         const ws: string[] | undefined =
           rawWs !== undefined && rawWs.length > 0 ? Array.from(rawWs) : undefined;
 
         const toolLabel = `${family.name}.${actionName}`;
+        // ── Context protection: intent filtering ──
+        const rawIntent = (rawArgs as Record<string, unknown>).intent;
+        let intentFilterResult: IntentFilterResult<unknown> | undefined;
+        if (rawIntent && typeof rawIntent === 'string' && rawIntent.trim().length > 0) {
+          if (Array.isArray(responseData)) {
+            const filtered = applyIntentFilter(
+              responseData as unknown[],
+              rawIntent,
+              5000,
+              (item) => JSON.stringify(item),
+            );
+            if (filtered.filtered) {
+              intentFilterResult = filtered;
+              responseData = filtered.results;
+            }
+          } else if (responseData !== null && typeof responseData === 'object') {
+            const obj = responseData as Record<string, unknown>;
+            const arrayKeys = [
+              'results', 'items', 'repositories', 'videos', 'posts', 'comments',
+              'papers', 'packages', 'works', 'questions', 'nodes', 'families', 'runs',
+            ];
+            for (const key of arrayKeys) {
+              if (Array.isArray(obj[key]) && (obj[key] as unknown[]).length > 0) {
+                const filtered = applyIntentFilter(
+                  obj[key] as unknown[],
+                  rawIntent,
+                  5000,
+                  (item) => JSON.stringify(item),
+                );
+                if (filtered.filtered) {
+                  intentFilterResult = filtered;
+                  (obj)[key] = filtered.results;
+                  break;
+                }
+              }
+            }
+            // Fallback: first top-level array if no preferred key matched
+            if (!intentFilterResult) {
+              const entries = Object.entries(obj).filter(([_, v]) => Array.isArray(v));
+              const firstEntry = entries.length > 0 ? entries[0] : undefined;
+              if (firstEntry) {
+                const firstKey = firstEntry[0];
+                const firstVal = firstEntry[1];
+                const filtered = applyIntentFilter(
+                  firstVal as unknown[],
+                  rawIntent,
+                  5000,
+                  (item) => JSON.stringify(item),
+                );
+                if (filtered.filtered) {
+                  intentFilterResult = filtered;
+                  obj[firstKey] = filtered.results;
+                }
+              }
+            }
+          }
+        }
+
+        const meta: Record<string, unknown> = {};
+        if (ws !== undefined) meta.warnings = ws;
+        if (correction) meta.correction = correction;
+        if (intentFilterResult) {
+          meta.intentFilter = {
+            filtered: intentFilterResult.filtered,
+            totalResults: intentFilterResult.totalResults,
+            filteredCount: intentFilterResult.filteredCount,
+            searchableTerms: intentFilterResult.searchableTerms,
+            bytesBefore: intentFilterResult.bytesBefore,
+            bytesAfter: intentFilterResult.bytesAfter,
+          };
+        }
         const full = makeResult(
           toolLabel,
           responseData,
           Date.now() - start,
-          ws !== undefined ? { warnings: ws } : undefined,
+          meta as MakeResultOpts,
         );
 
         // KG passive capture (fire-and-forget, never fails the tool call)
@@ -204,7 +325,7 @@ export function registerFamily(
         return successResponse(full);
       } catch (err: unknown) {
         logger.error({ err, tool: family.name, action: actionName }, 'Action failed');
-        return errorResponse(err);
+        return errorResponse(err, `${family.name}.${actionName}`);
       }
     },
   );

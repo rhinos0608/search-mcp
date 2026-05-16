@@ -1,5 +1,17 @@
 import type { RateLimitInfo } from './rateLimit.js';
 
+// ── Fuzzy correction metadata ────────────────────────────────────────────────
+
+export interface QueryCorrection {
+  original: string;
+  corrected: string;
+  changes: {
+    original: string;
+    corrected: string;
+    distance: number;
+  }[];
+}
+
 // ToolResult<T> — every tool handler returns this
 export interface ToolResult<T> {
   data: T;
@@ -9,6 +21,16 @@ export interface ToolResult<T> {
     timestamp: string; // ISO 8601
     warnings?: string[] | undefined;
     rateLimit?: RateLimitInfo | undefined;
+    correction?: QueryCorrection | undefined;
+    /** Intent-driven filter metadata when the tool supports result filtering. */
+    intentFilter?: {
+      filtered: boolean;
+      totalResults: number;
+      filteredCount: number;
+      searchableTerms: string[];
+      bytesBefore: number;
+      bytesAfter: number;
+    } | undefined;
   };
 }
 

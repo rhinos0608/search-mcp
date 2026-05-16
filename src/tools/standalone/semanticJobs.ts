@@ -12,6 +12,8 @@ import { logger } from '../../logger.js';
 import { DEFAULT_SEMANTIC_MAX_BYTES } from '../../semanticLimits.js';
 import { semanticJobs } from '../semanticJobs.js';
 import { makeResult, errorResponse, successResponse } from '../response.js';
+import { correctQuery } from '../../utils/fuzzyCorrection.js';
+import { applyIntentFilter, type IntentFilterResult } from '../../utils/intentFilter.js';
 
 export function registerSemanticJobs(server: McpServer, cfg: SearchConfig): void {
   server.registerTool(
@@ -107,6 +109,15 @@ export function registerSemanticJobs(server: McpServer, cfg: SearchConfig): void
               'When false (default), constraints only influence ranking scores - all results are returned ' +
               'but listings matching your constraints are ranked higher. Use true to filter out non-matches.',
           ),
+        fuzzyCorrect: z
+          .boolean()
+          .optional()
+          .default(true)
+          .describe('Auto-correct typos in the query using Levenshtein fuzzy matching.'),
+        intent: z
+          .string()
+          .optional()
+          .describe('Natural language intent for result filtering when output exceeds ~5KB.'),
       },
     },
     async ({
@@ -121,12 +132,24 @@ export function registerSemanticJobs(server: McpServer, cfg: SearchConfig): void
       addJobSuffix,
       useJobSpy,
       enforceConstraints,
+      fuzzyCorrect,
+      intent,
     }) => {
       logger.info({ tool: 'semantic_jobs', query, maxPages, topK }, 'Tool invoked');
       const start = Date.now();
       try {
+        let query_ = query;
+        let correction: { original: string; corrected: string; changes: { original: string; corrected: string; distance: number }[] } | undefined;
+        if (fuzzyCorrect) {
+          const cr = correctQuery(query);
+          if (cr.changes.length > 0) {
+            correction = { original: query, corrected: cr.corrected, changes: cr.changes };
+            query_ = cr.corrected;
+          }
+        }
+
         const data = await semanticJobs({
-          query,
+          query: query_,
           embeddingBaseUrl: cfg.embeddingSidecar.baseUrl,
           ...(cfg.embeddingSidecar.apiToken
             ? { embeddingApiToken: cfg.embeddingSidecar.apiToken }
@@ -144,10 +167,21 @@ export function registerSemanticJobs(server: McpServer, cfg: SearchConfig): void
           enforceConstraints,
         });
         const elapsed = Date.now() - start;
+        let intentFilterResult: IntentFilterResult<typeof data.results[number]> | undefined;
+        if (intent) {
+          intentFilterResult = applyIntentFilter(
+            data.results,
+            intent,
+            5000,
+            (item) => `${item.listing.title} ${item.listing.company ?? ''} ${item.listing.location ?? ''}`,
+          );
+        }
+        const filteredResults = intentFilterResult?.filtered ? intentFilterResult.results : data.results;
+
         const result = makeResult(
           'semantic_jobs',
           {
-            results: data.results.map((scored, index) => ({
+            results: filteredResults.map((scored, index) => ({
               rank: index + 1,
               overallScore: Math.round(scored.overallScore * 1000) / 1000,
               matchedConstraints: scored.matchedConstraints,
@@ -168,13 +202,15 @@ export function registerSemanticJobs(server: McpServer, cfg: SearchConfig): void
           },
           elapsed,
           {
+            ...(correction ? { correction } : {}),
             ...(data.warnings.length > 0 ? { warnings: data.warnings } : {}),
+            ...(intentFilterResult ? { intentFilter: intentFilterResult } : {}),
           },
         );
         return successResponse(result);
       } catch (err: unknown) {
         logger.error({ err, tool: 'semantic_jobs' }, 'Tool failed');
-        return errorResponse(err);
+        return errorResponse(err, 'semantic_jobs');
       }
     },
   );

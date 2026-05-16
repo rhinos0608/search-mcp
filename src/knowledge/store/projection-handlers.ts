@@ -101,7 +101,7 @@ export function handleNodeMetadataUpdated(event: KgEvent, state: ProjectionState
     typeof payload.field === 'string' && payload.field.length > 0 ? payload.field : undefined;
   if (field === undefined) {
     logger.warn(
-      { eventId: event.id, field: payload?.field },
+      { eventId: event.id, field: payload.field },
       'kg: NODE_METADATA_UPDATED missing or invalid field',
     );
     return;

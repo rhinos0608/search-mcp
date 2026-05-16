@@ -513,7 +513,7 @@ export function registerSemanticCrawl(
         return successResponse(result);
       } catch (err: unknown) {
         logger.error({ err, tool: 'semantic_crawl' }, 'Tool failed');
-        return errorResponse(err);
+        return errorResponse(err, 'semantic_crawl');
       }
     },
   );

@@ -118,16 +118,17 @@ npm run config:decrypt   # config.enc -> config.json
 
 
 ### Knowledge Graph (opt-in via `KNOWLEDGE_GRAPH_ENABLED`)
-- `graph_ingest` — text or URL → entities and relationships via LLM pipeline
-- `graph_query` — full-text search, entity lookup, traversal
-- `entity_lookup_batch` — resolve up to 100 entity IDs
-- `graph_status` — event count, projection stats, storage size
-- `graph_rebuild` — rebuild projection tables from event store
-- `family_list` — list families with node counts and merge candidates
-- `family_get` — retrieve family detail with entities and runs
-- `family_merge` — merge one family into another (one-way, irreversible)
-- `run_list` — list extraction runs with filters and pagination
-- `run_rollback` — roll back a run with compensation plan preview
+- `knowledge_graph` (family tool with `action` discriminator):
+  - `ingest` — text or URL → entities and relationships via LLM pipeline
+  - `query` — full-text search, entity lookup, traversal
+  - `entity_lookup_batch` — resolve up to 100 entity IDs
+  - `status` — event count, projection stats, storage size
+  - `rebuild` — rebuild projection tables from event store
+  - `family_list` — list families with node counts and merge candidates
+  - `family_get` — retrieve family detail with entities and runs
+  - `family_merge` — merge one family into another (one-way, irreversible)
+  - `run_list` — list extraction runs with filters and pagination
+  - `run_rollback` — roll back a run with compensation plan preview
 
 ### System
 - `health_check`: verify server status, config health, backend connectivity.

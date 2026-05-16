@@ -66,7 +66,7 @@ function buildNormInput(
     try {
       const resp = await fetch(content.value, { signal: controller.signal });
       clearTimeout(timer);
-      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      if (!resp.ok) throw new Error(`HTTP ${String(resp.status)}`);
       return {
         text: await resp.text(),
         url: content.value,

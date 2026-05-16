@@ -206,10 +206,10 @@ export function listRuns(opts: ListRunsOpts = {}): ListRunsResult {
       params.status = opts.status;
     }
     if (opts.excludeStatuses !== undefined && opts.excludeStatuses.length > 0) {
-      const placeholders = opts.excludeStatuses.map((_, i) => `@excludeStatus${i}`);
+      const placeholders = opts.excludeStatuses.map((_, i) => `@excludeStatus${String(i)}`);
       clauses.push(`status NOT IN (${placeholders.join(', ')})`);
       opts.excludeStatuses.forEach((s, i) => {
-        params[`excludeStatus${i}`] = s;
+        params[`excludeStatus${String(i)}`] = s;
       });
     }
     if (opts.after !== undefined) {

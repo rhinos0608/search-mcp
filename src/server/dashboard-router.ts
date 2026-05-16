@@ -397,7 +397,7 @@ async function handleApi(
 
   if (endpoint === '/rotate-key' && req.method === 'POST') {
     sessionStore.revokeAll();
-    transportManager.closeAll();
+    await transportManager.closeAll();
     const newKey = configManager.rotateApiKey();
     res.setHeader('Set-Cookie', buildClearCookieHeader(https));
     json(res, 200, { newKey, warning: 'All sessions and MCP connections have been terminated.' });

@@ -26,7 +26,7 @@ export function registerSemanticCrawlInspectCorpus(server: McpServer): void {
           makeResult('semantic_crawl_inspect_corpus', corpus, Date.now() - start),
         );
       } catch (err: unknown) {
-        return errorResponse(err);
+        return errorResponse(err, 'semantic_crawl_inspect_corpus');
       }
     },
   );

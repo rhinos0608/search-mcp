@@ -7,6 +7,12 @@
  * The cache stores corpus metadata, chunks, embedding vectors, and source-key
  * lookup rows in one durable database. BM25 is rebuilt on load from cached
  * chunk text, keeping the database schema small while preserving fast reads.
+ *
+ * Display: cached chunk text is full-length. When chunks are retrieved through
+ * the RAG pipeline (`retrieveCorpus`), results are automatically smart-snippet-
+ * extracted via `extractSmartSnippet` using the query terms. Direct consumers
+ * of `loadCorpusById` / `getOrBuildCorpus` should apply smart snippet
+ * extraction explicitly if displaying chunk text to users.
  */
 
 import fs from 'node:fs';

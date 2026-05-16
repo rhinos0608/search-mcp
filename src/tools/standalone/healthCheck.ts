@@ -27,7 +27,7 @@ export function registerHealthCheck(server: McpServer, cfg: SearchConfig): void 
         return successResponse(result);
       } catch (err: unknown) {
         logger.error({ err, tool: 'health_check' }, 'Tool failed');
-        return errorResponse(err);
+        return errorResponse(err, 'health_check');
       }
     },
   );

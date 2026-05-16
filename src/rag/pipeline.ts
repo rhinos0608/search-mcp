@@ -7,6 +7,7 @@ import { MAX_TOKENS, MIN_TOKENS, TOKEN_RATIO, OVERLAP_RATIO } from '../chunking.
 import { dedupeByUrl, dedupeByFingerprint, deduplicateCorpus } from './dedup.js';
 import { applyConstraints } from './constraints.js';
 import { recordRetrievalMetrics, recordDedupMetrics, recordConstraintMetrics } from './metrics.js';
+import { extractSmartSnippet } from '../utils/smartSnippet.js';
 import type { ConstraintConfig, ConstraintExtractors } from './constraints.js';
 import type { DedupeConfig, Coverage } from './types.js';
 import type {
@@ -327,6 +328,18 @@ function retrieveCorpusImpl(
           matched: c.constraintEvaluation.matchedConstraints,
           caveats: c.constraintEvaluation.failedConstraints,
         },
+      };
+    });
+  }
+
+  // Apply smart snippet extraction to result text
+  if (options.query && results.length > 0) {
+    results = results.map((result) => {
+      const snippet = extractSmartSnippet(result.item.text, options.query);
+      if (snippet === result.item.text) return result;
+      return {
+        ...result,
+        item: { ...result.item, text: snippet },
       };
     });
   }

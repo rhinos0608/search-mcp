@@ -49,7 +49,7 @@ Or if no relation: NONE
 <type> must be one of: adjacent, contradicts, parent, child, supersedes.`;
 
 function buildRelationPrompt(familyA: KgFamily, familyB: KgFamily, sharedEntityLabels: string[], sharedEdgeTypes: string[]): string {
-  return [`Family A: ${familyA.label}`, familyA.description ? `  Description: ${familyA.description}` : '', '', `Family B: ${familyB.label}`, familyB.description ? `  Description: ${familyB.description}` : '', '', `Shared entities (${sharedEntityLabels.length}): ${sharedEntityLabels.join(', ')}`, sharedEdgeTypes.length > 0 ? `Cross-family edges: ${sharedEdgeTypes.join(', ')}` : '', '', 'What is the relationship, if any? Respond with RELATION <type> <reason> or NONE.'].filter(Boolean).join('\n');
+  return [`Family A: ${familyA.label}`, familyA.description ? `  Description: ${familyA.description}` : '', '', `Family B: ${familyB.label}`, familyB.description ? `  Description: ${familyB.description}` : '', '', `Shared entities (${String(sharedEntityLabels.length)}): ${sharedEntityLabels.join(', ')}`, sharedEdgeTypes.length > 0 ? `Cross-family edges: ${sharedEdgeTypes.join(', ')}` : '', '', 'What is the relationship, if any? Respond with RELATION <type> <reason> or NONE.'].filter(Boolean).join('\n');
 }
 
 function parseRelationResponse(content: string): { relationType: FamilyRelationType | null; reason?: string } {
@@ -100,8 +100,8 @@ export async function runPass2Relations(): Promise<Pass2RelationResult> {
     const cfgGlobal = loadConfig();
     const kgConfig = cfgGlobal.knowledgeGraph;
     if (!cfgGlobal.llm.baseUrl || !cfgGlobal.llm.provider) { logger.info('kg: LLM not configured, skipping Pass 2'); return result; }
-    const maxFamilies = kgConfig.relations?.maxFamilies ?? 100;
-    const maxNodesPerFamily = kgConfig.relations?.maxNodesPerFamily ?? 100;
+    const maxFamilies = kgConfig.relations.maxFamilies;
+    const maxNodesPerFamily = kgConfig.relations.maxNodesPerFamily;
     const families = queryFamilies({ limit: maxFamilies }).families;
     if (families.length < 2) return result;
     const familyNodeIds = new Map<string, string[]>();
@@ -121,18 +121,15 @@ export async function runPass2Relations(): Promise<Pass2RelationResult> {
     const candidatePairKeys = new Set<string>();
     for (const [, families] of nodeToFamilies) {
       const arr = [...families];
-      for (let i = 0; i < arr.length; i++) {
-        for (let j = i + 1; j < arr.length; j++) {
-          const a = arr[i]!, b = arr[j]!;
+      for (const [i, a] of arr.entries()) {
+        for (const b of arr.slice(i + 1)) {
           candidatePairKeys.add(a < b ? `${a}:${b}` : `${b}:${a}`);
         }
       }
     }
 
     // Also check pairs linked by cross-family edges (edge-only connections)
-    for (let i = 0; i < families.length; i++) {
-      const a = families[i];
-      if (!a) continue;
+    for (const a of families) {
       const aNodeIds = familyNodeIds.get(a.id) ?? [];
       const seenNeighborFamilies = new Set<string>();
       for (const nid of aNodeIds) {

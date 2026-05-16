@@ -39,7 +39,7 @@ export function registerSemanticCrawlListCorpora(server: McpServer): void {
           ),
         );
       } catch (err: unknown) {
-        return errorResponse(err);
+        return errorResponse(err, 'semantic_crawl_list_corpora');
       }
     },
   );

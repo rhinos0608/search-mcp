@@ -18,6 +18,9 @@ import { gitHubCapabilities } from './tools/families/github.js';
 import { packagesCapabilities } from './tools/families/packages.js';
 import { researchCapabilities } from './tools/families/research.js';
 import { browserCapabilities } from './tools/families/browser.js';
+import { knowledgeGraphCapabilities } from './tools/families/knowledgeGraph.js';
+import { outputBudget } from './utils/outputBudget.js';
+import type { OutputBudgetStats } from './utils/outputBudget.js';
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -32,6 +35,7 @@ export interface HealthReport {
   overall: 'healthy' | 'degraded' | 'unhealthy';
   tools: Record<string, ToolHealth>;
   timestamp: string;
+  outputBudget?: OutputBudgetStats | undefined;
 }
 
 // ── Gating rules (required config) ──────────────────────────────────────────
@@ -215,6 +219,22 @@ export function configHealth(cfg: SearchConfig): Record<string, ToolHealth> {
           ...(cap.issue ? { remediation: cap.issue } : {}),
         };
   }
+
+  for (const cap of knowledgeGraphCapabilities(cfg)) {
+    report[cap.name] = cap.available
+      ? { status: 'healthy' as const, message: 'Configured.' }
+      : {
+          status: 'unconfigured' as const,
+          message: 'Missing required configuration.',
+          remediation: cap.issue ?? undefined,
+        };
+  }
+
+  // Budget tracking indicator (lightweight sync check)
+  report.output_budget = {
+    status: 'healthy' as const,
+    message: 'Output budget tracking active.',
+  };
 
   return report;
 }
@@ -740,6 +760,7 @@ export async function runHealthProbes(cfg: SearchConfig): Promise<HealthReport> 
     overall,
     tools,
     timestamp: new Date().toISOString(),
+    outputBudget: outputBudget.getStats(),
   };
 }
 

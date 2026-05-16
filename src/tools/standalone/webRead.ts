@@ -171,7 +171,7 @@ export function registerWebRead(server: McpServer, cfg: SearchConfig, kgHook?: K
         return successResponse(result);
       } catch (err: unknown) {
         logger.error({ err, tool: 'web_read' }, 'Tool failed');
-        return errorResponse(err);
+        return errorResponse(err, 'web_read');
       }
     },
   );

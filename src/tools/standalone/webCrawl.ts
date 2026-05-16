@@ -190,7 +190,7 @@ export function registerWebCrawl(server: McpServer, cfg: SearchConfig, kgHook?: 
         return successResponse(result);
       } catch (err: unknown) {
         logger.error({ err, tool: 'web_crawl' }, 'Tool failed');
-        return errorResponse(err);
+        return errorResponse(err, 'web_crawl');
       }
     },
   );

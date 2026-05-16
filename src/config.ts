@@ -1182,13 +1182,13 @@ export function loadConfig(): SearchConfig {
         DEFAULTS.access.exposeDashboardExternally,
       tailscale: {
         serveConfigured:
-          ((fileConfig as Partial<SearchConfig>).access?.tailscale?.serveConfigured) ??
+          ((fileConfig as { access?: { tailscale?: Partial<AccessConfig['tailscale']> } }).access?.tailscale?.serveConfigured) ??
           DEFAULTS.access.tailscale.serveConfigured,
         funnelConfigured:
-          ((fileConfig as Partial<SearchConfig>).access?.tailscale?.funnelConfigured) ??
+          ((fileConfig as { access?: { tailscale?: Partial<AccessConfig['tailscale']> } }).access?.tailscale?.funnelConfigured) ??
           DEFAULTS.access.tailscale.funnelConfigured,
         allowDashboardOverFunnel:
-          ((fileConfig as Partial<SearchConfig>).access?.tailscale?.allowDashboardOverFunnel) ??
+          ((fileConfig as { access?: { tailscale?: Partial<AccessConfig['tailscale']> } }).access?.tailscale?.allowDashboardOverFunnel) ??
           DEFAULTS.access.tailscale.allowDashboardOverFunnel,
       },
     },
