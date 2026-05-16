@@ -124,6 +124,11 @@ export function createMockRuntime(overrides?: Partial<SearchMcpRuntime>): Search
       consolidation: {
         cadenceMs: 604_800_000,
         annThreshold: 200,
+        maxFamilies: 50,
+      },
+      relations: {
+        maxFamilies: 50,
+        maxNodesPerFamily: 100,
       },
     },
     rescoreWeights: {

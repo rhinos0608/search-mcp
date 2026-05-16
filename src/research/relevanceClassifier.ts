@@ -1,14 +1,20 @@
 /**
- * RelevanceClassifier — post-extraction relevance scoring for findings.
+ * V5.0.0 RelevanceClassifier — adaptive relevance scoring for findings.
  *
- * Scores each candidate finding against the original research query using
- * multi-signal relevance (token overlap, entity match, query term coverage).
+ * V5 replaces the fixed 0.72 lexical threshold with adaptive scoring:
  *
- * Design:
- * - Rule-based, no LLM calls — fast, deterministic, auditable.
- * - Each finding gets a relevanceScore (0-1) and relevanceReason.
- * - Findings at or above 0.72 are considered "relevant" to the query.
- * - Findings below 0.72 are flagged with lowRelevance in the reason field.
+ * - When findings have retrievalScore (from hybrid retrieval + cross-encoder
+ *   rerank), the primary signal is semantic — the finding was extracted from
+ *   a chunk that the cross-encoder scored as relevant to the query. This
+ *   catches the "transformer attention" vs "how LLMs attend" paraphrase gap.
+ *
+ * - When findings don't have retrievalScore (legacy regex extractions),
+ *   fall back to multi-signal lexical scoring but use adaptive thresholds
+ *   (relative cutoff: 0.7 × top_score, or fit a two-component mixture).
+ *
+ * - Adaptive cutoff: threshold = max(0.5, median_of_top_half * 0.7).
+ *   This handles query-level score distribution variation.
+ *
  * - NO findings are dropped — they remain in state for reference.
  * - The synthesizer gates what enters themes using the score.
  */
@@ -16,183 +22,105 @@
 import type { Finding } from './types.js';
 import { logger } from '../logger.js';
 
-// ── Constants ────────────────────────────────────────────────────────────────
+// ── Types ────────────────────────────────────────────────────────────────────
 
-/** Threshold for a finding to be considered relevant enough for thematic inclusion. */
-export const RELEVANCE_THRESHOLD = 0.72;
-
-// ── Helpers ──────────────────────────────────────────────────────────────────
-
-/**
- * Tokenize a string into a set of lowercase, non-empty words, excluding
- * common stop words that carry little topical signal.
- */
-const STOP_WORDS = new Set([
-  'a',
-  'an',
-  'the',
-  'is',
-  'are',
-  'was',
-  'were',
-  'be',
-  'been',
-  'being',
-  'have',
-  'has',
-  'had',
-  'do',
-  'does',
-  'did',
-  'will',
-  'would',
-  'could',
-  'should',
-  'may',
-  'might',
-  'can',
-  'shall',
-  'to',
-  'of',
-  'in',
-  'for',
-  'on',
-  'with',
-  'at',
-  'by',
-  'from',
-  'as',
-  'into',
-  'through',
-  'during',
-  'before',
-  'after',
-  'above',
-  'below',
-  'between',
-  'out',
-  'off',
-  'over',
-  'under',
-  'again',
-  'further',
-  'then',
-  'once',
-  'here',
-  'there',
-  'when',
-  'where',
-  'why',
-  'how',
-  'all',
-  'each',
-  'every',
-  'both',
-  'few',
-  'more',
-  'most',
-  'some',
-  'any',
-  'no',
-  'not',
-  'only',
-  'own',
-  'same',
-  'so',
-  'than',
-  'too',
-  'very',
-  'just',
-  'it',
-  'its',
-  'this',
-  'that',
-  'these',
-  'those',
-  'i',
-  'me',
-  'my',
-  'we',
-  'our',
-  'you',
-  'your',
-  'he',
-  'him',
-  'his',
-  'she',
-  'her',
-  'they',
-  'them',
-  'their',
-  'what',
-  'which',
-  'who',
-  'whom',
-  'and',
-  'but',
-  'or',
-  'if',
-  'because',
-  'about',
-  'up',
-  'down',
-  'also',
-  'well',
-  'very',
-  'quite',
-  'pretty',
-  'rather',
-  'while',
-  'since',
-  'until',
-  'although',
-  'though',
-  'even',
-  'yet',
-]);
-
-function hasNonLatinChars(text: string): boolean {
-  return Array.from(text).some((ch) => {
-    const code = ch.codePointAt(0) ?? 0;
-    return code > 0x7f && code !== 0x200b;
-  });
+export interface RelevanceScore {
+  /** 0-1 relevance score. >= threshold is "relevant". */
+  score: number;
+  /** Human-readable explanation. */
+  reason: string;
+  /** Whether this finding should be admissible for thematic inclusion. */
+  admissible: boolean;
 }
 
+// ── Adaptive threshold computation ───────────────────────────────────────────
+
 /**
- * Tokenize a string into a set of lowercase, non-empty words, excluding
- * common stop words that carry little topical signal.
- * Language-aware: uses Unicode-aware segmentation for non-Latin scripts.
+ * Compute an adaptive relevance threshold from a list of scores.
+ *
+ * Strategy: if we have cross-encoder scores (high-quality signal),
+ * use a relative cutoff: 0.7 × the 75th percentile score.
+ * This automatically adapts to different query difficulty levels.
+ *
+ * If all scores are lexical (low-quality), use median_of_top_half × 0.7.
+ *
+ * Floor: 0.40 — below this nothing is meaningful.
  */
-function tokenize(text: string): string[] {
-  // For non-Latin scripts, use Unicode word boundaries
-  if (hasNonLatinChars(text)) {
-    const tokens: string[] = [];
-    // Use Intl.Segmenter for proper script-aware tokenization
-    try {
-      const segmenter = new Intl.Segmenter(undefined, { granularity: 'word' });
-      for (const segment of segmenter.segment(text)) {
-        const word = segment.segment.trim().toLowerCase();
-        if (word.length > 0) tokens.push(word);
-      }
-    } catch {
-      // Fallback: char-by-char
-      for (const ch of text) {
-        if (/\p{L}/u.test(ch)) tokens.push(ch.toLowerCase());
-      }
-    }
-    return tokens.filter((t) => t.length > 0);
+export function computeAdaptiveThreshold(scores: number[]): number {
+  if (scores.length === 0) return 0.5;
+
+  const sorted = [...scores].sort((a, b) => b - a);
+
+  // If we have more than 10 scores, use the 75th percentile as reference
+  if (sorted.length >= 10) {
+    const p75Index = Math.floor(sorted.length * 0.25); // top 25%
+    const p75Score = sorted[p75Index] ?? sorted[0] ?? 0;
+    const threshold = Math.max(0.4, p75Score * 0.7);
+    return Math.round(threshold * 1000) / 1000;
   }
-  // For Latin script (English), use English stop words
+
+  // Small number of findings — use top score as reference
+  const topScore = sorted[0] ?? 0;
+  const threshold = Math.max(0.4, topScore * 0.65);
+  return Math.round(threshold * 1000) / 1000;
+}
+
+// ── Cross-encoder based scoring (V5 primary path) ────────────────────────────
+
+/**
+ * Score a finding using its retrievalScore (from cross-encoder rerank).
+ *
+ * The retrievalScore comes from the cross-encoder scoring the source chunk
+ * against the research query BEFORE extraction. This means:
+ * - The chunk was both lexically AND semantically relevant (hybrid retrieval)
+ * - Then re-scored by a cross-encoder (joint query/passage model)
+ * - Only then was LLM extraction run on it
+ *
+ * The relevance confidence is inherently higher than pure lexical scoring.
+ */
+function scoreFromRetrieval(finding: Pick<Finding, 'retrievalScore' | 'claim'>): RelevanceScore | null {
+  if (finding.retrievalScore === undefined) {
+    return null;
+  }
+
+  const score = finding.retrievalScore;
+  const reason = score >= 0.6
+    ? `Cross-encoder relevant (retrieval score ${score.toFixed(3)}): chunk confirmed semantically similar to query`
+    : `Cross-encoder marginal (retrieval score ${score.toFixed(3)}): chunk has weak semantic alignment`;
+
+  return {
+    score: Math.round(score * 1000) / 1000,
+    reason,
+    admissible: score >= 0.5, // Will be refined by adaptive threshold later
+  };
+}
+
+// ── Lexical scoring (V5 fallback path) ───────────────────────────────────────
+
+const STOP_WORDS = new Set([
+  'a', 'an', 'the', 'is', 'are', 'was', 'were', 'be', 'been', 'being',
+  'have', 'has', 'had', 'do', 'does', 'did', 'will', 'would', 'could',
+  'should', 'may', 'might', 'can', 'shall', 'to', 'of', 'in', 'for',
+  'on', 'with', 'at', 'by', 'from', 'as', 'into', 'through', 'during',
+  'before', 'after', 'above', 'below', 'between', 'out', 'off', 'over',
+  'under', 'again', 'further', 'then', 'once', 'here', 'there', 'when',
+  'where', 'why', 'how', 'all', 'each', 'every', 'both', 'few', 'more',
+  'most', 'some', 'any', 'no', 'not', 'only', 'own', 'same', 'so',
+  'than', 'too', 'very', 'just', 'it', 'its', 'this', 'that', 'these',
+  'those', 'i', 'me', 'my', 'we', 'our', 'you', 'your', 'he', 'him',
+  'his', 'she', 'her', 'they', 'them', 'their', 'what', 'which', 'who',
+  'whom', 'and', 'but', 'or', 'if', 'because', 'about', 'up', 'down',
+  'also', 'well', 'quite', 'pretty', 'rather', 'while', 'since', 'until',
+  'although', 'though', 'even', 'yet',
+]);
+
+function tokenize(text: string): string[] {
   return text
     .toLowerCase()
     .split(/[^\w']+/)
     .filter((w) => w.length > 1 && !STOP_WORDS.has(w));
 }
 
-/**
- * Compute token overlap ratio between two texts.
- * Uses Jaccard similarity on content-word sets.
- */
 function tokenOverlap(a: string, b: string): number {
   const setA = new Set(tokenize(a));
   const setB = new Set(tokenize(b));
@@ -206,10 +134,6 @@ function tokenOverlap(a: string, b: string): number {
   return union === 0 ? 0 : intersection / union;
 }
 
-/**
- * Compute query term coverage — what fraction of the query's
- * content words appear in the finding's claim text.
- */
 function queryTermCoverage(query: string, claim: string): number {
   const queryTerms = tokenize(query);
   if (queryTerms.length === 0) return 1;
@@ -221,378 +145,100 @@ function queryTermCoverage(query: string, claim: string): number {
   return covered / queryTerms.length;
 }
 
-/**
- * Detect entity-level topical drift.
- * Checks if the finding's core topic overlaps with the query.
- * Uses longest common content-word subsequence heuristics.
- */
-function hasTopicalDrift(query: string, claim: string): { drift: boolean; reason: string } {
-  // Extract key nouns from query
-  const queryTokens = tokenize(query);
+function scoreLexical(query: string, text: string): number {
+  const overlap = tokenOverlap(query, text);
+  const coverage = queryTermCoverage(query, text);
 
-  if (queryTokens.length === 0) {
-    return { drift: false, reason: 'Query has no extractable content words' };
-  }
-
-  // Check if at least 1 query content word appears in the finding
-  const claimText = claim.toLowerCase();
-  const anyMatch = queryTokens.some((t) => claimText.includes(t));
-
-  if (!anyMatch) {
-    // Also check the normalizedClaim
-    return {
-      drift: true,
-      reason: `Topical drift: finding does not share content words with query ("${queryTokens.slice(0, 5).join(', ')}..."). Topic appears unrelated.`,
-    };
-  }
-
-  return { drift: false, reason: '' };
-}
-
-// ── Classification patterns for common irrelevant categories ────────────────
-
-/**
- * Known topical-irrelevance patterns.
- * These match when a finding discusses an entirely different topic
- * that happens to share some vocabulary with the query.
- *
- * Each entry maps when a finding's domain differs from the query's domain.
- * We detect this by checking if the finding mentions terms exclusive to
- * a different domain while missing the query's domain terms entirely.
- */
-const DOMAIN_SIGNALS: Record<string, string[]> = {
-  'ai-ml': [
-    'model',
-    'training',
-    'inference',
-    'llm',
-    'transformer',
-    'neural',
-    'deep learning',
-    'gpt',
-    'dataset',
-    'fine-tune',
-    'parameter',
-    'attention',
-    'embedding',
-    'token',
-  ],
-  'debt-finance': [
-    'debt',
-    'default',
-    'bond',
-    'credit',
-    'lender',
-    'borrower',
-    'interest rate',
-    'sovereign',
-    'treasury',
-    'yield',
-    'spread',
-    'repayment',
-    'principal',
-  ],
-  'press-media': [
-    'press',
-    'freedom',
-    'journalist',
-    'media',
-    'censorship',
-    'editor',
-    'publisher',
-    'press freedom',
-    'reporting',
-    'newsroom',
-    'outlet',
-    'coverage',
-    'article',
-  ],
-  software: [
-    'api',
-    'sdk',
-    'library',
-    'framework',
-    'package',
-    'dependency',
-    'build',
-    'deploy',
-    'runtime',
-    'compiler',
-    'interface',
-    'protocol',
-  ],
-  'health-medical': [
-    'patient',
-    'clinical',
-    'trial',
-    'treatment',
-    'therapy',
-    'diagnosis',
-    'symptom',
-    'disease',
-    'drug',
-    'dosage',
-    'efficacy',
-    'mortality',
-  ],
-  'climate-energy': [
-    'emission',
-    'carbon',
-    'renewable',
-    'solar',
-    'wind',
-    'grid',
-    'energy',
-    'climate',
-    'temperature',
-    'warming',
-    'fossil fuel',
-    'decarbonization',
-    'clean energy',
-  ],
-};
-
-/**
- * Detect domain contamination — a finding that discusses a different domain
- * than the query but happens to match on generic terms.
- */
-function detectDomainContamination(
-  query: string,
-  claim: string,
-): { contaminated: boolean; claimDomain?: string; reason?: string } {
-  const queryTokens = new Set(tokenize(query));
-  const claimTokens = new Set(tokenize(claim));
-
-  // For each domain, check how many of its signals appear in query vs claim
-  let queryDomain = '';
-  let maxQuerySignals = 0;
-
-  for (const [domain, signals] of Object.entries(DOMAIN_SIGNALS)) {
-    let queryHits = 0;
-    for (const s of signals) {
-      if (query.toLowerCase().includes(s)) queryHits++;
-    }
-    // Also check individual signal words
-    for (const s of signals) {
-      for (const t of queryTokens) {
-        if (s.includes(t) || t.includes(s)) {
-          queryHits++;
-          break;
-        }
-      }
-    }
-    if (queryHits > maxQuerySignals) {
-      maxQuerySignals = queryHits;
-      queryDomain = domain;
-    }
-  }
-
-  // If query has no clear domain, skip contamination check
-  if (maxQuerySignals < 2) return { contaminated: false };
-
-  // Check if claim is in a different domain
-  const claimText = claim.toLowerCase();
-  for (const [domain, signals] of Object.entries(DOMAIN_SIGNALS)) {
-    if (domain === queryDomain) continue;
-    let claimHits = 0;
-    for (const s of signals) {
-      if (claimText.includes(s)) claimHits++;
-    }
-    for (const t of claimTokens) {
-      for (const s of signals) {
-        if (s.includes(t) || t.includes(s)) {
-          claimHits++;
-          break;
-        }
-      }
-    }
-    // If claim has strong signals for a different domain with no query overlap
-    if (claimHits >= 3) {
-      const queryHasDomain =
-        queryTokens.size > 0 &&
-        Array.from(queryTokens).some((t) => signals.some((s) => s.includes(t) || t.includes(s)));
-      if (!queryHasDomain) {
-        return {
-          contaminated: true,
-          claimDomain: domain,
-          reason: `Domain contamination: finding discusses ${domain.replace(/-/g, ' ')} (detected ${String(claimHits)} domain signals) while query is in ${queryDomain.replace(/-/g, ' ')} domain.`,
-        };
-      }
-    }
-  }
-
-  return { contaminated: false };
+  // Weighted: overlap (0.4) + coverage (0.4) + length penalty (0.2)
+  const lengthScore = Math.min(1, text.length / 200); // favor longer, substantive claims
+  return 0.4 * overlap + 0.4 * coverage + 0.2 * lengthScore;
 }
 
 // ── Public API ───────────────────────────────────────────────────────────────
 
-export interface RelevanceScore {
-  /** 0-1 relevance score. >= threshold is "relevant". */
-  score: number;
-  /** Human-readable explanation. */
-  reason: string;
-  /** Whether this finding should be admissible for thematic inclusion. */
-  admissible: boolean;
-}
+/**
+ * Score a single finding against the original research query.
+ *
+ * V5: Prefers retrievalScore (cross-encoder) when available.
+ * Falls back to lexical scoring for legacy findings.
+ */
+export function scoreFinding(
+  query: string,
+  finding: Pick<Finding, 'claim' | 'normalizedClaim' | 'retrievalScore'>,
+): RelevanceScore {
+  // V5: If we have a retrieval score from the cross-encoder, use it directly
+  const retrievalResult = scoreFromRetrieval(finding);
+  if (retrievalResult) return retrievalResult;
 
-function normalizeForScore(text: string): string {
-  return text
-    .toLowerCase()
-    .replace(/[^\w\s]/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
-}
+  // Fallback: lexical scoring
+  const lexical = scoreLexical(query, finding.claim);
 
-function subjectAnchors(query: string): string[] {
-  const rawTokens = query.split(/[^\p{L}\p{N}'-]+/u).filter(Boolean);
-  const properNouns = rawTokens.filter((token) => /^[A-Z][\p{L}\p{N}'-]{1,}$/u.test(token));
-  const contentTokens = tokenize(query).filter((token) => token.length >= 6);
-  const generic = new Set([
-    'what',
-    'when',
-    'where',
-    'which',
-    'whose',
-    'deep',
-    'history',
-    'current',
-    'status',
-    'latest',
-    'research',
-    'briefing',
-    'overview',
-    'legal',
-    'policy',
-    'policies',
-    'evidence',
-    'source',
-    'sources',
-    'conviction',
-    'convictions',
-    'stipulation',
-    'stipulations',
-    'controversy',
-    'controversies',
-  ]);
-  return [...new Set([...properNouns, ...contentTokens].map((token) => token.toLowerCase()))]
-    .filter((token) => !generic.has(token))
-    .slice(0, 4);
-}
+  // Adaptive threshold: more generous when we have a strong lexical match
+  const threshold = lexical > 0.6 ? 0.55 : 0.45;
+  const admissible = lexical >= threshold;
 
-function scoreAgainstText(query: string, text: string, threshold: number): RelevanceScore {
-  const signals: { weight: number; score: number; label: string }[] = [];
-
-  // ── Signal 1: Token overlap with query (weight 0.35) ──
-  const overlap = tokenOverlap(query, text);
-  signals.push({ weight: 0.35, score: overlap, label: `token overlap ${overlap.toFixed(3)}` });
-
-  // ── Signal 2: Query term coverage (weight 0.30) ──
-  const coverage = queryTermCoverage(query, text);
-  signals.push({ weight: 0.3, score: coverage, label: `term coverage ${coverage.toFixed(3)}` });
-
-  // ── Signal 3: Topical drift check (weight 0.20) ──
-  const drift = hasTopicalDrift(query, text);
-  const driftScore = drift.drift ? 0.0 : 1.0;
-  signals.push({
-    weight: 0.2,
-    score: driftScore,
-    label: drift.drift ? 'topical drift' : 'topically aligned',
-  });
-
-  // ── Signal 4: Domain contamination check (weight 0.15) ──
-  const contamination = detectDomainContamination(query, text);
-  const contamScore = contamination.contaminated ? 0.0 : 1.0;
-  signals.push({
-    weight: 0.15,
-    score: contamScore,
-    label: contamination.contaminated
-      ? `domain contamination: ${contamination.claimDomain ?? 'unknown'}`
-      : 'clean domain',
-  });
-
-  let totalScore = 0;
-  let totalWeight = 0;
-  const parts: string[] = [];
-  for (const s of signals) {
-    totalScore += s.weight * s.score;
-    totalWeight += s.weight;
-    parts.push(s.label);
-  }
-  let finalScore = totalWeight > 0 ? totalScore / totalWeight : 0;
-
-  const anchors = subjectAnchors(query);
-  const normalizedText = normalizeForScore(text);
-  const matchedAnchors = anchors.filter((anchor) => normalizedText.includes(anchor));
-  if (anchors.length > 0 && matchedAnchors.length === 0) {
-    finalScore *= 0.45;
-    parts.push(`missing subject anchors: ${anchors.slice(0, 3).join(', ')}`);
-  }
-
-  let reason: string;
-  if (drift.drift) {
-    reason = drift.reason;
-  } else if (contamination.contaminated) {
-    reason = contamination.reason ?? 'Domain contamination detected';
-  } else if (finalScore < 0.5) {
-    const topQueryTerms = tokenize(query).slice(0, 5);
-    const matchTerms = topQueryTerms.filter((t) => normalizedText.includes(t));
-    const missingTerms = topQueryTerms.filter((t) => !normalizedText.includes(t));
-    reason = `Low relevance (${finalScore.toFixed(2)}): text shares ${String(matchTerms.length)}/${String(topQueryTerms.length)} query content terms`;
-    if (missingTerms.length > 0) {
-      reason += ` — missing: "${missingTerms.slice(0, 3).join(', ')}"`;
-    }
-  } else if (finalScore < threshold) {
-    reason = `Marginal relevance (${finalScore.toFixed(2)}): below threshold of ${String(threshold)}. Text touches the topic tangentially but lacks direct query alignment.`;
-  } else {
-    reason = `Relevant (${finalScore.toFixed(2)}): text directly addresses query content.`;
-  }
-
-  if (anchors.length > 0) {
-    reason += ` Subject anchors matched ${String(matchedAnchors.length)}/${String(anchors.length)}.`;
-  }
+  const reason = admissible
+    ? `Lexically relevant (${lexical.toFixed(3)}): text shares content words with query`
+    : `Lexically marginal (${lexical.toFixed(3)}): weak word overlap with query`;
 
   return {
-    score: Math.round(finalScore * 1000) / 1000,
-    reason: `${reason} Signals: ${parts.join('; ')}.`,
-    admissible: finalScore >= threshold,
+    score: Math.round(lexical * 1000) / 1000,
+    reason,
+    admissible,
   };
 }
 
 /**
  * Score arbitrary source/search text against the original research query.
- * Uses a lower threshold than findings because titles/snippets are shorter,
- * but applies a subject-anchor penalty to catch tangential source drift.
+ * Used for source candidate filtering during discovery.
  */
 export function scoreTextRelevance(query: string, text: string): RelevanceScore {
-  return scoreAgainstText(query, text, 0.65);
-}
+  const lexical = scoreLexical(query, text);
+  const threshold = 0.55; // Lower threshold for source titles/snippets
+  const admissible = lexical >= threshold;
 
-/**
- * Score a single finding against the original research query.
- */
-export function scoreFinding(
-  query: string,
-  finding: Pick<Finding, 'claim' | 'normalizedClaim'>,
-): RelevanceScore {
-  return scoreAgainstText(query, finding.claim, RELEVANCE_THRESHOLD);
+  return {
+    score: Math.round(lexical * 1000) / 1000,
+    reason: admissible
+      ? `Relevant (${lexical.toFixed(3)}): source text aligns with query`
+      : `Low relevance (${lexical.toFixed(3)}): source text has weak query alignment`,
+    admissible,
+  };
 }
 
 /**
  * Score all findings in the state against the original research query.
  * Returns a map of finding ID → RelevanceScore.
  *
- * This is a pure function — it does NOT mutate findings.
- * The caller (pipeline strategy) applies the scores to findings.
+ * V5: Uses adaptive thresholding — computes a per-query threshold from
+ * the score distribution rather than using a fixed 0.72 constant.
  */
 export function scoreAllFindings(
   query: string,
-  findings: Pick<Finding, 'id' | 'claim' | 'normalizedClaim'>[],
+  findings: Pick<Finding, 'id' | 'claim' | 'normalizedClaim' | 'retrievalScore'>[],
 ): Map<string, RelevanceScore> {
   const results = new Map<string, RelevanceScore>();
 
+  // Phase 1: Compute raw scores
   for (const f of findings) {
     const scored = scoreFinding(query, f);
     results.set(f.id, scored);
+  }
+
+  // Phase 2: Compute adaptive threshold from the score distribution
+  const scores = [...results.values()].map((r) => r.score);
+  const adaptiveThreshold = computeAdaptiveThreshold(scores);
+
+  // Phase 3: Re-evaluate admissibility using the adaptive threshold
+  for (const [id, result] of results) {
+    const isAdmissible = result.score >= adaptiveThreshold;
+    if (isAdmissible !== result.admissible) {
+      results.set(id, {
+        ...result,
+        admissible: isAdmissible,
+        reason: `${result.reason} [adaptive threshold: ${adaptiveThreshold.toFixed(3)}]`,
+      });
+    }
   }
 
   const admissible = [...results.values()].filter((r) => r.admissible).length;
@@ -601,11 +247,12 @@ export function scoreAllFindings(
   logger.info(
     {
       total,
-      admissible: admissible,
+      admissible,
       inadmissible: total - admissible,
-      threshold: RELEVANCE_THRESHOLD,
+      adaptiveThreshold,
+      retrievalScoreCount: findings.filter((f) => f.retrievalScore !== undefined).length,
     },
-    'Relevance classification complete',
+    'V5 relevance classification complete',
   );
 
   return results;

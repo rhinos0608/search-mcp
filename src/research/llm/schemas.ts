@@ -392,3 +392,77 @@ export const ThinkReflectSchema = z.object({
 });
 
 export type ThinkReflectResult = z.infer<typeof ThinkReflectSchema>;
+
+// ── V5.0.0 Structured Claim Extraction ─────────────────────────────────────
+
+const polarityEnum = z.enum(['asserted', 'negated', 'conditional']);
+const hedgeEnum = z.enum(['certain', 'likely', 'possible', 'speculative']);
+const evidenceTypeEnum = z.enum(['study', 'benchmark', 'claim', 'opinion', 'anecdote']);
+const comparisonTypeEnum = z.enum(['increase', 'decrease', 'absolute', 'ratio']);
+
+export const StructuredClaimSchema = z.object({
+  subject: z.string().min(1).describe('The entity, concept, or thing being described'),
+  predicate: z.string().min(1).describe('The relationship or property asserted'),
+  object: z.string().optional().describe('The value, entity, or concept on the receiving end'),
+  quantifier: z
+    .object({
+      value: z.number().describe('Numeric value'),
+      unit: z.string().min(1).describe('Unit of measurement'),
+      comparisonType: comparisonTypeEnum.describe('Comparison direction'),
+      baseline: z.string().optional().describe('What this is compared against'),
+      originalText: z.string().optional().describe('Verbatim text span containing the number'),
+    })
+    .optional()
+    .describe('Normalized quantitative claim'),
+  polarity: polarityEnum.describe('Asserted, negated, or conditional'),
+  hedge: hedgeEnum.describe('How certain the source is'),
+  evidenceType: evidenceTypeEnum.describe('What kind of evidence backs this claim'),
+  sourceSpan: z
+    .string()
+    .min(10)
+    .describe('Verbatim text span (1-3 sentences) containing this claim'),
+});
+
+export const StructuredExtractionResultSchema = z.object({
+  claims: z
+    .array(StructuredClaimSchema)
+    .min(0)
+    .describe('Array of structured claims extracted from passages'),
+});
+
+export type StructuredClaimResult = z.infer<typeof StructuredClaimSchema>;
+export type StructuredExtractionResult = z.infer<typeof StructuredExtractionResultSchema>;
+
+// ── V5.0.0 Claim Clustering ────────────────────────────────────────────────
+
+export const ClaimClusterSchema = z.object({
+  representativeClaim: z.string().min(5).describe('Clearest formulation of this finding'),
+  claimIds: z.array(z.string()).min(1).describe('IDs of claims in this cluster'),
+  confidence: z.enum(['high', 'medium', 'low']).describe('Cluster confidence level'),
+  sourceCount: z.number().min(1).describe('Number of distinct sources'),
+  consensus: z
+    .enum(['strong_agreement', 'moderate_agreement', 'mixed', 'contradictory', 'single_source'])
+    .describe('Consensus level within the cluster'),
+  contradiction: z
+    .string()
+    .nullable()
+    .describe('Description of contradiction if present'),
+});
+
+export const ClaimClusteringResultSchema = z.object({
+  clusters: z.array(ClaimClusterSchema).min(0).describe('Claim clusters'),
+});
+
+export type ClaimClusteringResult = z.infer<typeof ClaimClusteringResultSchema>;
+
+// ── V5.0.0 Query Expansion ──────────────────────────────────────────────────
+
+export const QueryExpansionResultSchema = z.object({
+  variations: z
+    .array(z.string())
+    .min(1)
+    .max(6)
+    .describe('Query paraphrase variations'),
+});
+
+export type QueryExpansionResult = z.infer<typeof QueryExpansionResultSchema>;

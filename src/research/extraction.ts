@@ -35,6 +35,13 @@ import type {
   InteractiveExtractionPlan,
 } from './types.js';
 import { extractSentence } from './extractSentence.js';
+import { hybridRetrieve, type RankedChunk, type ChunkEntry } from './hybridRetrieval.js';
+import { rerank } from '../utils/rerank.js';
+import { LlmClaimExtractor, structuredClaimToFinding } from './llmClaimExtractor.js';
+import type { DeepResearchLlmClient } from './llm/chat.js';
+// Process-wide claim cache singleton shared by every ExtractionEngine instance in this process.
+// If per-engine isolation is needed later, inject a ClaimCache instead.
+import { claimCache } from './claimCache.js';
 
 // ── Extraction configuration ────────────────────────────────────────────────
 
@@ -186,11 +193,16 @@ function parseHtmlToMarkdown(html: string, url: string): string | null {
 // ── ExtractionEngine ─────────────────────────────────────────────────────────
 
 export class ExtractionEngine {
+  private readonly llmExtractor: LlmClaimExtractor;
+
   constructor(
     private readonly state: ResearchStateEngine,
     private readonly budget: BudgetTracker,
     private readonly config: ExtractionConfig = DEFAULT_CONFIG,
-  ) {}
+    private readonly llm?: DeepResearchLlmClient,
+  ) {
+    this.llmExtractor = new LlmClaimExtractor();
+  }
 
   /**
    * Run extraction for the given sources.
@@ -327,7 +339,17 @@ export class ExtractionEngine {
 
         // 3. Extract claims from chunks
         const subQuestionIds = source.relevantSubQuestions;
-        const findings = this.extractClaims(chunks, source.id, subQuestionIds);
+        const query = subQuestionText ?? this.state.getState().query;
+
+        let findings: Omit<Finding, 'id' | 'createdAt'>[];
+
+        if (this.llm && chunks.length > 0) {
+          // ── V5 pipeline: hybrid retrieval → cross-encoder rerank → LLM extraction
+          findings = await this.extractClaimsV5(chunks, source, query, subQuestionIds);
+        } else {
+          // ── Rule-based fallback
+          findings = this.extractClaims(chunks, source.id, subQuestionIds);
+        }
 
         // 4. Register findings with state
         for (const finding of findings) {
@@ -867,6 +889,145 @@ export class ExtractionEngine {
   }
 
   // ── Claim extraction ────────────────────────────────────────────────────
+
+  /**
+   * V5 pipeline: hybrid retrieval → cross-encoder rerank → LLM extraction.
+   *
+   * Pipeline:
+   *   1. Convert chunks to ChunkEntry format for hybrid retrieval.
+   *   2. Run hybrid retrieve (BM25 + dense + RRF) → top 60.
+   *   3. Cross-encoder rerank on top 60 → top 20.
+   *   4. LLM structured extraction on top 20.
+   *   5. Cache results by content hash.
+   *
+   * Falls back to rule-based extraction if any step fails.
+   */
+  private async extractClaimsV5(
+    chunks: { text: string; heading?: string }[],
+    source: { id: string; url: string },
+    query: string,
+    subQuestionIds: string[],
+  ): Promise<Omit<Finding, 'id' | 'createdAt'>[]> {
+    try {
+      const cacheKey = [query, subQuestionIds.join('|'), chunks.map((c) => c.text).join('\n')]
+        .join('\n')
+        .slice(0, 4096);
+      const cached = claimCache.get(source.url, cacheKey);
+      if (cached) {
+        logger.info(
+          { sourceId: source.id, cachedClaims: cached.claims.length },
+          'V5: using cached claims',
+        );
+        return cached.claims.map((c) => structuredClaimToFinding(c, source.id, subQuestionIds));
+      }
+
+      if (!this.llm) {
+        return this.extractClaims(chunks, source.id, subQuestionIds);
+      }
+
+      // Convert to ChunkEntry format
+      const chunkEntries = chunks.map((c, i) => {
+        const entry: ChunkEntry = {
+          id: `chunk-${String(i)}`,
+          text: c.text,
+          sourceId: source.id,
+          sourceUrl: source.url,
+        };
+        if (c.heading) entry.heading = c.heading;
+        return entry;
+      });
+
+      // Step 1: Hybrid retrieval (BM25 + dense → top 60 via RRF)
+      logger.info(
+        { sourceId: source.id, totalChunks: chunkEntries.length, query: query.slice(0, 80) },
+        'V5: starting hybrid retrieval',
+      );
+      const ranked = await hybridRetrieve(query, chunkEntries, { topK: 60 });
+
+      if (ranked.length === 0) {
+        logger.warn(
+          { sourceId: source.id },
+          'V5: hybrid retrieval returned no results, falling back to rule-based',
+        );
+        return this.extractClaims(chunks, source.id, subQuestionIds);
+      }
+
+      // Step 2: Cross-encoder rerank (top 60 → top 20)
+      let reranked: RankedChunk[] = ranked;
+      try {
+        const chunkTexts = ranked.map((r) => r.chunk.text);
+        const rerankResults = await rerank(query, chunkTexts, { topK: 20 });
+
+        // Map rerank results back to RankedChunk, updating scores
+        const rerankMap = new Map(rerankResults.map((r) => [r.index, r.score]));
+        reranked = ranked
+          .map((r, i) => {
+            const rerankScore = rerankMap.get(i);
+            return rerankScore !== undefined
+              ? { ...r, denseScore: rerankScore, rrfScore: rerankScore }
+              : r;
+          })
+          .sort((a, b) => b.rrfScore - a.rrfScore)
+          .slice(0, 20);
+
+        logger.info(
+          {
+            sourceId: source.id,
+            beforeRerank: ranked.length,
+            afterRerank: reranked.length,
+          },
+          'V5: cross-encoder rerank complete',
+        );
+      } catch (rerankErr) {
+        logger.warn(
+          { sourceId: source.id, err: rerankErr },
+          'V5: cross-encoder rerank failed, using hybrid retrieval scores',
+        );
+        reranked = ranked.slice(0, 20);
+      }
+
+      // Step 3: LLM structured extraction
+      logger.info(
+        {
+          sourceId: source.id,
+          chunksForLlm: reranked.length,
+          query: query.slice(0, 80),
+        },
+        'V5: running LLM claim extraction',
+      );
+
+      const { findings, rawClaims } = await this.llmExtractor.extract(this.llm, {
+        query,
+        chunks: reranked,
+        sourceId: source.id,
+        subQuestionIds,
+      });
+
+      // Step 4: Cache the structured claims for future reuse
+      if (rawClaims.length > 0) {
+        claimCache.set(source.url, cacheKey, rawClaims);
+      }
+
+      logger.info(
+        {
+          sourceId: source.id,
+          totalChunks: chunks.length,
+          hybridRetrieved: ranked.length,
+          reranked: reranked.length,
+          findings: findings.length,
+        },
+        'V5: extraction pipeline complete',
+      );
+
+      return findings;
+    } catch (err) {
+      logger.error(
+        { sourceId: source.id, err },
+        'V5: extraction pipeline failed, falling back to rule-based',
+      );
+      return this.extractClaims(chunks, source.id, subQuestionIds);
+    }
+  }
 
   /**
    * Rule-based claim extraction from content chunks.

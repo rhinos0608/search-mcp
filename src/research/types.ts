@@ -389,6 +389,74 @@ export type EvidenceDirectness =
 
 export type ClaimType = 'primary' | 'secondary' | 'anecdotal';
 
+// ── V5.0.0 Structured claim extraction ───────────────────────────────────────
+
+/** Claim polarity — whether the claim asserts, negates, or conditions. */
+export type ClaimPolarity = 'asserted' | 'negated' | 'conditional';
+
+/** Epistemic hedge — how certain the source is about this claim. */
+export type ClaimHedge = 'certain' | 'likely' | 'possible' | 'speculative';
+
+/** What kind of evidence supports this claim. */
+export type ClaimEvidenceType = 'study' | 'benchmark' | 'claim' | 'opinion' | 'anecdote';
+
+/**
+ * Canonical quantifier object — normalizes "10% improvement",
+ * "reduced by a tenth", and "one-tenth efficiency gain" into the
+ * same structured form for cross-source clustering.
+ */
+export interface CanonicalQuantifier {
+  /** Numeric value (e.g. 10, -10, 0.1). */
+  value: number;
+  /** Unit of measurement (e.g. 'percent', 'seconds', 'dollars'). */
+  unit: string;
+  /** Comparison direction: 'increase', 'decrease', 'absolute', 'ratio'. */
+  comparisonType: 'increase' | 'decrease' | 'absolute' | 'ratio';
+  /** What this is compared against (e.g. 'baseline', 'previous version', 'competitor X'). */
+  baseline?: string;
+  /** Original textual form before normalization. */
+  originalText?: string;
+}
+
+/**
+ * Structured claim — the output of LLM extraction from a ranked passage.
+ * This is the canonical internal representation before conversion to Findings.
+ */
+export interface StructuredClaim {
+  /** The subject entity or concept being described. */
+  subject: string;
+  /** The relationship or property asserted. */
+  predicate: string;
+  /** The value, entity, or concept on the receiving end (optional). */
+  object?: string;
+  /** Normalized quantitative claim (optional). */
+  quantifier?: CanonicalQuantifier;
+  /** Whether this is asserted, negated, or conditional. */
+  polarity: ClaimPolarity;
+  /** How certain the source is about this claim. */
+  hedge: ClaimHedge;
+  /** What kind of evidence supports this. */
+  evidenceType: ClaimEvidenceType;
+  /** The original text span containing this claim. */
+  sourceSpan: string;
+  /** Source URL this claim was extracted from. */
+  sourceUrl?: string;
+  /** Source publication date if available. */
+  sourceDate?: string;
+  /** Relevance score assigned by the cross-encoder (pre-extraction). */
+  retrievalScore?: number;
+}
+
+/** Normalized canonical form of a claim for cross-source comparison. */
+export interface NormalizedClaimKey {
+  /** Lowercased, stemmed subject. */
+  subject: string;
+  /** Lowercased, stemmed predicate. */
+  predicate: string;
+  /** Canonical quantifier string (e.g. '10%_increase') or undefined. */
+  quantifierCanonical?: string;
+}
+
 export interface Finding {
   id: string;
   claim: string;
@@ -429,6 +497,21 @@ export interface Finding {
   conflictOfInterest?: boolean;
   /** Epistemic status of this claim within the broader literature. */
   epistemicStatus?: EpistemicStatus;
+  // ── V5.0.0 structured fields ──────────────────────────────────────────
+  /** Whether this claim is asserted, negated, or conditional. */
+  polarity?: ClaimPolarity;
+  /** How certain the source is about this claim. */
+  hedge?: ClaimHedge;
+  /** What kind of evidence backs this. */
+  evidenceType?: ClaimEvidenceType;
+  /** Normalized quantifier for cross-source comparison. */
+  quantifier?: CanonicalQuantifier;
+  /** Canonical claim key for cross-source clustering. */
+  canonicalKey?: NormalizedClaimKey;
+  /** Cross-encoder relevance score (pre-extraction retrieval). */
+  retrievalScore?: number;
+  /** Whether the retrieval score came from an exact chunk match rather than a fallback. */
+  retrievalScoreMatched?: boolean;
 }
 
 // ── Source-perspective metadata ────────────────────────────────────────────────

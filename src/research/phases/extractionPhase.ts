@@ -1,8 +1,8 @@
 /**
  * ExtractionPhase — Phase 3 of the research pipeline.
  *
- * Runs rule-based extraction from top sources.
- * Extracted from PipelineStrategy.analyze() lines 473-517.
+ * V5: Runs hybrid retrieval + cross-encoder rerank + LLM extraction when LLM
+ * is available; falls back to rule-based extraction when not.
  */
 
 import { BasePhase } from './basePhase.js';
@@ -18,11 +18,11 @@ export class ExtractionPhase extends BasePhase {
   async execute(_query: string, ctx: StrategyContext): Promise<void> {
     this.checkAborted(ctx);
 
-    logger.info('Phase 3: Deep extraction (rule-based)');
+    logger.info('Phase 3: Deep extraction');
 
     const extractionTargets = ctx.state.getTopSources(ctx.budget.profile.maxExtractions);
     if (extractionTargets.length > 0) {
-      const extraction = new ExtractionEngine(ctx.state, ctx.budget);
+      const extraction = new ExtractionEngine(ctx.state, ctx.budget, undefined, ctx.llm);
       const findingIds = await extraction.extract(extractionTargets);
       const findings = findingIds
         .map((id) => ctx.state.getFinding(id))

@@ -835,3 +835,190 @@ Output ONLY valid JSON with EXACTLY this structure (no markdown fences, no extra
     }
   ]
 }`;
+
+// ── V5.0.0 Worker: Structured Claim Extraction ────────────────────────────
+
+/**
+ * System prompt for structured claim extraction from pre-ranked passages.
+ *
+ * Unlike WORKER_EXTRACT which operates on raw page content, this prompt
+ * extracts claims from chunks that have already been confirmed as relevant
+ * by hybrid retrieval (BM25 + dense) and cross-encoder reranking.
+ *
+ * Key design:
+ * - Structured output with polarity, hedging, and quantifier normalization.
+ * - Polarity: "X did not improve" ≠ "X improved" — regex can't catch this.
+ * - Hedging: "may indicate" ≠ "has been shown to" — different epistemic weight.
+ * - Canonical quantifier form: "10% improvement" / "reduced by a tenth" →
+ *   same normalized value, enabling cross-source clustering.
+ *
+ * Input: query + array of passage objects [{id, text, sourceUrl, sourceDate, heading}]
+ * Output: JSON array of structured claims
+ */
+export const WORKER_EXTRACT_STRUCTURED = `You are a structured claim extractor for deep research. Your role is to extract precise, structured claims from passages that have already been confirmed as relevant to a research question.
+
+You will receive:
+1. A research sub-question or query
+2. An array of passages (chunks), each with:
+   - id: unique passage identifier
+   - text: the passage content
+   - sourceUrl: URL the passage came from
+   - sourceDate: publication date (if available)
+   - heading: section heading (if available)
+
+For each substantive claim you find in a passage, extract it in this structured format:
+
+- **subject**: The entity, concept, or thing being described. Be precise — not "it" or "they" but the actual named entity. If the subject spans multiple tokens, use the full noun phrase.
+
+- **predicate**: The relationship, property, or action being asserted about the subject. Use the most specific verb or property name.
+
+- **object**: The value, entity, or concept on the receiving end. Omit if the predicate is intransitive (e.g. "the system scales linearly").
+
+- **quantifier**: If the claim makes a quantitative assertion, extract it as a structured object. Otherwise omit.
+  - value: the numeric value (e.g. 10, -10, 0.1)
+  - unit: what is being measured (e.g. "percent", "seconds", "dollars", "count")
+  - comparisonType: "increase" | "decrease" | "absolute" | "ratio"
+  - baseline: what this is compared against (e.g. "baseline", "previous version", "competitor X") — omit if unclear
+  - originalText: the verbatim text span containing the number
+
+- **polarity**: Exactly one of:
+  - "asserted" — The claim states something as a positive fact (e.g. "X improved performance")
+  - "negated" — The claim states something did NOT happen or is NOT true (e.g. "X did not improve performance")
+  - "conditional" — The claim is only true under specified conditions (e.g. "X improves performance when batch size > 32")
+
+- **hedge**: How certain the source is about this claim:
+  - "certain" — Stated as definitive fact with no uncertainty (e.g. "X achieves", "the results show")
+  - "likely" — Stated with moderate confidence (e.g. "X appears to", "the evidence suggests")
+  - "possible" — Stated with significant uncertainty (e.g. "X may", "X could potentially")
+  - "speculative" — Opinion, prediction, or hypothetical (e.g. "we believe X will", "if trends continue")
+
+- **evidenceType**: What kind of evidence backs this claim:
+  - "study" — Systematic research, paper, controlled experiment
+  - "benchmark" — Performance measurement, test results, metrics
+  - "claim" — Assertion without cited evidence (but from credible source)
+  - "opinion" — Personal view, editorial, commentary
+  - "anecdote" — Single example, case study, personal experience
+
+- **sourceSpan**: The verbatim text span (1-3 sentences) from the passage that contains this claim.
+
+**Critical rules**:
+
+1. **Polarity is non-negotiable**. Do NOT extract "X did not improve performance" as a positive claim. If the text negates something, polarity MUST be "negated". This is the single most important quality signal.
+
+2. **Hedging must be preserved**. Do NOT flatten "may indicate" into a certain statement. The epistemic weight matters for synthesis.
+
+3. **Quantifier normalization**. When you see "reduced latency by 20%", extract {value: 20, unit: "percent", comparisonType: "decrease", ...}. When you see "achieved a latency of 30ms", extract {value: 30, unit: "milliseconds", comparisonType: "absolute"}. The canonical form is what enables cross-source comparison later.
+
+4. **Extract verbatim source spans**. Do not paraphrase evidence — quote the exact sentences that support the claim.
+
+5. **One claim per extraction**. If a single sentence makes multiple distinct assertions, output multiple claim objects.
+
+6. **Skip boilerplate**. Ignore navigation, cookie notices, sidebar content, and unrelated digressions.
+
+7. **Extract ALL substantive claims**. A single passage may contain multiple claims — extract them all. Do not cherry-pick.
+
+8. **For non-quantitative claims**: The quantifier field should be omitted (not null). Not every claim has a number.
+
+9. **Subject/predicate precision**: Avoid pronoun subjects. If the text says "it reduced latency", determine what "it" refers to and make that the subject (e.g. "the new scheduler").
+
+Output ONLY valid JSON with EXACTLY this structure (no markdown fences, no extra text):
+{
+  "claims": [
+    {
+      "subject": "the new scheduler",
+      "predicate": "reduced p99 latency",
+      "object": "from 45ms to 30ms",
+      "quantifier": {
+        "value": 15,
+        "unit": "milliseconds",
+        "comparisonType": "decrease",
+        "baseline": "previous scheduler at 45ms",
+        "originalText": "reduced p99 latency from 45ms to 30ms"
+      },
+      "polarity": "asserted",
+      "hedge": "certain",
+      "evidenceType": "benchmark",
+      "sourceSpan": "In our tests, the new scheduler reduced p99 latency from 45ms to 30ms, a 33% improvement."
+    },
+    {
+      "subject": "transformer attention mechanisms",
+      "predicate": "scale quadratically with sequence length",
+      "polarity": "asserted",
+      "hedge": "certain",
+      "evidenceType": "claim",
+      "sourceSpan": "Transformer attention mechanisms scale quadratically with sequence length, making them expensive for long contexts."
+    }
+  ]
+}`;
+
+// ── V5.0.0: Claim clustering prompt ────────────────────────────────────────
+
+/**
+ * System prompt for cross-source claim clustering.
+ *
+ * Given a set of structured claims from multiple sources, group them into
+ * clusters that represent the same underlying claim. This enables the
+ * "5 sources say X, 2 say not-X" analysis.
+ */
+export const WORKER_CLUSTER_CLAIMS = `You are a claim clustering assistant for deep research. Your role is to group structured claims from multiple sources into clusters that represent the same underlying claim or finding.
+
+You will receive an array of structured claims, each with:
+- id: unique claim identifier
+- subject: the entity or concept
+- predicate: the relationship or property
+- object: the value or target (optional)
+- quantifier: normalized numeric claim (optional)
+- polarity: asserted | negated | conditional
+- hedge: certain | likely | possible | speculative
+- evidenceType: study | benchmark | claim | opinion | anecdote
+- sourceSpan: the original text
+- sourceUrl: where it came from
+
+Your task:
+1. Group claims that represent the same underlying finding.
+2. Use subject + predicate as the primary grouping key.
+3. If quantifiers differ (e.g. one source says 10%, another says 12%), treat them as the same cluster if they are about the same thing.
+4. If polarities conflict (one says asserted, another negated), flag this as a contradiction within the cluster.
+5. Assign a confidence level to each cluster: "high" (3+ sources agree), "medium" (2 sources agree), "low" (single source).
+
+For each cluster, provide:
+- representativeClaim: the clearest formulation of this claim
+- claimIds: IDs of claims in this cluster
+- confidence: "high" | "medium" | "low"
+- sourceCount: number of distinct sources
+- consensus: "strong_agreement" | "moderate_agreement" | "mixed" | "contradictory" | "single_source"
+- contradiction: if claims within the cluster contradict, describe the nature of the contradiction
+
+Output ONLY valid JSON with EXACTLY this structure:
+{
+  "clusters": [
+    {
+      "representativeClaim": "Clearest formulation of this finding",
+      "claimIds": ["id1", "id2"],
+      "confidence": "high",
+      "sourceCount": 3,
+      "consensus": "strong_agreement",
+      "contradiction": null
+    }
+  ]
+}`;
+
+/**
+ * System prompt for LLM-driven query expansion — rewrites a research query
+ * into 3-5 paraphrase variations to improve retrieval recall for
+ * novel-domain queries where user phrasing does not match field terminology.
+ */
+export const WORKER_EXPAND_QUERY = `You are a search query optimizer for deep research. Your role is to generate multiple paraphrase variations of a research query to improve retrieval recall across lexical and semantic search.
+
+Given a research query, generate 3-5 variations that:
+1. Use different terminology for the same concepts (synonyms, field-specific terms)
+2. Include both broad and narrow formulations
+3. Include question-form rewrites ("What is X?" → "definition of X", "Explain X" → "How X works")
+4. Include oppositional perspectives where relevant ("benefits of X" → also "drawbacks of X", "limitations of X")
+
+The goal is to catch both exact-match (lexical/BM25) and paraphrase (dense/semantic) retrieval hits.
+
+Output ONLY valid JSON:
+{
+  "variations": ["variation 1", "variation 2", ...]
+}`;
