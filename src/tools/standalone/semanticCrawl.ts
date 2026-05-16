@@ -21,12 +21,17 @@ import { readabilityFallbackResult } from '../../utils/crawlResultShaping.js';
 import { extractionConfigSchema, validateExtractionConfig } from '../../utils/extractionConfig.js';
 import type { KnowledgeGraphHook } from '../../knowledge/hook.js';
 
-export function registerSemanticCrawl(server: McpServer, cfg: SearchConfig, kgHook?: KnowledgeGraphHook): void {
+export function registerSemanticCrawl(
+  server: McpServer,
+  cfg: SearchConfig,
+  kgHook?: KnowledgeGraphHook,
+): void {
   server.registerTool(
     'semantic_crawl',
     {
       description:
         'Crawl an information space and return the most semantically relevant passages for a specific query. ' +
+        'Accepted source.type values are: "url", "sitemap", "search", "github", and "cached". ' +
         'Uses EmbeddingGemma (300M, local) to chunk, embed, and rank content by similarity.\n\n' +
         'USE THIS TOOL when you need to:\n' +
         '- Find specific information within a large documentation site, codebase reference, or multi-page resource\n' +
@@ -38,7 +43,7 @@ export function registerSemanticCrawl(server: McpServer, cfg: SearchConfig, kgHo
         source: z
           .discriminatedUnion('type', [
             z.object({
-              type: z.literal('url'),
+              type: z.literal('url').describe('Crawl a URL and optionally follow links from it'),
               url: z.url().describe('Seed URL to start crawling from'),
               urls: z
                 .array(z.url())
@@ -46,11 +51,15 @@ export function registerSemanticCrawl(server: McpServer, cfg: SearchConfig, kgHo
                 .describe('Additional seed URLs to crawl in the same corpus'),
             }),
             z.object({
-              type: z.literal('sitemap'),
+              type: z
+                .literal('sitemap')
+                .describe('Parse sitemap.xml, rank URLs against query, then crawl selected URLs'),
               url: z.url().describe('URL of a sitemap.xml to parse for seed URLs'),
             }),
             z.object({
-              type: z.literal('search'),
+              type: z
+                .literal('search')
+                .describe('Use web search to discover seed URLs, then crawl them'),
               query: z.string().describe('Web search query to discover seed URLs, then crawl them'),
               maxSeedUrls: z
                 .number()
@@ -62,7 +71,9 @@ export function registerSemanticCrawl(server: McpServer, cfg: SearchConfig, kgHo
                 .describe('Max URLs to collect from web search (1–20, default 10)'),
             }),
             z.object({
-              type: z.literal('github'),
+              type: z
+                .literal('github')
+                .describe('Build a corpus from files in a GitHub repository'),
               owner: z.string().describe('GitHub repository owner'),
               repo: z.string().describe('GitHub repository name'),
               branch: z.string().optional().describe('Git branch (default: repo default branch)'),
@@ -70,10 +81,20 @@ export function registerSemanticCrawl(server: McpServer, cfg: SearchConfig, kgHo
               query: z
                 .string()
                 .optional()
-                .describe('Optional code search query to pre-filter files'),
+                .describe('Optional code search query to pre-filter and rank files'),
+              includePaths: z
+                .array(z.string())
+                .optional()
+                .describe('Only include files whose path contains one of these substrings'),
+              excludePaths: z
+                .array(z.string())
+                .optional()
+                .describe('Exclude files whose path contains one of these substrings'),
             }),
             z.object({
-              type: z.literal('cached'),
+              type: z
+                .literal('cached')
+                .describe('Reuse a previous corpusId without crawling again'),
               corpusId: z
                 .string()
                 .describe(
@@ -81,7 +102,10 @@ export function registerSemanticCrawl(server: McpServer, cfg: SearchConfig, kgHo
                 ),
             }),
           ])
-          .describe('Source of the corpus to crawl'),
+          .describe(
+            'Source of the corpus to crawl. Valid source.type values: "url", "sitemap", "search", "github", "cached". ' +
+              'Use "cached" with a corpusId returned by semantic_crawl, or call semantic_crawl_list_corpora to discover cached corpora.',
+          ),
         query: z.string().describe('The semantic search query — what are you looking for?'),
         topK: z
           .number()
@@ -95,7 +119,9 @@ export function registerSemanticCrawl(server: McpServer, cfg: SearchConfig, kgHo
           .enum(['bfs', 'dfs'])
           .optional()
           .default('bfs')
-          .describe('Crawl strategy: bfs (breadth-first) | dfs (depth-first)'),
+          .describe(
+            'Crawl strategy. bfs visits all links at depth N before depth N+1; dfs follows one path deeply before backtracking.',
+          ),
         maxDepth: z
           .number()
           .int()
@@ -104,7 +130,7 @@ export function registerSemanticCrawl(server: McpServer, cfg: SearchConfig, kgHo
           .optional()
           .default(2)
           .describe(
-            'Maximum link depth (0–5, default 2). Set 0 for single-page / sitemap / search modes.',
+            'Maximum link-follow depth from seed URL. 0 = only seed page(s). Sitemap/search modes force this to 0 because URLs are preselected.',
           ),
         maxPages: z
           .number()
@@ -113,12 +139,16 @@ export function registerSemanticCrawl(server: McpServer, cfg: SearchConfig, kgHo
           .max(100)
           .optional()
           .default(20)
-          .describe('Maximum pages to crawl (1–100, default 20). Divided across seeds.'),
+          .describe(
+            'Maximum total pages to crawl (1–100, default 20). The budget is divided across seed URLs and enforced client-side if Crawl4AI returns extra pages.',
+          ),
         includeExternalLinks: z
           .boolean()
           .optional()
           .default(false)
-          .describe('Follow external domain links (default false)'),
+          .describe(
+            'Follow links to external domains (default false). External pages share the same maxPages budget.',
+          ),
         maxBytes: z
           .number()
           .int()
@@ -152,7 +182,32 @@ export function registerSemanticCrawl(server: McpServer, cfg: SearchConfig, kgHo
           .boolean()
           .optional()
           .default(false)
-          .describe('Allow crawler to follow links outside the seed URL path (default false)'),
+          .describe(
+            'Allow crawler to follow links outside the seed URL path prefix (default false). When false, only pages under the seed path are kept.',
+          ),
+        includeElements: z
+          .boolean()
+          .optional()
+          .default(true)
+          .describe(
+            'Include page-level structured elements in the response (default true). Set false for lower-context output.',
+          ),
+        elementsLimit: z
+          .number()
+          .int()
+          .min(0)
+          .max(1000)
+          .optional()
+          .describe(
+            'Maximum structured elements to include when includeElements is true (0–1000).',
+          ),
+        outputMode: z
+          .enum(['full', 'passages'])
+          .optional()
+          .default('full')
+          .describe(
+            'full returns chunks plus metadata/elements; passages suppresses noisy page elements and extraction details.',
+          ),
         extractionConfig: extractionConfigSchema
           .optional()
           .describe(
@@ -203,6 +258,9 @@ export function registerSemanticCrawl(server: McpServer, cfg: SearchConfig, kgHo
         useContextualEmbeddings,
         maxChunkTokens,
         allowPathDrift,
+        includeElements,
+        elementsLimit,
+        outputMode,
         extractionConfig,
         waitFor,
         delayBeforeReturnHtml,
@@ -269,7 +327,10 @@ export function registerSemanticCrawl(server: McpServer, cfg: SearchConfig, kgHo
             // KG passive capture (fire-and-forget, never fails the tool call)
             if (kgHook && cfg.knowledgeGraph.enabled) {
               void kgHook.onToolCall('semantic_crawl', singlePage).catch((err: unknown) => {
-                logger.warn({ err, tool: 'semantic_crawl' }, 'KG passive capture failed (non-fatal)');
+                logger.warn(
+                  { err, tool: 'semantic_crawl' },
+                  'KG passive capture failed (non-fatal)',
+                );
               });
             }
 
@@ -293,6 +354,9 @@ export function registerSemanticCrawl(server: McpServer, cfg: SearchConfig, kgHo
             useReranker,
             maxChunkTokens,
             allowPathDrift,
+            includeElements,
+            ...(elementsLimit !== undefined ? { elementsLimit } : {}),
+            outputMode,
             waitFor,
             delayBeforeReturnHtml,
             pageTimeout,

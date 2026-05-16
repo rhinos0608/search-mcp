@@ -10,6 +10,8 @@ export interface GitHubCorpusOptions {
   branch?: string;
   extensions?: string[];
   query?: string;
+  includePaths?: string[];
+  excludePaths?: string[];
   maxFiles?: number;
   maxFileBytes?: number;
 }
@@ -157,10 +159,65 @@ function scoreBroadCorpusFile(entry: GitHubTreeEntry): number {
   }
   // Penalize changelogs, history files, readme — they dominate results but aren't useful for code search
   if (/^(changelog|history|readme|contributing|license)/i.test(name)) score -= 50;
-  // Penalize .md/.txt docs vs source code
+  // Penalize generic top-level policy/agent docs unless the query asks for them.
+  if (/^(agents|security|code_of_conduct|contributing|governance)\.(md|mdx|rst|txt)$/i.test(name)) {
+    score -= 15;
+  }
+  // Penalize .md/.txt docs vs source code for broad code search.
   if (/\.(md|mdx|txt|rst)$/i.test(name)) score -= 20;
   score -= pathParts.length * 2;
   score -= entry.path.length / 1000;
+  return score;
+}
+
+const QUERY_STOP_WORDS = new Set([
+  'a',
+  'an',
+  'and',
+  'are',
+  'as',
+  'at',
+  'be',
+  'by',
+  'for',
+  'from',
+  'how',
+  'in',
+  'is',
+  'it',
+  'of',
+  'official',
+  'on',
+  'or',
+  'the',
+  'to',
+  'with',
+]);
+
+function tokenizeQuery(query: string | undefined): string[] {
+  if (query === undefined) return [];
+  return query
+    .toLowerCase()
+    .split(/[^a-z0-9]+/u)
+    .map((token) => token.trim())
+    .filter((token) => token.length >= 2 && !QUERY_STOP_WORDS.has(token));
+}
+
+function scoreGitHubPathForQuery(entry: GitHubTreeEntry, terms: string[]): number {
+  if (terms.length === 0) return 0;
+  const path = entry.path.toLowerCase();
+  const parts = path.split('/');
+  const name = parts.at(-1) ?? '';
+  let score = 0;
+  for (const term of terms) {
+    if (path.includes(term)) score += 4;
+    if (name.includes(term)) score += 7;
+    for (const dir of parts.slice(0, -1)) {
+      if (dir.includes(term)) score += 2;
+    }
+  }
+  if (/\b(docs?|spec|specification|security|reference|guide|protocol)\b/u.test(path)) score += 2;
+  if (/\b(examples?|demos?|fixtures?|tests?|generated|vendor)\b/u.test(path)) score -= 4;
   return score;
 }
 
@@ -170,6 +227,43 @@ export function prioritizeBroadGitHubCorpus(entries: GitHubTreeEntry[]): GitHubT
     if (delta !== 0) return delta;
     return a.path.localeCompare(b.path);
   });
+}
+
+export function rankGitHubFilesByQuery(
+  entries: GitHubTreeEntry[],
+  query: string | undefined,
+): GitHubTreeEntry[] {
+  const terms = tokenizeQuery(query);
+  if (terms.length === 0) return prioritizeBroadGitHubCorpus(entries);
+
+  return [...entries].sort((a, b) => {
+    const aScore = scoreGitHubPathForQuery(a, terms) * 3 + scoreBroadCorpusFile(a) * 0.25;
+    const bScore = scoreGitHubPathForQuery(b, terms) * 3 + scoreBroadCorpusFile(b) * 0.25;
+    const delta = bScore - aScore;
+    if (delta !== 0) return delta;
+    return a.path.localeCompare(b.path);
+  });
+}
+
+function matchesPathFilter(path: string, filters: string[] | undefined): boolean {
+  if (filters === undefined || filters.length === 0) return false;
+  const normalized = path.toLowerCase();
+  return filters.some((filter) => normalized.includes(filter.toLowerCase()));
+}
+
+function passesPathFilters(
+  path: string,
+  includePaths: string[] | undefined,
+  excludePaths: string[] | undefined,
+): boolean {
+  if (
+    includePaths !== undefined &&
+    includePaths.length > 0 &&
+    !matchesPathFilter(path, includePaths)
+  ) {
+    return false;
+  }
+  return !matchesPathFilter(path, excludePaths);
 }
 
 export interface GitHubCorpusWarningInput {
@@ -259,7 +353,11 @@ export async function fetchGitHubCorpus(
   let treeFiles: GitHubTreeEntry[] = [];
   try {
     const treeResult = await getTree(opts.owner, opts.repo, '', opts.branch, true, 500);
-    treeFiles = treeResult.entries.filter((e) => shouldIncludeFile(e, extensions));
+    treeFiles = treeResult.entries.filter(
+      (e) =>
+        shouldIncludeFile(e, extensions) &&
+        passesPathFilters(e.path, opts.includePaths, opts.excludePaths),
+    );
     logger.info(
       { repo: opts.repo, treeFiles: treeFiles.length },
       'fetchGitHubCorpus: repo tree fetched',
@@ -291,7 +389,10 @@ export async function fetchGitHubCorpus(
           htmlUrl: r.htmlUrl,
           apiUrl: r.url,
         };
-        if (shouldIncludeFile(entry, extensions)) {
+        if (
+          shouldIncludeFile(entry, extensions) &&
+          passesPathFilters(entry.path, opts.includePaths, opts.excludePaths)
+        ) {
           searchFiles.push(entry);
         }
       }
@@ -315,7 +416,7 @@ export async function fetchGitHubCorpus(
     }
   }
 
-  const candidateFiles = prioritizeBroadGitHubCorpus(merged);
+  const candidateFiles = rankGitHubFilesByQuery(merged, opts.query);
   const selectedFiles = candidateFiles.slice(0, maxFiles);
   const docs: GitHubCorpusDocument[] = [];
 

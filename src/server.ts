@@ -15,6 +15,7 @@ import { registerWebSearch } from './tools/standalone/webSearch.js';
 import { registerWebRead } from './tools/standalone/webRead.js';
 import { registerWebCrawl } from './tools/standalone/webCrawl.js';
 import { registerSemanticCrawl } from './tools/standalone/semanticCrawl.js';
+import { registerSemanticCrawlListCorpora } from './tools/standalone/semanticCrawlListCorpora.js';
 import { registerSemanticJobs } from './tools/standalone/semanticJobs.js';
 import { registerFetchFocus } from './tools/standalone/fetchFocus.js';
 import { registerHealthCheck } from './tools/standalone/healthCheck.js';
@@ -47,7 +48,10 @@ import { initKgDb } from './knowledge/store/db.js';
 import { resolveKgDbPath } from './knowledge/config.js';
 import { KnowledgeGraphHook } from './knowledge/hook.js';
 
-export function createServer(cfg: SearchConfig, existingHook?: KnowledgeGraphHook): {
+export function createServer(
+  cfg: SearchConfig,
+  existingHook?: KnowledgeGraphHook,
+): {
   server: McpServer;
   kgHook: KnowledgeGraphHook | null;
 } {
@@ -83,7 +87,10 @@ export function createServer(cfg: SearchConfig, existingHook?: KnowledgeGraphHoo
 
   // Gated standalone tools
   if (!gated.has('semantic_jobs')) registerSemanticJobs(server, cfg);
-  if (!gated.has('semantic_crawl')) registerSemanticCrawl(server, cfg, kgHook ?? undefined);
+  if (!gated.has('semantic_crawl')) {
+    registerSemanticCrawl(server, cfg, kgHook ?? undefined);
+    registerSemanticCrawlListCorpora(server);
+  }
   if (!gated.has('deep_research')) registerDeepResearchTool(server, cfg, kgHook ?? undefined);
 
   // Family tools (pass kgHook for passive capture)

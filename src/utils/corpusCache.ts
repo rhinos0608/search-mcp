@@ -43,6 +43,18 @@ export interface CachedCorpus {
   lastAccessedAt: number; // Unix ms
 }
 
+export interface CorpusSummary {
+  corpusId: string;
+  sourceType: SemanticCrawlSource['type'];
+  sourceDescription: string;
+  createdAt: number;
+  lastAccessedAt: number;
+  chunkCount: number;
+  model: string;
+  dimensions: number;
+  totalBytes: number;
+}
+
 // ────────────────────────────────────────────────────────────────────
 // SQLite row shapes
 // ────────────────────────────────────────────────────────────────────
@@ -90,6 +102,17 @@ interface EvictionRow {
   last_accessed_at: number;
   created_at: number;
   total_bytes: number;
+}
+
+interface CorpusSummaryRow {
+  corpus_id: string;
+  source_json: string;
+  model: string;
+  dimensions: number;
+  created_at: number;
+  last_accessed_at: number;
+  total_bytes: number;
+  chunk_count: number;
 }
 
 interface CacheOpts {
@@ -164,6 +187,8 @@ function normalizeSource(source: SemanticCrawlSource): SemanticCrawlSource {
       branch: source.branch,
       extensions: source.extensions !== undefined ? [...source.extensions].sort() : undefined,
       query: source.query,
+      includePaths: source.includePaths !== undefined ? [...source.includePaths].sort() : undefined,
+      excludePaths: source.excludePaths !== undefined ? [...source.excludePaths].sort() : undefined,
     };
   }
   return { type: 'cached', corpusId: source.corpusId };
@@ -208,6 +233,23 @@ function contentHashForChunks(chunks: CorpusChunk[]): string {
     .createHash('sha256')
     .update(chunks.map((c) => c.text).join('\n'))
     .digest('hex');
+}
+
+function describeSource(source: SemanticCrawlSource): string {
+  switch (source.type) {
+    case 'url':
+      return source.urls !== undefined && source.urls.length > 0
+        ? `${source.url} (+${String(source.urls.length)} more)`
+        : source.url;
+    case 'sitemap':
+      return source.url;
+    case 'search':
+      return source.query;
+    case 'github':
+      return `${source.owner}/${source.repo}${source.query ? ` query=${source.query}` : ''}`;
+    case 'cached':
+      return source.corpusId;
+  }
 }
 
 function resolveDatabasePath(opts?: CacheOpts): string {
@@ -721,6 +763,58 @@ export function loadCorpusById(corpusId: string, opts?: CacheOpts): CachedCorpus
   const ttlMs = opts?.ttlMs ?? DEFAULT_TTL_MS;
   const databasePath = resolveDatabasePath(opts);
   return withDatabase(databasePath, (db) => readCorpusFromDatabase(db, corpusId, ttlMs)) ?? null;
+}
+
+export function listCorpora(opts?: CacheOpts): CorpusSummary[] {
+  const ttlMs = opts?.ttlMs ?? DEFAULT_TTL_MS;
+  const databasePath = resolveDatabasePath(opts);
+  return (
+    withDatabase(databasePath, (db) => {
+      const now = Date.now();
+      const rows = db
+        .prepare(
+          `
+          SELECT
+            c.corpus_id,
+            c.source_json,
+            c.model,
+            c.dimensions,
+            c.created_at,
+            c.last_accessed_at,
+            c.total_bytes,
+            COUNT(ch.position) AS chunk_count
+          FROM corpora c
+          LEFT JOIN chunks ch ON ch.corpus_id = c.corpus_id
+          WHERE ? - c.created_at <= ?
+          GROUP BY c.corpus_id
+          ORDER BY c.last_accessed_at DESC, c.created_at DESC
+        `,
+        )
+        .all(now, ttlMs) as CorpusSummaryRow[];
+
+      return rows.flatMap((row) => {
+        try {
+          const source = JSON.parse(row.source_json) as SemanticCrawlSource;
+          return [
+            {
+              corpusId: row.corpus_id,
+              sourceType: source.type,
+              sourceDescription: describeSource(source),
+              createdAt: row.created_at,
+              lastAccessedAt: row.last_accessed_at,
+              chunkCount: row.chunk_count,
+              model: row.model,
+              dimensions: row.dimensions,
+              totalBytes: row.total_bytes,
+            } satisfies CorpusSummary,
+          ];
+        } catch (err) {
+          logger.warn({ err, corpusId: row.corpus_id }, 'corpusCache: failed to parse source JSON');
+          return [];
+        }
+      });
+    }) ?? []
+  );
 }
 
 /**

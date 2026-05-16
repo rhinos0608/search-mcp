@@ -535,6 +535,42 @@ export type SemanticCrawlWarning =
   | {
       code: 'SEMANTIC_CRAWL_CACHED_SOURCE_LIMITATION';
       message: string;
+    }
+  | {
+      code: 'SEMANTIC_CRAWL_BUDGET_DIVISION';
+      message: string;
+      seedCount: number;
+      requestedMaxPages: number;
+      pagesPerSeed: number;
+    }
+  | {
+      code: 'SEMANTIC_CRAWL_SITEMAP_REORDERED';
+      message: string;
+      urlsFound: number;
+      urlsSelected: number;
+      selectedUrls: string[];
+    }
+  | {
+      code: 'SEMANTIC_CRAWL_GITHUB_FILE_SELECTION';
+      message: string;
+      selectedPaths: string[];
+    }
+  | {
+      code: 'SEMANTIC_CRAWL_RANKING_FILTER';
+      message: string;
+      pipeline: {
+        beforeCoherence: number;
+        afterCoherence: number;
+        afterLexical: number;
+        afterRerank: number;
+        requestedTopK: number;
+      };
+    }
+  | {
+      code: 'SEMANTIC_CRAWL_DOCUMENT_FALLBACK';
+      message: string;
+      originalUrl: string;
+      fallbackUrl: string;
     };
 
 export interface SemanticCrawlResult extends StructuredContent {
@@ -583,8 +619,12 @@ export interface GitHubSource {
   branch?: string | undefined;
   /** File extensions to include. Default: ['.md', '.mdx', '.rst', '.txt', '.py', '.ts', '.js', '.go', '.rs', '.java'] */
   extensions?: string[] | undefined;
-  /** Optional code search query to pre-filter files. */
+  /** Optional code search query to pre-filter and rank files. */
   query?: string | undefined;
+  /** Only include files whose path contains one of these substrings. */
+  includePaths?: string[] | undefined;
+  /** Exclude files whose path contains one of these substrings. */
+  excludePaths?: string[] | undefined;
 }
 
 export interface CachedSource {

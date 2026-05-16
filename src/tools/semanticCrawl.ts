@@ -4,6 +4,7 @@ import { webCrawl, type WebCrawlOptions } from './webCrawl.js';
 import { webSearch } from './webSearch.js';
 import { chunkMarkdown } from '../chunking.js';
 import { parseSitemap, isSitemapIndex } from '../utils/sitemap.js';
+import { rankSitemapUrls } from '../utils/sitemapRanking.js';
 import { dedupPages } from '../utils/url.js';
 import { isCookieBannerPage } from '../utils/cookieBanner.js';
 import { rrfMerge } from '../utils/fusion.js';
@@ -18,7 +19,7 @@ import { finalizeStructuredContent } from '../utils/elementHelpers.js';
 import { evaluateDomainTrust, type DomainTrustOptions } from '../utils/domainTrust.js';
 import { scrubContent } from '../utils/contentScrubber.js';
 import { recordOutcome } from '../utils/extractionStats.js';
-import { isDocumentUrl } from '../utils/documentUtils.js';
+import { documentFallbackUrls, isDocumentUrl } from '../utils/documentUtils.js';
 import { extractWithRAGA } from '../utils/ragAnythingClient.js';
 import type { ContentElement, StructuredContent } from '../types.js';
 import type {
@@ -115,6 +116,7 @@ interface EmbedAndRankOptions {
   precomputedEmbeddings?: number[][] | undefined;
   /** Pre-built BM25 index from cache (built inline when not provided). */
   bm25Index?: Bm25Index | undefined;
+  structuredWarnings?: SemanticCrawlWarning[] | undefined;
 }
 
 function median(values: number[]): number {
@@ -140,6 +142,35 @@ interface RetrieveSemanticChunksOptions {
   embeddingApiToken: string;
   embeddingDimensions: number;
   precomputedEmbeddings: number[][];
+  structuredWarnings?: SemanticCrawlWarning[] | undefined;
+}
+
+interface RankingFilterStats {
+  beforeCoherence: number;
+  afterCoherence: number;
+  afterLexical: number;
+  afterRerank: number;
+  requestedTopK: number;
+}
+
+function pushRankingFilterWarning(
+  structuredWarnings: SemanticCrawlWarning[] | undefined,
+  stats: RankingFilterStats,
+): void {
+  if (structuredWarnings === undefined) return;
+  if (stats.afterRerank >= stats.requestedTopK) return;
+  if (stats.beforeCoherence === 0) return;
+  const removed = stats.beforeCoherence - stats.afterRerank;
+  if (removed < stats.beforeCoherence * 0.5 && stats.afterRerank > 0) return;
+
+  const message =
+    `Ranking pipeline returned ${String(stats.afterRerank)} chunks for topK=${String(stats.requestedTopK)}. ` +
+    `Candidates: ${String(stats.beforeCoherence)} → coherence ${String(stats.afterCoherence)} → lexical ${String(stats.afterLexical)} → final ${String(stats.afterRerank)}.`;
+  structuredWarnings.push({
+    code: 'SEMANTIC_CRAWL_RANKING_FILTER',
+    message,
+    pipeline: stats,
+  });
 }
 
 export async function retrieveSemanticChunks(
@@ -238,6 +269,7 @@ export async function retrieveSemanticChunks(
     if (emb !== undefined) fusedPaired.push({ chunk, embedding: emb });
   }
 
+  const beforeCoherence = scoredChunks.length;
   const coherent = fusedPaired.length > 0 ? filterBySemanticCoherence(fusedPaired) : scoredChunks;
   if (coherent.length < scoredChunks.length) {
     logger.info(
@@ -260,14 +292,25 @@ export async function retrieveSemanticChunks(
   const afterLexical = lexicalResult.filtered;
 
   // Optional cross-encoder reranking
+  let topChunks: SemanticCrawlChunk[];
   if (opts.useReranker === true && afterLexical.length > 1) {
-    return applyReranking(
+    topChunks = await applyReranking(
       opts.query,
       afterLexical.slice(0, Math.min(RERANK_CANDIDATES, afterLexical.length)),
       opts.topK,
     );
+  } else {
+    topChunks = afterLexical.slice(0, opts.topK);
   }
-  return afterLexical.slice(0, opts.topK);
+
+  pushRankingFilterWarning(opts.structuredWarnings, {
+    beforeCoherence,
+    afterCoherence: coherent.length,
+    afterLexical: afterLexical.length,
+    afterRerank: topChunks.length,
+    requestedTopK: opts.topK,
+  });
+  return topChunks;
 }
 
 export async function embedAndRank(
@@ -494,6 +537,7 @@ export async function embedAndRank(
     }
   }
 
+  const beforeCoherence = scoredChunks.length;
   const coherent = filterBySemanticCoherence(fusedPaired);
   if (coherent.length < fusedPaired.length) {
     logger.info(
@@ -564,6 +608,14 @@ export async function embedAndRank(
   } else {
     topChunks = afterLexical.slice(0, opts.topK);
   }
+
+  pushRankingFilterWarning(opts.structuredWarnings, {
+    beforeCoherence,
+    afterCoherence: coherent.length,
+    afterLexical: afterLexical.length,
+    afterRerank: topChunks.length,
+    requestedTopK: opts.topK,
+  });
 
   return topChunks;
 }
@@ -873,6 +925,20 @@ export async function crawlSeeds(
   const perSeedBytes =
     opts.maxBytes !== undefined ? divideBudget(opts.maxBytes, numSeeds) : undefined;
 
+  if (numSeeds > 1) {
+    const msg =
+      `semantic_crawl: maxPages is a total budget divided across ${String(numSeeds)} seed URLs ` +
+      `(${String(perSeedPages)} pages per seed).`;
+    warnings.push(msg);
+    structuredWarnings.push({
+      code: 'SEMANTIC_CRAWL_BUDGET_DIVISION',
+      message: msg,
+      seedCount: numSeeds,
+      requestedMaxPages: resolvedMaxPages,
+      pagesPerSeed: perSeedPages,
+    });
+  }
+
   // Run all seed crawls concurrently (up to 4 in parallel) to avoid sequential
   // timeouts compounding when many seeds are provided.
   const crawlResults = await concurrentMap(
@@ -936,6 +1002,39 @@ export async function crawlSeeds(
         );
         return { seedUrl, result, error: undefined as unknown };
       } catch (err: unknown) {
+        if (isDocumentUrl(seedUrl)) {
+          for (const fallbackUrl of documentFallbackUrls(seedUrl)) {
+            try {
+              assertSafeUrl(fallbackUrl);
+              const fallbackResult = await webCrawl(
+                fallbackUrl,
+                crawl4aiCfg.baseUrl,
+                crawl4aiCfg.apiToken ?? '',
+                crawlOpts,
+              );
+              if (fallbackResult.successfulPages > 0) {
+                const msg = `semantic_crawl: document URL failed to crawl; fell back from ${seedUrl} to ${fallbackUrl}`;
+                warnings.push(msg);
+                structuredWarnings.push({
+                  code: 'SEMANTIC_CRAWL_DOCUMENT_FALLBACK',
+                  message: msg,
+                  originalUrl: seedUrl,
+                  fallbackUrl,
+                });
+                return {
+                  seedUrl: fallbackUrl,
+                  result: fallbackResult,
+                  error: undefined as unknown,
+                };
+              }
+            } catch (fallbackErr: unknown) {
+              logger.warn(
+                { err: fallbackErr, seedUrl, fallbackUrl },
+                'semantic_crawl: document fallback crawl failed',
+              );
+            }
+          }
+        }
         logger.warn({ err, seedUrl }, 'semantic_crawl: seed crawl failed');
         return { seedUrl, result: undefined, error: err };
       }
@@ -1194,7 +1293,10 @@ export function pagesToCorpus(
 }
 
 /** Collects and merges structured elements from all successful pages. */
-export function collectPageElements(pages: CrawlPageResult[]): StructuredContent {
+export function collectPageElements(
+  pages: CrawlPageResult[],
+  elementsLimit?: number,
+): StructuredContent {
   const allElements: ContentElement[] = [];
   let omittedCount = 0;
   for (const page of pages) {
@@ -1207,13 +1309,20 @@ export function collectPageElements(pages: CrawlPageResult[]): StructuredContent
       allElements.push(el);
     }
   }
-  const merged = finalizeStructuredContent(allElements);
-  if (omittedCount > 0) {
+
+  const limitedElements =
+    elementsLimit !== undefined && allElements.length > elementsLimit
+      ? allElements.slice(0, elementsLimit)
+      : allElements;
+  const limitOmitted = allElements.length - limitedElements.length;
+  const merged = finalizeStructuredContent(limitedElements);
+  const totalOmitted = omittedCount + limitOmitted + (merged.omittedElementCount ?? 0);
+  if (totalOmitted > 0) {
     const keptCount = merged.elements?.length ?? 0;
     return {
       ...merged,
-      originalElementCount: keptCount + omittedCount + (merged.omittedElementCount ?? 0),
-      omittedElementCount: omittedCount + (merged.omittedElementCount ?? 0),
+      originalElementCount: keptCount + totalOmitted,
+      omittedElementCount: totalOmitted,
     };
   }
   return merged;
@@ -1266,6 +1375,12 @@ export interface SemanticCrawlOptions {
   /** Override max tokens per chunk (default: 400). Larger values produce fewer
    * chunks, reducing LLM calls when useContextualEmbeddings is enabled. */
   maxChunkTokens?: number | undefined;
+  /** Include page-level structured elements in the response. */
+  includeElements?: boolean | undefined;
+  /** Maximum page-level structured elements to return when included. */
+  elementsLimit?: number | undefined;
+  /** Full response or low-context passages response. */
+  outputMode?: 'full' | 'passages' | undefined;
   /** Optional security policy for domain trust evaluation. Disabled by default. */
   domainTrust?: DomainTrustConfig | undefined;
 }
@@ -1393,12 +1508,27 @@ export async function semanticCrawl(
         );
       }
 
-      const safeUrls = filterSafeUrls(sitemapUrls, opts.domainTrust).slice(0, opts.maxPages);
+      const safeUrls = filterSafeUrls(sitemapUrls, opts.domainTrust);
+      const rankedUrls = rankSitemapUrls(safeUrls, opts.query);
+      const selectedUrls = rankedUrls.slice(0, opts.maxPages);
+      if (selectedUrls.length > 0 && selectedUrls[0] !== safeUrls[0]) {
+        const msg =
+          `semantic_crawl: sitemap URLs were preselected by relevance to query; ` +
+          `${String(safeUrls.length)} safe URLs found, ${String(selectedUrls.length)} selected.`;
+        crawlWarnings.push(msg);
+        crawlStructuredWarnings.push({
+          code: 'SEMANTIC_CRAWL_SITEMAP_REORDERED',
+          message: msg,
+          urlsFound: safeUrls.length,
+          urlsSelected: selectedUrls.length,
+          selectedUrls: selectedUrls.slice(0, 10),
+        });
+      }
       logger.info(
         {
           sitemapUrl: seedUrl,
           urlsFound: sitemapUrls.length,
-          urlsUsed: safeUrls.length,
+          urlsUsed: selectedUrls.length,
         },
         'Parsed sitemap',
       );
@@ -1415,7 +1545,7 @@ export async function semanticCrawl(
         maxDepth: 0,
         sourceType: opts.source.type,
       };
-      const result = await crawlSeeds(safeUrls, crawl4aiCfg, sitemapOpts, ragaConfig);
+      const result = await crawlSeeds(selectedUrls, crawl4aiCfg, sitemapOpts, ragaConfig);
       crawlWarnings.push(...result.warnings);
       for (const sw of result.structuredWarnings) {
         crawlStructuredWarnings.push(sw);
@@ -1517,7 +1647,21 @@ export async function semanticCrawl(
       if (opts.source.branch !== undefined) ghOpts.branch = opts.source.branch;
       if (opts.source.extensions !== undefined) ghOpts.extensions = opts.source.extensions;
       if (opts.source.query !== undefined) ghOpts.query = opts.source.query;
+      if (opts.source.includePaths !== undefined) ghOpts.includePaths = opts.source.includePaths;
+      if (opts.source.excludePaths !== undefined) ghOpts.excludePaths = opts.source.excludePaths;
       const docs = await fetchGitHubCorpus(ghOpts);
+      const selectedPaths = docs.map((doc) => doc.path);
+      if (selectedPaths.length > 0) {
+        const msg =
+          `semantic_crawl: selected ${String(selectedPaths.length)} GitHub files for ` +
+          `${opts.source.owner}/${opts.source.repo}. Top paths: ${selectedPaths.slice(0, 5).join(', ')}`;
+        crawlWarnings.push(msg);
+        crawlStructuredWarnings.push({
+          code: 'SEMANTIC_CRAWL_GITHUB_FILE_SELECTION',
+          message: msg,
+          selectedPaths: selectedPaths.slice(0, 20),
+        });
+      }
       corpusChunks = [];
       contextualDocuments = new Map<string, string>();
       for (const doc of docs) {
@@ -1555,7 +1699,7 @@ export async function semanticCrawl(
       });
       if (!cached) {
         throw new Error(
-          `Corpus '${opts.source.corpusId}' not found or expired. Re-issue with the original source to rebuild.`,
+          `Corpus '${opts.source.corpusId}' not found or expired. Re-issue with the original source to rebuild, or use semantic_crawl_list_corpora to browse available cached corpora.`,
         );
       }
       corpusChunks = cached.chunks;
@@ -1569,7 +1713,9 @@ export async function semanticCrawl(
 
     default: {
       // Exhaustiveness check — TypeScript should prevent this at compile time
-      throw new Error(`Unknown source type '${(opts.source as { type: string }).type}'`);
+      throw new Error(
+        `Unknown source type '${(opts.source as { type: string }).type}'. Valid values: "url", "sitemap", "search", "github", "cached".`,
+      );
     }
   }
 
@@ -1605,6 +1751,7 @@ export async function semanticCrawl(
       embeddingApiToken,
       embeddingDimensions,
       precomputedEmbeddings: precomputedEmbeddings ?? [],
+      structuredWarnings: crawlStructuredWarnings,
     });
 
     return {
@@ -1700,6 +1847,7 @@ export async function semanticCrawl(
     embeddingApiToken,
     embeddingDimensions,
     precomputedEmbeddings: corpus.embeddings,
+    structuredWarnings: crawlStructuredWarnings,
   });
 
   return {
@@ -1712,8 +1860,12 @@ export async function semanticCrawl(
     chunks: topChunks,
     ...(crawlWarnings.length > 0 ? { warnings: crawlWarnings } : {}),
     ...(crawlStructuredWarnings.length > 0 ? { structuredWarnings: crawlStructuredWarnings } : {}),
-    ...(crawlOmittedPages.length > 0 ? { omittedPages: crawlOmittedPages } : {}),
-    ...(extractedData ? { extractedData } : {}),
-    ...collectPageElements(lastPages),
+    ...(opts.outputMode !== 'passages' && crawlOmittedPages.length > 0
+      ? { omittedPages: crawlOmittedPages }
+      : {}),
+    ...(opts.outputMode !== 'passages' && extractedData ? { extractedData } : {}),
+    ...(opts.outputMode !== 'passages' && opts.includeElements !== false
+      ? collectPageElements(lastPages, opts.elementsLimit)
+      : {}),
   };
 }
