@@ -14,11 +14,10 @@
 import { logger } from '../../logger.js';
 import { getKgDb } from './db.js';
 import { queryEvents, countEvents } from './events.js';
-import { normalizeToLatest, CURRENT_PROJECTION_VERSION } from '../extractor/versions/v1.js';
+import { normalizeToLatest } from '../extractor/versions/v1.js';
 import {
   createCheckpoint,
   computeProjectionChecksum,
-  getLatestCompatibleCheckpoint,
 } from './checkpoints.js';
 import {
   AUDIT_ONLY_EVENTS,
@@ -266,8 +265,8 @@ function flushStateToDb(state: ProjectionState): void {
  * Rebuild the projection tables from the append-only event store.
  *
  * Strategy:
- * 1. If a compatible checkpoint exists (and full=false, fromEventId
- *    not set), start from its event cursor.
+ * 1. Replay from genesis by default so the atomic table swap always has
+ *    complete state. Cursor rebuilds are only used when explicitly requested.
  * 2. Query all events from the starting cursor (or from genesis).
  * 3. Replay each event through typed handlers into in-memory maps.
  * 4. Atomically DELETE all rows from projection tables and INSERT
@@ -307,12 +306,6 @@ export function rebuildProjection(
   if (opts.fromEventId !== undefined) {
     fromEventId = opts.fromEventId;
     fromGenesis = false;
-  } else if (!opts.full) {
-    const checkpoint = getLatestCompatibleCheckpoint(CURRENT_PROJECTION_VERSION);
-    if (checkpoint !== null) {
-      fromEventId = checkpoint.eventCursor;
-      fromGenesis = false;
-    }
   }
 
   // Step 2: Query events (cursor is exclusive — events with id > cursor)

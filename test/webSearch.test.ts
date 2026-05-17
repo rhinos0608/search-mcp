@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { searchWithBackends, type WebSearchDeps } from '../src/tools/webSearch.js';
+import { searchWithBackends, type WebSearchDeps, type ProvenanceResult } from '../src/tools/webSearch.js';
 import { createServer } from '../src/server.js';
 import { resetConfig, loadConfig } from '../src/config.js';
 import type { SearchResult } from '../src/types.js';
@@ -273,4 +273,41 @@ test('uses Exa as configured primary backend and marks source as exa', async () 
     else delete process.env.SEARXNG_BASE_URL;
     resetConfig();
   }
+});
+
+void test('searchWithBackends tracks provenance when primary succeeds', async () => {
+  const result = makeResult('https://example.com/a', 1);
+  const deps: WebSearchDeps = {
+    braveSearch: async () => [result],
+    searxngSearch: async () => [],
+    exaSearch: async () => [],
+    tavilySearch: async () => [],
+  };
+  const provenanceRef: { current: ProvenanceResult | null } = { current: null };
+  const results = await searchWithBackends('test', 1, 'moderate', deps, ['brave', 'searxng'], false, false, false, undefined, provenanceRef);
+  assert.ok(results.length > 0);
+  assert.ok(provenanceRef.current !== null);
+  assert.equal(provenanceRef.current!.usedBackend, 'brave');
+  assert.ok(provenanceRef.current!.servedBackends.includes('brave'));
+  assert.equal(provenanceRef.current!.usedFallback, false);
+});
+
+void test('searchWithBackends tracks provenance when fallback occurs', async () => {
+  const result = makeResult('https://example.com/b', 1);
+  const deps: WebSearchDeps = {
+    braveSearch: async () => {
+      throw new Error('brave down');
+    },
+    searxngSearch: async () => [result],
+    exaSearch: async () => [],
+    tavilySearch: async () => [],
+  };
+  const provenanceRef: { current: ProvenanceResult | null } = { current: null };
+  const results = await searchWithBackends('test', 1, 'moderate', deps, ['brave', 'searxng'], false, false, false, undefined, provenanceRef);
+  assert.ok(results.length > 0);
+  assert.ok(provenanceRef.current !== null);
+  assert.equal(provenanceRef.current!.usedBackend, 'brave');
+  assert.ok(!provenanceRef.current!.servedBackends.includes('brave'));
+  assert.equal(provenanceRef.current!.usedFallback, true);
+  assert.ok(typeof provenanceRef.current!.fallbackReason === 'string');
 });

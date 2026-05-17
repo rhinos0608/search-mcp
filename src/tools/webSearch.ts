@@ -156,6 +156,15 @@ async function runBackend(
   }
 }
 
+// ── Provenance tracking ─────────────────────────────────────────────────────
+
+export interface ProvenanceResult {
+  usedBackend: string;
+  servedBackends: string[];
+  usedFallback: boolean;
+  fallbackReason?: string;
+}
+
 // ── Dependency injection ─────────────────────────────────────────────────────
 
 export interface WebSearchDeps {
@@ -177,6 +186,7 @@ export async function searchWithBackends(
   mergeBackends = true,
   fuzzyCorrect = true,
   correctionResult?: { current: CorrectQueryResult | null },
+  provenanceResult?: { current: ProvenanceResult | null },
 ): Promise<SearchResult[]> {
   const cfg = loadConfig();
 
@@ -227,6 +237,9 @@ export async function searchWithBackends(
 
   const useMerge = mergeBackends && available.length > 1;
 
+  // Track which backends actually contributed results (shared across query variations)
+  const contributedBackendSet = new Set<string>();
+
   // Run each query variation across all backends, collecting per-query results
   const queryPromises = queries.map(async (qv) => {
     const promises = available.map(async (backend) => {
@@ -245,6 +258,7 @@ export async function searchWithBackends(
 
     for (const s of settled) {
       if (s.status === 'fulfilled') {
+        contributedBackendSet.add(s.value.backend);
         validResults.set(s.value.backend, s.value.results);
       }
     }
@@ -268,6 +282,26 @@ export async function searchWithBackends(
   });
 
   const queryResults = await Promise.all(queryPromises);
+
+  // ── Provenance tracking ──────────────────────────────────────────
+  if (provenanceResult) {
+    const effectivePrimary: string = overrideBackends?.[0] ?? primary;
+    const usedFallback = !contributedBackendSet.has(effectivePrimary);
+    const fallbackReasons: string[] = [];
+    if (usedFallback) {
+      if (!available.includes(effectivePrimary as SearchBackend)) {
+        fallbackReasons.push(`${effectivePrimary} was unavailable or degraded`);
+      } else {
+        fallbackReasons.push(`${effectivePrimary} failed to return results`);
+      }
+    }
+    provenanceResult.current = {
+      usedBackend: effectivePrimary,
+      servedBackends: Array.from(contributedBackendSet).sort(),
+      usedFallback,
+      ...(fallbackReasons.length > 0 ? { fallbackReason: fallbackReasons.join('; ') } : {}),
+    };
+  }
 
   // Deduplicate across query variations by normalized URL, keeping longest snippet and best rrfScore
   const seen = new Map<string, { item: SearchResult; rrfScore: number }>();
@@ -325,6 +359,7 @@ export async function webSearch(
   expandQueryOpt = true,
   mergeBackends = true,
   fuzzyCorrect = true,
+  provenanceResult?: { current: ProvenanceResult | null },
 ): Promise<SearchResult[]> {
   return searchWithBackends(
     query,
@@ -340,5 +375,7 @@ export async function webSearch(
     expandQueryOpt,
     mergeBackends,
     fuzzyCorrect,
+    undefined,
+    provenanceResult,
   );
 }

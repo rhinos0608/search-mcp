@@ -61,9 +61,11 @@ function toolToSourceKind(toolName: string): SourceKind {
   if (lower.startsWith('reddit')) return 'forum';
   if (lower.startsWith('youtube')) return 'social';
   if (lower.startsWith('github')) return 'code_repo';
-  if (lower.startsWith('npm') || lower.startsWith('pypi')) return 'package_registry';
+  if (lower.startsWith('packages') || lower.startsWith('npm') || lower.startsWith('pypi')) return 'package_registry';
   if (lower.startsWith('academic') || lower.startsWith('arxiv')) return 'research_paper';
   if (lower.startsWith('hackernews') || lower.startsWith('stackoverflow')) return 'forum';
+  if (lower.startsWith('research.hackernews') || lower.startsWith('research.stackoverflow')) return 'forum';
+  if (lower.startsWith('research.wikipedia')) return 'documentation';
   if (lower.startsWith('research')) return 'research_paper';
   return 'unknown';
 }
@@ -84,24 +86,90 @@ function toolToSourceKind(toolName: string): SourceKind {
  * - `{ posts: Array<{ content: string, url?: string, title?: string }> }` — Reddit/HN
  * - `{ items: Array<{ content: string, url?: string, title?: string }> }` — generic items
  */
+function stringValue(obj: Record<string, unknown>, keys: readonly string[]): string | undefined {
+  for (const key of keys) {
+    const value = obj[key];
+    if (typeof value === 'string' && value.trim().length > 0) return value.trim();
+  }
+  return undefined;
+}
+
+function textKeysForTool(tool: string): string[] {
+  if (tool === 'web_search') return ['content', 'text', 'textContent', 'snippet', 'description', 'extraSnippet'];
+  if (tool.startsWith('reddit')) return ['title', 'selftext', 'body', 'content', 'text', 'textContent', 'snippet', 'description', 'extraSnippet'];
+  if (tool.startsWith('youtube')) return ['title', 'description', 'fullText', 'text', 'content'];
+  if (tool.startsWith('github')) return ['name', 'path', 'description', 'readme', 'content', 'fragment', 'packageOverview', 'text'];
+  if (tool.startsWith('research')) return ['title', 'abstract', 'snippet', 'summary', 'description', 'body', 'storyText', 'text', 'content'];
+  if (tool.startsWith('packages')) return ['name', 'description', 'summary', 'text', 'content'];
+  return ['title', 'name', 'content', 'text', 'textContent', 'markdown', 'snippet', 'description', 'abstract', 'summary', 'body', 'selftext', 'storyText', 'fullText', 'extraSnippet'];
+}
+
+function urlFromObject(obj: Record<string, unknown>): string | undefined {
+  return stringValue(obj, ['url', 'link', 'htmlUrl', 'html_url', 'pdfUrl', 'repository']);
+}
+
+function titleFromObject(obj: Record<string, unknown>, fallback?: string): string | undefined {
+  return stringValue(obj, ['title', 'name', 'fullName', 'full_name', 'path']) ?? fallback;
+}
+
+function transcriptText(value: unknown): string | null {
+  if (typeof value === 'string' && value.trim().length > 0) return value.trim();
+  if (!Array.isArray(value)) return null;
+  const parts = value.flatMap((segment) => {
+    if (segment !== null && typeof segment === 'object') {
+      const text = (segment as Record<string, unknown>).text;
+      return typeof text === 'string' && text.trim().length > 0 ? [text.trim()] : [];
+    }
+    return [];
+  });
+  return parts.length > 0 ? parts.join(' ') : null;
+}
+
 function extractFromToolResult(
   toolName: string,
   result: Record<string, unknown>,
 ): { text: string; url: string | undefined; title: string | undefined } | null {
   const tool = toolName.toLowerCase();
+  const itemTextKeys = textKeysForTool(tool);
 
   // ── Direct content fields ──
-  if (typeof result.content === 'string' && result.content.trim().length > 0) {
+  const directText = stringValue(result, ['content', 'fullText', 'markdown', 'readme', 'abstract', 'body', 'selftext', 'storyText', 'snippet', 'description', 'text']);
+  if (directText !== undefined) {
     return {
-      text: result.content,
-      url: typeof result.url === 'string' ? result.url : undefined,
-      title: typeof result.title === 'string' ? result.title : undefined,
+      text: directText,
+      url: urlFromObject(result),
+      title: titleFromObject(result, tool.startsWith('youtube') ? 'YouTube transcript' : undefined),
+    };
+  }
+
+  const transcript = transcriptText(result.transcript);
+  if (transcript !== null) {
+    return {
+      text: transcript,
+      url: urlFromObject(result),
+      title: titleFromObject(result, 'YouTube transcript'),
     };
   }
 
   // ── Array-based results ──
   const arraysToTry: unknown[] = Array.isArray(result) ? [result] : [];
-  for (const key of ['results', 'articles', 'pages', 'posts', 'items', 'data']) {
+  for (const key of [
+    'results',
+    'articles',
+    'pages',
+    'posts',
+    'items',
+    'data',
+    'videos',
+    'comments',
+    'papers',
+    'packages',
+    'works',
+    'questions',
+    'entries',
+    'chunks',
+    'topChunks',
+  ]) {
     arraysToTry.push(result[key]);
   }
 
@@ -118,23 +186,22 @@ function extractFromToolResult(
       const obj = item as Record<string, unknown>;
       const itemParts: string[] = [];
 
-      for (const key of ['content', 'text', 'textContent', 'snippet', 'description', 'extraSnippet']) {
+      for (const key of itemTextKeys) {
         const value = obj[key];
         if (typeof value === 'string' && value.trim().length > 0) {
           itemParts.push(value.trim());
         }
       }
 
+      const segmentText = transcriptText(obj.transcript);
+      if (segmentText !== null) itemParts.push(segmentText);
+
       if (itemParts.length > 0) {
         parts.push(itemParts.join('\n'));
       }
 
-      if (firstUrl === undefined && typeof obj.url === 'string') {
-        firstUrl = obj.url;
-      }
-      if (firstTitle === undefined && typeof obj.title === 'string') {
-        firstTitle = obj.title;
-      }
+      firstUrl ??= urlFromObject(obj);
+      firstTitle ??= titleFromObject(obj);
     }
 
     if (parts.length > 0) {
@@ -142,38 +209,6 @@ function extractFromToolResult(
         text: parts.join('\n\n'),
         url: firstUrl,
         title: firstTitle ?? `${tool} results`,
-      };
-    }
-  }
-
-  // ── YouTube transcript specific ──
-  if (tool.startsWith('youtube') && typeof result.transcript === 'string') {
-    return {
-      text: result.transcript,
-      url: typeof result.url === 'string' ? result.url : undefined,
-      title: typeof result.title === 'string' ? result.title : 'YouTube transcript',
-    };
-  }
-
-  // ── Semantic crawl ──
-  if (tool.startsWith('semantic_crawl')) {
-    // semantic_crawl may have pages or a top-level text
-    if (typeof result.text === 'string' && result.text.trim().length > 0) {
-      return {
-        text: result.text,
-        url: typeof result.url === 'string' ? result.url : undefined,
-        title: typeof result.title === 'string' ? result.title : undefined,
-      };
-    }
-  }
-
-  // ── GitHub repository result ──
-  if (tool.startsWith('github')) {
-    if (typeof result.readme === 'string') {
-      return {
-        text: result.readme,
-        url: typeof result.url === 'string' ? result.url : undefined,
-        title: typeof result.full_name === 'string' ? result.full_name : undefined,
       };
     }
   }

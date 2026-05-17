@@ -31,6 +31,34 @@ import { correctQuery } from '../utils/fuzzyCorrection.js';
 import { applyIntentFilter } from '../utils/intentFilter.js';
 import type { IntentFilterResult } from '../utils/intentFilter.js';
 
+// ── Input normalization ─────────────────────────────────────────────────────
+
+function nullishUndefined(value: unknown): unknown {
+  return value === null || value === '' ? undefined : value;
+}
+
+function omitTopLevelNullish(value: unknown): unknown {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    return value;
+  }
+
+  const normalized: Record<string, unknown> = {};
+  for (const [key, fieldValue] of Object.entries(value)) {
+    if (fieldValue !== null && fieldValue !== '') {
+      normalized[key] = fieldValue;
+    }
+  }
+  return normalized;
+}
+
+function nullTolerantMergedField(fieldType: z.ZodType): z.ZodType {
+  if (fieldType.safeParse(undefined).success) {
+    return z.preprocess(nullishUndefined, fieldType);
+  }
+
+  return z.preprocess(nullishUndefined, fieldType.optional());
+}
+
 // ── Types ──────────────────────────────────────
 
 /**
@@ -119,14 +147,16 @@ function buildMergedSchema(family: FamilyDefinition): z.ZodObject<z.ZodRawShape>
   };
   for (const [key, fieldType] of allFields) {
     if (key === 'action') continue;
-    merged[key] = (fieldType as z.ZodType).optional();
+    merged[key] = nullTolerantMergedField(fieldType as z.ZodType);
   }
   return z.object(merged).superRefine((value, ctx) => {
     const actionName = typeof value.action === 'string' ? value.action : '';
     const action = family.actions.find((a) => a.name === actionName);
     if (!action) return;
 
-    const parsed = (action.schema as z.ZodObject<z.ZodRawShape>).safeParse(value);
+    const parsed = (action.schema as z.ZodObject<z.ZodRawShape>).safeParse(
+      omitTopLevelNullish(value),
+    );
     if (parsed.success) return;
 
     for (const issue of parsed.error.issues) {
@@ -176,7 +206,12 @@ export function registerFamily(
       // Zod schema so that missing required fields are caught before
       // the handler runs.  The merged schema has all fields optional
       // for client compatibility; this is the actual runtime gate.
-      const parsed = (action.schema as z.ZodObject<z.ZodRawShape>).safeParse(rawArgs);
+      // Some MCP clients serialize omitted optional fields as null or
+      // empty string; treat top-level null/emptyish as omitted while
+      // preserving invalid required-field errors after per-action validation.
+      const parsed = (action.schema as z.ZodObject<z.ZodRawShape>).safeParse(
+        omitTopLevelNullish(rawArgs),
+      );
       if (!parsed.success) {
         const issues = parsed.error.issues.map(
           (i) => `${(i as { path: (string | number)[] }).path.join('.')}: ${(i as { message: string }).message}`,
@@ -204,7 +239,8 @@ export function registerFamily(
 
       // ── Context protection: fuzzy correction ──
       let correction: { original: string; corrected: string; changes: { original: string; corrected: string; distance: number }[] } | undefined;
-      const fuzzyOpt = parsed.data.fuzzyCorrect !== false;
+      const rawFuzzyCorrect = (rawArgs as Record<string, unknown>).fuzzyCorrect;
+      const fuzzyOpt = rawFuzzyCorrect !== false;
       const rawQuery = typeof parsed.data.query === 'string' ? parsed.data.query : undefined;
       if (fuzzyOpt && rawQuery) {
         const cr = correctQuery(rawQuery);
@@ -298,6 +334,10 @@ export function registerFamily(
         const meta: Record<string, unknown> = {};
         if (ws !== undefined) meta.warnings = ws;
         if (correction) meta.correction = correction;
+        if (wrapped?.provenance) meta.provenance = wrapped.provenance;
+        if (wrapped?.retry) meta.retry = wrapped.retry;
+        if (wrapped?.normalized) meta.normalized = wrapped.normalized;
+        if (wrapped?.partial !== undefined) meta.partial = wrapped.partial;
         if (intentFilterResult) {
           meta.intentFilter = {
             filtered: intentFilterResult.filtered,

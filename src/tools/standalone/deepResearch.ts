@@ -37,7 +37,7 @@ import type { KnowledgeGraphHook } from '../../knowledge/hook.js';
 // ── Schema (flat object — MCP clients render flat properties) ──────────────
 
 const deepResearchSchema = z.object({
-  action: z.enum(['start', 'poll', 'list', 'cancel', 'save']).describe('Which action to perform'),
+  action: z.enum(['start', 'poll', 'list', 'cancel', 'save', 'run']).describe('Which action to perform'),
   jobId: z.string().optional().describe('Job ID (required for poll, cancel, and save)'),
   path: z
     .string()
@@ -71,6 +71,15 @@ const deepResearchSchema = z.object({
     .optional()
     .describe(
       'Maximum runtime in milliseconds (10s to 45min). If omitted, the depth profile default is used.',
+    ),
+  timeoutMs: z
+    .number()
+    .int()
+    .min(10_000)
+    .max(300_000)
+    .optional()
+    .describe(
+      'Maximum wait in milliseconds for the run convenience action (10s to 5min). Defaults to 60s. On timeout, returns partial status with jobId and retry metadata.',
     ),
   strategy: z
     .enum(['agent', 'pipeline', 'tree'])
@@ -111,6 +120,8 @@ interface DeepResearchExtra {
 
 /** Poll blocks for up to this long when the job is still running. */
 const POLL_WAIT_MS = 60_000;
+/** Default timeout for the run convenience action. */
+const RUN_DEFAULT_TIMEOUT_MS = POLL_WAIT_MS;
 /** Interval between status checks during poll wait. */
 const POLL_INTERVAL_MS = 2_000;
 
@@ -279,6 +290,98 @@ async function handleStart(
       elapsed,
     ),
   );
+}
+
+/**
+ * Convenience: start and poll until complete or timeout.
+ * Returns final result on completion, or partial status with jobId and retry metadata on timeout.
+ */
+async function handleRun(
+  args: DeepResearchArgs,
+  cfg: SearchConfig,
+  extra: DeepResearchExtra | undefined,
+  kgHook: KnowledgeGraphHook | undefined,
+): Promise<ReturnType<typeof successResponse> | ReturnType<typeof errorResponse>> {
+  const start = Date.now();
+
+  // First, start the job using handleStart
+  const startResult = await handleStart(args, cfg, extra, kgHook);
+  if ('isError' in startResult) {
+    return startResult;
+  }
+
+  // Parse jobId from the start result
+  let jobId: string | undefined;
+  try {
+    const content: unknown = JSON.parse(startResult.content[0]?.text ?? '{}');
+    if (typeof content === 'object' && content !== null && 'data' in content) {
+      const data = content.data;
+      if (typeof data === 'object' && data !== null && 'jobId' in data) {
+        const parsedJobId = data.jobId;
+        if (typeof parsedJobId === 'string') {
+          jobId = parsedJobId;
+        }
+      }
+    }
+    if (!jobId) {
+      return errorResponse(new Error('Start did not return a jobId'));
+    }
+  } catch {
+    return errorResponse(new Error('Failed to parse start result'));
+  }
+
+  // Bounded poll loop
+  const timeoutMs = args.timeoutMs ?? RUN_DEFAULT_TIMEOUT_MS;
+  const deadline = Date.now() + timeoutMs;
+
+  for (;;) {
+    const snapshot: ResearchJobSnapshot | null = researchJobManager.poll(jobId);
+    if (!snapshot) {
+      return errorResponse(new Error(`Research job "${jobId}" not found.`));
+    }
+
+    // Terminal state → return final result
+    if (
+      snapshot.status === 'complete' ||
+      snapshot.status === 'failed' ||
+      snapshot.status === 'cancelled' ||
+      snapshot.status === 'expired'
+    ) {
+      if (snapshot.status === 'complete' && !snapshot.result && snapshot.resultFile) {
+        snapshot.result = ensureResultLoaded(jobId);
+      }
+      const elapsed = Date.now() - start;
+      return successResponse(makeResult('deep_research', snapshot, elapsed));
+    }
+
+    // Timeout → return partial status with retry metadata
+    const now = Date.now();
+    if (now >= deadline) {
+      const elapsed = now - start;
+      return successResponse(
+        makeResult(
+          'deep_research',
+          { ...snapshot, jobId },
+          elapsed,
+          {
+            partial: true,
+            retry: {
+              recommended: true,
+              reason: 'Research did not complete within the timeout window. Poll for results.',
+              minimalCall: {
+                action: 'poll',
+                jobId,
+              },
+            },
+          },
+        ),
+      );
+    }
+
+    const remaining = deadline - now;
+    const delay = Math.min(POLL_INTERVAL_MS, remaining);
+    await new Promise((resolve) => setTimeout(resolve, delay));
+  }
 }
 
 async function handlePoll(
@@ -536,6 +639,8 @@ async function handleDeepResearch(
   switch (args.action) {
     case 'start':
       return handleStart(args, cfg, extra, kgHook);
+    case 'run':
+      return handleRun(args, cfg, extra, kgHook);
     case 'poll':
       return handlePoll(args);
     case 'list':
@@ -629,6 +734,7 @@ export function registerDeepResearchTool(
         'Conduct deep multi-source research via a job/poll protocol.\n\n' +
         'Actions:\n' +
         '  start  — Begin research. Returns jobId immediately. Research runs in background. Results are auto-saved to disk unless save=false is set.\n' +
+        '  run    — Convenience: start and poll until complete or timeout. Returns final result, or partial status + jobId + retry metadata on timeout.\n' +
         '  poll   — Check job status and retrieve partial or complete results.\n' +
         '  list   — List all jobs. Includes status, progress, saved file path, and creation time for each. Use poll with a jobId to retrieve results.\n' +
         '  cancel — Cancel a running research job.\n' +

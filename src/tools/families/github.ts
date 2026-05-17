@@ -31,12 +31,13 @@ import { getGitHubTrending } from '../githubTrending.js';
 import { semanticGitHubCode } from '../semanticGitHubCode.js';
 import { wrapResponse } from '../response.js';
 import { registerFamily, type FamilyDefinition } from '../registry.js';
+import { resolveGitHubRepoLocator } from '../normalize.js';
 
 // ── Action schemas (each is a complete z.object with action discriminator) ──
 
 const repoAction = z.object({
   action: z.literal('repo').describe('Fetch repository metadata and README'),
-  // Accept either owner+repo separate, or 'repository' as "owner/repo" string
+  // Accept either owner+repo separate, or 'repository' as "owner/repo" string or GitHub URL
   owner: z
     .string()
     .regex(/^[a-zA-Z0-9](?:[a-zA-Z0-9._-]*[a-zA-Z0-9])?$/)
@@ -49,9 +50,8 @@ const repoAction = z.object({
     .describe('Repository name'),
   repository: z
     .string()
-    .regex(/^[a-zA-Z0-9](?:[a-zA-Z0-9._-]*[a-zA-Z0-9])?\/[a-zA-Z0-9._-]{1,100}$/u)
     .optional()
-    .describe('Repository as "owner/repo" (alternative to owner+repo fields)'),
+    .describe('Repository as "owner/repo" or GitHub URL (alternative to owner+repo fields)'),
   includeReadme: z
     .boolean()
     .optional()
@@ -65,11 +65,17 @@ const fileAction = z
     owner: z
       .string()
       .regex(/^[a-zA-Z0-9](?:[a-zA-Z0-9._-]*[a-zA-Z0-9])?$/)
+      .optional()
       .describe('GitHub username or organisation'),
     repo: z
       .string()
       .regex(/^[a-zA-Z0-9._-]{1,100}$/)
+      .optional()
       .describe('Repository name'),
+    repository: z
+      .string()
+      .optional()
+      .describe('Repository as "owner/repo" or GitHub URL (alternative to owner+repo fields)'),
     path: z.string().describe('File path within the repo'),
     branch: z.string().optional().describe('Git ref (branch, tag, or commit SHA)'),
     raw: z.boolean().optional().default(true).describe('true = decoded UTF-8 text; false = base64'),
@@ -118,11 +124,17 @@ const treeAction = z.object({
   owner: z
     .string()
     .regex(/^[a-zA-Z0-9](?:[a-zA-Z0-9._-]*[a-zA-Z0-9])?$/)
+    .optional()
     .describe('GitHub username or organisation'),
   repo: z
     .string()
     .regex(/^[a-zA-Z0-9._-]{1,100}$/)
+    .optional()
     .describe('Repository name'),
+  repository: z
+    .string()
+    .optional()
+    .describe('Repository as "owner/repo" or GitHub URL (alternative to owner+repo fields)'),
   path: z.string().optional().default('').describe('Directory path within the repo'),
   branch: z.string().optional().describe('Git ref (branch, tag, or commit SHA)'),
   recursive: z.boolean().optional().default(false).describe('Return full recursive tree'),
@@ -161,10 +173,16 @@ const trendingAction = z.object({
 const codeSearchAction = z.object({
   action: z.literal('code_search').describe('Semantic code search across a repository'),
   query: z.string().describe('Code search query, e.g. an identifier or behaviour'),
-  repo: z
-    .string()
-    .regex(/^[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+$/u)
-    .describe('Repository in owner/repo form'),
+  repo: z.preprocess(
+    (val) => {
+      if (typeof val === 'string') {
+        const loc = resolveGitHubRepoLocator(val);
+        if (loc) return `${loc.owner}/${loc.repo}`;
+      }
+      return val;
+    },
+    z.string().regex(/^[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+$/u),
+  ).describe('Repository in owner/repo form or GitHub URL'),
   ref: z.string().optional().describe('Git ref, branch, tag, or commit SHA'),
   language: z
     .enum(['typescript', 'javascript', 'python', 'go', 'rust', 'markdown', 'shell'])
@@ -254,19 +272,19 @@ const githubFamily: FamilyDefinition = {
           includeReadme: boolean;
         };
 
-        // Support 'repository' as alternative to 'owner'/'repo'
+        // Support 'repository' as alternative to 'owner'/'repo' (accepts owner/repo, GitHub URL)
         let resolvedOwner = owner;
         let resolvedRepo = repo;
         if (!resolvedOwner && !resolvedRepo && repository) {
-          const parts = repository.split('/');
-          if (parts.length === 2) {
-            resolvedOwner = parts[0];
-            resolvedRepo = parts[1];
+          const loc = resolveGitHubRepoLocator(repository);
+          if (loc) {
+            resolvedOwner = loc.owner;
+            resolvedRepo = loc.repo;
           }
         }
         if (!resolvedOwner || !resolvedRepo) {
           throw new Error(
-            'Missing repository: provide `owner` + `repo` or `repository` (owner/repo form)',
+            'Missing repository: provide `owner` + `repo` or `repository` (owner/repo or GitHub URL)',
           );
         }
 
@@ -280,9 +298,10 @@ const githubFamily: FamilyDefinition = {
       schema: fileAction,
       handler: async (args, _cfg) => {
         void _cfg;
-        const { owner, repo, path, branch, raw, offset, limit, byteOffset, byteLimit } = args as {
-          owner: string;
-          repo: string;
+        const { owner, repo, repository, path, branch, raw, offset, limit, byteOffset, byteLimit } = args as {
+          owner?: string;
+          repo?: string;
+          repository?: string;
           path: string;
           branch?: string;
           raw: boolean;
@@ -291,9 +310,24 @@ const githubFamily: FamilyDefinition = {
           byteOffset?: number;
           byteLimit?: number;
         };
+
+        // Resolve owner+repo from repository if needed
+        let resolvedOwner = owner;
+        let resolvedRepo = repo;
+        if ((!resolvedOwner || !resolvedRepo) && repository) {
+          const loc = resolveGitHubRepoLocator(repository);
+          if (loc) {
+            resolvedOwner = loc.owner;
+            resolvedRepo = loc.repo;
+          }
+        }
+        if (!resolvedOwner || !resolvedRepo) {
+          throw new Error('Missing repository: provide `owner` + `repo` or `repository` (owner/repo or GitHub URL)');
+        }
+
         const data = await getGitHubRepoFile(
-          owner,
-          repo,
+          resolvedOwner,
+          resolvedRepo,
           path,
           branch,
           raw,
@@ -311,18 +345,34 @@ const githubFamily: FamilyDefinition = {
       schema: treeAction,
       handler: async (args, _cfg) => {
         void _cfg;
-        const { owner, repo, path, branch, recursive, limit, includeMonorepo } = args as {
-          owner: string;
-          repo: string;
+        const { owner, repo, repository, path, branch, recursive, limit, includeMonorepo } = args as {
+          owner?: string;
+          repo?: string;
+          repository?: string;
           path: string;
           branch?: string;
           recursive: boolean;
           limit: number;
           includeMonorepo?: boolean;
         };
+
+        // Resolve owner+repo from repository if needed
+        let resolvedOwner = owner;
+        let resolvedRepo = repo;
+        if ((!resolvedOwner || !resolvedRepo) && repository) {
+          const loc = resolveGitHubRepoLocator(repository);
+          if (loc) {
+            resolvedOwner = loc.owner;
+            resolvedRepo = loc.repo;
+          }
+        }
+        if (!resolvedOwner || !resolvedRepo) {
+          throw new Error('Missing repository: provide `owner` + `repo` or `repository` (owner/repo or GitHub URL)');
+        }
+
         const data = await getGitHubRepoTree(
-          owner,
-          repo,
+          resolvedOwner,
+          resolvedRepo,
           path,
           branch,
           recursive,

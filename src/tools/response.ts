@@ -11,7 +11,7 @@
 import { logger } from '../logger.js';
 import { isToolError } from '../errors.js';
 import { outputBudget } from '../utils/outputBudget.js';
-import type { ToolResult } from '../types.js';
+import type { ToolProvenance, ToolResult } from '../types.js';
 import type { RateLimitInfo } from '../rateLimit.js';
 
 // ── Large text field detection and hybrid serialization ───────────────────────────────
@@ -178,11 +178,30 @@ export interface ToolWrappedResponse<T> {
   readonly kind: 'wrapped';
   readonly data: T;
   readonly warnings?: readonly string[];
+  readonly provenance?: ToolProvenance;
+  readonly retry?: { recommended: boolean; reason?: string; minimalCall?: Record<string, unknown> };
+  readonly normalized?: { aliases?: Record<string, string>; defaults?: Record<string, unknown>; ignoredFields?: string[] };
+  readonly partial?: boolean;
 }
 
 /** Convenience factory for creating a wrapped response. */
-export function wrapResponse<T>(data: T, warnings?: string[]): ToolWrappedResponse<T> {
-  return warnings !== undefined ? { kind: 'wrapped', data, warnings } : { kind: 'wrapped', data };
+export function wrapResponse<T>(
+  data: T,
+  warnings?: string[],
+  extra?: {
+    provenance?: ToolProvenance;
+    retry?: { recommended: boolean; reason?: string; minimalCall?: Record<string, unknown> };
+    normalized?: { aliases?: Record<string, string>; defaults?: Record<string, unknown>; ignoredFields?: string[] };
+    partial?: boolean;
+  },
+): ToolWrappedResponse<T> {
+  const base: Record<string, unknown> = { kind: 'wrapped', data };
+  if (warnings !== undefined) base.warnings = warnings;
+  if (extra?.provenance) base.provenance = extra.provenance;
+  if (extra?.retry) base.retry = extra.retry;
+  if (extra?.normalized) base.normalized = extra.normalized;
+  if (extra?.partial !== undefined) base.partial = extra.partial;
+  return base as unknown as ToolWrappedResponse<T>;
 }
 
 export interface MakeResultOpts {
@@ -197,6 +216,10 @@ export interface MakeResultOpts {
     bytesBefore: number;
     bytesAfter: number;
   };
+  provenance?: ToolProvenance;
+  retry?: { recommended: boolean; reason?: string; minimalCall?: Record<string, unknown> };
+  normalized?: { aliases?: Record<string, string>; defaults?: Record<string, unknown>; ignoredFields?: string[] };
+  partial?: boolean;
 }
 
 export function makeResult<T>(
@@ -215,6 +238,10 @@ export function makeResult<T>(
       ...(opts?.rateLimit ? { rateLimit: opts.rateLimit } : {}),
       ...(opts?.correction ? { correction: opts.correction } : {}),
       ...(opts?.intentFilter ? { intentFilter: opts.intentFilter } : {}),
+      ...(opts?.provenance ? { provenance: opts.provenance } : {}),
+      ...(opts?.retry ? { retry: opts.retry } : {}),
+      ...(opts?.normalized ? { normalized: opts.normalized } : {}),
+      ...(opts?.partial !== undefined ? { partial: opts.partial } : {}),
     },
   };
 }
@@ -297,15 +324,27 @@ export async function handleToolCall<T>(
   try {
     const data = await handler();
     // Check for branded wrapped response — not just any object with a data key
-    const maybeWrapped = data as Record<string, unknown>;
+    const maybeWrapped = data as Partial<ToolWrappedResponse<unknown>>;
     if (maybeWrapped.kind === 'wrapped') {
+      const opts: MakeResultOpts = {};
+      if (Array.isArray(maybeWrapped.warnings) && (maybeWrapped.warnings as string[]).length > 0) {
+        opts.warnings = [...(maybeWrapped.warnings as string[])];
+      }
+      if (maybeWrapped.provenance) {
+        opts.provenance = maybeWrapped.provenance;
+      }
+      if (maybeWrapped.retry) {
+        opts.retry = maybeWrapped.retry;
+      }
+      if (maybeWrapped.normalized) {
+        opts.normalized = maybeWrapped.normalized;
+      }
+      if (maybeWrapped.partial !== undefined) opts.partial = maybeWrapped.partial;
       const result = makeResult(
         tool,
         maybeWrapped.data as T,
         Date.now() - start,
-        Array.isArray(maybeWrapped.warnings) && (maybeWrapped.warnings as string[]).length > 0
-          ? { warnings: [...(maybeWrapped.warnings as string[])] }
-          : undefined,
+        Object.keys(opts).length > 0 ? opts : undefined,
       );
       return successResponse(result);
     }

@@ -25,6 +25,7 @@ import { redditComments } from '../redditComments.js';
 import { semanticReddit } from '../semanticReddit.js';
 import { wrapResponse } from '../response.js';
 import { registerFamily, type FamilyDefinition } from '../registry.js';
+import { nullishOrEmptyToUndefined } from '../normalize.js';
 
 // ── Shared enums ────────────────────────────────────────────────────────────
 
@@ -32,6 +33,15 @@ const SORT_SEARCH = z.enum(['relevance', 'hot', 'top', 'new', 'comments']);
 const SORT_COMMENTS = z.enum(['confidence', 'top', 'new', 'controversial', 'old', 'qa']);
 const SORT_SEMANTIC = z.enum(['relevance', 'hot', 'new', 'top']);
 const TIMEFRAME = z.enum(['hour', 'day', 'week', 'month', 'year', 'all']);
+
+const commentsSortSchema = z.preprocess(
+  nullishOrEmptyToUndefined,
+  SORT_COMMENTS.optional().default('confidence'),
+);
+const commentsLimitSchema = z.preprocess(
+  nullishOrEmptyToUndefined,
+  z.number().int().min(1).max(100).optional(),
+);
 
 // ── Post locator - accepts both simple string and full discriminated union ─────────────────
 // The union allows LLMs to pass simple strings that get auto-coerced.
@@ -165,15 +175,12 @@ const commentsSchema = z
       .describe(
         'Number of parent comments above the focused comment (0–8). Only valid with `comment`.',
       ),
-    sort: SORT_COMMENTS.optional().default('confidence').describe('Comment sort order'),
+    sort: commentsSortSchema.describe('Comment sort order'),
     depth: z.number().int().min(1).max(10).optional().describe('Maximum nesting depth (1–10)'),
-    limit: z
-      .number()
-      .int()
-      .min(1)
-      .max(100)
-      .optional()
-      .describe('Maximum comment nodes to return (1–100)'),
+    limit: commentsLimitSchema.describe('Maximum comment nodes to return (1–100)'),
+    commentLimit: commentsLimitSchema.describe(
+      'Alias for limit. Maximum comment nodes to return (1–100).',
+    ),
     showMore: z
       .boolean()
       .optional()
@@ -270,7 +277,7 @@ const redditFamily: FamilyDefinition = {
       schema: commentsSchema,
       handler: async (args, _cfg) => {
         void _cfg;
-        const { post, url, comment, context, sort, depth, limit, showMore } = args as {
+        const { post, url, comment, context, sort, depth, limit, commentLimit, showMore } = args as {
           post?:
             | { type: 'url'; url: string }
             | { type: 'permalink'; permalink: string }
@@ -281,6 +288,7 @@ const redditFamily: FamilyDefinition = {
           sort: 'confidence' | 'top' | 'new' | 'controversial' | 'old' | 'qa';
           depth?: number;
           limit?: number;
+          commentLimit?: number;
           showMore: boolean;
         };
 
@@ -309,13 +317,15 @@ const redditFamily: FamilyDefinition = {
             break;
         }
 
+        const effectiveLimit = limit ?? commentLimit;
+
         return redditComments({
           ...locator,
           ...(comment !== undefined ? { comment } : {}),
           ...(context !== undefined ? { context } : {}),
           sort,
           ...(depth !== undefined ? { depth } : {}),
-          ...(limit !== undefined ? { limit } : {}),
+          ...(effectiveLimit !== undefined ? { limit: effectiveLimit } : {}),
           showMore,
         });
       },

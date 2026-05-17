@@ -1,7 +1,7 @@
 /**
  * graph_rebuild — On-demand projection rebuild from the event store.
  *
- * Supports full genesis rebuild and incremental rebuild from an event cursor.
+ * Replays from genesis by default; explicit cursors are for diagnostics only.
  */
 import { z } from 'zod/v4';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
@@ -14,8 +14,8 @@ const graphRebuildSchema = z.object({
   full: z
     .boolean()
     .optional()
-    .default(false)
-    .describe('Force a genesis rebuild (replay all events from the beginning)'),
+    .default(true)
+    .describe('Replay all events from the beginning. Full rebuild is the safe default because projection swaps require complete state.'),
   from_event_id: z
     .string()
     .optional()
@@ -33,15 +33,14 @@ export function registerGraphRebuildTool(server: McpServer, _cfg: SearchConfig):
     {
       description:
         'Rebuild the six projection tables (nodes, edges, families, sources, node_families, event_refs) ' +
-        'from the append-only event store. Supports incremental rebuild from the latest compatible checkpoint ' +
-        'or a full genesis rebuild. Atomic swap inside a single SQLite transaction.',
+        'from the append-only event store. Replays from genesis by default so the atomic swap receives complete state. ' +
+        'Explicit cursors are for diagnostics only.',
       inputSchema: graphRebuildSchema,
     },
     async (args) => {
       const start = Date.now();
       try {
-        const rebuildOpts: Record<string, unknown> = {};
-        if (args.full) rebuildOpts.full = true;
+        const rebuildOpts: Record<string, unknown> = { full: true };
         if (args.from_event_id !== undefined) rebuildOpts.fromEventId = args.from_event_id;
         if (args.validate) rebuildOpts.validate = true;
         const result = rebuildProjection(rebuildOpts);

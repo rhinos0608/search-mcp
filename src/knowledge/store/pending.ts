@@ -66,17 +66,26 @@ const UPDATE_EXTRACTION_RUN_SQL =
 const DELETE_EXTRACTIONS_SQL =
   'DELETE FROM kg_pending_extractions WHERE session_id = ?';
 
+export interface FlushedPendingExtraction {
+  id: string;
+  toolName: string;
+  content: string;
+  sourceUrl: string | undefined;
+  contentHash: string | undefined;
+}
+
 interface FlushResult {
   runId: string;
   extractionCount: number;
+  extractions: FlushedPendingExtraction[];
 }
 
 /**
  * Flush all pending extractions for a session into a single run.
  *
  * Creates a new run, assigns all pending extractions to it, then
- * returns the run ID and count. Does NOT run the extractor — that
- * is the caller's responsibility.
+ * returns the run ID, count, and extracted content rows. The caller
+ * is responsible for running the extraction pipeline.
  *
  * Returns null if there are no pending extractions for the session.
  */
@@ -104,6 +113,7 @@ export function flushSessionExtractions(sessionId: string): FlushResult | null {
     const deleteStmt = db.prepare(DELETE_EXTRACTIONS_SQL);
 
     let extractionCount = 0;
+    let extractions: FlushedPendingExtraction[] = [];
 
     const txn = db.transaction(() => {
       const rows = selectStmt.all(sessionId) as Record<string, unknown>[];
@@ -114,6 +124,18 @@ export function flushSessionExtractions(sessionId: string): FlushResult | null {
       }
       deleteStmt.run(sessionId);
       extractionCount = rows.length;
+      extractions = rows.flatMap((row) => {
+        if (typeof row.id !== 'string' || typeof row.tool_name !== 'string' || typeof row.content !== 'string') {
+          return [];
+        }
+        return [{
+          id: row.id,
+          toolName: row.tool_name,
+          content: row.content,
+          sourceUrl: typeof row.source_url === 'string' ? row.source_url : undefined,
+          contentHash: typeof row.content_hash === 'string' ? row.content_hash : undefined,
+        }];
+      });
     });
 
     txn();
@@ -125,7 +147,7 @@ export function flushSessionExtractions(sessionId: string): FlushResult | null {
       'kg: flushed session extractions',
     );
 
-    return { runId, extractionCount };
+    return { runId, extractionCount, extractions };
   } catch (err) {
     logger.warn({ err, sessionId }, 'kg: flushSessionExtractions failed');
     return null;

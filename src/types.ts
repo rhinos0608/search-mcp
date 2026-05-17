@@ -12,6 +12,20 @@ export interface QueryCorrection {
   }[];
 }
 
+export interface ToolProvenance {
+  usedBackend?: string;
+  servedBackends?: string[];
+  usedFallback?: boolean;
+  fallbackReason?: string;
+  autoRoute?: {
+    selectedAction: string;
+    routeHint: string;
+    skippedCandidates: string[];
+    unavailableCandidates?: string[];
+    fallbackAction?: string;
+  };
+}
+
 // ToolResult<T> — every tool handler returns this
 export interface ToolResult<T> {
   data: T;
@@ -31,6 +45,22 @@ export interface ToolResult<T> {
       bytesBefore: number;
       bytesAfter: number;
     } | undefined;
+    /** Which backend served the result and whether fallback occurred. */
+    provenance?: ToolProvenance | undefined;
+    /** Retry recommendation when the caller could get a richer result on re-request. */
+    retry?: {
+      recommended: boolean;
+      reason?: string;
+      minimalCall?: Record<string, unknown>;
+    } | undefined;
+    /** Input normalization metadata (alias resolution, default application, ignored fields). */
+    normalized?: {
+      aliases?: Record<string, string>;
+      defaults?: Record<string, unknown>;
+      ignoredFields?: string[];
+    } | undefined;
+    /** True when the result is a partial/subset (budget limit, truncation, etc.). */
+    partial?: boolean | undefined;
   };
 }
 

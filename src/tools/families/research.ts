@@ -291,6 +291,155 @@ const wikidataAction = z.object({
     .describe('Maximum results (1–50, default 20)'),
 });
 
+// ── Auto-action schema ────────────────────────────────────────────────────────
+
+const autoAction = z.object({
+  action: z.literal('auto').describe('Auto-route research queries to the best backend based on query hints'),
+  query: z.string().min(1).describe('The research query string'),
+  limit: z
+    .number()
+    .int()
+    .min(1)
+    .max(50)
+    .optional()
+    .default(20)
+    .describe('Maximum results (1–50, default 20)'),
+});
+
+/**
+ * Deterministic query routing: analyse the query for domain hints and select
+ * the best backend without LLM calls. Only the `academic.backends` fan-out path
+ * requires config; all other routes are self-contained.
+ */
+interface AutoRoute {
+  actionName: string;
+  hint: string;
+  invoke: (query: string, limit: number) => Promise<unknown>;
+}
+
+/**
+ * Build available route candidates based on query content.
+ * Returns the best match plus any other candidates that were considered.
+ */
+function autoRouteQuery(query: string, limit: number): {
+  selected: AutoRoute;
+  candidates: AutoRoute[];
+} {
+  void limit; // used by invoke closures
+  const trimmed = query.trim();
+  const lower = trimmed.toLowerCase();
+  const candidates: AutoRoute[] = [];
+
+  // Helper: collect candidates in priority order; later entries act as fallbacks
+  const collect = () => {
+    // Try each rule; first match wins for `selected`. All rules populate `candidates`.
+
+    // 1. DOI pattern
+    if (/\b10\.\d{4,}\/\S+/i.test(trimmed)) {
+      candidates.push({
+        actionName: 'academic',
+        hint: 'DOI pattern detected in query',
+        invoke: async (q, l) => {
+          const result = await academicSearch(q, 'all', l, null);
+          return { results: result.papers, totalResults: result.papers.length };
+        },
+      });
+    }
+
+    // 2. arXiv ID: arXiv:XXXX.XXXXX or XXXX.XXXXX
+    if (/\barXiv\s*:\s*\d{4}\.\d{4,5}\b/i.test(trimmed) || /^\d{4}\.\d{4,5}\b/.test(trimmed)) {
+      const cleanQuery = trimmed.replace(/^arXiv\s*:\s*/i, '').trim();
+      candidates.push({
+        actionName: 'arxiv',
+        hint: 'arXiv ID pattern detected in query',
+        invoke: async (q, l) => {
+          void q; // arxiv route uses pre-processed cleanQuery
+          const result = await arxivSearch(cleanQuery, null, 'relevance', null, null, l);
+          return { results: result as unknown[], totalResults: (result as unknown[]).length };
+        },
+      });
+    }
+
+    // 3. PubMed / biomedical hints
+    if (/\b(?:pubmed|pmid|clinical trial|randomized\s+controlled|biomedical|pmc\d+)\b/i.test(lower)) {
+      candidates.push({
+        actionName: 'pubmed',
+        hint: 'PubMed/biomedical keywords detected',
+        invoke: async (q, l) => {
+          const result = await searchPubMed(q, l);
+          return { results: result as unknown[], totalResults: (result as unknown[]).length };
+        },
+      });
+    }
+
+    // 4. Hacker News hints
+    if (/\b(?:hn|hacker\s*news|show\s*hn|ask\s*hn)\b/i.test(lower)) {
+      candidates.push({
+        actionName: 'hackernews',
+        hint: 'Hacker News keywords detected',
+        invoke: async (q, l) => {
+          const result = await hackernewsSearch(q, 'story', 'relevance', null, l);
+          return { results: result as unknown[], totalResults: (result as unknown[]).length };
+        },
+      });
+    }
+
+    // 5. Stack Overflow hints
+    if (/\b(?:stack\s*overflow|stackoverflow|so\s+question|code\s+error|syntax\s+error|how\s+to\s+fix|debug|typescript\s+error|react\s+error)\b/i.test(lower)) {
+      candidates.push({
+        actionName: 'stackoverflow',
+        hint: 'Stack Overflow / code debugging keywords detected',
+        invoke: async (q, l) => {
+          const result = await stackoverflowSearch(q, '', 'relevance', '', false, l);
+          return { results: result as unknown[], totalResults: (result as unknown[]).length };
+        },
+      });
+    }
+
+    // 6. Wikipedia / encyclopedia hints
+    if (/\b(?:wikipedia|encyclopedia|define|what\s+is|who\s+is|meaning\s+of)\b/i.test(lower)) {
+      candidates.push({
+        actionName: 'wikipedia',
+        hint: 'Wikipedia/encyclopedia keywords detected',
+        invoke: async (q, l) => {
+          void l; // wikipedia has no limit parameter
+          const result = await searchWikipedia(q);
+          return { results: result as unknown[], totalResults: (result as unknown[]).length };
+        },
+      });
+    }
+
+    // 7. Academic / research paper keywords (catch-all academic indicator)
+    if (/\b(?:paper|research|study|survey|review\s+of|literature|publication|journal|conference|proceedings|thesis|dissertation|methodology|experiment)\b/i.test(lower)) {
+      candidates.push({
+        actionName: 'academic',
+        hint: 'Academic/research keywords detected',
+        invoke: async (q, l) => {
+          const result = await academicSearch(q, 'all', l, null);
+          return { results: result.papers, totalResults: result.papers.length };
+        },
+      });
+    }
+
+    // 8. Default fallback: academic fan-out (safest general research path)
+    candidates.push({
+      actionName: 'academic',
+      hint: 'No specific hint matched; defaulting to academic fan-out',
+      invoke: async (q, l) => {
+        const result = await academicSearch(q, 'all', l, null);
+        return { results: result.papers, totalResults: result.papers.length };
+      },
+    });
+  };
+
+  collect();
+  const selected = candidates[0];
+  if (!selected) {
+    throw new Error('No research route candidates available');
+  }
+  return { selected, candidates };
+}
+
 // ── Family definition ───────────────────────────────────────────────────────
 
 const researchFamily: FamilyDefinition = {
@@ -503,8 +652,62 @@ const researchFamily: FamilyDefinition = {
         return searchWikidata(query, language, limit);
       },
     },
+    {
+      name: 'auto',
+      description:
+        'Auto-route research queries to the best backend based on query hints ' +
+        '(DOI, arXiv ID, PubMed/HN/SO/Wikipedia keywords, or academic fan-out by default).',
+      schema: autoAction,
+      handler: async (args, _cfg) => {
+        void _cfg;
+        const { query, limit } = args as { query: string; limit: number };
+        const { selected, candidates } = autoRouteQuery(query, limit);
+
+        // Build provenance metadata
+        const skippedCandidates = candidates
+          .filter((c) => c.actionName !== selected.actionName)
+          .map((c) => c.actionName);
+        const lastCandidate = candidates.at(-1) ?? selected;
+        try {
+          const data = await selected.invoke(query, limit);
+          return wrapResponse(data, undefined, {
+            provenance: {
+              usedBackend: selected.actionName,
+              autoRoute: {
+                selectedAction: selected.actionName,
+                routeHint: selected.hint,
+                skippedCandidates,
+                unavailableCandidates: [],
+              },
+            },
+          });
+        } catch (err) {
+          if (selected.actionName === lastCandidate.actionName) {
+            throw err;
+          }
+
+          const fallbackData = await lastCandidate.invoke(query, limit);
+          return wrapResponse(fallbackData, undefined, {
+            provenance: {
+              usedBackend: lastCandidate.actionName,
+              usedFallback: true,
+              fallbackReason: `${selected.actionName} failed; fell back to ${lastCandidate.actionName}`,
+              autoRoute: {
+                selectedAction: selected.actionName,
+                routeHint: selected.hint,
+                skippedCandidates,
+                unavailableCandidates: [selected.actionName],
+                fallbackAction: lastCandidate.actionName,
+              },
+            },
+          });
+        }
+      },
+    },
   ],
 };
+
+export { autoAction, autoRouteQuery, researchFamily };
 
 // ── Registration ─────────────────────────────────────────────────────────────
 

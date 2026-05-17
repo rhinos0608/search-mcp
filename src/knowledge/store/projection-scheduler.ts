@@ -110,11 +110,11 @@ async function scheduleRebuild(runId: string): Promise<void> {
   // Use setImmediate to yield the event loop, then rebuild
   await new Promise<void>((resolve) => setImmediate(() => { resolve(); }));
 
-  // If full rebuild needed (e.g., schema changed), invalidate checkpoints first
-  // otherwise, incremental rebuild from latest checkpoint is sufficient
+  // Always replay from genesis: projection rebuild swaps complete tables, so
+  // applying only post-checkpoint events would drop previously projected rows.
 
   try {
-    const result = rebuildProjection({});
+    const result = rebuildProjection({ full: true });
 
     _lastRebuildTime = Date.now();
 
@@ -146,7 +146,7 @@ async function triggerRebuildInternal(): Promise<void> {
     // Yield event loop before potentially expensive rebuild
     await new Promise<void>((resolve) => setImmediate(() => { resolve(); }));
 
-    const result = rebuildProjection({});
+    const result = rebuildProjection({ full: true });
 
     _lastRebuildTime = Date.now();
 

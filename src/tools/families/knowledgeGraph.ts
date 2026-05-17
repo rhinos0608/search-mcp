@@ -33,7 +33,6 @@ import { listRuns } from '../../knowledge/store/runs.js';
 import { appendEvents } from '../../knowledge/store/events.js';
 import { countEvents } from '../../knowledge/store/events.js';
 import { getKgDb, getKgDbPath } from '../../knowledge/store/db.js';
-import { triggerProjectionRebuildOnRunComplete } from '../../knowledge/store/projection-scheduler.js';
 import { rebuildProjection } from '../../knowledge/store/projections.js';
 import { queryNodes, getEdgesForNode } from '../../knowledge/store/projections.js';
 import { queryFamilies } from '../../knowledge/store/projections.js';
@@ -92,8 +91,8 @@ const rebuildSchema = z.object({
   full: z
     .boolean()
     .optional()
-    .default(false)
-    .describe('Force a genesis rebuild (replay all events from the beginning)'),
+    .default(true)
+    .describe('Replay all events from the beginning. Full rebuild is the safe default because projection swaps require complete state.'),
   from_event_id: z
     .string()
     .optional()
@@ -188,24 +187,16 @@ function parseJsonArr(raw: string | null): string[] {
   }
 }
 
-/** Emit all events from an extraction result into the event store. */
+/** Finalize a run after KnowledgeGraphExtractor has emitted its events. */
 function emitEventsFromResult(
   result: Awaited<ReturnType<KnowledgeGraphExtractor['extract']>>,
   runId: string,
 ): void {
-  const all = [
-    ...result.claimEvents,
-    ...result.nodeEvents,
-    ...result.edgeEvents,
-    ...result.sourceEvents,
-    ...result.failureEvents,
-  ];
-  if (all.length > 0) appendEvents(all);
   updateRunStatus(runId, 'completed', {
     entityCount: result.entities.length,
     edgeCount: result.edges.length,
   });
-  triggerProjectionRebuildOnRunComplete(runId);
+  rebuildProjection({ full: true });
 }
 
 /** Build a NormalizedExtractionInput from user-supplied content parameters. */
@@ -726,8 +717,7 @@ const knowledgeGraphFamily: FamilyDefinition = {
       schema: rebuildSchema,
       handler: async (args) => {
         const start = Date.now();
-        const rebuildOpts: Record<string, unknown> = {};
-        if ((args).full) rebuildOpts.full = true;
+        const rebuildOpts: Record<string, unknown> = { full: true };
         if ((args).from_event_id !== undefined)
           rebuildOpts.fromEventId = args.from_event_id;
         if ((args).validate) rebuildOpts.validate = true;

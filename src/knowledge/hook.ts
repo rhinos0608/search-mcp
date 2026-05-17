@@ -18,11 +18,17 @@ import { KnowledgeGraphExtractor } from './extractor/index.js';
 import type { ExtractionResult } from './extractor/index.js';
 import { runPass1Classifier, type RunEntity, type RunMetadata } from './families/classifier.js';
 import { normalizeToolResult } from './extractor/normalise.js';
-import { appendPendingExtraction, flushSessionExtractions, getStaleExtractions, type StaleExtractionGroup } from './store/pending.js';
+import {
+  appendPendingExtraction,
+  flushSessionExtractions,
+  getStaleExtractions,
+  type FlushedPendingExtraction,
+  type StaleExtractionGroup,
+} from './store/pending.js';
 import { createRun, updateRunStatus } from './store/runs.js';
 import { setRunActiveFlag, clearRunActiveFlag, markStuckRunsFailed } from './store/run-active.js';
 import { appendEvents } from './store/events.js';
-import { triggerProjectionRebuildOnRunComplete } from './store/projection-scheduler.js';
+import { rebuildProjection } from './store/projections.js';
 import { scrubContent } from '../utils/contentScrubber.js';
 
 // ────────────────────────────────────────────────────────────────────
@@ -50,6 +56,15 @@ const PASSIVE_CAPTURE_ALLOWLIST = new Set([
   'research.arxiv',
   'research.hackernews',
   'research.stackoverflow',
+  'research.pubmed',
+  'research.wikipedia',
+  'research.openalex',
+  'research.crossref',
+  'research.datacite',
+  'research.ror',
+  'research.semantic_scholar',
+  'research.gdelt',
+  'research.wikidata',
   'packages.npm',
   'packages.pypi',
 ]);
@@ -86,6 +101,19 @@ function buildWarning(code: StructuredWarning['code'], message: string, source?:
     message,
     source: source ?? undefined,
   } as StructuredWarning;
+}
+
+function sourceKindForTool(toolName: string): 'documentation' | 'forum' | 'social' | 'code_repo' | 'package_registry' | 'research_paper' | 'unknown' {
+  const lower = toolName.toLowerCase();
+  if (lower.startsWith('web_') || lower.startsWith('semantic_crawl')) return 'documentation';
+  if (lower.startsWith('reddit') || lower.startsWith('hackernews') || lower.startsWith('stackoverflow')) return 'forum';
+  if (lower.startsWith('research.hackernews') || lower.startsWith('research.stackoverflow')) return 'forum';
+  if (lower.startsWith('research.wikipedia')) return 'documentation';
+  if (lower.startsWith('youtube')) return 'social';
+  if (lower.startsWith('github')) return 'code_repo';
+  if (lower.startsWith('packages') || lower.startsWith('npm') || lower.startsWith('pypi')) return 'package_registry';
+  if (lower.startsWith('academic') || lower.startsWith('arxiv') || lower.startsWith('research')) return 'research_paper';
+  return 'unknown';
 }
 
 // ────────────────────────────────────────────────────────────────────
@@ -271,8 +299,8 @@ export class KnowledgeGraphHook {
         },
       ]);
 
-      // 7. Trigger projection rebuild (async, fire-and-forget)
-      triggerProjectionRebuildOnRunComplete(run.runId);
+      // 7. Rebuild projection now so completed deep research is immediately queryable.
+      rebuildProjection({ full: true });
 
       // 8. Clear active run flag
       this.setActiveRun(null);
@@ -362,12 +390,56 @@ export class KnowledgeGraphHook {
 
   // ── Flush pending extractions ─────────────────────────────────────
 
+  private async extractFlushedSession(
+    sessionId: string,
+    runId: string,
+    extractions: FlushedPendingExtraction[],
+  ): Promise<void> {
+    if (extractions.length === 0) {
+      updateRunStatus(runId, 'failed', { lastError: 'No flushed extraction content' });
+      return;
+    }
+
+    updateRunStatus(runId, 'extracting');
+    const extractor = new KnowledgeGraphExtractor(this.config);
+    let entityCount = 0;
+    let edgeCount = 0;
+    let failureCount = 0;
+
+    for (const extraction of extractions) {
+      const input = {
+        text: extraction.content,
+        url: extraction.sourceUrl,
+        title: extraction.toolName,
+        sourceKind: sourceKindForTool(extraction.toolName),
+        retrievedAt: new Date().toISOString(),
+      };
+
+      try {
+        const result = await extractor.extract(input, runId);
+        entityCount += result.entities.length;
+        edgeCount += result.edges.length;
+        failureCount += result.failureEvents.length;
+      } catch (err) {
+        failureCount += 1;
+        logger.warn({ err, sessionId, runId, pendingId: extraction.id }, 'kg: passive extraction failed');
+      }
+    }
+
+    if (entityCount === 0 && failureCount > 0) {
+      updateRunStatus(runId, 'failed', { lastError: 'Passive extraction produced no entities' });
+    } else {
+      updateRunStatus(runId, 'completed', { entityCount, edgeCount });
+      rebuildProjection({ full: true });
+    }
+  }
+
   async flushSession(sessionId: string): Promise<void> {
     try {
       const result = flushSessionExtractions(sessionId);
       if (result !== null) {
         logger.info({ sessionId, runId: result.runId, count: result.extractionCount }, 'kg: session flushed');
-        triggerProjectionRebuildOnRunComplete(result.runId);
+        await this.extractFlushedSession(sessionId, result.runId, result.extractions);
       }
     } catch (err) {
       logger.warn({ err, sessionId }, 'kg: flushSession failed (non-fatal)');
@@ -396,7 +468,7 @@ export class KnowledgeGraphHook {
               { sessionId: group.sessionId, runId: result.runId, count: result.extractionCount },
               'kg: recovery flushed stale extractions',
             );
-            triggerProjectionRebuildOnRunComplete(result.runId);
+            await this.extractFlushedSession(group.sessionId, result.runId, result.extractions);
           }
         } catch (flushErr) {
           logger.warn({ err: flushErr, sessionId: group.sessionId }, 'kg: recovery flush failed');

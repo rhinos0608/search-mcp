@@ -9,7 +9,7 @@ import { z } from 'zod/v4';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { SearchConfig } from '../../config.js';
 import { logger } from '../../logger.js';
-import { webSearch } from '../webSearch.js';
+import { webSearch, type ProvenanceResult } from '../webSearch.js';
 import { correctQuery } from '../../utils/fuzzyCorrection.js';
 import { applyIntentFilter, type IntentFilterResult } from '../../utils/intentFilter.js';
 import { makeResult, errorResponse, successResponse } from '../response.js';
@@ -84,7 +84,8 @@ export function registerWebSearch(
           }
         }
 
-        let data = await webSearch(query, limit, safeSearch, expandQuery, mergeSearchBackends, fuzzyCorrect);
+        const provenanceRef: { current: ProvenanceResult | null } = { current: null };
+        let data = await webSearch(query, limit, safeSearch, expandQuery, mergeSearchBackends, fuzzyCorrect, provenanceRef);
         let intentFilterResult: IntentFilterResult<SearchResult> | undefined;
 
         // Apply intent filtering at the handler level when intent is provided
@@ -101,6 +102,7 @@ export function registerWebSearch(
         const result = makeResult('web_search', data, Date.now() - start, {
           ...(correction ? { correction } : {}),
           ...(intentFilterResult ? { intentFilter: intentFilterResult } : {}),
+          ...(provenanceRef.current ? { provenance: provenanceRef.current } : {}),
         });
 
         // KG passive capture (fire-and-forget, never fails the tool call)

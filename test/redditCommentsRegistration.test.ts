@@ -62,6 +62,43 @@ test('reddit.comments accepts a valid url post locator', () => {
    assert.equal(parsed.showMore, false);
 });
 
+test('reddit.comments treats null sort as omitted and accepts commentLimit alias', async () => {
+   const { server } = createServer(loadConfig());
+   const entry = getRegisteredTool(server, 'reddit');
+   assert.ok(entry.inputSchema !== undefined);
+
+   const args = {
+      action: 'comments',
+      post: {
+         type: 'url',
+         url: 'https://example.com/r/UFOs/comments/1t6m6dl/age_of_disclosure_reports_as_of_now_tomorrow_is/',
+      },
+      sort: null,
+      commentLimit: 60,
+      depth: 3,
+   };
+   const parsed = entry.inputSchema.parse(args) as {
+      action: string;
+      commentLimit: number;
+      depth: number;
+   };
+
+   assert.equal(parsed.action, 'comments');
+   assert.equal(parsed.commentLimit, 60);
+   assert.equal(parsed.depth, 3);
+
+   const typedEntry = entry as {
+      handler: (
+         rawArgs: unknown,
+         extra: unknown,
+      ) => Promise<{ content: { text: string }[]; isError?: boolean }>;
+   };
+   const result = await typedEntry.handler(args, {});
+   assert.equal(result.isError, true);
+   assert.match(result.content[0]?.text ?? '', /Invalid Reddit thread URL host/);
+   assert.doesNotMatch(result.content[0]?.text ?? '', /sort: Invalid option/);
+});
+
 test('reddit.comments accepts a valid id post locator', () => {
    const { server } = createServer(loadConfig());
    const entry = getRegisteredTool(server, 'reddit');

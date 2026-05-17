@@ -55,3 +55,4 @@ dashboard/node_modules/
 dashboard/dist/
 
 .smart-edit-undo/
+.mcp.json

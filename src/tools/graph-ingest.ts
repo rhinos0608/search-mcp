@@ -2,7 +2,7 @@
  * graph_ingest — Ingest content into the knowledge graph.
  *
  * Supports text content and URL fetching. Calls KnowledgeGraphExtractor to
- * extract entities/relationships, emits events, and triggers async projection.
+ * extract entities/relationships, emits events, and rebuilds the projection.
  */
 import { z } from 'zod/v4';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
@@ -11,9 +11,8 @@ import { logger } from '../logger.js';
 import { makeResult, errorResponse, successResponse } from './response.js';
 import { KnowledgeGraphExtractor } from '../knowledge/extractor/index.js';
 import { createRun, updateRunStatus, getRun } from '../knowledge/store/runs.js';
-import { appendEvents } from '../knowledge/store/events.js';
 import { getKgDb } from '../knowledge/store/db.js';
-import { triggerProjectionRebuildOnRunComplete } from '../knowledge/store/projection-scheduler.js';
+import { rebuildProjection } from '../knowledge/store/projections.js';
 import type { NormalizedExtractionInput } from '../knowledge/extractor/normalise.js';
 
 const graphIngestSchema = z.object({
@@ -28,22 +27,16 @@ const graphIngestSchema = z.object({
   idempotency_key: z.string().max(200).optional().describe('Prevent duplicate runs'),
 });
 
-/** Emit all events from an extraction result. */
+/** Finalize a run after KnowledgeGraphExtractor has emitted its events. */
 function emitEventsFromResult(
   result: Awaited<ReturnType<KnowledgeGraphExtractor['extract']>>,
   runId: string,
 ): void {
-  const all = [
-    ...result.claimEvents, ...result.nodeEvents,
-    ...result.edgeEvents, ...result.sourceEvents,
-    ...result.failureEvents,
-  ];
-  if (all.length > 0) appendEvents(all);
   updateRunStatus(runId, 'completed', {
     entityCount: result.entities.length,
     edgeCount: result.edges.length,
   });
-  triggerProjectionRebuildOnRunComplete(runId);
+  rebuildProjection({ full: true });
 }
 
 function buildNormInput(
