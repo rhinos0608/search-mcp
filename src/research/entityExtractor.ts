@@ -206,24 +206,22 @@ function extractNames(query: string): string[] {
 
   // Determine sentence-start token positions
   const sentenceStartPositions = new Set<number>();
-  const firstToken = query.match(/[A-Za-z]+/);
-  if (firstToken?.index !== undefined) {
+  const firstToken = /[A-Za-z]+/.exec(query);
+  if (firstToken) {
     sentenceStartPositions.add(firstToken.index);
   }
   for (const m of query.matchAll(/[.!?]\s+/g)) {
-    if (m.index !== undefined) {
-      const rest = query.slice(m.index + m[0].length);
-      const nextToken = rest.match(/[A-Za-z]+/);
-      if (nextToken?.index !== undefined) {
-        sentenceStartPositions.add(m.index + m[0].length + nextToken.index);
-      }
+    const rest = query.slice(m.index + m[0].length);
+    const nextToken = /[A-Za-z]+/.exec(rest);
+    if (nextToken) {
+      sentenceStartPositions.add(m.index + m[0].length + nextToken.index);
     }
   }
 
   // Single capitalized words anywhere, filtering out stop words and sentence starts.
   for (const match of query.matchAll(/\b[A-Z][a-zA-Z]*\b/g)) {
     const word = match[0];
-    if (match.index !== undefined && sentenceStartPositions.has(match.index)) {
+    if (sentenceStartPositions.has(match.index)) {
       continue;
     }
     if (!STOP_WORDS.has(word.toLowerCase()) && word.length >= 2) {
@@ -334,7 +332,7 @@ export function extractEntities(query: string): ExtractedEntities {
 export function expandTemporalRanges(entities: string[]): string[] {
   const result: string[] = [];
   for (const entity of entities) {
-    const rangeMatch = entity.match(/^(\d{4})\s*(?:-|–|to)\s*(\d{4})$/);
+    const rangeMatch = /^(\d{4})\s*(?:-|–|to)\s*(\d{4})$/.exec(entity);
     if (rangeMatch) {
       let start = parseInt(rangeMatch[1] ?? '0', 10);
       let end = parseInt(rangeMatch[2] ?? '0', 10);
