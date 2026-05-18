@@ -1420,7 +1420,7 @@ export class QueryDecomposer {
 
     if (!result.success || !result.data.subQuestions.length) {
       logger.warn(
-        { error: result.success ? 'Empty sub-questions from LLM' : result.response?.error },
+        { error: result.success ? 'Empty sub-questions from LLM' : result.response.error },
         'LLM decompose V2 failed, falling back to rule-based',
       );
       return this.decompose(query);

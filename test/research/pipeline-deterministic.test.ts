@@ -104,7 +104,7 @@ describe('PipelineStrategy domain routing', () => {
          try {
             return await originalAnalyze(query, ctx);
          } catch {
-            return { report: { query, executiveSummary: 'test' }, timeline: [] };
+            return { report: { query, executiveSummary: 'test' } as any, timeline: [] };
          }
       };
       try {
