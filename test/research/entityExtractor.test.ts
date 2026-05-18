@@ -61,6 +61,11 @@ describe('extractEntities', () => {
       assert.deepStrictEqual(result.numerical, ['65mph', '100 km/h']);
     });
 
+    it('extracts standalone km', () => {
+      const result = extractEntities('Distance of 5km');
+      assert.deepStrictEqual(result.numerical, ['5km']);
+    });
+
     it('extracts scale words', () => {
       const result = extractEntities('Revenue of 5 million and 2 billion');
       assert.deepStrictEqual(result.numerical, ['5 million', '2 billion']);
@@ -163,6 +168,12 @@ describe('extractEntities', () => {
       // 'cat' and 'sat' might be filtered depending on stopword list; just ensure no stopwords
       assert.ok(!result.descriptors.includes('A'), 'Should not include A');
       assert.ok(!result.descriptors.includes('a'), 'Should not include a');
+    });
+
+    it('includes two-letter descriptors', () => {
+      const result = extractEntities('AI and Go programming');
+      assert.ok(result.descriptors.includes('ai'), 'Should include ai');
+      assert.ok(result.descriptors.includes('go'), 'Should include go');
     });
   });
 

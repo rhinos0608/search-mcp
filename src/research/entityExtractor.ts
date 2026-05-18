@@ -191,7 +191,7 @@ const STOP_WORDS = new Set([
 const TEMPORAL_PATTERN = /\b((?:19|20)\d{2}(?:\s*(?:-|–|to)\s*(?:19|20)\d{2})?)\b/g;
 
 const NUMERICAL_ATTACHED_PATTERN =
-  /\b\d+(?:\.\d+)?\s*(?:km\/h|mph|ms|MB|KB|GB|TB|KB|%)(?!\w)/g;
+  /\b\d+(?:\.\d+)?\s*(?:km\/h|km|mph|ms|MB|KB|GB|TB|%)(?!\w)/g;
 
 const NUMERICAL_SCALE_PATTERN =
   /\b\d+(?:\.\d+)?\s+(?:million|billion|thousand)\b/g;
@@ -252,7 +252,7 @@ function extractDescriptors(query: string): string[] {
   const tokens = query.matchAll(/[a-zA-Z]+/g);
   for (const match of tokens) {
     const word = match[0].toLowerCase();
-    if (!STOP_WORDS.has(word) && word.length >= 3) {
+    if (!STOP_WORDS.has(word) && word.length >= 2) {
       descriptors.add(word);
     }
   }
