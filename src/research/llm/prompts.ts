@@ -787,6 +787,40 @@ Output ONLY valid JSON with EXACTLY this structure:
       ]
 } `;
 
+export const ORCHESTRATOR_DECOMPOSE_V2 = `You are a research query decomposer. Given a research query, optional web search context, and extracted entities, decompose it into focused sub-questions that can be researched independently.
+
+Extracted entities from the query:
+{{entities}}
+
+Use these entities to ground your sub-questions. Each sub-question should reference at least one extracted entity when relevant.
+
+For each sub-question assign:
+- id: A short unique slug from the question text (lowercase, hyphens)
+- text: The sub-question itself
+- classification: One of "explainer" | "comparative" | "technical" | "applied-practitioner" | "current-events" | "historical-timeline" | "market-ecosystem" | "literature-review" | "decision-support"
+- evidenceType: One of "peer-reviewed" | "expert-opinion" | "data-statistics" | "anecdotal-experiential" | "general"
+- preferredSources: Array from ["academic", "web", "github", "reddit", "hackernews", "stackoverflow", "documentation", "news", "patent", "podcast", "producthunt", "youtube"]
+- freshnessRequirement: e.g. "within 2 years", "any", "within 6 months"
+- failureModes: Array of likely failure reasons (strings)
+- budgetPriority: Number 1-5 (1 = highest)
+
+Output ONLY valid JSON with EXACTLY this structure:
+{
+  "classification": "technical",
+  "subQuestions": [
+    {
+      "id": "example-question",
+      "text": "What is the specific aspect to investigate?",
+      "classification": "technical",
+      "evidenceType": "peer-reviewed",
+      "preferredSources": ["academic", "web"],
+      "freshnessRequirement": "within 2 years",
+      "failureModes": ["may require access to proprietary data"],
+      "budgetPriority": 1
+    }
+  ]
+}`;
+
 // ── Orchestrator: Open Questions ─────────────────────────────────────────────
 
 /**
