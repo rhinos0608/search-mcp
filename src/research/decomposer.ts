@@ -1364,4 +1364,105 @@ export class QueryDecomposer {
       extractedEntities: entities.map((e) => ({ name: e.name, domain: e.domain })),
     };
   }
+
+  /**
+   * LLM-based decomposition with pre-computed entities.
+   * Uses ORCHESTRATOR_DECOMPOSE_V2 to ground sub-questions in extracted entities.
+   */
+  async llmDecomposeWithEntities(
+    query: string,
+    llm: DeepResearchLlmClient,
+    state?: ResearchStateEngine,
+    entities?: { name: string; domain: string }[],
+  ): Promise<DecomposeResult> {
+    const { ORCHESTRATOR_DECOMPOSE_V2 } = await import('./llm/prompts.js');
+
+    // Build context from research state
+    let context = '';
+    if (state) {
+      const s = state.getState();
+      const sourceCount = s.sources.length;
+      const findingCount = s.findings.length;
+      if (sourceCount > 0 || findingCount > 0) {
+        context = `\n\nCurrent research context:\n- Sources found: ${String(sourceCount)}\n- Findings extracted: ${String(findingCount)}`;
+        if (s.subQuestions.length > 0) {
+          context += `\n- Existing sub-questions: ${s.subQuestions.map((sq) => sq.text).join(' | ')}`;
+        }
+      }
+    }
+
+    const entityBlock = entities && entities.length > 0
+      ? JSON.stringify(entities, null, 2)
+      : '[]';
+
+    const prompt = ORCHESTRATOR_DECOMPOSE_V2.replace('{{entities}}', entityBlock);
+
+    const result = await llm.callJSON<{
+      classification: string;
+      subQuestions: {
+        id: string;
+        text: string;
+        classification: string;
+        evidenceType: string;
+        preferredSources: string[];
+        freshnessRequirement: string;
+        failureModes: string[];
+        budgetPriority: number;
+      }[];
+    }>({
+      model: 'orchestrator',
+      messages: [
+        { role: 'system' as const, content: prompt },
+        { role: 'user' as const, content: `Research query: ${query}${context}` },
+      ],
+      temperature: 0.3,
+    });
+
+    if (!result.success || !result.data.subQuestions.length) {
+      logger.warn(
+        { error: result.success ? 'Empty sub-questions from LLM' : result.response?.error },
+        'LLM decompose V2 failed, falling back to rule-based',
+      );
+      return this.decompose(query);
+    }
+
+    const classification = normalizeClassification(result.data.classification);
+    const subQuestions: SubQuestion[] = result.data.subQuestions.map((sq) => ({
+      id: sq.id || makeId(),
+      text: sq.text,
+      classification: normalizeClassification(sq.classification),
+      evidenceType: sq.evidenceType,
+      preferredSources: normalizeSourceTypes(sq.preferredSources),
+      freshnessRequirement: sq.freshnessRequirement || 'within 2 years',
+      failureModes: sq.failureModes,
+      budgetPriority: typeof sq.budgetPriority === 'number' ? sq.budgetPriority : 1,
+      status: 'pending',
+    }));
+
+    subQuestions.push(...generateCoverageFacetSubQuestions(query, query));
+    const dedupedSubQuestions = dedupeSubQuestions(subQuestions);
+
+    const minSQs = MIN_SUBQUESTIONS_BY_CLASSIFICATION[classification];
+    if (dedupedSubQuestions.length < minSQs) {
+      logger.warn(
+        { classification, subQuestionCount: dedupedSubQuestions.length, minRequired: minSQs },
+        `LLM V2 decomposition produced only ${String(dedupedSubQuestions.length)} sub-questions for a ${classification} query — below minimum of ${String(minSQs)}.`,
+      );
+    }
+    if (dedupedSubQuestions.length === 0) {
+      logger.warn('LLM V2 decompose returned 0 sub-questions, falling back to rule-based');
+      return this.decompose(query);
+    }
+
+    const plan = `${classification.charAt(0).toUpperCase() + classification.slice(1)} research on "${query}". LLM V2 decomposed into ${String(dedupedSubQuestions.length)} sub-questions.`;
+
+    return {
+      classification,
+      subQuestions: dedupedSubQuestions,
+      plan,
+      disambiguatedTopic: query,
+      wasDisambiguated: false,
+      extractedEntities: entities?.map((e) => ({ name: e.name, domain: e.domain })) ?? [],
+    };
+  }
 }

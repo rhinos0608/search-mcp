@@ -17,12 +17,21 @@ export class DecompositionPhase extends BasePhase {
     this.checkAborted(ctx);
 
     const decomposer = new QueryDecomposer();
-    const {
-      classification,
-      subQuestions,
-      disambiguationNote: _disambiguationNote,
-      extractedEntities: _extractedEntities,
-    } = decomposer.decompose(query);
+
+    let result: import('../decomposer.js').DecomposeResult;
+
+    if (ctx.llm && ctx.entities && ctx.entities.names.length > 0) {
+      result = await decomposer.llmDecomposeWithEntities(
+        query,
+        ctx.llm,
+        ctx.state,
+        ctx.entities.names.map((name) => ({ name, domain: ctx.route?.category ?? 'unknown' })),
+      );
+    } else {
+      result = decomposer.decompose(query);
+    }
+
+    const { classification, subQuestions } = result;
 
     for (const sq of subQuestions) {
       if (classification === 'current-events' || classification === 'market-ecosystem') {
@@ -44,7 +53,6 @@ export class DecompositionPhase extends BasePhase {
     );
 
     if (ctx.budget.isExhausted()) {
-      // Budget exhausted — caller will handle partial synthesis
       return;
     }
   }
