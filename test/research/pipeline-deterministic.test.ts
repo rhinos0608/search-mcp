@@ -103,20 +103,34 @@ describe('PipelineStrategy domain routing', () => {
          capturedCtx = ctx;
          try {
             return await originalAnalyze(query, ctx);
-         } catch {
-            return { report: { query, executiveSummary: 'test' } as any, timeline: [] };
+         } catch (err) {
+            assert.fail(`PipelineStrategy.analyze threw: ${err instanceof Error ? err.message : String(err)}`);
+            throw err;
          }
       };
       try {
-         await strategy.analyze('What is the best treatment for migraines?', {
-            state: { getSubQuestions: () => [], sourceCount: () => 0, findingCount: () => 0, initialize() {}, setLanguage() {}, addSource() { return 's1'; }, addSubQuestion() {}, getFullState() { return {}; }, transitionTo() {}, isTaxonomyRevised() { return false; }, getTaxonomy() { return {}; }, reviseTaxonomy() {}, workerReportCount() { return 0; } } as any,
+         await strategy.analyze('best migraine treatment clinical trial', {
+            state: { getSubQuestions: () => [], sourceCount: () => 0, findingCount: () => 0, initialize() {}, setLanguage() {}, addSource() { return 's1'; }, addSubQuestion() {}, getFullState() { return {}; }, getState: () => ({ query: 'best migraine treatment clinical trial', findings: [], contradictions: [], openQuestions: [], sources: [], subQuestions: [] }), getSources: () => [], transitionTo() {}, isTaxonomyRevised() { return false; }, getTaxonomy() { return {}; }, reviseTaxonomy() {}, workerReportCount() { return 0; } } as any,
             budget: { isExhausted: () => true, recordTokens: () => true, profile: { maxGapLoops: 0 } } as any,
             config: { agentMaxIterations: 10, treeBreadth: 4, treeDepth: 2, treeConcurrency: 2, treeContextWordLimit: 25000 } as any,
             depth: 'standard',
          });
          assert.ok(capturedCtx);
-         assert.ok(capturedCtx.entities);
-         assert.ok(capturedCtx.route);
+         assert.ok(capturedCtx.entities, 'expected capturedCtx.entities to be set');
+         assert.ok(capturedCtx.route, 'expected capturedCtx.route to be set');
+
+         // Validate route category — this query should map to medical
+         assert.strictEqual(
+            capturedCtx.route.category,
+            'medical',
+            `expected medical route for migraine/treatment query, got ${capturedCtx.route.category}`,
+         );
+         // Validate entities include "migraine" as a descriptor
+         const descriptors = capturedCtx.entities.descriptors ?? [];
+         assert.ok(
+            descriptors.some((d: string) => d.toLowerCase().includes('migraine')),
+            `expected descriptors to include 'migraine', got [${descriptors.join(', ')}]`,
+         );
       } finally {
          strategy.analyze = originalAnalyze;
       }

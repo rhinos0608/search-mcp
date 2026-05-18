@@ -9,6 +9,7 @@
 
 import { logger } from '../../logger.js';
 import { assertSafeUrl, safeResponseJson } from '../../httpGuards.js';
+import { parseJsonFromText } from '../../utils/jsonFromText.js';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -175,45 +176,21 @@ export class DeepResearchLlmClient {
 
     const { model: _, ...callOptions } = options;
 
-    const response = await callFn({
-      ...callOptions,
-      responseFormat: 'json_object' as const,
-    });
+    const response = await callFn(callOptions);
 
     if (!response.success) {
       return { success: false, response };
     }
 
-    // ── Guiding Parsers ──────────────────────────────────────────────────
+    const data = parseJsonFromText(response.content);
+    if (data !== undefined) return { success: true, data: data as T, response };
 
-    // Attempt 1: Direct parse
-    try {
-      const data = JSON.parse(response.content) as T;
-      return { success: true, data, response };
-    } catch {
-      // Attempt 2: Extract JSON from markdown code blocks or loose braces
-      const jsonMatch =
-        /```(?:json)?\s*(\{[\s\S]*\})\s*```/.exec(response.content) ??
-        /(\{[\s\S]*\})/.exec(response.content);
-
-      if (jsonMatch?.[1]) {
-        try {
-          const data = JSON.parse(jsonMatch[1]) as T;
-          return { success: true, data, response };
-        } catch {
-          // fall through
-        }
-      }
-
-      // Attempt 3: If no JSON structure can be retrieved, return success: false
-      // This protects callers from type-errors while still providing raw content in result.response.
-      logger.warn('LLM returned non-JSON content');
-      return {
-        success: false,
-        response,
-        parseError: 'LLM returned non-JSON content',
-      };
-    }
+    logger.warn('LLM returned non-JSON content');
+    return {
+      success: false,
+      response,
+      parseError: 'LLM returned non-JSON content',
+    };
   }
   /**
    * Call orchestrator with one retry.
@@ -267,7 +244,7 @@ export class DeepResearchLlmClient {
     const timeoutMs = options.timeoutMs ?? REQUEST_TIMEOUT_MS;
     const deadline = startTime + timeoutMs;
     const endpoint = `${baseUrl ?? this.baseUrl}/v1/chat/completions`;
-    logger.info(
+    logger.debug(
       { endpoint, model, baseUrl, hasWorkerBaseUrl: !!this.workerBaseUrl },
       'LLM callModel endpoint debug',
     );
@@ -284,10 +261,8 @@ export class DeepResearchLlmClient {
       temperature,
     };
 
-    // Only include response_format when explicitly requested — avoids
-    // OpenAI schema errors when the model does not support it.
-    if (options.responseFormat === 'json_object') {
-      body.response_format = { type: 'json_object' };
+    if (options.responseFormat !== undefined) {
+      body.response_format = { type: options.responseFormat };
     }
 
     for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
@@ -352,7 +327,10 @@ export class DeepResearchLlmClient {
           // Retry with exponential backoff on transient gateway, rate-limit, or server errors.
           if (attempt < MAX_RETRIES && RETRYABLE_HTTP_STATUSES.has(status)) {
             const delay = Math.min(backoffDelay(attempt), Math.max(0, deadline - Date.now()));
-            logger.warn({ status, attempt, delay }, 'LLM request returned error; retrying with backoff');
+            logger.warn(
+              { status, attempt, delay },
+              'LLM request returned error; retrying with backoff',
+            );
             try {
               await sleep(delay, options.signal);
             } catch (err) {

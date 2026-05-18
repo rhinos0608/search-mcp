@@ -279,7 +279,6 @@ async function expandQueryWithLlm(
     ],
     temperature: 0.5,
     maxTokens: 512,
-    responseFormat: 'json_object',
     model: 'worker',
   });
 

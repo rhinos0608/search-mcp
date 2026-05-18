@@ -40,6 +40,64 @@ export interface QueryFamiliesResult {
 // queryNodes
 // ────────────────────────────────────────────────────────────────────
 
+const SEARCH_FIELDS = [
+  "LOWER(n.label)",
+  "LOWER(COALESCE(n.canonical_label, ''))",
+  "LOWER(COALESCE(n.aliases, ''))",
+];
+
+function escapeLike(value: string): string {
+  return value.replace(/[\\%_]/g, '\\$&');
+}
+
+function tokenizeSearch(value: string): string[] {
+  const tokens = value
+    .toLowerCase()
+    .match(/[\p{L}\p{N}]+/gu) ?? [];
+  const meaningful = tokens.filter((token) => token.length >= 2);
+  return [...new Set(meaningful.length > 0 ? meaningful : tokens)];
+}
+
+function likeAnyField(paramName: string): string {
+  const fieldMatches = SEARCH_FIELDS.map((field) => `${field} LIKE @${paramName} ESCAPE '\\'`);
+  fieldMatches.push(
+    `EXISTS (SELECT 1 FROM kg_events ev WHERE ev.entity_id = n.id AND LOWER(ev.payload) LIKE @${paramName} ESCAPE '\\')`,
+  );
+  return fieldMatches.join(' OR ');
+}
+
+const EXACT_LABEL_BOOST = 100;
+const CANONICAL_LABEL_BOOST = 90;
+const ALIASES_BOOST = 80;
+const EVENTS_BOOST = 50;
+const PREFIX_BASE_BOOST = 20;
+const TERM_BASE_BOOST = 10;
+const CANONICAL_TERM_BASE_BOOST = 8;
+const ALIASES_TERM_BASE_BOOST = 6;
+const EVENTS_TERM_BASE_BOOST = 4;
+
+function searchRankExpression(termCount: number): string {
+  const pieces = [
+    `CASE WHEN LOWER(n.label) LIKE @searchPhrase ESCAPE '\\' THEN ${String(EXACT_LABEL_BOOST)} ELSE 0 END`,
+    `CASE WHEN LOWER(COALESCE(n.canonical_label, '')) LIKE @searchPhrase ESCAPE '\\' THEN ${String(CANONICAL_LABEL_BOOST)} ELSE 0 END`,
+    `CASE WHEN LOWER(COALESCE(n.aliases, '')) LIKE @searchPhrase ESCAPE '\\' THEN ${String(ALIASES_BOOST)} ELSE 0 END`,
+    `CASE WHEN EXISTS (SELECT 1 FROM kg_events ev WHERE ev.entity_id = n.id AND LOWER(ev.payload) LIKE @searchPhrase ESCAPE '\\') THEN ${String(EVENTS_BOOST)} ELSE 0 END`,
+  ];
+
+  for (let i = 0; i < termCount; i += 1) {
+    const orderBoost = termCount - i;
+    pieces.push(
+      `CASE WHEN LOWER(n.label) LIKE @searchPrefix${String(i)} ESCAPE '\\' THEN ${String(PREFIX_BASE_BOOST + orderBoost)} ELSE 0 END`,
+      `CASE WHEN LOWER(n.label) LIKE @searchTerm${String(i)} ESCAPE '\\' THEN ${String(TERM_BASE_BOOST + orderBoost)} ELSE 0 END`,
+      `CASE WHEN LOWER(COALESCE(n.canonical_label, '')) LIKE @searchTerm${String(i)} ESCAPE '\\' THEN ${String(CANONICAL_TERM_BASE_BOOST + orderBoost)} ELSE 0 END`,
+      `CASE WHEN LOWER(COALESCE(n.aliases, '')) LIKE @searchTerm${String(i)} ESCAPE '\\' THEN ${String(ALIASES_TERM_BASE_BOOST + orderBoost)} ELSE 0 END`,
+      `CASE WHEN EXISTS (SELECT 1 FROM kg_events ev WHERE ev.entity_id = n.id AND LOWER(ev.payload) LIKE @searchTerm${String(i)} ESCAPE '\\') THEN ${String(EVENTS_TERM_BASE_BOOST + orderBoost)} ELSE 0 END`,
+    );
+  }
+
+  return pieces.join(' + ');
+}
+
 /**
  * Query projected nodes with optional filters.
  *
@@ -52,6 +110,7 @@ export interface QueryFamiliesResult {
 export function queryNodes(opts: {
   entityId?: string;
   label?: string;
+  search?: string;
   type?: string;
   familyId?: string;
   minConfidence?: number;
@@ -76,13 +135,34 @@ export function queryNodes(opts: {
       params.entityId = opts.entityId;
     }
 
+function likeLabelField(paramName: string): string {
+  const fieldMatches = ['n.label', 'n.canonical_label', 'n.aliases'].map(
+    (field) => `LOWER(${field}) LIKE @${paramName} ESCAPE '\\'`,
+  );
+  return fieldMatches.join(' OR ');
+}
+
     if (opts.label !== undefined) {
-      // Alias-aware: match label OR aliases JSON
-      clauses.push(
-        '(n.label LIKE @label OR n.aliases LIKE @aliasPattern)',
-      );
-      params.label = `%${opts.label}%`;
-      params.aliasPattern = `%${opts.label}%`;
+      clauses.push(`(${likeLabelField('label')})`);
+      params.label = `%${escapeLike(opts.label.toLowerCase())}%`;
+    }
+
+    const searchTerms = opts.search !== undefined ? tokenizeSearch(opts.search) : [];
+    if (opts.search !== undefined) {
+      const normalizedSearch = opts.search.trim().toLowerCase();
+      if (normalizedSearch.length > 0) {
+        const searchClauses = [`(${likeAnyField('searchPhrase')})`];
+        params.searchPhrase = `%${escapeLike(normalizedSearch)}%`;
+
+        for (const [index, term] of searchTerms.entries()) {
+          const suffix = String(index);
+          searchClauses.push(`(${likeAnyField(`searchTerm${suffix}`)})`);
+          params[`searchTerm${suffix}`] = `%${escapeLike(term)}%`;
+          params[`searchPrefix${suffix}`] = `${escapeLike(term)}%`;
+        }
+
+        clauses.push(`(${searchClauses.join(' OR ')})`);
+      }
     }
 
     if (opts.type !== undefined) {
@@ -134,8 +214,12 @@ export function queryNodes(opts: {
       .get(params) as { cnt: number } | undefined;
     const total = countRow?.cnt ?? 0;
 
-    // Fetch with pagination
-    const sql = `SELECT n.* FROM kg_nodes n${where} ORDER BY n.last_updated ASC, n.id ASC${limit}`;
+    const rankExpr = opts.search !== undefined ? searchRankExpression(searchTerms.length) : null;
+    const select = rankExpr !== null ? `SELECT n.*, (${rankExpr}) as search_rank` : 'SELECT n.*';
+    const orderBy = rankExpr !== null
+      ? 'ORDER BY search_rank DESC, n.label ASC, n.id ASC'
+      : 'ORDER BY n.last_updated ASC, n.id ASC';
+    const sql = `${select} FROM kg_nodes n${where} ${orderBy}${limit}`;
     const rows = db.prepare(sql).all(params) as Record<string, unknown>[];
 
     const hasMore = rows.length > pageLimit;

@@ -6,58 +6,95 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert';
 
 describe('AgentResponseParser', () => {
-   it('parses ACTION with ARGUMENTS', () => {
-      const text = 'THOUGHT: Need to search\nACTION: search_web\nARGUMENTS: {"query": "test", "limit": 5}';
-      const actionMatch = text.match(/ACTION:\s*(\S+)/i);
-      const argsMatch = text.match(/ARGUMENTS:\s*(\{[\s\S]*?\})/i);
-      assert.ok(actionMatch, 'ACTION should be found');
-      assert.ok(argsMatch, 'ARGUMENTS should be found');
-      assert.strictEqual(actionMatch?.[1], 'search_web');
-      if (argsMatch?.[1]) {
-         const parsed = JSON.parse(argsMatch[1]);
-         assert.strictEqual(parsed.query, 'test');
-         assert.strictEqual(parsed.limit, 5);
-      }
-   });
+  it('parses ACTION with ARGUMENTS', async () => {
+    const { parseAgentResponse } = await import('../../src/research/strategies/agentStrategy.js');
+    const text = 'THOUGHT: Need to search\nACTION: search_web\nARGUMENTS: {"query": "test", "limit": 5}';
+    const parsed = parseAgentResponse(text);
+    assert.strictEqual(parsed.type, 'action');
+    assert.strictEqual(parsed.tool, 'search_web');
+    assert.strictEqual((parsed.args as any).query, 'test');
+    assert.strictEqual((parsed.args as any).limit, 5);
+    assert.strictEqual(parsed.thought, 'Need to search');
+  });
 
-   it('parses ANSWER', () => {
-      const text = 'THOUGHT: Found enough\nANSWER: The answer is 42.';
-      const answerMatch = text.match(/ANSWER:\s*([\s\S]*)/i);
-      assert.ok(answerMatch, 'ANSWER should be found');
-      assert.ok(answerMatch?.[1]?.includes('The answer is 42'));
-   });
+  it('parses ANSWER', async () => {
+    const { parseAgentResponse } = await import('../../src/research/strategies/agentStrategy.js');
+    const text = 'THOUGHT: Found enough\nANSWER: The answer is 42.';
+    const parsed = parseAgentResponse(text);
+    assert.strictEqual(parsed.type, 'answer');
+    assert.ok(parsed.content?.includes('The answer is 42'));
+    assert.strictEqual(parsed.thought, 'Found enough');
+  });
 
-   it('detects missing ARGUMENTS', () => {
-      const text = 'ACTION: search_web';
-      const actionMatch = text.match(/ACTION:\s*(\S+)/i);
-      const argsMatch = text.match(/ARGUMENTS:\s*(\{[\s\S]*?\})/i);
-      assert.ok(actionMatch, 'ACTION should be found');
-      assert.strictEqual(argsMatch, null, 'ARGUMENTS should be null without JSON');
-   });
+  it('detects missing ARGUMENTS', async () => {
+    const { parseAgentResponse } = await import('../../src/research/strategies/agentStrategy.js');
+    const text = 'THOUGHT: Need to search\nACTION: search_web';
+    const parsed = parseAgentResponse(text);
+    assert.strictEqual(parsed.type, 'error');
+    assert.ok(parsed.message?.includes('no ARGUMENTS found'));
+  });
 
-   it('handles malformed JSON in ARGUMENTS', () => {
-      const text = 'ACTION: search_web\nARGUMENTS: {bad json}';
-      const argsMatch = text.match(/ARGUMENTS:\s*(\{[\s\S]*?\})/i);
-      assert.ok(argsMatch, 'ARGUMENTS block should be found');
-      if (argsMatch?.[1]) {
-         assert.throws(() => JSON.parse(argsMatch[1]!));
-      }
-   });
+  it('falls back to raw text when JSON in ARGUMENTS is malformed', async () => {
+    const { parseAgentResponse } = await import('../../src/research/strategies/agentStrategy.js');
+    const text = 'THOUGHT: Need to search\nACTION: search_web\nARGUMENTS: {bad json}';
+    const parsed = parseAgentResponse(text);
+    assert.strictEqual(parsed.type, 'action');
+    assert.strictEqual(parsed.tool, 'search_web');
+    assert.strictEqual((parsed.args as any)._rawArgs, '{bad json}');
+  });
 
-   it('falls back to error for unparseable input', () => {
-      const text = 'Just some random text without any format';
-      const actionMatch = text.match(/ACTION:\s*(\S+)/i);
-      const answerMatch = text.match(/ANSWER:\s*([\s\S]*)/i);
-      assert.strictEqual(actionMatch, null);
-      assert.strictEqual(answerMatch, null);
-   });
+  it('falls back to error for unparseable input', async () => {
+    const { parseAgentResponse } = await import('../../src/research/strategies/agentStrategy.js');
+    const text = 'Just some random text without any format';
+    const parsed = parseAgentResponse(text);
+    assert.strictEqual(parsed.type, 'error');
+    assert.ok(parsed.message?.includes('Could not parse response'));
+  });
 
-   it('handles multi-line THOUGHT', () => {
-      const text = 'THOUGHT: This is a\nmulti-line thought\nspanning several lines\nACTION: search_web\nARGUMENTS: {"query": "test"}';
-      const thoughtMatch = text.match(/THOUGHT:\s*([\s\S]*?)(?=\n(?:ACTION|ANSWER|$))/i);
-      assert.ok(thoughtMatch, 'THOUGHT should be found');
-      assert.ok((thoughtMatch?.[1]?.match(/\n/g)?.length ?? 0) >= 2, 'THOUGHT should contain multiple lines');
-   });
+  it('handles multi-line THOUGHT', async () => {
+    const { parseAgentResponse } = await import('../../src/research/strategies/agentStrategy.js');
+    const text = 'THOUGHT: This is a\nmulti-line thought\nspanning several lines\nACTION: search_web\nARGUMENTS: {"query": "test"}';
+    const parsed = parseAgentResponse(text);
+    assert.strictEqual(parsed.type, 'action');
+    assert.ok((parsed.thought?.match(/\n/g)?.length ?? 0) >= 2, 'THOUGHT should contain multiple lines');
+  });
+
+  it('tolerates markdown fences around ARGUMENTS', async () => {
+    const { parseAgentResponse } = await import('../../src/research/strategies/agentStrategy.js');
+    const text = `THOUGHT: Need to search
+ACTION: search_web
+ARGUMENTS: \`\`\`json
+{"query": "test", "limit": 5}
+\`\`\``;
+    const parsed = parseAgentResponse(text);
+    assert.strictEqual(parsed.type, 'action');
+    assert.strictEqual((parsed.args as any).query, 'test');
+  });
+
+  it('tolerates same-line ACTION after THOUGHT', async () => {
+    const { parseAgentResponse } = await import('../../src/research/strategies/agentStrategy.js');
+    const text = 'THOUGHT: Let me search ACTION: search_web ARGUMENTS: {"query": "test"}';
+    const parsed = parseAgentResponse(text);
+    assert.strictEqual(parsed.type, 'action');
+    assert.strictEqual(parsed.tool, 'search_web');
+    assert.strictEqual(parsed.thought, 'Let me search');
+  });
+
+  it('handles escaped quotes inside JSON string', async () => {
+    const { parseAgentResponse } = await import('../../src/research/strategies/agentStrategy.js');
+    const text = 'THOUGHT: Need to search\nACTION: search_web\nARGUMENTS: {"query": "What does \\"foo\\" mean"}';
+    const parsed = parseAgentResponse(text);
+    assert.strictEqual(parsed.type, 'action');
+    assert.strictEqual((parsed.args as any).query, 'What does "foo" mean');
+  });
+
+  it('ignores array-shaped ARGUMENTS and prefers object', async () => {
+    const { parseAgentResponse } = await import('../../src/research/strategies/agentStrategy.js');
+    // Arrays should be ignored; if no object is present, it should error
+    const text = 'THOUGHT: Need to search\nACTION: search_web\nARGUMENTS: [1, 2, 3]';
+    const parsed = parseAgentResponse(text);
+    assert.strictEqual(parsed.type, 'error');
+  });
 });
 
 describe('AgentStrategy instantiation', () => {

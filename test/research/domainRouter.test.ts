@@ -205,14 +205,21 @@ describe('routeQuery', () => {
 
   describe('hasKeywordMatch', () => {
     it('escapes regex metacharacters in single-word keywords', () => {
-      // Without escaping, 'test.api' would be interpreted as 'test<any char>api'
-      // With escaping, it should match literally
+      // '.' is a regex wildcard — without escaping, 'test.api' would match
+      // 'test<any single char>api' (e.g., 'testXapi'). The escape forces
+      // literal '.' matching, which is required for keywords containing
+      // non-word characters like 'c++' (where '+' means 'one or more' in
+      // regex) or '.net' (where '.' matches any character).
       assert.ok(hasKeywordMatch('use test.api now', 'test.api'));
       assert.ok(!hasKeywordMatch('use testXapi now', 'test.api'));
 
-      // Keywords with non-word characters should match correctly
+      // 'c++' — '+' is a regex quantifier; without escaping 'c++' would
+      // match 'c' followed by one or more 'c' characters ('cc', 'ccc').
       assert.ok(hasKeywordMatch('learn c++', 'c++'));
       assert.ok(!hasKeywordMatch('learn csharp', 'c++'));
+
+      // '.net' — '.' matches any single char; without escaping '.net'
+      // would match 'Xnet', 'Anet', etc.
       assert.ok(hasKeywordMatch('use .net framework', '.net'));
     });
   });

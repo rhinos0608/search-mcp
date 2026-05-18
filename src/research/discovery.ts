@@ -13,8 +13,6 @@ import { loadConfig } from '../config.js';
 import { academicSearch } from '../tools/academicSearch.js';
 import { getGitHubRepoSearch } from '../tools/githubRepoSearch.js';
 import { hackernewsSearch } from '../tools/hackernewsSearch.js';
-import { redditSearch } from '../tools/redditSearch.js';
-import { redditComments } from '../tools/redditComments.js';
 import { stackoverflowSearch } from '../tools/stackoverflowSearch.js';
 import { youtubeSearch } from '../tools/youtubeSearch.js';
 import { getYouTubeTranscript } from '../tools/youtubeTranscript.js';
@@ -34,7 +32,6 @@ import type {
   SourceEntry,
   SearchCluster,
 } from './types.js';
-import type { NormalizedRedditComment } from '../tools/redditThreadParser.js';
 import { withRetry } from './retry.js';
 import { ResearchStateEngine, BudgetTracker } from './state.js';
 import { rankSource, maxPerHostname } from './sourceRanking.js';
@@ -154,12 +151,6 @@ function buildSearchQueries(sq: SubQuestion): string[] {
     queries.push(sq.text.slice(0, 80));
   }
   return queries;
-}
-
-function buildRedditQuery(sq: SubQuestion): string {
-  // Reddit works better with shorter queries
-  const text = sq.text.replace(/^(what|how|why|when|where|which|is|are|do|does|can)\s/i, '');
-  return text.length > 60 ? text.slice(0, 60) : text;
 }
 
 function buildGitHubQuery(sq: SubQuestion): string {
@@ -860,106 +851,10 @@ export class DiscoveryEngine {
   }
 
   private async searchRedditSemantic(sq: SubQuestion): Promise<SourceCandidate[]> {
-    if (!this.budget.recordToolCall()) return [];
-
-    try {
-      const query = buildRedditQuery(sq);
-      const posts: {
-        title: string;
-        url: string;
-        selftext?: string;
-        created_utc?: number;
-        permalink: string;
-      }[] = await withRetry(() => redditSearch(query, '', 'relevance', 'year', 10), {
-        signal: this.abortSignal,
-      });
-
-      const candidates: SourceCandidate[] = [];
-
-      // Fetch comments for top posts to enrich source content
-      // Expand from 5 to 10 posts for richer community signal
-      const topPosts = posts.slice(0, 10);
-      const commentSettled = await Promise.allSettled(
-        topPosts.map(async (p) => {
-          try {
-            const result = await withRetry(() => redditComments({ url: p.permalink }, {}), {
-              signal: this.abortSignal,
-            });
-            // Collect top comment bodies for snippet enrichment
-            // Expand from 20 to 30 comments per post
-            const commentBodies = (result.comments as NormalizedRedditComment[])
-              .filter((c): c is NormalizedRedditComment => 'body' in c)
-              .slice(0, 30)
-              .map((c) => c.body)
-              .filter((b) => b && b.length > 20);
-            const snippet =
-              commentBodies.length > 0
-                ? `Post: ${p.title}\n\nTop comments:\n` +
-                  commentBodies
-                    .slice(0, 20)
-                    .map((b) => `- ${b.slice(0, 1000)}`)
-                    .join('\n')
-                : (p.selftext ?? p.title);
-            return {
-              title: p.title,
-              url: p.url,
-              snippet,
-              sourceType: 'reddit' as const,
-              estimatedQuality: 0.5,
-              estimatedRelevance: 0.6,
-              freshness: p.created_utc
-                ? `${String(Math.floor((Date.now() / 1000 - p.created_utc) / 86400))} days ago`
-                : '',
-              reasonForInclusion: `Reddit discussion with comments about: ${sq.text}`,
-              subQuestionId: sq.id,
-            };
-          } catch {
-            // Fall back to post-only metadata
-            return {
-              title: p.title,
-              url: p.url,
-              snippet: p.selftext ?? p.title,
-              sourceType: 'reddit' as const,
-              estimatedQuality: 0.4,
-              estimatedRelevance: 0.5,
-              freshness: p.created_utc
-                ? `${String(Math.floor((Date.now() / 1000 - p.created_utc) / 86400))} days ago`
-                : '',
-              reasonForInclusion: `Reddit discussion about: ${sq.text}`,
-              subQuestionId: sq.id,
-            };
-          }
-        }),
-      );
-
-      for (const result of commentSettled) {
-        if (result.status === 'fulfilled') {
-          candidates.push(result.value);
-        }
-      }
-
-      // Also include remaining posts without comments
-      for (const p of posts.slice(10)) {
-        candidates.push({
-          title: p.title,
-          url: p.url,
-          snippet: p.selftext ?? p.title,
-          sourceType: 'reddit',
-          estimatedQuality: 0.4,
-          estimatedRelevance: 0.5,
-          freshness: p.created_utc
-            ? `${String(Math.floor((Date.now() / 1000 - p.created_utc) / 86400))} days ago`
-            : '',
-          reasonForInclusion: `Reddit discussion about: ${sq.text}`,
-          subQuestionId: sq.id,
-        });
-      }
-
-      return candidates;
-    } catch (err) {
-      logger.warn({ err, subQuestion: sq.id }, 'Reddit semantic search failed');
-      return [];
-    }
+    // Reddit search now requires a subreddit — discovery has no subreddit context.
+    // Skip Reddit source discovery.
+    void sq;
+    return [];
   }
 
   private async searchHackerNews(sq: SubQuestion): Promise<SourceCandidate[]> {

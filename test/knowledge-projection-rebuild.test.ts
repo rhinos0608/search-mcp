@@ -46,6 +46,23 @@ function appendNode(runId: string, nodeId: string, label: string): void {
   ]);
 }
 
+function appendClaim(runId: string, nodeId: string, label: string, evidence: string): void {
+  appendEvents([
+    {
+      timestamp: new Date().toISOString(),
+      eventType: 'CLAIM_EXTRACTED',
+      eventVersion: 1,
+      runId,
+      batchId: null,
+      actor: 'system',
+      entityId: nodeId,
+      entityType: 'concept',
+      payload: JSON.stringify({ label, type: 'concept', evidence }),
+      payloadHash: null,
+    },
+  ]);
+}
+
 test('default projection rebuild preserves existing graph state after new events', () => {
   initTempDb();
 
@@ -59,4 +76,25 @@ test('default projection rebuild preserves existing graph state after new events
   assert.equal(result.fromGenesis, true);
   assert.equal(queryNodes({ label: 'First passive memory', limit: 5 }).nodes.length, 1);
   assert.equal(queryNodes({ label: 'Second passive memory', limit: 5 }).nodes.length, 1);
+});
+
+test('projection search falls back from exact phrase to meaningful query terms', () => {
+  initTempDb();
+
+  appendNode('run-1', 'node-1', 'Distributed systems');
+  appendNode('run-1', 'node-2', 'Cache invalidation');
+  appendNode('run-1', 'node-3', 'Mechanistic interpretability');
+  appendNode('run-1', 'node-4', 'Circuit analysis');
+  appendNode('run-1', 'node-5', 'Message broker');
+  appendClaim('run-1', 'node-5', 'Message broker', 'Queue backpressure increases consumer latency.');
+  rebuildProjection({});
+
+  const broad = queryNodes({ search: 'distributed cache', limit: 10 }).nodes.map((node) => node.label);
+  assert.deepEqual(broad, ['Distributed systems', 'Cache invalidation']);
+
+  const exact = queryNodes({ search: 'mechanistic interpretability', limit: 10 }).nodes.map((node) => node.label);
+  assert.deepEqual(exact, ['Mechanistic interpretability']);
+
+  const evidence = queryNodes({ search: 'queue latency', limit: 10 }).nodes.map((node) => node.label);
+  assert.deepEqual(evidence, ['Message broker']);
 });

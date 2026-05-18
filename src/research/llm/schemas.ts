@@ -224,7 +224,7 @@ export type FailureAnalysis = z.infer<typeof FailureAnalysisSchema>;
 
 export const WorkerAgentInvestigateSchema = z.object({
   queries: z.array(z.string()).min(1).describe('Optimized search queries'),
-  sourceTypes: z.array(sourceTypeEnum).min(3).describe('Source types to search (at least 3)'),
+  sourceTypes: z.array(sourceTypeEnum).min(5).describe('Source types to search (at least 5)'),
   reasoning: z.string().min(20).describe('Brief explanation of the search strategy'),
 });
 

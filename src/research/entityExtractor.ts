@@ -333,9 +333,9 @@ export function expandTemporalRanges(entities: string[]): string[] {
   const result: string[] = [];
   for (const entity of entities) {
     const rangeMatch = /^(\d{4})\s*(?:-|–|to)\s*(\d{4})$/.exec(entity);
-    if (rangeMatch) {
-      let start = parseInt(rangeMatch[1] ?? '0', 10);
-      let end = parseInt(rangeMatch[2] ?? '0', 10);
+    if (rangeMatch?.[1] !== undefined && rangeMatch[2] !== undefined) {
+      let start = parseInt(rangeMatch[1], 10);
+      let end = parseInt(rangeMatch[2], 10);
       if (start > end) {
         [start, end] = [end, start];
       }

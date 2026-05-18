@@ -7,6 +7,7 @@ import { createServer } from './server.js';
 import { ConfigManager } from './config/manager.js';
 import * as http from 'node:http';
 import { startHttpServer } from './server/http.js';
+import { isAddressInUseError } from './server/startupErrors.js';
 import type { SearchMcpRuntime } from './config/types.js';
 import { closeKgDb } from './knowledge/store/db.js';
 
@@ -81,29 +82,37 @@ async function main(): Promise<void> {
       getConfig: () => configManager.get(),
     };
 
-    let httpServer: http.Server;
+    let httpServer: http.Server | undefined;
     try {
       httpServer = await startHttpServer(runtime, configManager, port);
+      logger.info({ port }, 'HTTP MCP transport active');
     } catch (err) {
-      logger.error({ err: err as Error }, 'HTTP server startup failed');
-      await stdioServer.close().catch(() => {
-        // Ignore errors during shutdown
-      });
-      throw err;
+      if (!isAddressInUseError(err)) {
+        logger.error({ err: err as Error }, 'HTTP server startup failed');
+        await stdioServer.close().catch(() => {
+          // Ignore errors during shutdown
+        });
+        throw err;
+      }
+
+      logger.warn(
+        { err: err as Error, port },
+        'HTTP_PORT is already in use; continuing with stdio transport only',
+      );
     }
-    logger.info({ port }, 'HTTP MCP transport active');
 
     registerShutdownHandlers(async () => {
-      // Close HTTP server first to stop new connections.
-      try {
-        await new Promise<void>((resolve, reject) => {
-          httpServer.close((err) => {
-            if (err) reject(err);
-            else resolve();
+      if (httpServer) {
+        try {
+          await new Promise<void>((resolve, reject) => {
+            httpServer.close((err) => {
+              if (err) reject(err);
+              else resolve();
+            });
           });
-        });
-      } catch (err) {
-        logger.error({ err }, 'Error closing HTTP server');
+        } catch (err) {
+          logger.error({ err }, 'Error closing HTTP server');
+        }
       }
       try {
         await stdioServer.close();

@@ -23,33 +23,24 @@ export function resetRedditSearchCache(): void {
 
 export async function redditSearch(
   query: string,
-  subreddit = '',
+  subreddit: string,
   sort: 'relevance' | 'hot' | 'top' | 'new' | 'comments' = 'relevance',
   timeframe: 'all' | 'year' | 'month' | 'week' | 'day' | 'hour' = 'year',
   limit = 25,
   clientOptions: RedditClientOptions = {},
 ): Promise<RedditPost[]> {
-  if (subreddit && !/^[A-Za-z0-9_]{1,21}$/.test(subreddit)) {
+  if (!/^[A-Za-z0-9_]{1,21}$/.test(subreddit)) {
     throw new Error(
       `Invalid subreddit name: "${subreddit}". Must be 1–21 alphanumeric/underscore characters.`,
     );
   }
 
-  // When searching globally (no subreddit), Reddit's API returns all-time
-  // highest-karma posts regardless of query. For any unscoped call with a
-  // broad timeframe (year/all), cap to 'week' — this covers sort=top,
-  // sort=relevance, etc. which are all equally broken without subreddit scoping.
-  const unscoped = !subreddit;
-  const broadTimeframe = timeframe === 'all' || timeframe === 'year';
-  const effectiveTimeframe = unscoped && broadTimeframe ? 'week' : timeframe;
-  const effectiveSort = unscoped && sort === 'relevance' ? 'new' : sort;
-
   const key = cacheKey(
     'reddit',
     query,
     subreddit,
-    effectiveSort,
-    effectiveTimeframe,
+    sort,
+    timeframe,
     String(limit),
   );
   const cached = cache.get(key);
@@ -59,12 +50,12 @@ export async function redditSearch(
   }
 
   const client = createRedditClient(mergeRedditClientOptions(clientOptions));
-  const path = subreddit ? `/r/${encodeURIComponent(subreddit)}/search` : '/search';
+  const path = `/r/${encodeURIComponent(subreddit)}/search`;
   const queryParams = {
     q: query,
-    restrict_sr: subreddit ? 1 : undefined,
-    sort: effectiveSort,
-    t: effectiveTimeframe,
+    restrict_sr: 1,
+    sort,
+    t: timeframe,
     limit,
     include_over_18: 0,
   };
@@ -134,9 +125,9 @@ export async function redditSearch(
 
   // Single-source RRF + rescoring
   const rescoreSort: 'relevance' | 'date' | 'top' =
-    effectiveSort === 'new'
+    sort === 'new'
       ? 'date'
-      : effectiveSort === 'hot' || effectiveSort === 'top'
+      : sort === 'hot' || sort === 'top'
         ? 'top'
         : 'relevance'; // covers 'relevance' and 'comments'
 

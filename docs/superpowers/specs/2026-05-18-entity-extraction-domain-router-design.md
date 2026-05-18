@@ -109,7 +109,7 @@ export function generateEntityBasedQueries(
 
 | Category | Pattern | Example |
 |----------|---------|---------|
-| Temporal | `\b(19\|20)\d{2}(?:\s*[-–]\s*(19\|20)\d{2})?\b` | "2023", "2018–2023" |
+| Temporal | `\b(19|20)\d{2}(?:\s*[-–]\s*(19|20)\d{2})?\b` | "2023", "2018–2023" |
 | Numerical | `\b\d+(?:\.\d+)?(?:%\|ms\|MB\|km\|million\|billion)\b` | "84.5%", "300ms" |
 | Names | Capitalized sequences of 2–4 words not starting a sentence | "Plastic Man", "Dartmouth College" |
 | Locations | Capitalized word after preposition + location indicator | "in Pennsylvania", "at the Grand Canyon" |
@@ -214,13 +214,17 @@ export function routeQuery(
 
 ### 6.4 LLM Fallback (Optional)
 
-If `confidence < 0.5` and an LLM client is available, call `callWorker` with a lightweight classification prompt:
+If `confidence < 0.5` and the `ENABLE_DOMAIN_ROUTING_LLM_FALLBACK` env var is `true` and an LLM client is available, call `callWorker` with a lightweight classification prompt:
 
 ```
 Classify this query into one category: medical, scientific, technical,
 current-events, background-knowledge, code, community-opinion, comparative,
 how-to, general. Return JSON: {"category": "...", "confidence": 0.0-1.0}
 ```
+
+**Configuration**: `ENABLE_DOMAIN_ROUTING_LLM_FALLBACK` (default `false`) enables the LLM fallback path. When `true`, the system calls `callWorker` with `maxTokens: 500` and temperature `0.3`. If the call times out or errors, a warning is logged and the original heuristic classification result is used as the fallback.
+
+**Performance note**: For ambiguous queries (confidence < 0.5), enabling the LLM fallback adds approximately 500–1000ms of latency. Keep this toggle off to preserve the fast path (sub-millisecond keyword heuristic).
 
 ---
 

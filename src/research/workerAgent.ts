@@ -308,7 +308,6 @@ export class WorkerAgent {
         temperature: 0.3,
         timeoutMs: this.config.llmTimeoutMs,
         maxTokens: 1000,
-        responseFormat: 'json_object',
       });
 
       if (result.success) {
@@ -1238,7 +1237,6 @@ Output ONLY valid JSON:
         temperature: 0.3,
         timeoutMs: this.config.llmTimeoutMs,
         maxTokens: 4000,
-        responseFormat: 'json_object',
       });
 
       if (result.success) {

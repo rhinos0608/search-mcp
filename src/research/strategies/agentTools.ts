@@ -372,18 +372,24 @@ function createRedditSearchTool(
   return {
     name: 'search_reddit',
     description:
-      'Search Reddit for community discussions and opinions. Best for user experiences, reviews, and community knowledge.',
+      'Search Reddit for community discussions and opinions. Best for user experiences, reviews, and community knowledge. Requires a subreddit.',
     parameters: {
       query: { type: 'string', description: 'The search query', required: true },
+      subreddit: { type: 'string', description: 'Subreddit to search (without r/ prefix). Required.', required: true },
       limit: { type: 'number', description: 'Max results (1-20, default 10)' },
     },
     execute: async (args) => {
       const query = typeof args.query === 'string' ? args.query : '';
       if (!query) return { content: 'Error: query is required', error: 'missing query' };
+      const subreddit = typeof args.subreddit === 'string' ? args.subreddit : '';
+      if (!subreddit) return { content: 'Error: subreddit is required for Reddit search', error: 'missing subreddit' };
       const limit = Math.min(Number(args.limit) || 10, 20);
 
       try {
-        const results = await (await getTools()).redditSearch(query, limit);
+        // ResearchTools.redditSearch takes (query, limit, subreddit) to match the ResearchTools interface;
+        // limit is passed second (positional) and subreddit third.
+        const tools = await getTools();
+        const results = await tools.redditSearch(query, limit, subreddit);
         const startIdx = collector.addResults(
           results.map((r) => ({ title: r.title, link: r.url, snippet: r.selftext })),
           'reddit',

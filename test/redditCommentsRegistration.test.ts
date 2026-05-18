@@ -244,12 +244,14 @@ test('reddit.semantic accepts basic params', () => {
    const parsed = entry.inputSchema.parse({
       action: 'semantic',
       query: 'error handling patterns',
+      subreddit: 'typescript',
       maxPosts: 5,
       topK: 20,
-   }) as { action: string; query: string; maxPosts: number; topK: number };
+   }) as { action: string; query: string; subreddit: string; maxPosts: number; topK: number };
 
    assert.equal(parsed.action, 'semantic');
    assert.equal(parsed.query, 'error handling patterns');
+   assert.equal(parsed.subreddit, 'typescript');
    assert.equal(parsed.maxPosts, 5);
    assert.equal(parsed.topK, 20);
 });

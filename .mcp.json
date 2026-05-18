@@ -11,13 +11,20 @@
       ]
     },
     "search-mcp": {
-      "command": "npx",
+      "command": "node",
       "args": [
-        "-y",
-        "mcp-remote",
-        "https://macbook-pro.taila2c1ae.ts.net/mcp",
-        "--header",
-        "Authorization: Bearer WIDNpDFdxP11Dn5Gw6sbUXqA5uVcp-COeS0opTHwe6I"
+        "/Users/rhinesharar/search-mcp/dist/index.js"
+      ],
+      "env": {
+        "SEARCH_MCP_CONFIG_KEY": "secret"
+      },
+      "directTools": [
+        "web_search",
+        "web_crawl",
+        "semantic_crawl",
+        "deep_research",
+        "github",
+        "research"
       ]
     }
   }

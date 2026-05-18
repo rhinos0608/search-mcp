@@ -135,11 +135,7 @@ const searchSchema = z.object({
   query: z.string().describe('The search query string'),
   subreddit: z
     .string()
-    .optional()
-    .default('')
-    .describe(
-      'Restrict to this subreddit (without r/ prefix). Strongly recommended — global Reddit search has poor relevance.',
-    ),
+    .describe('Subreddit to search (without r/ prefix). Required — Reddit search is always subreddit-scoped.'),
   sort: SORT_SEARCH.optional().default('relevance').describe('Sort order'),
   timeframe: TIMEFRAME.optional().default('year').describe('Time window'),
   limit: z
@@ -200,9 +196,7 @@ const semanticSchema = z.object({
   query: z.string().describe('The semantic search query — what are you looking for in comments?'),
   subreddit: z
     .string()
-    .optional()
-    .default('')
-    .describe('Restrict search to this subreddit (without r/ prefix)'),
+    .describe('Subreddit to search (without r/ prefix). Required — Reddit search is always subreddit-scoped.'),
   sort: SORT_SEMANTIC.optional().default('relevance').describe('Sort order for post search'),
   timeframe: TIMEFRAME.optional().default('year').describe('Time window for post search'),
   maxPosts: z
@@ -250,9 +244,10 @@ const redditFamily: FamilyDefinition = {
   name: 'reddit',
   description:
     'Search Reddit, browse comment threads, or perform semantic search across comments. ' +
-    'Use `search` to find posts by keyword, `comments` to read a thread (with a clean ' +
-    'post locator: URL, permalink, or subreddit+ID), and `semantic` to find relevant ' +
-    'comment passages across multiple posts. All actions work without authentication.',
+    'All actions require a subreddit. Use `search` to find posts by keyword within a subreddit, ' +
+    '`comments` to read a thread (with a clean post locator: URL, permalink, or subreddit+ID), ' +
+    'and `semantic` to find relevant comment passages across multiple posts. ' +
+    'All actions work without authentication.',
   actions: [
     {
       name: 'search',
@@ -361,7 +356,7 @@ const redditFamily: FamilyDefinition = {
 
         const data = await semanticReddit({
           query,
-          subreddit: subreddit || undefined,
+          subreddit,
           sort,
           timeframe,
           maxPosts,

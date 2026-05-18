@@ -1344,8 +1344,16 @@ export interface ResearchTools {
   redditSearch(
     query: string,
     limit?: number,
+    subreddit?: string,
   ): Promise<
-    { title: string; url: string; selftext?: string; created_utc?: number; permalink: string }[]
+    {
+      title: string;
+      url: string;
+      selftext?: string;
+      created_utc?: number;
+      permalink: string;
+      subreddit?: string;
+    }[]
   >;
   hackernewsSearch(
     query: string,

@@ -41,14 +41,12 @@ export class PipelineStrategy implements ResearchStrategy {
     const startTime = Date.now();
     const effectiveDepth = ctx.depth;
 
-    // Ensure entities and route are available for downstream phases
-    if (!ctx.entities || !ctx.route) {
-      const entities = extractEntities(query);
-      const route = routeQuery(query, entities);
-      ctx.entities = entities;
-      ctx.route = route;
+    // Ensure entities and route are available independently
+    ctx.entities ??= extractEntities(query);
+    if (!ctx.route) {
+      ctx.route = routeQuery(query, ctx.entities);
       logger.info(
-        { category: route.category, confidence: route.confidence },
+        { category: ctx.route.category, confidence: ctx.route.confidence },
         'PipelineStrategy: computed domain route',
       );
     }

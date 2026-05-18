@@ -144,7 +144,7 @@ export function registerGraphIngestTool(server: McpServer, cfg: SearchConfig): v
         if (!sync) {
           updateRunStatus(runId, 'classifying');
           const extractor = new KnowledgeGraphExtractor(cfg);
-          void extractor.extract(normInput, runId).then(
+          void extractor.extract(normInput, runId, { totalTimeoutMs: timeoutMs }).then(
             (result) => { emitEventsFromResult(result, runId); },
             (err: unknown) => { updateRunStatus(runId, 'failed', {
               lastError: err instanceof Error ? err.message : String(err),
@@ -160,7 +160,7 @@ export function registerGraphIngestTool(server: McpServer, cfg: SearchConfig): v
         const extractor = new KnowledgeGraphExtractor(cfg);
         let extraction: Awaited<ReturnType<KnowledgeGraphExtractor['extract']>>;
         try {
-          extraction = await extractor.extract(normInput, runId);
+          extraction = await extractor.extract(normInput, runId, { totalTimeoutMs: timeoutMs });
         } catch (err: unknown) {
           const msg = err instanceof Error ? err.message : String(err);
           updateRunStatus(runId, 'failed', { lastError: msg });

@@ -11,8 +11,11 @@ import { curateEvidenceSources } from '../sourceQuality.js';
 import { ResearchStateEngine } from '../state.js';
 import { logger } from '../../logger.js';
 import { randomUUID } from 'node:crypto';
+import type { DomainRoute } from '../domainRouter.js';
+import type { ExtractedEntities } from '../entityExtractor.js';
 import { extractEntities, generateEntityBasedQueries } from '../entityExtractor.js';
 import { routeQuery } from '../domainRouter.js';
+import { extractJsonCandidates } from '../../utils/jsonFromText.js';
 
 // ── Constants ────────────────────────────────────────────────────────────
 
@@ -21,41 +24,54 @@ const FALLBACK_SYNTHESIS_MAX_TOKENS = 4000;
 // ── Balanced-brace JSON extractor ───────────────────────────────────────
 
 /**
- * Extracts the full JSON substring following "ARGUMENTS:" by tracking
- * brace depth. Handles nested braces, strings with escapes, and quoted
- * braces correctly. Returns the JSON string or null if not found.
+ * Extracts the JSON object following "ARGUMENTS:".
+ * Tolerates markdown fences, extra whitespace/newlines, and escaped
+ * characters by delegating to extractJsonCandidates.
+ *
+ * Prefers a *valid* JSON object, but will return a malformed object-shaped
+ * candidate so the caller can emit a precise "Invalid JSON" error rather than
+ * a generic "no ARGUMENTS found" message.
  */
-function extractJsonArg(text: string): string | null {
+export function extractJsonArg(text: string): string | null {
   const idx = text.indexOf('ARGUMENTS:');
   if (idx === -1) return null;
-  let i = idx + 'ARGUMENTS:'.length;
-  while (i < text.length) {
-    const c = text[i];
-    if (c === undefined || !/\s/.test(c)) break;
-    i++;
-  }
-  if (i >= text.length || text[i] !== '{') return null;
-  let depth = 0;
-  const start = i;
-  while (i < text.length) {
-    const ch = text[i];
-    if (ch === undefined) break;
-    if (ch === '{') depth++;
-    else if (ch === '}') {
-      depth--;
-      if (depth === 0) return text.slice(start, i + 1);
-    } else if (ch === '"') {
-      i++;
-      while (i < text.length) {
-        const qc = text[i];
-        if (qc === undefined || qc === '"') break;
-        if (qc === '\\') i++;
-        i++;
-      }
+
+  // Grab everything after ARGUMENTS: up to the next section marker
+  const after = text.slice(idx + 'ARGUMENTS:'.length);
+  const nextSection = /\n(?:THOUGHT|ACTION|ANSWER):/i.exec(after);
+  const candidateBlock = nextSection ? after.slice(0, nextSection.index) : after;
+
+  // 1. Try a direct parse of the trimmed block
+  const trimmed = candidateBlock.trim();
+  if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
+    try {
+      JSON.parse(trimmed);
+      if (trimmed.startsWith('{')) return trimmed;
+      // arrays are not valid tool arguments
+    } catch {
+      // fall through to candidate extraction
     }
-    i++;
   }
-  return null;
+
+  // 2. Use the robust fence-aware extractor
+  const candidates = extractJsonCandidates(candidateBlock);
+  let firstObjectCandidate: string | null = null;
+
+  for (const candidate of candidates) {
+    if (!candidate.trim().startsWith('{')) continue;
+    firstObjectCandidate ??= candidate;
+    try {
+      const parsed: unknown = JSON.parse(candidate);
+      if (parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        return candidate;
+      }
+    } catch {
+      // malformed JSON — keep firstObjectCandidate and continue
+    }
+  }
+
+  // Return the malformed candidate so the caller can report a precise parse error
+  return firstObjectCandidate;
 }
 
 // ── Response parser ──────────────────────────────────────────────────────
@@ -71,7 +87,7 @@ export interface ParsedResponse {
 }
 
 export function parseAgentResponse(text: string): ParsedResponse {
-  const thoughtMatch = /THOUGHT:\s*([\s\S]*?)(?=\n(?:ACTION|ANSWER|$))/i.exec(text);
+  const thoughtMatch = /THOUGHT:\s*([\s\S]*?)(?=\n?\s*(?:ACTION|ANSWER):|$)/i.exec(text);
   const actionMatch = /ACTION:\s*(\S+)/i.exec(text);
   const argsJson = extractJsonArg(text);
   const answerMatch = /ANSWER:\s*([\s\S]*)/i.exec(text);
@@ -90,12 +106,9 @@ export function parseAgentResponse(text: string): ParsedResponse {
     try {
       args = JSON.parse(argsJson) as Record<string, unknown>;
     } catch {
-      return {
-        type: 'error',
-        message: 'Invalid JSON in ARGUMENTS. Use valid JSON: {"key": "value"}',
-        thought: thoughtMatch?.[1]?.trim() ?? '',
-        raw: text,
-      };
+      // JSON parse failed — pass raw text through so the orchestrator can
+      // synthesise from it later instead of dropping the iteration entirely.
+      args = { _rawArgs: argsJson };
     }
     return {
       type: 'action',
@@ -389,8 +402,8 @@ export class AgentStrategy implements ResearchStrategy {
   // ── Private ─────────────────────────────────────────────────────────
 
   private buildSystemPrompt(
-    route?: import('../domainRouter.js').DomainRoute,
-    entities?: import('../entityExtractor.js').ExtractedEntities,
+    route?: DomainRoute,
+    entities?: ExtractedEntities,
   ): string {
     const today = new Date().toISOString().slice(0, 10);
     const toolDesc = describeTools(this.tools);
@@ -486,7 +499,7 @@ Search strategy tips:
     ];
 
     // Add recent history (last 16 entries)
-    const recentHistory = this.history.slice(-16);
+    const recentHistory = this.history.slice(-8);
     for (const entry of recentHistory) {
       if (entry.role === 'assistant') {
         if (entry.action) {

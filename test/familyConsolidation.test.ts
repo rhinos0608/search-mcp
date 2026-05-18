@@ -161,6 +161,10 @@ for (const [familyName, actions] of FAMILY_TOOLS) {
       ) {
         params.query = 'test';
       }
+      // Reddit search/semantic requires subreddit
+      if (familyName === 'reddit' && (action === 'search' || action === 'semantic')) {
+        params.subreddit = 'test';
+      }
       if (action === 'repo') {
         params.repository = 'owner/repo';
       }
@@ -342,6 +346,24 @@ for (const [familyName, actions] of GATED_FAMILIES) {
     assert.ok(!bad.success, `${familyName} should reject unknown action`);
   });
 }
+
+test('knowledge_graph entity_lookup_batch schema accepts label lookup', () => {
+  const server = createServer(loadConfig()).server;
+  const tools = getAllRegisteredTools(server);
+  const entry = tools.knowledge_graph;
+
+  if (entry === undefined) {
+    assert.ok(true, 'knowledge_graph is gated (config missing)');
+    return;
+  }
+
+  const result = entry.inputSchema?.safeParse({
+    action: 'entity_lookup_batch',
+    entity_label: 'Mechanistic interpretability',
+  });
+
+  assert.equal(result?.success, true, JSON.stringify(result?.error?.issues ?? []));
+});
 
 // ── Full tool list sanity check ─────────────────────────────────────────────
 

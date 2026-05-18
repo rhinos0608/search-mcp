@@ -353,7 +353,6 @@ async function callExtractionLlm(
     messages,
     temperature: temperature ?? 0.3,
     maxTokens: 4096,
-    responseFormat: 'json_object',
     model: 'worker',
   });
 

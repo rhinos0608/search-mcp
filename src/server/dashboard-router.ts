@@ -12,7 +12,7 @@ import {
   buildClearCookieHeader,
 } from './auth.js';
 import { parseSessionTtlMs } from './session-utils.js';
-import { classifyRequestOrigin, dashboardAllowed } from './access-provider.js';
+import { classifyRequestOrigin, dashboardAllowed, LOOPBACK_ADDRS } from './access-provider.js';
 import type { HttpTransportManager } from './mcp-transport.js';
 import { timingSafeEqual } from 'node:crypto';
 
@@ -87,8 +87,13 @@ function json(res: http.ServerResponse, status: number, data: unknown): void {
   res.end(body);
 }
 
-function isHttps(req: http.IncomingMessage): boolean {
-  return (req.socket as { encrypted?: boolean }).encrypted === true;
+export function isHttps(req: http.IncomingMessage): boolean {
+  if ((req.socket as { encrypted?: boolean }).encrypted === true) return true;
+  // Reverse proxies (Tailscale Serve, nginx, etc.) terminate TLS and forward to
+  // localhost over plain HTTP. Trust X-Forwarded-Proto from loopback sources.
+  const addr = req.socket.remoteAddress ?? '';
+  if (LOOPBACK_ADDRS.has(addr) && req.headers['x-forwarded-proto'] === 'https') return true;
+  return false;
 }
 
 function getSessionId(req: http.IncomingMessage): string | undefined {

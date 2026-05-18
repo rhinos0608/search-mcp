@@ -140,16 +140,21 @@ export function createResearchTools(options?: ResearchToolsOptions): ResearchToo
       }
     },
 
-    async redditSearch(query: string, limit?: number) {
+    async redditSearch(query: string, limit?: number, subreddit?: string) {
       onToolCall?.('reddit_search', query);
+      // Subreddit is required — return empty results if not provided
+      if (!subreddit) {
+        return [];
+      }
       try {
-        const results = await redditSearch(query, '', 'relevance', 'year', limit ?? 25);
+        const results = await redditSearch(query, subreddit, 'relevance', 'year', limit ?? 25);
         return results.map((r) => ({
           title: r.title,
           url: r.url,
           selftext: r.selftext,
           created_utc: r.createdUtc,
           permalink: r.permalink,
+          subreddit: r.subreddit,
         }));
       } catch {
         return [];

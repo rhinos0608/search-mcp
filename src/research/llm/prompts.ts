@@ -451,7 +451,7 @@ You will receive:
 
 Plan a search strategy:
 - **queries**: 1-3 optimized search queries. Use keywords over full questions for keyword-based search. Vary phrasing to capture different perspectives.
-- **sourceTypes**: Which source types to search. Choose from: web, academic, github, reddit, hackernews, documentation, news, youtube, pubmed, wikipedia. Always include at least 3 different source types for diversity. For ANY question, include reddit and youtube alongside web/academic — they provide practitioner perspectives and video content that complement traditional sources. For medical or biology questions, include pubmed. For general background, include wikipedia. For technical questions, also include github. For current events, include news.
+- **sourceTypes**: Which source types to search. Choose from: web, academic, github, reddit, hackernews, documentation, news, youtube, pubmed, wikipedia. Always include at least 5 different source types for diversity. For ANY question, include reddit and youtube alongside web/academic — they provide practitioner perspectives and video content that complement traditional sources. For medical or biology questions, include pubmed. For general background, include wikipedia. For technical questions, also include github. For current events, include news.
 
 Strategy tips:
 - ALWAYS include reddit and youtube as source types — practitioner discussions and video content provide perspectives that web search alone misses
@@ -466,7 +466,7 @@ Strategy tips:
 Output ONLY valid JSON with EXACTLY this structure (no markdown fences, no extra text):
 {
   "queries": ["search query 1", "search query 2"],
-  "sourceTypes": ["web", "academic", "reddit", "youtube"],
+  "sourceTypes": ["web", "academic", "reddit", "youtube", "github"],
   "reasoning": "Brief explanation of the search strategy"
 }`;
 

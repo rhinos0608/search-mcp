@@ -82,9 +82,25 @@ export async function semanticReddit(opts: SemanticRedditOptions): Promise<Seman
     warnings.push('commentLimit capped at 100 to match the Reddit API limit');
   }
 
+  // Subreddit is strongly recommended for Reddit search — return empty result if not provided
+  if (!opts.subreddit) {
+    const corpus = prepareCorpus({ adapter: 'conversation', chunks: [] });
+    const response = retrieveCorpus(corpus, {
+      query: opts.query,
+      topK: opts.topK,
+      profile: opts.profile,
+    });
+    return {
+      ...response,
+      warnings: ['Subreddit recommended for targeted Reddit search. No subreddit provided.'],
+      postCount: 0,
+      failedPosts: 0,
+    };
+  }
+
   const posts = await redditSearch(
     opts.query,
-    opts.subreddit ?? '',
+    opts.subreddit,
     sort,
     timeframe,
     maxPosts,

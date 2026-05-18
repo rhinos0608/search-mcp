@@ -37,7 +37,7 @@ export class GapLoopPhase extends BasePhase {
     const { WorkerPoolManager } = await import('../pool/workerPool.js');
     const gapWorkerPool = new WorkerPoolManager({
       concurrency: 3,
-      perWorkerToolCalls: 15,
+      perWorkerToolCalls: 35,
       tokenBudget: {
         recordTokens: (count: number) => {
           ctx.budget.recordTokens(count);

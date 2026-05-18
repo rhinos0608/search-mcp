@@ -74,12 +74,17 @@ const querySchema = z.object({
 });
 
 const entityLookupBatchSchema = z.object({
-  action: z.literal('entity_lookup_batch').describe('Batch resolve up to 100 entity IDs to labeled nodes'),
+  action: z.literal('entity_lookup_batch').describe('Batch resolve up to 100 entity IDs by exact ID, or a single label query that can return multiple labeled nodes'),
   entity_ids: z
     .array(z.string().min(1))
     .min(1)
     .max(100)
+    .optional()
     .describe('Entity IDs to resolve (max 100)'),
+  entity_label: z.string().min(1).max(500).optional().describe('Single label/substring query — returns all matching labeled nodes up to limit'),
+  limit: z.number().int().min(1).max(100).optional().default(20).describe('Max results when using entity_label lookup'),
+}).refine((value) => value.entity_ids !== undefined || value.entity_label !== undefined, {
+  message: 'Either entity_ids or entity_label is required',
 });
 
 const statusSchema = z.object({
@@ -325,7 +330,7 @@ const knowledgeGraphFamily: FamilyDefinition = {
           updateRunStatus(runId, 'classifying');
           const extractor = new KnowledgeGraphExtractor(cfg);
           void extractor
-            .extract(normInput, runId)
+            .extract(normInput, runId, { totalTimeoutMs: timeoutMs })
             .then(
               (result) => {
                 emitEventsFromResult(result, runId);
@@ -346,7 +351,7 @@ const knowledgeGraphFamily: FamilyDefinition = {
         const extractor = new KnowledgeGraphExtractor(cfg);
         let extraction: Awaited<ReturnType<KnowledgeGraphExtractor['extract']>>;
         try {
-          extraction = await extractor.extract(normInput, runId);
+          extraction = await extractor.extract(normInput, runId, { totalTimeoutMs: timeoutMs });
         } catch (err: unknown) {
           const msg = err instanceof Error ? err.message : String(err);
           updateRunStatus(runId, 'failed', { lastError: msg });
@@ -422,7 +427,7 @@ const knowledgeGraphFamily: FamilyDefinition = {
         if (args.entity_id !== undefined) nodeOpts.entityId = args.entity_id;
         if (args.entity_label !== undefined) nodeOpts.label = args.entity_label;
         if (args.query !== undefined && args.entity_id === undefined && args.entity_label === undefined) {
-          nodeOpts.label = args.query;
+          nodeOpts.search = args.query;
         }
         if (entity_type !== undefined) nodeOpts.type = entity_type;
         if (family_id !== undefined) nodeOpts.familyId = family_id;
@@ -530,7 +535,11 @@ const knowledgeGraphFamily: FamilyDefinition = {
       schema: entityLookupBatchSchema,
       handler: async (args) => {
         const start = Date.now();
-        const entityIds = (args as { entity_ids: string[] }).entity_ids;
+        const { entity_ids: entityIds, entity_label: entityLabel, limit } = args as {
+          entity_ids?: string[];
+          entity_label?: string;
+          limit: number;
+        };
 
         const nodes: {
           id: string;
@@ -542,11 +551,25 @@ const knowledgeGraphFamily: FamilyDefinition = {
         }[] = [];
         const notFound: string[] = [];
 
-        for (const id of entityIds) {
-          const node = getNode(id);
-          if (node === null) {
-            notFound.push(id);
-          } else {
+        if (entityIds !== undefined) {
+          for (const id of entityIds) {
+            const node = getNode(id);
+            if (node === null) {
+              notFound.push(id);
+            } else {
+              nodes.push({
+                id: node.id,
+                label: node.label,
+                type: node.type,
+                extraction_confidence: node.extractionConfidence ?? 0,
+                aliases: parseJsonArr(node.aliases),
+                primary_family_id: node.primaryFamilyId,
+              });
+            }
+          }
+        } else if (entityLabel !== undefined) {
+          const result = queryNodes({ search: entityLabel, limit });
+          for (const node of result.nodes) {
             nodes.push({
               id: node.id,
               label: node.label,

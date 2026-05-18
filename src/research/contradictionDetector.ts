@@ -138,7 +138,6 @@ export class ContradictionDetector {
         ],
         temperature: 0.2,
         maxTokens: 2000,
-        responseFormat: 'json_object',
       });
 
       if (!result.success || result.data.contradictions.length === 0) return [];
@@ -231,7 +230,6 @@ export class ContradictionDetector {
         ],
         temperature: 0.3,
         maxTokens: 1500,
-        responseFormat: 'json_object',
       });
 
       if (!result.success || result.data.openQuestions.length === 0) return [];

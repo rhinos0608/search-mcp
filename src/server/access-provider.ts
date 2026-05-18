@@ -37,7 +37,7 @@ export function normalizeBaseUrl(input: string): NormalizeResult {
   return { ok: true, url: parsed.origin };
 }
 
-const LOOPBACK_ADDRS = new Set(['127.0.0.1', '::1', '::ffff:127.0.0.1']);
+export const LOOPBACK_ADDRS = new Set(['127.0.0.1', '::1', '::ffff:127.0.0.1']);
 
 export function classifyRequestOrigin(req: http.IncomingMessage): RequestOrigin {
   const addr = req.socket.remoteAddress ?? '';
