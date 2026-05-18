@@ -11,6 +11,8 @@ import { curateEvidenceSources } from '../sourceQuality.js';
 import { ResearchStateEngine } from '../state.js';
 import { logger } from '../../logger.js';
 import { randomUUID } from 'node:crypto';
+import { extractEntities, generateEntityBasedQueries } from '../entityExtractor.js';
+import { routeQuery } from '../domainRouter.js';
 
 // ── Constants ────────────────────────────────────────────────────────────
 
@@ -147,6 +149,7 @@ export class AgentStrategy implements ResearchStrategy {
   private tools: AgentTool[];
   private collector: CitationCollector;
   private history: AgentHistoryEntry[] = [];
+  private seededQueries: string[] = [];
 
   constructor(ctx: StrategyContext, collector?: CitationCollector) {
     this.maxIterations = ctx.config.agentMaxIterations;
@@ -162,7 +165,12 @@ export class AgentStrategy implements ResearchStrategy {
       findingCount: 0,
     });
 
-    const systemPrompt = this.buildSystemPrompt();
+    const entities = ctx.entities ?? extractEntities(query);
+    const route = ctx.route ?? routeQuery(query, entities);
+    const seededQueries = generateEntityBasedQueries(entities, 3, query);
+    this.seededQueries = seededQueries;
+
+    const systemPrompt = this.buildSystemPrompt(route, entities);
     let iteration = 0;
     let finalAnswer: string | null = null;
 
@@ -380,16 +388,32 @@ export class AgentStrategy implements ResearchStrategy {
 
   // ── Private ─────────────────────────────────────────────────────────
 
-  private buildSystemPrompt(): string {
+  private buildSystemPrompt(
+    route?: import('../domainRouter.js').DomainRoute,
+    entities?: import('../entityExtractor.js').ExtractedEntities,
+  ): string {
     const today = new Date().toISOString().slice(0, 10);
     const toolDesc = describeTools(this.tools);
 
-    return `You are a thorough research assistant. Today's date: ${today}.
+    let preamble = '';
+    if (route) {
+      preamble += `\nQuery domain: ${route.category} (confidence: ${route.confidence.toFixed(2)})\n`;
+      preamble += `Preferred source types: ${route.primaryBackends.join(', ')}\n`;
+    }
+    if (entities) {
+      preamble += `Extracted entities: ${JSON.stringify(entities)}\n`;
+    }
+
+    return `You are an exhaustive research agent conducting deep multi-source investigation. Today's date: ${today}.${preamble}
 
 CRITICAL RULES:
 1. You MUST search for information before answering. Do NOT answer from memory.
-2. Use tools to gather information from multiple sources.
-3. When you have enough information, provide a comprehensive ANSWER.
+2. DECOMPOSE the question into distinct sub-topics and research each one.
+3. Use AT LEAST 5 DIFFERENT TOOL TYPES — never rely on search_web alone. You have access to academic, GitHub, Hacker News, Reddit, Stack Exchange, Wikipedia, Semantic Scholar, PubMed and more. A web-only answer is INCOMPLETE.
+4. Search each sub-topic across MULTIPLE source categories (e.g., academic papers, community discussions, code repositories, documentation).
+5. Use the research_subtopic tool for large questions with multiple facets.
+6. Keep researching until you have broad coverage across source types and sub-topics. Do NOT stop after finding a few web results.
+7. When you have 15+ quality sources spanning at least 4 different source types, you may synthesize your final answer.
 
 RESPONSE FORMAT:
 To use a tool:
@@ -405,9 +429,12 @@ Available tools:
 ${toolDesc}
 
 Search strategy tips:
-- Start broad, then narrow down
-- Verify claims across multiple sources when possible
-- When you have 5+ quality sources, consider synthesizing your answer`;
+- For each sub-topic, query at least 3 different source backends
+- Prefer search_academic for broad literature coverage over individual backend tools
+- Use search_hackernews and search_reddit for community perspective
+- Use search_github for implementation examples and repositories
+- Use fetch_page or fetch_focus to read key sources in depth
+- Cross-reference claims: verify important facts across different source types`;
   }
 
   private extractFindingsFromAnswer(
@@ -458,8 +485,8 @@ Search strategy tips:
       { role: 'system', content: systemPrompt },
     ];
 
-    // Add recent history (last 8 entries)
-    const recentHistory = this.history.slice(-8);
+    // Add recent history (last 16 entries)
+    const recentHistory = this.history.slice(-16);
     for (const entry of recentHistory) {
       if (entry.role === 'assistant') {
         if (entry.action) {
@@ -494,9 +521,14 @@ Search strategy tips:
 
     // Add current prompt
     if (this.history.length === 0) {
+      let userContent = `Research question: ${query}\n\n`;
+      if (this.seededQueries.length > 0) {
+        userContent += `Suggested initial search queries:\n${this.seededQueries.map((q, i) => `${String(i + 1)}. ${q}`).join('\n')}\n\n`;
+      }
+      userContent += 'Begin by searching for information. Use the tools available to you.';
       messages.push({
         role: 'user',
-        content: `Research question: ${query}\n\nBegin by searching for information. Use the tools available to you.`,
+        content: userContent,
       });
     } else {
       messages.push({
@@ -508,7 +540,7 @@ Search strategy tips:
     const resp = await ctx.llm.callOrchestrator({
       messages,
       temperature: 0.7,
-      maxTokens: 2000,
+      maxTokens: 4000,
       ...(ctx.abortSignal ? { signal: ctx.abortSignal } : {}),
     });
 

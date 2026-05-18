@@ -170,3 +170,58 @@ describe('StrategyRegistry', () => {
       );
    });
 });
+
+describe('AgentStrategy entity integration', () => {
+  const mockCtx = {
+    config: {
+      enabled: true,
+      defaultDepth: 'standard',
+      maxDepth: 'deep',
+      maxToolCalls: 200,
+      maxTokens: 500_000,
+      maxTimeMs: 300_000,
+      baseUrl: 'http://localhost',
+      model: 'test-model',
+      workerModel: 'test-model',
+      treeBreadth: 4,
+      treeDepth: 2,
+      treeConcurrency: 2,
+      treeContextWordLimit: 25000,
+      searchBackend: 'brave',
+      agentMaxIterations: 5,
+    },
+    state: {
+      initialize() { /* noop */ },
+      setLanguage() { /* noop */ },
+      addSource() { return 'source-1'; },
+      getFullState() { return {}; },
+    },
+    budget: {
+      recordTokens() { return true; },
+      isExhausted() { return false; },
+      profile: { maxGapLoops: 0 },
+    },
+    llm: {} as any,
+    abortSignal: undefined,
+    onProgress: undefined,
+  };
+
+  it('includes domain classification in system prompt when route provided', async () => {
+    const { AgentStrategy } = await import('../../src/research/strategies/agentStrategy.js');
+    const strategy = new AgentStrategy(mockCtx as any);
+    const prompt = (strategy as any).buildSystemPrompt(
+      { category: 'technical', confidence: 0.8, primaryBackends: ['github', 'documentation'], secondaryBackends: ['web'], reasoning: 'test' },
+      { temporal: [], numerical: [], names: ['Rust'], locations: [], descriptors: ['benchmark'] },
+    );
+    assert.ok(prompt.includes('Query domain: technical'));
+    assert.ok(prompt.includes('github'));
+    assert.ok(prompt.includes('Rust'));
+  });
+
+  it('falls back to basic system prompt when no route/entities', async () => {
+    const { AgentStrategy } = await import('../../src/research/strategies/agentStrategy.js');
+    const strategy = new AgentStrategy(mockCtx as any);
+    const prompt = (strategy as any).buildSystemPrompt();
+    assert.ok(!prompt.includes('Query domain:'));
+  });
+});
