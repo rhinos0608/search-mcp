@@ -103,6 +103,38 @@ function estimateTokens(text: string): number {
   return Math.ceil(text.length / 4);
 }
 
+function normalizeBaseUrl(value: string): string {
+  return value
+    .trim()
+    .replace(/\/+$/, '')
+    .replace(/\/v1\/chat\/completions$/, '')
+    .replace(/\/v1$/, '');
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+function normalizeMessageContent(content: unknown): string {
+  if (typeof content === 'string') return content;
+  if (content === null || content === undefined) return '';
+
+  if (Array.isArray(content)) {
+    return content
+      .map((part) => {
+        if (typeof part === 'string') return part;
+        if (isRecord(part) && typeof part.text === 'string') return part.text;
+        return '';
+      })
+      .filter((part) => part.length > 0)
+      .join('\n');
+  }
+
+  if (isRecord(content) && typeof content.text === 'string') return content.text;
+
+  return JSON.stringify(content);
+}
+
 // ── Client ────────────────────────────────────────────────────────────────────
 
 export class DeepResearchLlmClient {
@@ -116,14 +148,12 @@ export class DeepResearchLlmClient {
   constructor(config: LlmClientConfig, budget?: TokenBudget) {
     // Normalize: strip trailing slashes and any /v1 or /v1/chat/completions
     // suffix, since we always append /v1/chat/completions to form the endpoint.
-    this.baseUrl = config.baseUrl
-      .replace(/\/+$/, '')
-      .replace(/\/v1\/chat\/completions$/, '')
-      .replace(/\/v1$/, '');
-    this.workerBaseUrl = (config.workerBaseUrl ?? config.baseUrl)
-      .replace(/\/+$/, '')
-      .replace(/\/v1\/chat\/completions$/, '')
-      .replace(/\/v1$/, '');
+    this.baseUrl = normalizeBaseUrl(config.baseUrl);
+    this.workerBaseUrl = normalizeBaseUrl(
+      config.workerBaseUrl && config.workerBaseUrl.trim().length > 0
+        ? config.workerBaseUrl
+        : config.baseUrl,
+    );
     this.model = config.model;
     this.workerModel = config.workerModel;
     this.apiToken = config.apiToken;
@@ -359,9 +389,9 @@ export class DeepResearchLlmClient {
         }
 
         const data = (await safeResponseJson(response, endpoint)) as {
-          choices?: [{ message?: { content?: string } }];
+          choices?: [{ message?: { content?: unknown } }];
         };
-        const rawContent = data.choices?.[0]?.message?.content ?? '';
+        const rawContent = normalizeMessageContent(data.choices?.[0]?.message?.content);
 
         const completionTokens = estimateTokens(rawContent);
         const totalTokens = promptTokens + completionTokens;

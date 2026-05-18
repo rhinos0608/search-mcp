@@ -128,3 +128,41 @@ test('WorkerAgent handles empty search results', async () => {
    assert.strictEqual(report.sources.length, 0);
    assert.strictEqual(report.findings.length, 0);
 });
+
+test('WorkerAgent preserves malformed synthesis JSON as a finding', async () => {
+   const baseClient = new MockLlmClient();
+   const malformedClient = {
+      async callWorker() {
+         return baseClient.callWorker();
+      },
+      async callOrchestrator() {
+         return baseClient.callOrchestrator();
+      },
+      async callJSON(options: { model: string, messages: { role: string, content: string }[] }) {
+         const allContent = options.messages.map(m => m.content).join('\n');
+         if (allContent.includes('autonomous research investigator')) {
+            return baseClient.callJSON(options);
+         }
+         return {
+            success: true,
+            data: {
+               answer: 'The sources point to a usable narrative answer, but not the requested findings array.'
+            },
+            response: { success: true, content: '{"answer":"fallback"}', tokensUsed: 42 }
+         };
+      }
+   };
+
+   const agent = new WorkerAgent(
+      malformedClient as unknown as DeepResearchLlmClient,
+      mockTools,
+      undefined,
+      { maxSearchRounds: 1 }
+   );
+
+   const report = await agent.investigate('What does the source say?');
+
+   assert.strictEqual(report.findings.length, 1);
+   assert.match(report.findings[0]!.evidence, /usable narrative answer/);
+   assert.strictEqual(report.findings[0]!.citationConfidence, 'inferred');
+});

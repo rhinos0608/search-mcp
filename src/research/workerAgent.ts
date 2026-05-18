@@ -19,6 +19,7 @@ import { logger } from '../logger.js';
 import { CircuitBreaker, CircuitBreakerOpenError } from './retry.js';
 import type { DeepResearchLlmClient, TokenBudget } from './llm/chat.js';
 import { WORKER_AGENT_INVESTIGATE } from './llm/prompts.js';
+import { assessContentQuality } from './sourceQuality.js';
 import type {
   ResearchTools,
   WorkerReport,
@@ -27,7 +28,9 @@ import type {
   SubThread,
   ContentQualityAssessment,
   SubQuestion,
+  SourceType,
 } from './types.js';
+import { SOURCE_TYPE_ARRAY } from './types.js';
 
 // ── Configuration ───────────────────────────────────────────────────────────
 
@@ -90,6 +93,8 @@ interface CompactBlock {
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
+const SOURCE_TYPES = new Set<string>(SOURCE_TYPE_ARRAY);
+
 function toSourceType(t: string): WorkerSource['sourceType'] {
   return t as WorkerSource['sourceType'];
 }
@@ -103,7 +108,28 @@ function truncate(s: string, max: number): string {
   return s.slice(0, max - 3) + '...';
 }
 
-import { assessContentQuality } from './sourceQuality.js';
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+function stringArray(value: unknown): string[] {
+  return Array.isArray(value)
+    ? value.filter((item): item is string => typeof item === 'string')
+    : [];
+}
+
+function sourceTypeArray(value: unknown): SourceType[] {
+  return stringArray(value).filter((item): item is SourceType => SOURCE_TYPES.has(item));
+}
+
+function stringifyUnknown(value: unknown): string {
+  if (typeof value === 'string') return value;
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return String(value);
+  }
+}
 
 function quickQuality(markdown: string, url: string, title: string): ContentQualityAssessment {
   return assessContentQuality(markdown, url, title);
@@ -311,12 +337,25 @@ export class WorkerAgent {
       });
 
       if (result.success) {
-        return {
-          queries: result.data.queries.slice(0, 3),
-          sourceTypes: result.data.sourceTypes,
-          reasoning: result.data.reasoning,
-          tokensUsed: result.response.tokensUsed,
-        };
+        const data: unknown = result.data;
+        if (isRecord(data)) {
+          const queries = stringArray(data.queries).slice(0, 3);
+          const sourceTypes = sourceTypeArray(data.sourceTypes);
+          if (queries.length > 0 && sourceTypes.length > 0) {
+            return {
+              queries,
+              sourceTypes,
+              reasoning:
+                typeof data.reasoning === 'string' ? data.reasoning : 'LLM generated a search plan.',
+              tokensUsed: result.response.tokensUsed,
+            };
+          }
+        }
+
+        logger.warn(
+          { question: truncate(question, 60) },
+          'Worker planning returned malformed JSON; using fallback',
+        );
       }
 
       // Fallback for non-JSON or failed LLM planning
@@ -1240,18 +1279,20 @@ Output ONLY valid JSON:
       });
 
       if (result.success) {
-        // Map source numbers in evidence to actual URLs
-        const findings = result.data.findings.map((f) => ({
-          id: makeId(),
-          claim: f.claim,
-          evidence: f.evidence,
-          sourceUrls: this.resolveSourceUrls(f.evidence, compacted),
-          citationConfidence: 'explicit' as const,
-          ...(f.caveats !== undefined ? { caveats: f.caveats } : {}),
-        }));
+        const parsed = this.parseSynthesisData(result.data, compacted, question);
+        if (parsed.findings.length > 0 || parsed.subThreads.length > 0) {
+          return { ...parsed, tokensUsed: result.response.tokensUsed };
+        }
 
-        const subThreads = result.data.subThreads;
-        return { findings, subThreads, tokensUsed: result.response.tokensUsed };
+        logger.warn(
+          { question: truncate(question, 60) },
+          'Worker synthesis returned malformed JSON; preserving structured payload as finding',
+        );
+        return {
+          findings: [this.wrapSynthesisText(question, stringifyUnknown(result.data), compacted)],
+          subThreads: [],
+          tokensUsed: result.response.tokensUsed,
+        };
       }
 
       // Handle cases where the LLM returns substantive text instead of requested JSON findings
@@ -1280,6 +1321,94 @@ Output ONLY valid JSON:
       logger.warn({ err }, 'WorkerAgent LLM synthesis error');
       throw err;
     }
+  }
+
+  private parseSynthesisData(
+    data: unknown,
+    compacted: CompactBlock[],
+    question: string,
+  ): { findings: WorkerFinding[]; subThreads: SubThread[] } {
+    if (!isRecord(data)) return { findings: [], subThreads: [] };
+
+    const findings: WorkerFinding[] = Array.isArray(data.findings)
+      ? data.findings.flatMap((finding) => this.parseWorkerFinding(finding, compacted))
+      : [];
+
+    const subThreads: SubThread[] = Array.isArray(data.subThreads)
+      ? data.subThreads.flatMap((thread) => this.parseSubThread(thread))
+      : [];
+
+    if (findings.length === 0) {
+      const narrative =
+        typeof data.answer === 'string'
+          ? data.answer
+          : typeof data.summary === 'string'
+            ? data.summary
+            : '';
+      if (narrative.length > 0) {
+        findings.push(this.wrapSynthesisText(question, narrative, compacted));
+      }
+    }
+
+    return { findings, subThreads };
+  }
+
+  private parseWorkerFinding(finding: unknown, compacted: CompactBlock[]): WorkerFinding[] {
+    if (
+      !isRecord(finding) ||
+      typeof finding.claim !== 'string' ||
+      typeof finding.evidence !== 'string'
+    ) {
+      return [];
+    }
+
+    return [
+      {
+        id: makeId(),
+        claim: finding.claim,
+        evidence: finding.evidence,
+        sourceUrls: this.resolveSourceUrls(finding.evidence, compacted),
+        citationConfidence: 'explicit' as const,
+        ...(typeof finding.caveats === 'string' ? { caveats: finding.caveats } : {}),
+      },
+    ];
+  }
+
+  private parseSubThread(thread: unknown): SubThread[] {
+    if (
+      !isRecord(thread) ||
+      typeof thread.question !== 'string' ||
+      typeof thread.rationale !== 'string' ||
+      typeof thread.priority !== 'number'
+    ) {
+      return [];
+    }
+
+    const suggestedSourceTypes = sourceTypeArray(thread.suggestedSourceTypes);
+    return [
+      {
+        question: thread.question,
+        rationale: thread.rationale,
+        priority: thread.priority,
+        suggestedSourceTypes,
+      },
+    ];
+  }
+
+  private wrapSynthesisText(
+    question: string,
+    text: string,
+    compacted: CompactBlock[],
+  ): WorkerFinding {
+    return {
+      id: makeId(),
+      claim: `Synthesis summary for "${truncate(question, 80)}"`,
+      evidence: text,
+      sourceUrls: compacted.map((c) => c.url).slice(0, 10),
+      citationConfidence: 'inferred' as const,
+      caveats:
+        '[Note: LLM returned JSON that did not match the worker schema; content preserved as raw synthesis]',
+    };
   }
 
   /**

@@ -70,6 +70,42 @@ export type SourceType =
   | 'unknown';
 
 /**
+ * All valid SourceType values as a const array — single source of truth
+ * for validation, sets, and runtime checks.
+ */
+export const SOURCE_TYPE_ARRAY: readonly SourceType[] = [
+  'academic',
+  'web',
+  'github',
+  'reddit',
+  'hackernews',
+  'stackoverflow',
+  'documentation',
+  'official_docs',
+  'official_blog',
+  'package_registry',
+  'vendor_docs',
+  'forum',
+  'social',
+  'news',
+  'patent',
+  'pubmed',
+  'wikipedia',
+  'podcast',
+  'producthunt',
+  'youtube',
+  'browser-interactive',
+  'openalex',
+  'crossref',
+  'datacite',
+  'ror',
+  'semantic_scholar',
+  'gdelt',
+  'wikidata',
+  'unknown',
+];
+
+/**
  * Source quality tier used for synthesis gating.
  * Tier 1 = primary evidence (arXiv, official blogs, repos, conference proceedings).
  * Tier 2 = reputable secondary (established tech publications, HN discussions with substance).
