@@ -227,13 +227,14 @@ const DOMAINS: DomainSpec[] = [
 const KEYWORD_MATCH_SCORE = 0.4;
 const PREFIX_MATCH_SCORE = 0.3;
 const TEMPORAL_BOOST_SCORE = 0.2;
+const NAMED_ENTITY_BOOST_SCORE = 0.2;
 const CONFIDENCE_THRESHOLD = 0.5;
 
 function normalizeQuery(query: string): string {
   return query.trim().toLowerCase();
 }
 
-function hasKeywordMatch(normalized: string, keyword: string): boolean {
+export function hasKeywordMatch(normalized: string, keyword: string): boolean {
   const lowerKeyword = keyword.toLowerCase();
   if (lowerKeyword.includes(' ')) {
     const escaped = lowerKeyword.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -243,7 +244,8 @@ function hasKeywordMatch(normalized: string, keyword: string): boolean {
     );
     return regex.test(normalized);
   }
-  const regex = new RegExp(`\\b${lowerKeyword}\\b`, 'i');
+  const escaped = lowerKeyword.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const regex = new RegExp(`\\b${escaped}\\b`, 'i');
   return regex.test(normalized);
 }
 
@@ -270,6 +272,7 @@ function hasPrefixMatch(normalized: string, keyword: string): boolean {
  * - Exact keyword match in domain keyword list → +0.4 per match
  * - Query prefix match (e.g., "what is" → background-knowledge) → +0.3
  * - Temporal entity overlap (current-events) → +0.2
+ * - Named entity overlap (technical/code) → +0.2
  * - Capped at 1.0
  *
  * If the highest confidence is below 0.5, falls back to the general category.
@@ -310,6 +313,14 @@ export function routeQuery(
       confidence += TEMPORAL_BOOST_SCORE;
     }
 
+    if (
+      (domain.category === 'technical' || domain.category === 'code') &&
+      entities &&
+      entities.names.length > 0
+    ) {
+      confidence += NAMED_ENTITY_BOOST_SCORE;
+    }
+
     confidence = Math.min(confidence, 1.0);
 
     if (confidence > bestConfidence) {
@@ -325,6 +336,12 @@ export function routeQuery(
         entities.temporal.length > 0
       ) {
         bestReasoning = `Temporal entity boost for current-events. Confidence: ${confidence.toFixed(2)}.`;
+      } else if (
+        (domain.category === 'technical' || domain.category === 'code') &&
+        entities &&
+        entities.names.length > 0
+      ) {
+        bestReasoning = `Named entity boost for ${domain.category}. Confidence: ${confidence.toFixed(2)}.`;
       } else {
         bestReasoning = `Prefix match for ${domain.category}. Confidence: ${confidence.toFixed(2)}.`;
       }

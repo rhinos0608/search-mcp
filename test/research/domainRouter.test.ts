@@ -2,6 +2,7 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   routeQuery,
+  hasKeywordMatch,
   type DomainCategory,
   type DomainRoute,
 } from '../../src/research/domainRouter.js';
@@ -202,6 +203,19 @@ describe('routeQuery', () => {
     });
   });
 
+  describe('hasKeywordMatch', () => {
+    it('escapes regex metacharacters in single-word keywords', () => {
+      // Without escaping, 'test.api' would be interpreted as 'test<any char>api'
+      // With escaping, it should match literally
+      assert.ok(hasKeywordMatch('use test.api now', 'test.api'));
+      assert.ok(!hasKeywordMatch('use testXapi now', 'test.api'));
+
+      // Keywords with quantifier metacharacters should not throw
+      assert.doesNotThrow(() => hasKeywordMatch('learn c++', 'c++'));
+      assert.doesNotThrow(() => hasKeywordMatch('use .net', '.net'));
+    });
+  });
+
   describe('entity-influenced routing', () => {
     it('boosts current-events when temporal entities are present', () => {
       const entities: ExtractedEntities = {
@@ -247,6 +261,46 @@ describe('routeQuery', () => {
       const route = routeQuery('Something happened', entities);
       assert.strictEqual(route.category, 'general');
       assert.strictEqual(route.confidence, 0);
+    });
+
+    it('boosts technical when named entities are present', () => {
+      const entities: ExtractedEntities = {
+        temporal: [],
+        numerical: [],
+        names: ['React'],
+        locations: [],
+        descriptors: [],
+      };
+      const routeWithBoost = routeQuery('React architecture', entities);
+      const routeWithoutBoost = routeQuery('React architecture');
+      // "architecture" matches technical (0.4), below threshold without boost
+      // named entity boost (+0.2) pushes it to 0.6, routing to technical
+      assert.strictEqual(routeWithBoost.category, 'technical');
+      assert.strictEqual(routeWithoutBoost.category, 'general');
+      assert.ok(
+        routeWithBoost.confidence > routeWithoutBoost.confidence,
+        `expected boosted confidence (${routeWithBoost.confidence}) to be higher than non-boosted (${routeWithoutBoost.confidence})`,
+      );
+    });
+
+    it('boosts code when named entities are present', () => {
+      const entities: ExtractedEntities = {
+        temporal: [],
+        numerical: [],
+        names: ['Express'],
+        locations: [],
+        descriptors: [],
+      };
+      const routeWithBoost = routeQuery('Express sdk', entities);
+      const routeWithoutBoost = routeQuery('Express sdk');
+      // "sdk" matches code (0.4), below threshold without boost
+      // named entity boost (+0.2) pushes it to 0.6, routing to code
+      assert.strictEqual(routeWithBoost.category, 'code');
+      assert.strictEqual(routeWithoutBoost.category, 'general');
+      assert.ok(
+        routeWithBoost.confidence > routeWithoutBoost.confidence,
+        `expected boosted confidence (${routeWithBoost.confidence}) to be higher than non-boosted (${routeWithoutBoost.confidence})`,
+      );
     });
   });
 
