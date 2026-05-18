@@ -9,6 +9,8 @@
 import { logger } from '../../logger.js';
 import type { ResearchStrategy, StrategyContext } from './types.js';
 import type { ResearchResult, ResearchReport } from '../types.js';
+import { extractEntities } from '../entityExtractor.js';
+import { routeQuery } from '../domainRouter.js';
 import {
   DecompositionPhase,
   DiscoveryPhase,
@@ -38,6 +40,18 @@ export class PipelineStrategy implements ResearchStrategy {
   async analyze(query: string, ctx: StrategyContext): Promise<ResearchResult> {
     const startTime = Date.now();
     const effectiveDepth = ctx.depth;
+
+    // Ensure entities and route are available for downstream phases
+    if (!ctx.entities || !ctx.route) {
+      const entities = extractEntities(query);
+      const route = routeQuery(query, entities);
+      ctx.entities = entities;
+      ctx.route = route;
+      logger.info(
+        { category: route.category, confidence: route.confidence },
+        'PipelineStrategy: computed domain route',
+      );
+    }
 
     this.compactor = new InFlightCompactor(ctx.state, ctx.budget);
 
@@ -185,7 +199,7 @@ export class PipelineStrategy implements ResearchStrategy {
     const { WorkerPoolManager } = await import('../pool/workerPool.js');
     const workerPool = new WorkerPoolManager({
       concurrency: 3,
-      perWorkerToolCalls: 15,
+      perWorkerToolCalls: 35,
       tokenBudget: {
         recordTokens: (count: number) => {
           ctx.budget.recordTokens(count);

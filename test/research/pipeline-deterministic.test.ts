@@ -91,3 +91,34 @@ describe('StrategyRegistry deterministic selection', () => {
       assert.strictEqual(strategyRegistry.has('tree'), true);
    });
 });
+
+describe('PipelineStrategy domain routing', () => {
+   it('can extract entities and route when not provided by orchestrator', async () => {
+      const { PipelineStrategy } = await import('../../src/research/strategies/pipelineStrategy.js');
+      const strategy = new PipelineStrategy();
+      // Wrap analyze to capture ctx while still running original logic
+      let capturedCtx: any;
+      const originalAnalyze = strategy.analyze.bind(strategy);
+      strategy.analyze = async (query: string, ctx: any) => {
+         capturedCtx = ctx;
+         try {
+            return await originalAnalyze(query, ctx);
+         } catch {
+            return { report: { query, executiveSummary: 'test' }, timeline: [] };
+         }
+      };
+      try {
+         await strategy.analyze('What is the best treatment for migraines?', {
+            state: { getSubQuestions: () => [], sourceCount: () => 0, findingCount: () => 0, initialize() {}, setLanguage() {}, addSource() { return 's1'; }, addSubQuestion() {}, getFullState() { return {}; }, transitionTo() {}, isTaxonomyRevised() { return false; }, getTaxonomy() { return {}; }, reviseTaxonomy() {}, workerReportCount() { return 0; } } as any,
+            budget: { isExhausted: () => true, recordTokens: () => true, profile: { maxGapLoops: 0 } } as any,
+            config: { agentMaxIterations: 10, treeBreadth: 4, treeDepth: 2, treeConcurrency: 2, treeContextWordLimit: 25000 } as any,
+            depth: 'standard',
+         });
+         assert.ok(capturedCtx);
+         assert.ok(capturedCtx.entities);
+         assert.ok(capturedCtx.route);
+      } finally {
+         strategy.analyze = originalAnalyze;
+      }
+   });
+});

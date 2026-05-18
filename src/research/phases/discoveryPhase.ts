@@ -21,6 +21,19 @@ export class DiscoveryPhase extends BasePhase {
 
     logger.info('Phase 2: Broad discovery');
 
+    // Augment sub-question preferred sources with domain route backends
+    const subQuestions = ctx.state.getSubQuestions();
+    if (ctx.route) {
+      for (const sq of subQuestions) {
+        const augmented = new Set([...ctx.route.primaryBackends, ...sq.preferredSources]);
+        sq.preferredSources = [...augmented];
+      }
+      logger.info(
+        { primaryBackends: ctx.route.primaryBackends },
+        'DiscoveryPhase: augmented sub-question preferredSources with domain route',
+      );
+    }
+
     const discovery = new DiscoveryEngine(
       ctx.state,
       ctx.budget,
@@ -28,7 +41,7 @@ export class DiscoveryPhase extends BasePhase {
       ctx.llm,
       ctx.abortSignal,
     );
-    const candidates = await discovery.discover(ctx.state.getSubQuestions());
+    const candidates = await discovery.discover(subQuestions);
 
     // sqSourceCounts removed — progress tracking lives in the phase
 
