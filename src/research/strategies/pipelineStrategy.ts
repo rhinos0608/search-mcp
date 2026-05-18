@@ -199,7 +199,7 @@ export class PipelineStrategy implements ResearchStrategy {
     const { WorkerPoolManager } = await import('../pool/workerPool.js');
     const workerPool = new WorkerPoolManager({
       concurrency: 3,
-      perWorkerToolCalls: 35,
+      perWorkerToolCalls: 15,
       tokenBudget: {
         recordTokens: (count: number) => {
           ctx.budget.recordTokens(count);
