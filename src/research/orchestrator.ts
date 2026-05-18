@@ -14,6 +14,8 @@ import { strategyRegistry } from './strategies/index.js';
 import type { ResearchStrategy, StrategyContext } from './strategies/types.js';
 import type { ResearchDepth, ResearchResult } from './types.js';
 import type { DeepResearchConfig } from '../config.js';
+import { extractEntities } from './entityExtractor.js';
+import { routeQuery } from './domainRouter.js';
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -46,8 +48,8 @@ const DEFAULT_CONFIG: Required<DeepResearchConfig> = {
   enabled: true,
   defaultDepth: 'standard',
   maxDepth: 'deep',
-  maxToolCalls: 200,
-  maxTokens: 500_000,
+  maxToolCalls: 300,
+  maxTokens: 800_000,
   maxTimeMs: 2_700_000,
   baseUrl: '',
   workerBaseUrl: '',
@@ -58,8 +60,8 @@ const DEFAULT_CONFIG: Required<DeepResearchConfig> = {
   treeDepth: 2,
   treeConcurrency: 2,
   treeContextWordLimit: 25000,
-  agentMaxIterations: 30,
-  agentMaxSubIterations: 8,
+  agentMaxIterations: 50,
+  agentMaxSubIterations: 15,
   agentDefaultFetchMode: 'summary_focus_query',
   autoSave: true,
 };
@@ -195,6 +197,21 @@ export class ResearchOrchestrator {
       this.state.setLanguage({ code: 'en', style: 'formal' });
     }
 
+    // Optional entity extraction and domain routing
+    let entities: import('./entityExtractor.js').ExtractedEntities | undefined;
+    let route: import('./domainRouter.js').DomainRoute | undefined;
+    if (query.length > 10) {
+      entities = extractEntities(query);
+      const hasEntities =
+        entities.names.length > 0 ||
+        entities.temporal.length > 0 ||
+        entities.numerical.length > 0 ||
+        entities.descriptors.length > 0;
+      if (hasEntities) {
+        route = routeQuery(query, entities);
+      }
+    }
+
     // Build strategy context
     const ctx: StrategyContext = {
       state: this.state,
@@ -206,6 +223,8 @@ export class ResearchOrchestrator {
       depth: effectiveDepth,
       jobId: this._jobId,
       deterministic: deterministic ?? false,
+      ...(entities !== undefined ? { entities } : {}),
+      ...(route !== undefined ? { route } : {}),
     };
 
     // Resolve strategy

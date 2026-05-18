@@ -9,6 +9,8 @@ import type { ResearchStateEngine, BudgetTracker } from '../state.js';
 import type { DeepResearchLlmClient } from '../llm/chat.js';
 import type { DeepResearchConfig } from '../../config.js';
 import type { ResearchResult, ResearchDepth } from '../types.js';
+import type { ExtractedEntities } from '../entityExtractor.js';
+import type { DomainRoute } from '../domainRouter.js';
 
 // ── Progress callback (shared with orchestrator) ──────────────────────────
 
@@ -36,6 +38,10 @@ export interface StrategyContext {
   depth: ResearchDepth;
   jobId?: string | undefined;
   deterministic?: boolean;
+  /** Extracted entities from the query, if available. */
+  entities?: ExtractedEntities | undefined;
+  /** Domain route classification, if available. */
+  route?: DomainRoute | undefined;
 }
 
 // ── ResearchStrategy ──────────────────────────────────────────────────────
