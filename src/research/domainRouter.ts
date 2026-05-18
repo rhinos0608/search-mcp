@@ -236,16 +236,11 @@ function normalizeQuery(query: string): string {
 
 export function hasKeywordMatch(normalized: string, keyword: string): boolean {
   const lowerKeyword = keyword.toLowerCase();
-  if (lowerKeyword.includes(' ')) {
-    const escaped = lowerKeyword.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    const regex = new RegExp(
-      `(?:^|[^a-z0-9])${escaped}(?:[^a-z0-9]|$)`,
-      'i',
-    );
-    return regex.test(normalized);
-  }
   const escaped = lowerKeyword.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  const regex = new RegExp(`\\b${escaped}\\b`, 'i');
+  const regex = new RegExp(
+    `(?:^|[^a-z0-9])${escaped}(?:[^a-z0-9]|$)`,
+    'i',
+  );
   return regex.test(normalized);
 }
 
@@ -326,8 +321,8 @@ export function routeQuery(
     if (confidence > bestConfidence) {
       bestConfidence = confidence;
       bestCategory = domain.category;
-      bestPrimary = domain.primaryBackends;
-      bestSecondary = domain.secondaryBackends;
+      bestPrimary = [...domain.primaryBackends];
+      bestSecondary = [...domain.secondaryBackends];
       if (matchedKeywords.length > 0) {
         bestReasoning = `Matched keywords: ${matchedKeywords.join(', ')}. Confidence: ${confidence.toFixed(2)}.`;
       } else if (
@@ -362,8 +357,8 @@ export function routeQuery(
   return {
     category: bestCategory,
     confidence: bestConfidence,
-    primaryBackends: bestPrimary,
-    secondaryBackends: bestSecondary,
+    primaryBackends: [...bestPrimary],
+    secondaryBackends: [...bestSecondary],
     reasoning: bestReasoning,
   };
 }

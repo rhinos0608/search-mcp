@@ -210,9 +210,10 @@ describe('routeQuery', () => {
       assert.ok(hasKeywordMatch('use test.api now', 'test.api'));
       assert.ok(!hasKeywordMatch('use testXapi now', 'test.api'));
 
-      // Keywords with quantifier metacharacters should not throw
-      assert.doesNotThrow(() => hasKeywordMatch('learn c++', 'c++'));
-      assert.doesNotThrow(() => hasKeywordMatch('use .net', '.net'));
+      // Keywords with non-word characters should match correctly
+      assert.ok(hasKeywordMatch('learn c++', 'c++'));
+      assert.ok(!hasKeywordMatch('learn csharp', 'c++'));
+      assert.ok(hasKeywordMatch('use .net framework', '.net'));
     });
   });
 
@@ -342,6 +343,15 @@ describe('routeQuery', () => {
       const route = routeQuery('How to install Node.js');
       assert.strictEqual(typeof route.reasoning, 'string');
       assert.ok(route.reasoning.length > 0);
+    });
+
+    it('returns copies of backend arrays that can be safely mutated', () => {
+      const route1 = routeQuery('Clinical treatment for diabetes symptoms');
+      route1.primaryBackends.push('foo' as SourceType);
+      route1.secondaryBackends.push('bar' as SourceType);
+      const route2 = routeQuery('Clinical treatment for diabetes symptoms');
+      assert.deepStrictEqual(route2.primaryBackends, ['pubmed', 'academic']);
+      assert.deepStrictEqual(route2.secondaryBackends, ['web', 'wikipedia']);
     });
 
     it('falls back to general when confidence is below 0.5', () => {
