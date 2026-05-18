@@ -38,6 +38,11 @@ describe('extractEntities', () => {
       const result = extractEntities('The number 1899 or 2100');
       assert.deepStrictEqual(result.temporal, []);
     });
+
+    it('deduplicates duplicate years in the same query', () => {
+      const result = extractEntities('2024 and 2024');
+      assert.deepStrictEqual(result.temporal, ['2024']);
+    });
   });
 
   describe('numerical', () => {
@@ -84,7 +89,7 @@ describe('extractEntities', () => {
 
   describe('names', () => {
     it('extracts proper nouns', () => {
-      const result = extractEntities('Google released a new product');
+      const result = extractEntities('The new Google product is great');
       assert.ok(result.names.includes('Google'), 'Should include Google');
     });
 
@@ -105,15 +110,22 @@ describe('extractEntities', () => {
     });
 
     it('does not extract sentence-starting capitalized words as names', () => {
-      const result = extractEntities('The quick brown fox');
-      assert.ok(!result.names.includes('The'), 'Should not include sentence-start The');
+      const result = extractEntities('Alice went to the store');
+      assert.ok(!result.names.includes('Alice'), 'Should not include sentence-start Alice');
     });
 
     it('extracts mixed names and acronyms', () => {
-      const result = extractEntities('OpenAI and IBM partnered with Microsoft');
+      const result = extractEntities('Yesterday OpenAI and IBM partnered with Microsoft');
       assert.ok(result.names.includes('OpenAI'), 'Should include OpenAI');
       assert.ok(result.names.includes('IBM'), 'Should include IBM');
       assert.ok(result.names.includes('Microsoft'), 'Should include Microsoft');
+    });
+
+    it('does not extract multi-word sequences containing stopwords', () => {
+      const result = extractEntities('The New York Times is a newspaper');
+      assert.ok(!result.names.includes('The New'), 'Should not include sequence starting with stopword');
+      assert.ok(!result.names.includes('The New York'), 'Should not include sequence with stopword');
+      assert.ok(result.names.includes('New York Times'), 'Should include valid multi-word name');
     });
   });
 
@@ -171,9 +183,14 @@ describe('extractEntities', () => {
     });
 
     it('includes two-letter descriptors', () => {
-      const result = extractEntities('AI and Go programming');
+      const result = extractEntities('ai programming in go');
       assert.ok(result.descriptors.includes('ai'), 'Should include ai');
       assert.ok(result.descriptors.includes('go'), 'Should include go');
+    });
+
+    it('does not treat capitalized words as descriptors', () => {
+      const result = extractEntities('Google released a new product');
+      assert.ok(!result.descriptors.includes('google'), 'Should not lowercase capitalized words');
     });
   });
 
@@ -186,6 +203,17 @@ describe('extractEntities', () => {
       assert.ok(result.names.includes('Google'), 'Should include names');
       assert.ok(result.locations.includes('California'), 'Should include locations');
       assert.ok(result.descriptors.includes('latency'), 'Should include descriptors');
+    });
+  });
+
+  describe('edge cases', () => {
+    it('returns empty arrays for an empty query', () => {
+      const result = extractEntities('');
+      assert.deepStrictEqual(result.temporal, []);
+      assert.deepStrictEqual(result.numerical, []);
+      assert.deepStrictEqual(result.names, []);
+      assert.deepStrictEqual(result.locations, []);
+      assert.deepStrictEqual(result.descriptors, []);
     });
   });
 });
@@ -219,6 +247,16 @@ describe('expandTemporalRanges', () => {
   it('returns empty array for empty input', () => {
     const result = expandTemporalRanges([]);
     assert.deepStrictEqual(result, []);
+  });
+
+  it('normalizes reversed ranges', () => {
+    const result = expandTemporalRanges(['2023-2018']);
+    assert.deepStrictEqual(result, ['2018', '2019', '2020', '2021', '2022', '2023']);
+  });
+
+  it('does not expand ranges longer than 20 years', () => {
+    const result = expandTemporalRanges(['2000-2040']);
+    assert.deepStrictEqual(result, ['2000-2040']);
   });
 });
 
@@ -311,5 +349,18 @@ describe('generateEntityBasedQueries', () => {
     };
     const queries = generateEntityBasedQueries(entities);
     assert.deepStrictEqual(queries, []);
+  });
+
+  it('puts original query first so it is not sliced off', () => {
+    const entities: ExtractedEntities = {
+      temporal: ['2020', '2021', '2022'],
+      numerical: ['10%', '20%'],
+      names: ['A', 'B', 'C'],
+      locations: ['X', 'Y'],
+      descriptors: ['fast', 'slow'],
+    };
+    const original = 'Original query here';
+    const queries = generateEntityBasedQueries(entities, 3, original);
+    assert.strictEqual(queries[0], original, 'Original query should be first');
   });
 });

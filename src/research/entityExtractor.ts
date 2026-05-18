@@ -204,9 +204,28 @@ function extractNames(query: string): string[] {
     names.add(match[0]);
   }
 
-  // Single capitalized words anywhere, filtering out stop words.
+  // Determine sentence-start token positions
+  const sentenceStartPositions = new Set<number>();
+  const firstToken = query.match(/[A-Za-z]+/);
+  if (firstToken?.index !== undefined) {
+    sentenceStartPositions.add(firstToken.index);
+  }
+  for (const m of query.matchAll(/[.!?]\s+/g)) {
+    if (m.index !== undefined) {
+      const rest = query.slice(m.index + m[0].length);
+      const nextToken = rest.match(/[A-Za-z]+/);
+      if (nextToken?.index !== undefined) {
+        sentenceStartPositions.add(m.index + m[0].length + nextToken.index);
+      }
+    }
+  }
+
+  // Single capitalized words anywhere, filtering out stop words and sentence starts.
   for (const match of query.matchAll(/\b[A-Z][a-zA-Z]*\b/g)) {
     const word = match[0];
+    if (match.index !== undefined && sentenceStartPositions.has(match.index)) {
+      continue;
+    }
     if (!STOP_WORDS.has(word.toLowerCase()) && word.length >= 2) {
       names.add(word);
     }
@@ -215,11 +234,19 @@ function extractNames(query: string): string[] {
   // Multi-word capitalized sequences of 2-4 words anywhere.
   const tokens = Array.from(query.matchAll(/[A-Za-z]+/g)).map((m) => m[0]);
   for (let start = 0; start < tokens.length; start++) {
-    if (!/^[A-Z][a-zA-Z]*$/.test(tokens[start]!)) continue;
+    const firstToken = tokens[start];
+    if (!firstToken || !/^[A-Z][a-zA-Z]*$/.test(firstToken)) continue;
+    if (STOP_WORDS.has(firstToken.toLowerCase())) continue;
 
     for (let len = 2; len <= 4 && start + len <= tokens.length; len++) {
       const slice = tokens.slice(start, start + len);
-      if (slice.every((w) => /^[A-Z][a-zA-Z]*$/.test(w))) {
+      if (slice.length !== len) continue;
+      if (
+        slice.every(
+          (w) =>
+            /^[A-Z][a-zA-Z]*$/.test(w) && !STOP_WORDS.has(w.toLowerCase()),
+        )
+      ) {
         names.add(slice.join(' '));
       }
     }
@@ -230,13 +257,12 @@ function extractNames(query: string): string[] {
 
 function extractLocations(query: string): string[] {
   const locations = new Set<string>();
-  // Preposition + optional "the" + capitalized word(s)
   const pattern =
     /\b(?:in|at|on|near|from|to|of|by|within|around)\s+(?:the\s+)?((?:[A-Z][a-zA-Z]*(?:\s+[A-Z][a-zA-Z]*){0,2}))\b/g;
 
   for (const match of query.matchAll(pattern)) {
-    const candidate = match[1]!;
-    // Exclude acronyms and all-caps, and stop words
+    const candidate = match[1] ?? '';
+    if (!candidate) continue;
     const words = candidate.split(/\s+/);
     const filtered = words.filter((w) => !STOP_WORDS.has(w.toLowerCase()));
     if (filtered.length > 0 && !words.every((w) => /^[A-Z]+$/.test(w))) {
@@ -249,9 +275,9 @@ function extractLocations(query: string): string[] {
 
 function extractDescriptors(query: string): string[] {
   const descriptors = new Set<string>();
-  const tokens = query.matchAll(/[a-zA-Z]+/g);
+  const tokens = query.matchAll(/\b[a-z]+\b/g);
   for (const match of tokens) {
-    const word = match[0].toLowerCase();
+    const word = match[0];
     if (!STOP_WORDS.has(word) && word.length >= 2) {
       descriptors.add(word);
     }
@@ -259,18 +285,28 @@ function extractDescriptors(query: string): string[] {
   return Array.from(descriptors);
 }
 
+/**
+ * Extract entities (temporal, numerical, names, locations, descriptors)
+ * from a natural-language query string.
+ *
+ * @param query - The input query to analyze.
+ * @returns An object containing arrays of extracted entity strings.
+ */
 export function extractEntities(query: string): ExtractedEntities {
-  const temporal: string[] = [];
+  const temporal = new Set<string>();
   for (const match of query.matchAll(TEMPORAL_PATTERN)) {
-    temporal.push(match[1]!);
+    const value = match[1];
+    if (value) {
+      temporal.add(value);
+    }
   }
 
-  const numerical: string[] = [];
+  const numerical = new Set<string>();
   for (const match of query.matchAll(NUMERICAL_ATTACHED_PATTERN)) {
-    numerical.push(match[0]);
+    numerical.add(match[0]);
   }
   for (const match of query.matchAll(NUMERICAL_SCALE_PATTERN)) {
-    numerical.push(match[0]);
+    numerical.add(match[0]);
   }
 
   const names = extractNames(query);
@@ -278,23 +314,39 @@ export function extractEntities(query: string): ExtractedEntities {
   const descriptors = extractDescriptors(query);
 
   return {
-    temporal,
-    numerical,
+    temporal: Array.from(temporal),
+    numerical: Array.from(numerical),
     names,
     locations,
     descriptors,
   };
 }
 
+/**
+ * Expand year-range entities into individual years.
+ *
+ * Reversed ranges are normalized, and ranges spanning more than 20 years
+ * are left unchanged.
+ *
+ * @param entities - Array of temporal entity strings.
+ * @returns Array with ranges expanded to individual years, capped at 20 years.
+ */
 export function expandTemporalRanges(entities: string[]): string[] {
   const result: string[] = [];
   for (const entity of entities) {
     const rangeMatch = entity.match(/^(\d{4})\s*(?:-|–|to)\s*(\d{4})$/);
     if (rangeMatch) {
-      const start = parseInt(rangeMatch[1]!, 10);
-      const end = parseInt(rangeMatch[2]!, 10);
-      for (let year = start; year <= end; year++) {
-        result.push(String(year));
+      let start = parseInt(rangeMatch[1] ?? '0', 10);
+      let end = parseInt(rangeMatch[2] ?? '0', 10);
+      if (start > end) {
+        [start, end] = [end, start];
+      }
+      if (end - start <= 20) {
+        for (let year = start; year <= end; year++) {
+          result.push(String(year));
+        }
+      } else {
+        result.push(entity);
       }
     } else {
       result.push(entity);
@@ -303,40 +355,74 @@ export function expandTemporalRanges(entities: string[]): string[] {
   return result;
 }
 
+/**
+ * Generate search queries from extracted entities.
+ *
+ * Priority order:
+ * 1. Original query (if provided) — placed first so it is never sliced off.
+ * 2. Name + descriptor combinations.
+ * 3. Name + temporal combinations.
+ * 4. Descriptor-only combinations for disambiguation.
+ * 5. Individual entities as fallback.
+ *
+ * @param entities - The extracted entities.
+ * @param maxQueries - Maximum number of queries to return (default 5).
+ * @param originalQuery - Optional original query to include first.
+ * @returns Array of generated query strings, deduplicated and capped.
+ */
 export function generateEntityBasedQueries(
   entities: ExtractedEntities,
-  maxQueries = 10,
+  maxQueries = 5,
   originalQuery?: string,
 ): string[] {
-  const queries = new Set<string>();
+  const queries: string[] = [];
 
-  // Prefer combined queries (richer)
-  const nonEmptyArrays = [
-    entities.names,
-    entities.temporal,
-    entities.numerical,
-    entities.locations,
-    entities.descriptors,
-  ].filter((arr) => arr.length > 0);
-
-  if (nonEmptyArrays.length >= 2) {
-    const first = nonEmptyArrays[0]![0];
-    const second = nonEmptyArrays[1]![0];
-    if (first && second) {
-      queries.add(`${first} ${second}`);
-    }
-  }
-
-  for (const arr of nonEmptyArrays) {
-    for (const entity of arr) {
-      queries.add(entity);
-    }
-  }
-
+  // 1. Always include original query first so it doesn't get sliced off
   if (originalQuery) {
-    queries.add(originalQuery);
+    queries.push(originalQuery);
   }
 
-  const ordered = Array.from(queries);
-  return ordered.slice(0, maxQueries);
+  // 2. Name + descriptor combinations
+  for (const name of entities.names) {
+    for (const desc of entities.descriptors) {
+      queries.push(`${name} ${desc}`);
+    }
+  }
+
+  // 3. Name + temporal combinations
+  for (const name of entities.names) {
+    for (const temp of entities.temporal) {
+      queries.push(`${name} ${temp}`);
+    }
+  }
+
+  // 4. Descriptor-only for disambiguation (descriptor + temporal / numerical)
+  for (const desc of entities.descriptors) {
+    for (const temp of entities.temporal) {
+      queries.push(`${desc} ${temp}`);
+    }
+    for (const num of entities.numerical) {
+      queries.push(`${desc} ${num}`);
+    }
+  }
+
+  // Fallback: individual entities
+  for (const name of entities.names) {
+    queries.push(name);
+  }
+  for (const desc of entities.descriptors) {
+    queries.push(desc);
+  }
+  for (const temp of entities.temporal) {
+    queries.push(temp);
+  }
+  for (const num of entities.numerical) {
+    queries.push(num);
+  }
+  for (const loc of entities.locations) {
+    queries.push(loc);
+  }
+
+  const deduped = [...new Set(queries)];
+  return deduped.slice(0, maxQueries);
 }
