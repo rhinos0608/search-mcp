@@ -147,6 +147,7 @@ test('semanticReddit returns ranked results for a happy-path query', async () =>
 
   const result = await semanticReddit({
     query: 'semantic reddit happy path q1',
+    subreddit: 'test',
     embeddingBaseUrl: 'http://sidecar.local',
     embeddingDimensions: 4,
     topK: 5,
@@ -209,6 +210,7 @@ test('semanticReddit records failed posts in failedPosts and warnings', async ()
 
   const result = await semanticReddit({
     query: 'failed posts unique query q2',
+    subreddit: 'test',
     embeddingBaseUrl: 'http://sidecar.local',
     embeddingDimensions: 4,
     clientOptions: { fetchImpl },
@@ -237,6 +239,7 @@ test('semanticReddit filters deleted and removed comments', async () => {
 
   const result = await semanticReddit({
     query: 'deleted removed filter unique query q3',
+    subreddit: 'test',
     embeddingBaseUrl: 'http://sidecar.local',
     embeddingDimensions: 4,
     topK: 5,
@@ -280,6 +283,7 @@ test('semanticReddit returns empty corpus when all comments are deleted', async 
 
   const result = await semanticReddit({
     query: 'all deleted unique query q4',
+    subreddit: 'test',
     embeddingBaseUrl: 'http://sidecar.local',
     embeddingDimensions: 4,
     clientOptions: {
@@ -350,6 +354,7 @@ test('semanticReddit respects a small maxBytes corpus budget', async () => {
 
   const result = await semanticReddit({
     query: 'budget test unique query q6',
+    subreddit: 'test',
     embeddingBaseUrl: 'http://sidecar.local',
     embeddingDimensions: 4,
     maxBytes: 1,
@@ -407,6 +412,7 @@ test('semanticReddit clamps commentLimit to the Reddit API cap', async () => {
 
   await semanticReddit({
     query: 'comment limit clamp unique query q7',
+    subreddit: 'test',
     embeddingBaseUrl: 'http://sidecar.local',
     embeddingDimensions: 4,
     commentLimit: 300,

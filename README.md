@@ -19,7 +19,7 @@
 | **Packages** | `packages` family (npm/pypi) |
 | **Jobs** | `semantic_jobs` — structured extraction from 20+ boards (SEEK, Indeed, LinkedIn, etc.) with constraint filtering and weighted ranking |
 | **Browser** | `browser` family (navigate/snapshot/click/type/evaluate/screenshot/extract/act/wait/pdf/storage/network/tabs/session/wait_for/dialog_handle/iframe_context/scroll_to_load/paginate/download/table_extract/network_intercept/resource_timing/diff) with CDP stealth or CloakBrowser backend |
-| **Knowledge Graph** | `graph_ingest`, `graph_query`, `entity_lookup_batch`, `graph_status`, `graph_rebuild`, `family_list`, `family_get`, `family_merge`, `run_list`, `run_rollback` — entity extraction, querying, and family management (opt-in via `KNOWLEDGE_GRAPH_ENABLED`) |
+| **Knowledge Graph** | `graph_ingest`, `graph_query`, `entity_lookup_batch`, `graph_status`, `graph_rebuild`, `family_list`, `family_get`, `family_merge`, `run_list`, `run_rollback` — entity extraction, querying, and family management (opt-in via `KG_ENABLED`) |
 | **System** | `health_check` — live probe of all backends |
 
 ## Quick Start

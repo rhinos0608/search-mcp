@@ -381,7 +381,7 @@ const knowledgeGraphFamily: FamilyDefinition = {
         );
       },
       configIssue: (cfg) => {
-        if (!cfg.knowledgeGraph.enabled) return 'Set KNOWLEDGE_GRAPH_ENABLED=true to use knowledge_graph.ingest.';
+        if (!cfg.knowledgeGraph.enabled) return 'Set KG_ENABLED=true to use knowledge_graph.ingest.';
         return null;
       },
     },
@@ -522,7 +522,7 @@ const knowledgeGraphFamily: FamilyDefinition = {
         );
       },
       configIssue: (cfg) => {
-        if (!cfg.knowledgeGraph.enabled) return 'Set KNOWLEDGE_GRAPH_ENABLED=true to use knowledge_graph.query.';
+        if (!cfg.knowledgeGraph.enabled) return 'Set KG_ENABLED=true to use knowledge_graph.query.';
         return null;
       },
     },
@@ -587,7 +587,7 @@ const knowledgeGraphFamily: FamilyDefinition = {
       },
       configIssue: (cfg) => {
         if (!cfg.knowledgeGraph.enabled)
-          return 'Set KNOWLEDGE_GRAPH_ENABLED=true to use knowledge_graph.entity_lookup_batch.';
+          return 'Set KG_ENABLED=true to use knowledge_graph.entity_lookup_batch.';
         return null;
       },
     },
@@ -726,7 +726,7 @@ const knowledgeGraphFamily: FamilyDefinition = {
         );
       },
       configIssue: (cfg) => {
-        if (!cfg.knowledgeGraph.enabled) return 'Set KNOWLEDGE_GRAPH_ENABLED=true to use knowledge_graph.status.';
+        if (!cfg.knowledgeGraph.enabled) return 'Set KG_ENABLED=true to use knowledge_graph.status.';
         return null;
       },
     },
@@ -761,7 +761,7 @@ const knowledgeGraphFamily: FamilyDefinition = {
         );
       },
       configIssue: (cfg) => {
-        if (!cfg.knowledgeGraph.enabled) return 'Set KNOWLEDGE_GRAPH_ENABLED=true to use knowledge_graph.rebuild.';
+        if (!cfg.knowledgeGraph.enabled) return 'Set KG_ENABLED=true to use knowledge_graph.rebuild.';
         return null;
       },
     },
@@ -864,7 +864,7 @@ const knowledgeGraphFamily: FamilyDefinition = {
       },
       configIssue: (cfg) => {
         if (!cfg.knowledgeGraph.enabled)
-          return 'Set KNOWLEDGE_GRAPH_ENABLED=true to use knowledge_graph.family_list.';
+          return 'Set KG_ENABLED=true to use knowledge_graph.family_list.';
         return null;
       },
     },
@@ -1013,7 +1013,7 @@ const knowledgeGraphFamily: FamilyDefinition = {
       },
       configIssue: (cfg) => {
         if (!cfg.knowledgeGraph.enabled)
-          return 'Set KNOWLEDGE_GRAPH_ENABLED=true to use knowledge_graph.family_get.';
+          return 'Set KG_ENABLED=true to use knowledge_graph.family_get.';
         return null;
       },
     },
@@ -1121,7 +1121,7 @@ const knowledgeGraphFamily: FamilyDefinition = {
       },
       configIssue: (cfg) => {
         if (!cfg.knowledgeGraph.enabled)
-          return 'Set KNOWLEDGE_GRAPH_ENABLED=true to use knowledge_graph.family_merge.';
+          return 'Set KG_ENABLED=true to use knowledge_graph.family_merge.';
         return null;
       },
     },
@@ -1218,7 +1218,7 @@ const knowledgeGraphFamily: FamilyDefinition = {
       },
       configIssue: (cfg) => {
         if (!cfg.knowledgeGraph.enabled)
-          return 'Set KNOWLEDGE_GRAPH_ENABLED=true to use knowledge_graph.run_list.';
+          return 'Set KG_ENABLED=true to use knowledge_graph.run_list.';
         return null;
       },
     },
@@ -1350,7 +1350,7 @@ const knowledgeGraphFamily: FamilyDefinition = {
       },
       configIssue: (cfg) => {
         if (!cfg.knowledgeGraph.enabled)
-          return 'Set KNOWLEDGE_GRAPH_ENABLED=true to use knowledge_graph.run_rollback.';
+          return 'Set KG_ENABLED=true to use knowledge_graph.run_rollback.';
         return null;
       },
     },

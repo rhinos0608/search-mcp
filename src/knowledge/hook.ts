@@ -380,8 +380,7 @@ export class KnowledgeGraphHook {
             ? { ...base, sourceUrl: normalized.url }
             : base,
         );
-
-    }
+      }
     } catch (err) {
       // NEVER fail the tool call
       logger.warn({ err, toolName }, 'kg: passive capture failed (non-fatal)');

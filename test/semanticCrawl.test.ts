@@ -771,19 +771,10 @@ describe('crawlSeeds size guard', () => {
   it('in-flight accumulator stops collection and emits SEMANTIC_CRAWL_RESPONSE_SIZE_LIMIT_APPROACHED', async () => {
     // Mock returns a page with a huge markdown body — larger than SAFE_BYTES on its own.
     // Use allowPathDrift: true so pages are not dropped by the path prefix filter.
-    globalThis.fetch = async (_input: RequestInfo | URL, _init?: RequestInit) => {
-      const url =
-        typeof _input === 'string'
-          ? _input
-          : _input instanceof URL
-            ? _input.href
-            : (_input as Request).url;
-      // Return a result with the seed URL embedded in the response so filter passes
-      const seedUrl = url.includes('page1')
-        ? 'https://example.com/page1'
-        : 'https://example.com/page2';
-      return buildCrawlResponse('X'.repeat(SAFE_BYTES + 1), seedUrl);
-    };
+    // Use meaningful content that passes quality assessment
+    // Each page is ~21MB, 2 pages from 2 seeds triggers the byte budget
+    globalThis.fetch = async () =>
+      buildCrawlResponse('Lorem ipsum dolor sit amet consectetur adipiscing elit. '.repeat(Math.floor(SAFE_BYTES / 100) + 1));
 
     const result = await crawlSeeds(
       ['https://example.com/page1', 'https://example.com/page2'],

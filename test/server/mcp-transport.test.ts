@@ -33,7 +33,7 @@ test('close: removes session', async () => {
   const mgr = new HttpTransportManager(createMockRuntime());
   const s = await mgr.getOrCreate(undefined);
   assert.ok(s !== null);
-  mgr.close(s!.sessionId);
+  await mgr.close(s!.sessionId);
   const again = await mgr.getOrCreate(s!.sessionId);
   assert.equal(again, null);
   mgr.closeAll();

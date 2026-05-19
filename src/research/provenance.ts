@@ -140,7 +140,7 @@ export function classifySourceAuthority(
         if (rule.owner.toLowerCase() === owner.toLowerCase()) {
           const repoPattern = rule.repoPattern;
           try {
-            const escapedPattern = repoPattern.replace(/[.*+?^${}()|[]\\]/g, '\\$&').replace(/\\\*/g, '[^/]*');
+            const escapedPattern = repoPattern.replace(/[[\]\\*.+?^${}()|]/g, '\\$&').replace(/\\\*/g, '[^/]*');
             if (new RegExp(`^${escapedPattern}$`, 'i').test(repo)) {
               return rule.authority;
             }

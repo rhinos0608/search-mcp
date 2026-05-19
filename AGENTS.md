@@ -117,7 +117,7 @@ npm run config:decrypt   # config.enc -> config.json
   - Backends: Playwright + CDP (stealth mode), optional CloakBrowser
 
 
-### Knowledge Graph (opt-in via `KNOWLEDGE_GRAPH_ENABLED`)
+### Knowledge Graph (opt-in via `KG_ENABLED`)
 - `knowledge_graph` (family tool with `action` discriminator):
   - `ingest` — text or URL → entities and relationships via LLM pipeline
   - `query` — full-text search, entity lookup, traversal
