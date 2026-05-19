@@ -38,6 +38,59 @@ export function optionalTrimmedString(schema?: z.ZodType): z.ZodType {
   return z.preprocess(nullishOrEmptyToUndefined, inner.optional());
 }
 
+// ── Number coercion ────────────────────────────────────────────────────────
+
+/**
+ * Coerce a numeric string to a number, pass through all other values.
+ * Handles the case where MCP clients serialize numbers as strings.
+ */
+export function coerceNumericString(value: unknown): unknown {
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    if (trimmed === '') return undefined;
+    const num = Number(trimmed);
+    if (!Number.isNaN(num)) return num;
+  }
+  return value;
+}
+
+/**
+ * Wrap any Zod schema to coerce numeric strings to numbers before validation.
+ * Safe for all types — values that aren't valid numbers pass through unchanged.
+ *
+ * @example
+ * ```ts
+ * limit: tolerant(z.number().int().min(1).max(50)).optional().default(10)
+ * ```
+ */
+export function tolerant<T extends z.ZodType>(schema: T) {
+  return z.preprocess(coerceNumericString, schema);
+}
+
+/**
+ * Recursively walk an args object and coerce all numeric string values
+ * to actual numbers.  Arrays and nested objects are traversed; primitives
+ * are passed through.  Returns a shallow copy with transformed values.
+ */
+export function coerceArgs(raw: Record<string, unknown>): Record<string, unknown> {
+  const result: Record<string, unknown> = {};
+  for (const key of Object.keys(raw)) {
+    const val = raw[key];
+    if (typeof val === 'string') {
+      result[key] = coerceNumericString(val);
+    } else if (Array.isArray(val)) {
+      result[key] = val.map((v: unknown): unknown =>
+        typeof v === 'string' ? coerceNumericString(v) : v,
+      );
+    } else if (typeof val === 'object' && val !== null) {
+      result[key] = coerceArgs(val as Record<string, unknown>);
+    } else {
+      result[key] = val;
+    }
+  }
+  return result;
+}
+
 // ── Limit resolver ─────────────────────────────────────────────────────────
 
 /**
@@ -106,7 +159,10 @@ function resolveGitHubRepoLocatorFromString(input: string): GitHubRepoLocator | 
   if (!trimmed) return null;
 
   // Full GitHub URL - optional protocol, optional www, then owner/repo
-  const urlMatch = /^(?:https?:\/\/)?(?:www\.)?github\.com\/([A-Za-z0-9._-]+)\/([A-Za-z0-9._-]+?)(?:\/.*?\.git)?(?:\/.*)?$/.exec(trimmed);
+  const urlMatch =
+    /^(?:https?:\/\/)?(?:www\.)?github\.com\/([A-Za-z0-9._-]+)\/([A-Za-z0-9._-]+?)(?:\/.*?\.git)?(?:\/.*)?$/.exec(
+      trimmed,
+    );
   if (urlMatch) {
     const ownerGroup = urlMatch[1];
     const repoGroup = urlMatch[2];

@@ -138,7 +138,13 @@ const treeAction = z.object({
   path: z.string().optional().default('').describe('Directory path within the repo'),
   branch: z.string().optional().describe('Git ref (branch, tag, or commit SHA)'),
   recursive: z.boolean().optional().default(false).describe('Return full recursive tree'),
-  limit: z.number().int().min(1).max(500).optional().default(100).describe('Max items (1–500)'),
+  limit: z
+    .number()
+    .int()
+    .min(1)
+    .max(10000)
+    .optional()
+    .describe('Max items (1–10000, omit for unlimited)'),
   includeMonorepo: z
     .boolean()
     .optional()
@@ -153,6 +159,16 @@ const searchAction = z.object({
   language: z.string().optional().describe('Filter by language (e.g. "typescript")'),
   path: z.string().optional().describe('Filter to files under this path'),
   limit: z.number().int().min(1).max(1000).optional().default(30).describe('Max results (1–1000)'),
+  useCodeSearchAsDefault: z
+    .boolean()
+    .optional()
+    .default(true)
+    .describe('Use AST-aware semantic code search as the default path (recommended)'),
+  fallbackToBasicSearch: z
+    .boolean()
+    .optional()
+    .default(false)
+    .describe('Fall back to basic GitHub search when code_search finds no results'),
 });
 
 const trendingAction = z.object({
@@ -170,83 +186,111 @@ const trendingAction = z.object({
   limit: z.number().int().min(1).max(50).optional().default(25).describe('Max repos (1–50)'),
 });
 
-const codeSearchAction = z.object({
-  action: z.literal('code_search').describe('Semantic code search across a repository'),
-  query: z.string().describe('Code search query, e.g. an identifier or behaviour'),
-  repo: z.preprocess(
-    (val) => {
-      if (typeof val === 'string') {
-        const loc = resolveGitHubRepoLocator(val);
-        if (loc) return `${loc.owner}/${loc.repo}`;
-      }
-      return val;
-    },
-    z.string().regex(/^[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+$/u),
-  ).describe('Repository in owner/repo form or GitHub URL'),
-  ref: z.string().optional().describe('Git ref, branch, tag, or commit SHA'),
-  language: z
-    .enum(['typescript', 'javascript', 'python', 'go', 'rust', 'markdown', 'shell'])
-    .optional()
-    .describe('Language filter'),
-  maxFiles: z
-    .number()
-    .int()
-    .min(1)
-    .max(500)
-    .optional()
-    .default(100)
-    .describe('Max files to collect (1–500)'),
-  maxFileBytes: z
-    .number()
-    .int()
-    .min(1)
-    .max(500_000)
-    .optional()
-    .default(50_000)
-    .describe('Max bytes per file before truncation'),
-  fileFilter: z
-    .array(z.string())
-    .optional()
-    .describe('Path prefixes, substrings, or * globs to keep'),
-  preFilterByContent: z
-    .boolean()
-    .optional()
-    .default(true)
-    .describe('Run a lightweight content-based prefilter before downloading full files'),
-  topK: z
-    .number()
-    .int()
-    .min(1)
-    .max(50)
-    .optional()
-    .default(10)
-    .describe('Number of code results (1–50)'),
-  profile: z
-    .enum([
-      'balanced',
-      'lexical-heavy',
-      'semantic-heavy',
-      'high-precision',
-      'fast',
-      'precision',
-      'recall',
-    ])
-    .optional()
-    .default('lexical-heavy')
-    .describe('Retrieval profile (defaults to lexical-heavy for code)'),
-  minScore: z
-    .number()
-    .min(0)
-    .max(1)
-    .optional()
-    .describe('Minimum bi-encoder score required for returned chunks (0–1)'),
-  includeContext: z
-    .boolean()
-    .optional()
-    .default(false)
-    .describe('Include source code text in results'),
-  debug: z.boolean().optional().default(false).describe('Include debug corpus counts'),
-});
+const codeSearchAction = z
+  .object({
+    action: z.literal('code_search').describe('Semantic code search across a repository'),
+    query: z.string().describe('Code search query, e.g. an identifier or behaviour'),
+    repository: z
+      .string()
+      .optional()
+      .describe('Repository as "owner/repo" or GitHub URL (alternative to repo)'),
+    repo: z
+      .preprocess(
+        (val) => {
+          if (typeof val === 'string' && val) {
+            const loc = resolveGitHubRepoLocator(val);
+            if (loc) return `${loc.owner}/${loc.repo}`;
+            return val;
+          }
+          return undefined;
+        },
+        z.string().regex(/^[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+$/u),
+      )
+      .optional()
+      .describe('Repository in owner/repo form or GitHub URL'),
+    ref: z.string().optional().describe('Git ref, branch, tag, or commit SHA'),
+    language: z
+      .enum(['typescript', 'javascript', 'python', 'go', 'rust', 'markdown', 'shell'])
+      .optional()
+      .describe('Language filter'),
+    maxFiles: z
+      .number()
+      .int()
+      .min(1)
+      .max(500)
+      .optional()
+      .default(100)
+      .describe('Max files to collect (1–500)'),
+    maxFileBytes: z
+      .number()
+      .int()
+      .min(1)
+      .max(500_000)
+      .optional()
+      .default(50_000)
+      .describe('Max bytes per file before truncation'),
+    fileFilter: z
+      .array(z.string())
+      .optional()
+      .describe('Path prefixes, substrings, or * globs to keep'),
+    preFilterByContent: z
+      .boolean()
+      .optional()
+      .default(true)
+      .describe('Run a lightweight content-based prefilter before downloading full files'),
+    topK: z
+      .number()
+      .int()
+      .min(1)
+      .max(50)
+      .optional()
+      .default(10)
+      .describe('Number of code results (1–50)'),
+    profile: z
+      .enum([
+        'balanced',
+        'lexical-heavy',
+        'semantic-heavy',
+        'high-precision',
+        'fast',
+        'precision',
+        'recall',
+      ])
+      .optional()
+      .default('lexical-heavy')
+      .describe('Retrieval profile (defaults to lexical-heavy for code)'),
+    useCodeSearchAsDefault: z
+      .boolean()
+      .optional()
+      .default(true)
+      .describe('Use AST-aware semantic code search as the default search path (recommended)'),
+    fallbackToBasicSearch: z
+      .boolean()
+      .optional()
+      .default(false)
+      .describe('Fall back to basic GitHub search when code_search finds no results'),
+    minScore: z
+      .number()
+      .min(0)
+      .max(1)
+      .optional()
+      .describe('Minimum bi-encoder score required for returned chunks (0–1)'),
+    includeContext: z
+      .boolean()
+      .optional()
+      .default(false)
+      .describe('Include source code text in results'),
+    debug: z.boolean().optional().default(false).describe('Include debug corpus counts'),
+  })
+  .superRefine((data, ctx) => {
+    if (!data.repo && !data.repository) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['repo'],
+        message: 'Missing repository: provide `repo` or `repository` (owner/repo or GitHub URL)',
+      });
+    }
+  });
 
 // ── Family definition ───────────────────────────────────────────────────────
 
@@ -298,18 +342,19 @@ const githubFamily: FamilyDefinition = {
       schema: fileAction,
       handler: async (args, _cfg) => {
         void _cfg;
-        const { owner, repo, repository, path, branch, raw, offset, limit, byteOffset, byteLimit } = args as {
-          owner?: string;
-          repo?: string;
-          repository?: string;
-          path: string;
-          branch?: string;
-          raw: boolean;
-          offset?: number;
-          limit?: number;
-          byteOffset?: number;
-          byteLimit?: number;
-        };
+        const { owner, repo, repository, path, branch, raw, offset, limit, byteOffset, byteLimit } =
+          args as {
+            owner?: string;
+            repo?: string;
+            repository?: string;
+            path: string;
+            branch?: string;
+            raw: boolean;
+            offset?: number;
+            limit?: number;
+            byteOffset?: number;
+            byteLimit?: number;
+          };
 
         // Resolve owner+repo from repository if needed
         let resolvedOwner = owner;
@@ -322,7 +367,9 @@ const githubFamily: FamilyDefinition = {
           }
         }
         if (!resolvedOwner || !resolvedRepo) {
-          throw new Error('Missing repository: provide `owner` + `repo` or `repository` (owner/repo or GitHub URL)');
+          throw new Error(
+            'Missing repository: provide `owner` + `repo` or `repository` (owner/repo or GitHub URL)',
+          );
         }
 
         const data = await getGitHubRepoFile(
@@ -345,16 +392,17 @@ const githubFamily: FamilyDefinition = {
       schema: treeAction,
       handler: async (args, _cfg) => {
         void _cfg;
-        const { owner, repo, repository, path, branch, recursive, limit, includeMonorepo } = args as {
-          owner?: string;
-          repo?: string;
-          repository?: string;
-          path: string;
-          branch?: string;
-          recursive: boolean;
-          limit: number;
-          includeMonorepo?: boolean;
-        };
+        const { owner, repo, repository, path, branch, recursive, limit, includeMonorepo } =
+          args as {
+            owner?: string;
+            repo?: string;
+            repository?: string;
+            path: string;
+            branch?: string;
+            recursive: boolean;
+            limit: number;
+            includeMonorepo?: boolean;
+          };
 
         // Resolve owner+repo from repository if needed
         let resolvedOwner = owner;
@@ -367,7 +415,9 @@ const githubFamily: FamilyDefinition = {
           }
         }
         if (!resolvedOwner || !resolvedRepo) {
-          throw new Error('Missing repository: provide `owner` + `repo` or `repository` (owner/repo or GitHub URL)');
+          throw new Error(
+            'Missing repository: provide `owner` + `repo` or `repository` (owner/repo or GitHub URL)',
+          );
         }
 
         const data = await getGitHubRepoTree(
@@ -384,18 +434,62 @@ const githubFamily: FamilyDefinition = {
     },
     {
       name: 'search',
-      description: 'Search code across GitHub using the GitHub Search API',
+      description:
+        'Search code across GitHub using the GitHub Search API or AST-aware semantic code search',
       schema: searchAction,
       handler: async (args, cfg) => {
         void cfg;
-        const { query, owner, repo, language, path, limit } = args as {
+        const {
+          query,
+          owner,
+          repo,
+          language,
+          path,
+          limit,
+          useCodeSearchAsDefault,
+          fallbackToBasicSearch,
+        } = args as {
           query: string;
           owner?: string;
           repo?: string;
           language?: string;
           path?: string;
           limit: number;
+          useCodeSearchAsDefault?: boolean;
+          fallbackToBasicSearch?: boolean;
         };
+
+        // Route to AST-aware semantic code search by default
+        if (useCodeSearchAsDefault) {
+          const repoSpec = owner && repo ? `${owner}/${repo}` : undefined;
+          const data = await semanticGitHubCode({
+            query,
+            repo: repoSpec ?? '',
+            ...(language !== undefined ? { language } : {}),
+            maxFiles: limit,
+            topK: Math.min(limit, 50),
+            preFilterByContent: true,
+          });
+
+          // Fall back to basic search if no results and fallback is enabled
+          if (fallbackToBasicSearch && data.topKDelivered === 0) {
+            const basicResults = await getGitHubRepoSearch(
+              query,
+              owner,
+              repo,
+              language,
+              path,
+              limit,
+            );
+            return wrapResponse(basicResults, [
+              'code_search returned no results, fell back to basic GitHub search',
+            ]);
+          }
+
+          const warnings = data.warnings;
+          return wrapResponse(data, warnings);
+        }
+
         const data = await getGitHubRepoSearch(query, owner, repo, language, path, limit);
         return data;
       },
@@ -435,7 +529,8 @@ const githubFamily: FamilyDefinition = {
         void cfg;
         const {
           query,
-          repo,
+          repo: rawRepo,
+          repository,
           ref,
           language,
           maxFiles,
@@ -449,7 +544,8 @@ const githubFamily: FamilyDefinition = {
           debug,
         } = args as {
           query: string;
-          repo: string;
+          repo?: string;
+          repository?: string;
           ref?: string;
           language?: string;
           maxFiles: number;
@@ -462,6 +558,17 @@ const githubFamily: FamilyDefinition = {
           includeContext: boolean;
           debug: boolean;
         };
+
+        let repo = rawRepo;
+        if (!repo && repository) {
+          const loc = resolveGitHubRepoLocator(repository);
+          if (loc) repo = `${loc.owner}/${loc.repo}`;
+        }
+        if (!repo) {
+          throw new Error(
+            'Missing repository: provide `repo` or `repository` (owner/repo or GitHub URL)',
+          );
+        }
 
         const data = await semanticGitHubCode({
           query,
@@ -504,7 +611,11 @@ const githubFamily: FamilyDefinition = {
 
 // ── Registration ─────────────────────────────────────────────────────────────
 
-export function registerGitHubTool(server: McpServer, cfg: SearchConfig, kgHook?: KnowledgeGraphHook): void {
+export function registerGitHubTool(
+  server: McpServer,
+  cfg: SearchConfig,
+  kgHook?: KnowledgeGraphHook,
+): void {
   registerFamily(server, githubFamily, cfg, kgHook);
 }
 

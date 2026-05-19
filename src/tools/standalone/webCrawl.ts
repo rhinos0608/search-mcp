@@ -6,6 +6,7 @@
  */
 
 import { z } from 'zod/v4';
+import { tolerant } from '../normalize.js';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { SearchConfig } from '../../config.js';
 import { logger } from '../../logger.js';
@@ -20,7 +21,11 @@ import { readabilityFallbackResult, extractionWarnings } from '../../utils/crawl
 import { extractionConfigSchema, validateExtractionConfig } from '../../utils/extractionConfig.js';
 import type { KnowledgeGraphHook } from '../../knowledge/hook.js';
 
-export function registerWebCrawl(server: McpServer, cfg: SearchConfig, kgHook?: KnowledgeGraphHook): void {
+export function registerWebCrawl(
+  server: McpServer,
+  cfg: SearchConfig,
+  kgHook?: KnowledgeGraphHook,
+): void {
   server.registerTool(
     'web_crawl',
     {
@@ -39,21 +44,13 @@ export function registerWebCrawl(server: McpServer, cfg: SearchConfig, kgHook?: 
             'Crawl strategy: bfs (breadth-first, good for shallow wide coverage) | ' +
               'dfs (depth-first, good for deeply nested docs)',
           ),
-        maxDepth: z
-          .number()
-          .int()
-          .min(1)
-          .max(5)
+        maxDepth: tolerant(z.number().int().min(1).max(5))
           .optional()
           .default(1)
           .describe(
             'Maximum link depth to follow from seed URL (1–5, default 1 = single page only)',
           ),
-        maxPages: z
-          .number()
-          .int()
-          .min(1)
-          .max(100)
+        maxPages: tolerant(z.number().int().min(1).max(100))
           .optional()
           .default(1)
           .describe('Maximum number of pages to crawl (1–100, default 1)'),
@@ -74,20 +71,13 @@ export function registerWebCrawl(server: McpServer, cfg: SearchConfig, kgHook?: 
           .describe(
             'Wait for a CSS selector (css:.selector) or JS expression (js:() => boolean) before extracting content. Useful for SPAs and dynamic content.',
           ),
-        delayBeforeReturnHtml: z
-          .number()
-          .min(0)
-          .max(30)
+        delayBeforeReturnHtml: tolerant(z.number().min(0).max(30))
           .optional()
           .default(0.1)
           .describe(
             'Extra seconds to wait after page load for dynamic content to settle (0–30, default 0.1)',
           ),
-        pageTimeout: z
-          .number()
-          .int()
-          .min(1000)
-          .max(300000)
+        pageTimeout: tolerant(z.number().int().min(1000).max(300000))
           .optional()
           .default(60000)
           .describe('Page operation timeout in milliseconds (1000–300000, default 60000)'),

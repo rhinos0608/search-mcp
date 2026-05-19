@@ -6,6 +6,7 @@
  */
 
 import { z } from 'zod/v4';
+import { tolerant } from '../normalize.js';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { SearchConfig } from '../../config.js';
 import { logger } from '../../logger.js';
@@ -27,11 +28,7 @@ export function registerWebSearch(
         'Search the web and return a ranked list of results with titles, URLs, descriptions, and citation metadata (position, domain, source backend, age). Uses the configured search backend (Exa, Brave, or SearXNG) with automatic fallback.',
       inputSchema: {
         query: z.string().describe('The search query string'),
-        limit: z
-          .number()
-          .int()
-          .min(1)
-          .max(50)
+        limit: tolerant(z.number().int().min(1).max(50))
           .optional()
           .default(10)
           .describe('Maximum number of results to return (1–50, default 10)'),
@@ -69,14 +66,36 @@ export function registerWebSearch(
           ),
       },
     },
-    async ({ query, limit, safeSearch, expandQuery, mergeSearchBackends, fuzzyCorrect, intent }) => {
+    async ({
+      query,
+      limit,
+      safeSearch,
+      expandQuery,
+      mergeSearchBackends,
+      fuzzyCorrect,
+      intent,
+    }) => {
       logger.info(
-        { tool: 'web_search', limit, safeSearch, expandQuery, mergeSearchBackends, fuzzyCorrect, intent },
+        {
+          tool: 'web_search',
+          limit,
+          safeSearch,
+          expandQuery,
+          mergeSearchBackends,
+          fuzzyCorrect,
+          intent,
+        },
         'Tool invoked',
       );
       const start = Date.now();
       try {
-        let correction: { original: string; corrected: string; changes: { original: string; corrected: string; distance: number }[] } | undefined;
+        let correction:
+          | {
+              original: string;
+              corrected: string;
+              changes: { original: string; corrected: string; distance: number }[];
+            }
+          | undefined;
         if (fuzzyCorrect) {
           const cr = correctQuery(query);
           if (cr.changes.length > 0) {
@@ -85,7 +104,15 @@ export function registerWebSearch(
         }
 
         const provenanceRef: { current: ProvenanceResult | null } = { current: null };
-        let data = await webSearch(query, limit, safeSearch, expandQuery, mergeSearchBackends, fuzzyCorrect, provenanceRef);
+        let data = await webSearch(
+          query,
+          limit,
+          safeSearch,
+          expandQuery,
+          mergeSearchBackends,
+          fuzzyCorrect,
+          provenanceRef,
+        );
         let intentFilterResult: IntentFilterResult<SearchResult> | undefined;
 
         // Apply intent filtering at the handler level when intent is provided

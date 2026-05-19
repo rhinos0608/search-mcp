@@ -6,6 +6,7 @@
  */
 
 import { z } from 'zod/v4';
+import { tolerant } from '../normalize.js';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { SearchConfig } from '../../config.js';
 import { logger } from '../../logger.js';
@@ -21,7 +22,11 @@ import { readabilityFallbackResult, extractionWarnings } from '../../utils/crawl
 import { extractionConfigSchema, validateExtractionConfig } from '../../utils/extractionConfig.js';
 import type { KnowledgeGraphHook } from '../../knowledge/hook.js';
 
-export function registerWebRead(server: McpServer, cfg: SearchConfig, kgHook?: KnowledgeGraphHook): void {
+export function registerWebRead(
+  server: McpServer,
+  cfg: SearchConfig,
+  kgHook?: KnowledgeGraphHook,
+): void {
   server.registerTool(
     'web_read',
     {
@@ -36,19 +41,11 @@ export function registerWebRead(server: McpServer, cfg: SearchConfig, kgHook?: K
           .optional()
           .default('bfs')
           .describe('Crawl strategy (default bfs)'),
-        maxDepth: z
-          .number()
-          .int()
-          .min(1)
-          .max(5)
+        maxDepth: tolerant(z.number().int().min(1).max(5))
           .optional()
           .default(1)
           .describe('Max link depth to follow (1–5, default 1 = single page)'),
-        maxPages: z
-          .number()
-          .int()
-          .min(1)
-          .max(100)
+        maxPages: tolerant(z.number().int().min(1).max(100))
           .optional()
           .default(1)
           .describe('Max pages to crawl (1–100, default 1)'),

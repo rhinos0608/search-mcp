@@ -27,6 +27,7 @@ import {
   type ToolWrappedResponse,
   type MakeResultOpts,
 } from './response.js';
+import { coerceNumericString, coerceArgs } from './normalize.js';
 import { correctQuery } from '../utils/fuzzyCorrection.js';
 import { applyIntentFilter } from '../utils/intentFilter.js';
 import type { IntentFilterResult } from '../utils/intentFilter.js';
@@ -34,7 +35,8 @@ import type { IntentFilterResult } from '../utils/intentFilter.js';
 // ── Input normalization ─────────────────────────────────────────────────────
 
 function nullishUndefined(value: unknown): unknown {
-  return value === null || value === '' ? undefined : value;
+  if (value === null || value === '') return undefined;
+  return coerceNumericString(value);
 }
 
 function omitTopLevelNullish(value: unknown): unknown {
@@ -142,8 +144,15 @@ function buildMergedSchema(family: FamilyDefinition): z.ZodObject<z.ZodRawShape>
   const names = family.actions.map((a) => a.name) as [string, ...string[]];
   const merged: Record<string, unknown> = {
     action: z.enum(names).describe(family.name + ' action: ' + names.join(', ')),
-    fuzzyCorrect: z.boolean().optional().default(true).describe('Auto-correct typos in query using fuzzy matching'),
-    intent: z.string().optional().describe('Natural language intent for result filtering when output exceeds ~5KB'),
+    fuzzyCorrect: z
+      .boolean()
+      .optional()
+      .default(true)
+      .describe('Auto-correct typos in query using fuzzy matching'),
+    intent: z
+      .string()
+      .optional()
+      .describe('Natural language intent for result filtering when output exceeds ~5KB'),
   };
   for (const [key, fieldType] of allFields) {
     if (key === 'action') continue;
@@ -199,7 +208,10 @@ export function registerFamily(
       // Find the matching action
       const action = family.actions.find((a) => a.name === actionName);
       if (!action) {
-        return errorResponse(new Error(`${family.name}: unknown action "${actionName}"`), family.name);
+        return errorResponse(
+          new Error(`${family.name}: unknown action "${actionName}"`),
+          family.name,
+        );
       }
 
       // Strict per-action validation — run the selected action's own
@@ -209,17 +221,18 @@ export function registerFamily(
       // Some MCP clients serialize omitted optional fields as null or
       // empty string; treat top-level null/emptyish as omitted while
       // preserving invalid required-field errors after per-action validation.
+      // Also coerce numeric strings to numbers in case the client
+      // sends them as strings.
       const parsed = (action.schema as z.ZodObject<z.ZodRawShape>).safeParse(
-        omitTopLevelNullish(rawArgs),
+        omitTopLevelNullish(coerceArgs(rawArgs as Record<string, unknown>)),
       );
       if (!parsed.success) {
         const issues = parsed.error.issues.map(
-          (i) => `${(i as { path: (string | number)[] }).path.join('.')}: ${(i as { message: string }).message}`,
+          (i) =>
+            `${(i as { path: (string | number)[] }).path.join('.')}: ${(i as { message: string }).message}`,
         );
         return errorResponse(
-          new Error(
-            `${family.name}.${actionName} validation error: ${issues.join('; ')}`,
-          ),
+          new Error(`${family.name}.${actionName} validation error: ${issues.join('; ')}`),
           `${family.name}.${actionName}`,
         );
       }
@@ -228,7 +241,10 @@ export function registerFamily(
       const actionIssue = action.configIssue?.(cfg) ?? null;
       if (actionIssue) {
         logger.warn({ tool: family.name, action: actionName, actionIssue }, 'Action unavailable');
-        return errorResponse(new Error(`${family.name}.${actionName} unavailable: ${actionIssue}`), `${family.name}.${actionName}`);
+        return errorResponse(
+          new Error(`${family.name}.${actionName} unavailable: ${actionIssue}`),
+          `${family.name}.${actionName}`,
+        );
       }
 
       const start = Date.now();
@@ -238,7 +254,13 @@ export function registerFamily(
       );
 
       // ── Context protection: fuzzy correction ──
-      let correction: { original: string; corrected: string; changes: { original: string; corrected: string; distance: number }[] } | undefined;
+      let correction:
+        | {
+            original: string;
+            corrected: string;
+            changes: { original: string; corrected: string; distance: number }[];
+          }
+        | undefined;
       const rawFuzzyCorrect = (rawArgs as Record<string, unknown>).fuzzyCorrect;
       const fuzzyOpt = rawFuzzyCorrect !== false;
       const rawQuery = typeof parsed.data.query === 'string' ? parsed.data.query : undefined;
@@ -278,11 +300,8 @@ export function registerFamily(
         let intentFilterResult: IntentFilterResult<unknown> | undefined;
         if (rawIntent && typeof rawIntent === 'string' && rawIntent.trim().length > 0) {
           if (Array.isArray(responseData)) {
-            const filtered = applyIntentFilter(
-              responseData as unknown[],
-              rawIntent,
-              5000,
-              (item) => JSON.stringify(item),
+            const filtered = applyIntentFilter(responseData as unknown[], rawIntent, 5000, (item) =>
+              JSON.stringify(item),
             );
             if (filtered.filtered) {
               intentFilterResult = filtered;
@@ -291,20 +310,28 @@ export function registerFamily(
           } else if (responseData !== null && typeof responseData === 'object') {
             const obj = responseData as Record<string, unknown>;
             const arrayKeys = [
-              'results', 'items', 'repositories', 'videos', 'posts', 'comments',
-              'papers', 'packages', 'works', 'questions', 'nodes', 'families', 'runs',
+              'results',
+              'items',
+              'repositories',
+              'videos',
+              'posts',
+              'comments',
+              'papers',
+              'packages',
+              'works',
+              'questions',
+              'nodes',
+              'families',
+              'runs',
             ];
             for (const key of arrayKeys) {
               if (Array.isArray(obj[key]) && (obj[key] as unknown[]).length > 0) {
-                const filtered = applyIntentFilter(
-                  obj[key] as unknown[],
-                  rawIntent,
-                  5000,
-                  (item) => JSON.stringify(item),
+                const filtered = applyIntentFilter(obj[key] as unknown[], rawIntent, 5000, (item) =>
+                  JSON.stringify(item),
                 );
                 if (filtered.filtered) {
                   intentFilterResult = filtered;
-                  (obj)[key] = filtered.results;
+                  obj[key] = filtered.results;
                   break;
                 }
               }
@@ -316,11 +343,8 @@ export function registerFamily(
               if (firstEntry) {
                 const firstKey = firstEntry[0];
                 const firstVal = firstEntry[1];
-                const filtered = applyIntentFilter(
-                  firstVal as unknown[],
-                  rawIntent,
-                  5000,
-                  (item) => JSON.stringify(item),
+                const filtered = applyIntentFilter(firstVal as unknown[], rawIntent, 5000, (item) =>
+                  JSON.stringify(item),
                 );
                 if (filtered.filtered) {
                   intentFilterResult = filtered;

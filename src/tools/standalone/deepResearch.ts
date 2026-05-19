@@ -20,6 +20,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as os from 'node:os';
 import { z } from 'zod/v4';
+import { tolerant } from '../normalize.js';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { SearchConfig } from '../../config.js';
 import {
@@ -37,7 +38,9 @@ import type { KnowledgeGraphHook } from '../../knowledge/hook.js';
 // ── Schema (flat object — MCP clients render flat properties) ──────────────
 
 const deepResearchSchema = z.object({
-  action: z.enum(['start', 'poll', 'list', 'cancel', 'save', 'run']).describe('Which action to perform'),
+  action: z
+    .enum(['start', 'poll', 'list', 'cancel', 'save', 'run'])
+    .describe('Which action to perform'),
   jobId: z.string().optional().describe('Job ID (required for poll, cancel, and save)'),
   path: z
     .string()
@@ -63,20 +66,12 @@ const deepResearchSchema = z.object({
         '- exhaustive: 100+ sources, comprehensive coverage (~45min)\n' +
         '- tree: breadth×depth recursive exploration (4 sub-queries × 2 levels, ~15min)',
     ),
-  maxTimeMs: z
-    .number()
-    .int()
-    .min(10_000)
-    .max(2_700_000)
+  maxTimeMs: tolerant(z.number().int().min(10_000).max(2_700_000))
     .optional()
     .describe(
       'Maximum runtime in milliseconds (10s to 45min). If omitted, the depth profile default is used.',
     ),
-  timeoutMs: z
-    .number()
-    .int()
-    .min(10_000)
-    .max(300_000)
+  timeoutMs: tolerant(z.number().int().min(10_000).max(300_000))
     .optional()
     .describe(
       'Maximum wait in milliseconds for the run convenience action (10s to 5min). Defaults to 60s. On timeout, returns partial status with jobId and retry metadata.',
@@ -359,22 +354,17 @@ async function handleRun(
     if (now >= deadline) {
       const elapsed = now - start;
       return successResponse(
-        makeResult(
-          'deep_research',
-          { ...snapshot, jobId },
-          elapsed,
-          {
-            partial: true,
-            retry: {
-              recommended: true,
-              reason: 'Research did not complete within the timeout window. Poll for results.',
-              minimalCall: {
-                action: 'poll',
-                jobId,
-              },
+        makeResult('deep_research', { ...snapshot, jobId }, elapsed, {
+          partial: true,
+          retry: {
+            recommended: true,
+            reason: 'Research did not complete within the timeout window. Poll for results.',
+            minimalCall: {
+              action: 'poll',
+              jobId,
             },
           },
-        ),
+        }),
       );
     }
 

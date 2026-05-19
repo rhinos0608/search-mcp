@@ -6,6 +6,7 @@
  */
 
 import { z } from 'zod/v4';
+import { tolerant } from '../normalize.js';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { SearchConfig } from '../../config.js';
 import type { SemanticCrawlBatchResult, SemanticCrawlSource } from '../../types.js';
@@ -59,18 +60,16 @@ export function registerSemanticCrawl(
               preferLocale: z
                 .string()
                 .optional()
-                .describe('Preferred locale when collapsing locale-duplicate sitemap URLs, e.g. en or en-US'),
+                .describe(
+                  'Preferred locale when collapsing locale-duplicate sitemap URLs, e.g. en or en-US',
+                ),
             }),
             z.object({
               type: z
                 .literal('search')
                 .describe('Use web search to discover seed URLs, then crawl them'),
               query: z.string().describe('Web search query to discover seed URLs, then crawl them'),
-              maxSeedUrls: z
-                .number()
-                .int()
-                .min(1)
-                .max(20)
+              maxSeedUrls: tolerant(z.number().int().min(1).max(20))
                 .optional()
                 .default(10)
                 .describe('Max URLs to collect from web search (1–20, default 10)'),
@@ -99,7 +98,9 @@ export function registerSemanticCrawl(
                 .boolean()
                 .optional()
                 .default(true)
-                .describe('Run a lightweight content-based prefilter before downloading full files'),
+                .describe(
+                  'Run a lightweight content-based prefilter before downloading full files',
+                ),
             }),
             z.object({
               type: z
@@ -116,18 +117,17 @@ export function registerSemanticCrawl(
             'Source of the corpus to crawl. Valid source.type values: "url", "sitemap", "search", "github", "cached". ' +
               'Use "cached" with a corpusId returned by semantic_crawl, or call semantic_crawl_list_corpora to discover cached corpora.',
           ),
-        query: z.string().optional().describe('The semantic search query — what are you looking for?'),
+        query: z
+          .string()
+          .optional()
+          .describe('The semantic search query — what are you looking for?'),
         queries: z
           .array(z.string())
           .min(1)
           .max(10)
           .optional()
           .describe('Batch query mode for cached corpora. Provide multiple queries in one call.'),
-        topK: z
-          .number()
-          .int()
-          .min(1)
-          .max(50)
+        topK: tolerant(z.number().int().min(1).max(50))
           .optional()
           .default(10)
           .describe('Number of most-relevant chunks to return (1–50, default 10)'),
@@ -138,21 +138,13 @@ export function registerSemanticCrawl(
           .describe(
             'Crawl strategy. bfs visits all links at depth N before depth N+1; dfs follows one path deeply before backtracking.',
           ),
-        maxDepth: z
-          .number()
-          .int()
-          .min(0)
-          .max(5)
+        maxDepth: tolerant(z.number().int().min(0).max(5))
           .optional()
           .default(2)
           .describe(
             'Maximum link-follow depth from seed URL. 0 = only seed page(s). Sitemap/search modes force this to 0 because URLs are preselected.',
           ),
-        maxPages: z
-          .number()
-          .int()
-          .min(1)
-          .max(100)
+        maxPages: tolerant(z.number().int().min(1).max(100))
           .optional()
           .default(20)
           .describe(
@@ -165,11 +157,7 @@ export function registerSemanticCrawl(
           .describe(
             'Follow links to external domains (default false). External pages share the same maxPages budget.',
           ),
-        maxBytes: z
-          .number()
-          .int()
-          .min(1)
-          .max(DEFAULT_SEMANTIC_MAX_BYTES)
+        maxBytes: tolerant(z.number().int().min(1).max(DEFAULT_SEMANTIC_MAX_BYTES))
           .optional()
           .default(DEFAULT_SEMANTIC_MAX_BYTES)
           .describe('Maximum total bytes to crawl (1–250MB, default 250MB)'),
@@ -178,10 +166,7 @@ export function registerSemanticCrawl(
           .optional()
           .default(false)
           .describe('Apply cross-encoder re-ranking to top candidates (default false)'),
-        minScore: z
-          .number()
-          .min(0)
-          .max(1)
+        minScore: tolerant(z.number().min(0).max(1))
           .optional()
           .describe('Minimum bi-encoder score required for returned chunks (0–1)'),
         useContextualEmbeddings: z
@@ -189,11 +174,7 @@ export function registerSemanticCrawl(
           .optional()
           .default(false)
           .describe('Use LLM-generated context for embedding corpus chunks (default false)'),
-        maxChunkTokens: z
-          .number()
-          .int()
-          .min(100)
-          .max(8000)
+        maxChunkTokens: tolerant(z.number().int().min(100).max(8000))
           .optional()
           .describe(
             'Override max tokens per chunk (100–8000, default 400). ' +
@@ -214,11 +195,7 @@ export function registerSemanticCrawl(
           .describe(
             'Include page-level structured elements in the response (default true). Set false for lower-context output.',
           ),
-        elementsLimit: z
-          .number()
-          .int()
-          .min(0)
-          .max(1000)
+        elementsLimit: tolerant(z.number().int().min(0).max(1000))
           .optional()
           .describe(
             'Maximum structured elements to include when includeElements is true (0–1000).',
@@ -241,20 +218,13 @@ export function registerSemanticCrawl(
           .describe(
             'Wait for a CSS selector (css:.selector) or JS expression (js:() => boolean) before extracting content. Useful for SPAs and dynamic content.',
           ),
-        delayBeforeReturnHtml: z
-          .number()
-          .min(0)
-          .max(30)
+        delayBeforeReturnHtml: tolerant(z.number().min(0).max(30))
           .optional()
           .default(0.1)
           .describe(
             'Extra seconds to wait after page load for dynamic content to settle (0–30, default 0.1)',
           ),
-        pageTimeout: z
-          .number()
-          .int()
-          .min(1000)
-          .max(300000)
+        pageTimeout: tolerant(z.number().int().min(1000).max(300000))
           .optional()
           .default(60000)
           .describe('Page operation timeout in milliseconds (1000–300000, default 60000)'),
@@ -318,7 +288,13 @@ export function registerSemanticCrawl(
         jsCode?: string;
       };
       logger.info(
-        { tool: 'semantic_crawl', sourceType: source.type, query, queryCount: queries?.length, topK },
+        {
+          tool: 'semantic_crawl',
+          sourceType: source.type,
+          query,
+          queryCount: queries?.length,
+          topK,
+        },
         'Tool invoked',
       );
       const start = Date.now();
@@ -328,7 +304,9 @@ export function registerSemanticCrawl(
         }
 
         const singleQuery = query?.trim();
-        const batchQueries = queries?.map((value) => value.trim()).filter((value) => value.length > 0);
+        const batchQueries = queries
+          ?.map((value) => value.trim())
+          .filter((value) => value.length > 0);
         if ((singleQuery ? 1 : 0) + (batchQueries && batchQueries.length > 0 ? 1 : 0) !== 1) {
           throw new Error('Provide exactly one of `query` or `queries`.');
         }

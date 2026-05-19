@@ -6,6 +6,7 @@
  */
 
 import { z } from 'zod/v4';
+import { tolerant } from '../normalize.js';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { SearchConfig } from '../../config.js';
 import { logger } from '../../logger.js';
@@ -44,9 +45,7 @@ export function registerSemanticJobs(server: McpServer, cfg: SearchConfig): void
             'Preferred work modes. Used for ranking boost - matches appear higher in results. ' +
               'Set enforceConstraints: true to filter out non-matches.',
           ),
-        maxSalary: z
-          .number()
-          .positive()
+        maxSalary: tolerant(z.number().positive())
           .optional()
           .describe(
             'Maximum annual salary. Listings exceeding this are ranked lower. ' +
@@ -59,27 +58,15 @@ export function registerSemanticJobs(server: McpServer, cfg: SearchConfig): void
             'Title keywords to exclude. Used for ranking penalty - excluded keywords ranked lower. ' +
               'Set enforceConstraints: true to filter out listings with these keywords.',
           ),
-        maxPages: z
-          .number()
-          .int()
-          .min(1)
-          .max(50)
+        maxPages: tolerant(z.number().int().min(1).max(50))
           .optional()
           .default(20)
           .describe('Maximum number of job listing pages to crawl (1–50, default 20)'),
-        topK: z
-          .number()
-          .int()
-          .min(1)
-          .max(50)
+        topK: tolerant(z.number().int().min(1).max(50))
           .optional()
           .default(10)
           .describe('Number of top-ranked job listings to return (1–50, default 10)'),
-        maxBytes: z
-          .number()
-          .int()
-          .min(1)
-          .max(DEFAULT_SEMANTIC_MAX_BYTES)
+        maxBytes: tolerant(z.number().int().min(1).max(DEFAULT_SEMANTIC_MAX_BYTES))
           .optional()
           .default(DEFAULT_SEMANTIC_MAX_BYTES)
           .describe('Maximum total bytes of listing text to embed (1–250MB, default 250MB)'),
@@ -139,7 +126,13 @@ export function registerSemanticJobs(server: McpServer, cfg: SearchConfig): void
       const start = Date.now();
       try {
         let query_ = query;
-        let correction: { original: string; corrected: string; changes: { original: string; corrected: string; distance: number }[] } | undefined;
+        let correction:
+          | {
+              original: string;
+              corrected: string;
+              changes: { original: string; corrected: string; distance: number }[];
+            }
+          | undefined;
         if (fuzzyCorrect) {
           const cr = correctQuery(query);
           if (cr.changes.length > 0) {
@@ -167,16 +160,19 @@ export function registerSemanticJobs(server: McpServer, cfg: SearchConfig): void
           enforceConstraints,
         });
         const elapsed = Date.now() - start;
-        let intentFilterResult: IntentFilterResult<typeof data.results[number]> | undefined;
+        let intentFilterResult: IntentFilterResult<(typeof data.results)[number]> | undefined;
         if (intent) {
           intentFilterResult = applyIntentFilter(
             data.results,
             intent,
             5000,
-            (item) => `${item.listing.title} ${item.listing.company ?? ''} ${item.listing.location ?? ''}`,
+            (item) =>
+              `${item.listing.title} ${item.listing.company ?? ''} ${item.listing.location ?? ''}`,
           );
         }
-        const filteredResults = intentFilterResult?.filtered ? intentFilterResult.results : data.results;
+        const filteredResults = intentFilterResult?.filtered
+          ? intentFilterResult.results
+          : data.results;
 
         const result = makeResult(
           'semantic_jobs',
