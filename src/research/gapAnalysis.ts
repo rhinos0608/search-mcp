@@ -467,7 +467,12 @@ export class GapFiller {
         continue;
       }
 
-      this.state.addGap(gap);
+      const addedId = this.state.addGap(gap);
+      if (addedId === '') {
+        // Gap rejected — capacity reached
+        remaining.push(gap);
+        continue;
+      }
       existingKeys.add(key);
       filled++;
     }
@@ -528,10 +533,13 @@ export class GapFiller {
 
     // Escape valve: if >50% well-covered AND we have at least one pass per
     // sub-question, it's safe to stop (prevents infinite looping on niche topics).
-    if (wellCoveredRatio > 0.5 && currentLoops >= state.subQuestions.length) return false;
+    // BUT don't stop if high-priority gaps (priority <= 2) are still open.
+    const hasHighPriorityGaps = openGaps.some((g) => g.priority <= 2);
+    if (!hasHighPriorityGaps && wellCoveredRatio > 0.5 && currentLoops >= state.subQuestions.length) return false;
 
     // Niche-topic escape: only after the configured minimum sanity passes.
-    if (currentLoops >= Math.max(2, minGapLoops) && wellCoveredRatio >= 0.3) return false;
+    // Also skips if any high-priority gaps remain.
+    if (!hasHighPriorityGaps && currentLoops >= Math.max(2, minGapLoops) && wellCoveredRatio >= 0.3) return false;
 
     return true;
   }

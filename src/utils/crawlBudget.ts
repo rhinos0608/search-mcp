@@ -53,5 +53,6 @@ export function isLikelyJsHeavySite(opts: {
 }
 
 export function estimateSerializedBytes(value: unknown): number {
-  return Buffer.byteLength(JSON.stringify(value), 'utf8');
+  const json = JSON.stringify(value);
+  return json ? Buffer.byteLength(json, 'utf8') : 0;
 }

@@ -80,7 +80,19 @@ export function shouldSkipDomain(domain: string): boolean {
   const current = stats.get(domain);
   if (current === undefined) return false;
 
-  return current.total > SKIP_THRESHOLD_TOTAL && current.successRate < SKIP_THRESHOLD_RATE;
+  // Use the raw (unrounded) success rate for threshold comparison
+  // to avoid rounding up just above the skip threshold
+  const cutoff = Date.now() - 7 * 24 * 60 * 60 * 1000;
+  let total = 0;
+  let successes = 0;
+  for (const outcome of outcomes) {
+    if (outcome.domain !== domain) continue;
+    if (outcome.timestamp < cutoff) continue;
+    total++;
+    if (outcome.success) successes++;
+  }
+
+  return total > SKIP_THRESHOLD_TOTAL && successes / total < SKIP_THRESHOLD_RATE;
 }
 
 /** Prune old entries and clear all stats (for testing). */

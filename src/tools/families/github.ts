@@ -9,7 +9,8 @@
  * Actions:
  *   repo        — Repository metadata + README
  *   file        — Read a file from a repository
- *   tree        — List directory contents
+ *   list_dir    — List immediate contents of a directory (non-recursive)
+ *   tree        — List directory contents (supports recursive / monorepo)
  *   search      — Code search via GitHub Search API
  *   trending    — Trending repositories on GitHub
  *   code_search — AST-aware semantic code search (RAG)
@@ -149,6 +150,33 @@ const treeAction = z.object({
     .boolean()
     .optional()
     .describe('Auto-detect monorepo structure. Defaults true when path is empty (root).'),
+});
+
+const listDirAction = z.object({
+  action: z.literal('list_dir').describe('List immediate contents of a directory (non-recursive)'),
+  owner: z
+    .string()
+    .regex(/^[a-zA-Z0-9](?:[a-zA-Z0-9._-]*[a-zA-Z0-9])?$/)
+    .optional()
+    .describe('GitHub username or organisation'),
+  repo: z
+    .string()
+    .regex(/^[a-zA-Z0-9._-]{1,100}$/)
+    .optional()
+    .describe('Repository name'),
+  repository: z
+    .string()
+    .optional()
+    .describe('Repository as "owner/repo" or GitHub URL (alternative to owner+repo fields)'),
+  path: z.string().optional().default('').describe('Directory path within the repo'),
+  branch: z.string().optional().describe('Git ref (branch, tag, or commit SHA)'),
+  limit: z
+    .number()
+    .int()
+    .min(1)
+    .max(10000)
+    .optional()
+    .describe('Max items (1–10000, omit for unlimited)'),
 });
 
 const searchAction = z.object({
@@ -299,7 +327,8 @@ const githubFamily: FamilyDefinition = {
   description:
     'Work with GitHub repositories, files, directory trees, code search, trending repos, ' +
     'and semantic code search. Choose the `action` field to select what to do: ' +
-    '`repo` for metadata, `file` for reading a known file, `tree` for listing contents, ' +
+    '`repo` for metadata, `file` for reading a known file, `list_dir` for listing a ' +
+    'directory, `tree` for full tree listing, ' +
     '`search` for GitHub code search, `trending` for trending repos (no auth needed), ' +
     'and `code_search` for AST-aware semantic code retrieval.',
   actions: [
@@ -433,6 +462,47 @@ const githubFamily: FamilyDefinition = {
       },
     },
     {
+      name: 'list_dir',
+      description: 'List the immediate files and directories inside a given folder in a repository',
+      schema: listDirAction,
+      handler: async (args, _cfg) => {
+        void _cfg;
+        const { owner, repo, repository, path, branch, limit } = args as {
+          owner?: string;
+          repo?: string;
+          repository?: string;
+          path: string;
+          branch?: string;
+          limit?: number;
+        };
+
+        let resolvedOwner = owner;
+        let resolvedRepo = repo;
+        if ((!resolvedOwner || !resolvedRepo) && repository) {
+          const loc = resolveGitHubRepoLocator(repository);
+          if (loc) {
+            resolvedOwner = loc.owner;
+            resolvedRepo = loc.repo;
+          }
+        }
+        if (!resolvedOwner || !resolvedRepo) {
+          throw new Error(
+            'Missing repository: provide `owner` + `repo` or `repository` (owner/repo or GitHub URL)',
+          );
+        }
+
+        const data = await getGitHubRepoTree(
+          resolvedOwner,
+          resolvedRepo,
+          path,
+          branch,
+          false,
+          limit,
+        );
+        return data;
+      },
+    },
+    {
       name: 'search',
       description:
         'Search code across GitHub using the GitHub Search API or AST-aware semantic code search',
@@ -459,12 +529,12 @@ const githubFamily: FamilyDefinition = {
           fallbackToBasicSearch?: boolean;
         };
 
-        // Route to AST-aware semantic code search by default
-        if (useCodeSearchAsDefault) {
-          const repoSpec = owner && repo ? `${owner}/${repo}` : undefined;
+        // Route to AST-aware semantic code search by default (requires a repo)
+        const repoSpec = owner && repo ? `${owner}/${repo}` : undefined;
+        if (useCodeSearchAsDefault && repoSpec) {
           const data = await semanticGitHubCode({
             query,
-            repo: repoSpec ?? '',
+            repo: repoSpec,
             ...(language !== undefined ? { language } : {}),
             maxFiles: limit,
             topK: Math.min(limit, 50),

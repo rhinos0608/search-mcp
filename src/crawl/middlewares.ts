@@ -677,7 +677,7 @@ export class StatsRecorderMiddleware implements CrawlMiddleware {
     statsCollector.recordHistogram('crawl.pages.per_seed', resp.result.totalPages);
 
     for (const page of resp.result.pages) {
-      const domain = safeDomain(ctx.request.url);
+      const domain = safeDomain(page.url);
       recordOutcome({
         url: page.url,
         domain,

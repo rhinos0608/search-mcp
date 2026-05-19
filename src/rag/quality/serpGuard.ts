@@ -89,8 +89,6 @@ const NON_JOB_KEYWORDS: readonly string[] = [
   'guide',
   'tutorial',
   'article',
-  'salary',
-  'pay',
   'review',
   'rating',
   'webroot',
@@ -121,9 +119,18 @@ function isResultRelevant(result: SearchResult, locationTerms: string[]): boolea
   if (!hasJobKeyword) return false;
 
   // Must contain at least one location keyword OR be from an AU domain
-  const hasLocationKeyword =
-    locationTerms.some((term) => haystack.includes(term)) ||
-    AU_LOCATION_KEYWORDS.some((kw) => haystack.includes(kw));
+  const // Check location by looking for each location term as a word-boundary match
+    // to avoid false positives (e.g. "au" matching "Australia" is fine, but
+    // "au" matching "August" or "auto" should not count)
+    hasLocationKeyword =
+      locationTerms.some((term) => {
+        const escaped = term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        return new RegExp(`\\b${escaped}\\b`, 'i').test(haystack);
+      }) ||
+      AU_LOCATION_KEYWORDS.some((kw) => {
+        const escaped = kw.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        return new RegExp(`\\b${escaped}\\b`, 'i').test(haystack);
+      });
   if (!hasLocationKeyword) return false;
 
   return true;

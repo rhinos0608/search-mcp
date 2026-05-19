@@ -76,7 +76,7 @@ export async function extractTables(
           const rows = Array.from(table.querySelectorAll('tr'));
           const dataRows: Record<string, string>[] = [];
 
-          const startRow = thElements.length > 0 ? 1 : 1;
+          const startRow = headers.length > 0 ? 1 : 0;
           for (let i = startRow; i < rows.length; i++) {
             const row = rows[i];
             if (!row) continue;

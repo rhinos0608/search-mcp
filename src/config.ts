@@ -874,33 +874,39 @@ export function loadConfig(): SearchConfig {
     }
   }
 
-  if (existsSync(encPath) && configKey) {
-    try {
-      const buf = readFileSync(encPath);
-      const encryptedConfig = decryptConfig(buf, configKey) as SearchConfig;
-      // Deep merge encrypted config over JSON config with safety checks
-      fileConfig = {
-        ...fileConfig,
-        ...encryptedConfig,
-        github: {
-          ...(fileConfig.github ?? {}),
-          ...encryptedConfig.github,
-        },
-        reddit: {
-          ...(fileConfig.reddit ?? {}),
-          ...encryptedConfig.reddit,
-        },
-        embeddingSidecar: {
-          ...(fileConfig.embeddingSidecar ?? {}),
-          ...encryptedConfig.embeddingSidecar,
-        },
-      };
-      logger.info(
-        { hasToken: !!encryptedConfig.github.token },
-        'Merged encrypted config from config.enc',
+  if (existsSync(encPath)) {
+    if (!configKey) {
+      logger.warn(
+        'config.enc exists but SEARCH_MCP_CONFIG_KEY is not set — encrypted config will be ignored',
       );
-    } catch (err) {
-      logger.warn({ err }, 'Failed to decrypt config.enc — falling back to base config');
+    } else {
+      try {
+        const buf = readFileSync(encPath);
+        const encryptedConfig = (decryptConfig(buf, configKey) as SearchConfig) ?? {};
+        // Deep merge encrypted config over JSON config with safety checks
+        fileConfig = {
+          ...fileConfig,
+          ...encryptedConfig,
+          github: {
+            ...(fileConfig.github ?? {}),
+            ...(encryptedConfig?.github && typeof encryptedConfig.github === 'object' ? encryptedConfig.github : {}),
+          },
+          reddit: {
+            ...(fileConfig.reddit ?? {}),
+            ...(encryptedConfig?.reddit && typeof encryptedConfig.reddit === 'object' ? encryptedConfig.reddit : {}),
+          },
+          embeddingSidecar: {
+            ...(fileConfig.embeddingSidecar ?? {}),
+            ...(encryptedConfig?.embeddingSidecar && typeof encryptedConfig.embeddingSidecar === 'object' ? encryptedConfig.embeddingSidecar : {}),
+          },
+        };
+        logger.info(
+          { hasToken: !!encryptedConfig?.github?.token },
+          'Merged encrypted config from config.enc',
+        );
+      } catch (err) {
+        logger.warn({ err }, 'Failed to decrypt config.enc — falling back to base config');
+      }
     }
   }
 

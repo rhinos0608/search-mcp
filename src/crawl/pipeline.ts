@@ -98,18 +98,17 @@ export class ChunkPipeline {
           if (err instanceof DropChunk) {
             const count = droppedReasons.get(err.reason) ?? 0;
             droppedReasons.set(err.reason, count + 1);
-            // Re-throw DropChunk at page level if no chunks remain
-            if (workingChunks.length === 1) {
-              // The whole page was dropped
-              workingChunks = [];
+            // Remove the dropped chunk from working set
+            workingChunks = workingChunks.filter((chunk) => {
+              return !('dropChunkId' in chunk && chunk.dropChunkId === err.reason);
+            });
+            // If no chunks remain, the whole page was dropped
+            if (workingChunks.length === 0) {
               break;
             }
-            // Otherwise, just skip the current placeholder — shouldn't happen
-            // since DropChunk is meant for individual chunks post-chunking
-            workingChunks = [];
-            break;
+          } else {
+            throw err;
           }
-          throw err;
         }
       }
 

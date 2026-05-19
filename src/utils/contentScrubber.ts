@@ -140,8 +140,14 @@ const PATTERNS: Pattern[] = [
   {
     type: 'xss_injection',
     confidence: 0.85,
-    regex: /on(?:error|load|click|mouseover)\s*=\s*['"][^'"]{0,1000}/gi,
-    description: 'Inline event handler',
+    regex: /on(?:error|load|click|mouseover|submit|focus|blur|change|dblclick|keydown|keyup|keypress|mousedown|mouseup|mousemove|mouseenter|mouseleave|scroll|resize|drag|drop|contextmenu)\s*=\s*['"][^'"]{0,1000}/gi,
+    description: 'Inline event handler (quoted)',
+  },
+  {
+    type: 'xss_injection',
+    confidence: 0.85,
+    regex: /<[a-zA-Z][^>]*\s+on(?:error|load|click|mouseover|submit|focus|blur|change|dblclick|keydown|keyup|keypress|mousedown|mouseup|mousemove|mouseenter|mouseleave|scroll|resize|drag|drop|contextmenu)\s*=\s*[^\s>"'`]+/gi,
+    description: 'Inline event handler (unquoted)',
   },
 ];
 
@@ -165,6 +171,8 @@ export function scrubContent(rawContent: string): ScrubResult {
       });
       content = content.replace(match[0], '[REDACTED]');
     }
+    // Reset regex lastIndex if the regex is stateful (global/sticky)
+    pattern.regex.lastIndex = 0;
   }
 
   if (threats.length === 0) {

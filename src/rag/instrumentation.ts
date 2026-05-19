@@ -263,6 +263,12 @@ export function instrumentPipeline(adapter: string, query: string): PipelineInst
     },
 
     traceEnd(): RetrievalRunTrace {
+      // End any spans that are still in 'started' state
+      for (const span of run.spans) {
+        if (span.status === 'started') {
+          endSpan(span, 'completed');
+        }
+      }
       return completeRun(run.runId) ?? run;
     },
   };

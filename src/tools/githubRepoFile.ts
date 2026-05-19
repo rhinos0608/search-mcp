@@ -416,7 +416,7 @@ export async function getGitHubRepoFile(
   if (!response.ok) {
     if (response.status === 403) {
       // githubFetch already consumed the body. Re-fetch the error body
-      // to distinguish large-file 403 from rate-limit 403.
+      // to distinguish large-file 403 from rate-limit or permission 403.
       let errorText: string | undefined;
       try {
         const controller = new AbortController();
@@ -430,8 +430,10 @@ export async function getGitHubRepoFile(
         clearTimeout(timeout);
         errorText = await rawResp.text();
       } catch {
-        // Could not re-fetch — fall through to rate limit below
+        // Could not re-fetch — fall through to rate limit check below
       }
+
+      // Check for known non-rate-limit 403 responses first
       if (
         errorText &&
         (errorText.includes('too large') ||
@@ -467,11 +469,37 @@ export async function getGitHubRepoFile(
           { statusCode: 403, backend: 'github' },
         );
       }
-      getTracker('github').recordLimitHit();
-      throw rateLimitError('GitHub API rate limit exceeded. Try again later.', {
-        statusCode: 403,
-        backend: 'github',
-      });
+
+      // Check for permission/auth failures (not found in private repo, etc.)
+      if (
+        errorText &&
+        (errorText.includes('Not Found') ||
+          errorText.includes('not found') ||
+          errorText.includes('Repository access blocked') ||
+          errorText.includes('permission') ||
+          errorText.includes('Permission'))
+      ) {
+        throw validationError(
+          `GitHub returned 403 for "${path}" — access denied. The file may not exist or the token lacks permission.`,
+          { statusCode: 403, backend: 'github' },
+        );
+      }
+
+      // Check for rate limit headers
+      const rateInfo = getTracker('github');
+      if (!rateInfo.canProceed()) {
+        rateInfo.recordLimitHit();
+        throw rateLimitError('GitHub API rate limit exceeded. Try again later.', {
+          statusCode: 403,
+          backend: 'github',
+        });
+      }
+
+      // Fallback: unknown 403 — report validation error, not rate limit
+      throw validationError(
+        `GitHub returned 403 for "${path}". The file may be too large, require different permissions, or the API rate limit may be exhausted.`,
+        { statusCode: 403, backend: 'github' },
+      );
     }
     handleGitHubError(response.status, response.statusText, `${owner}/${repo}/${path}`);
   }

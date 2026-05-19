@@ -258,6 +258,145 @@ function flushStateToDb(state: ProjectionState): void {
 }
 
 // ────────────────────────────────────────────────────────────────────
+// Load existing state from DB for incremental rebuilds
+// ────────────────────────────────────────────────────────────────────
+
+function loadStateFromDb(state: ProjectionState): void {
+  const db = getKgDb();
+  if (db === null) return;
+
+  try {
+    // Load nodes
+    const nodes = db.prepare('SELECT * FROM kg_nodes').all() as Record<string, unknown>[];
+    for (const row of nodes) {
+      state.nodes.set(row.id as string, {
+        id: row.id as string,
+        label: row.label as string,
+        canonicalLabel: (row.canonical_label as string | null) ?? '',
+        type: row.type as string,
+        extractionConfidence: (row.extraction_confidence as number | null) ?? null,
+        primaryFamilyId: (row.primary_family_id as string | null) ?? null,
+        aliases: (row.aliases as string | null) ?? '',
+        firstSeenRunId: (row.first_seen_run_id as string | null) ?? null,
+        lastUpdated: (row.last_updated as string | null) ?? null,
+        metadata: (row.metadata as string | null) ?? '',
+      });
+    }
+
+    // Load edges
+    const edges = db.prepare('SELECT * FROM kg_edges').all() as Record<string, unknown>[];
+    for (const row of edges) {
+      const edgeId = row.id as string;
+      const fromId = row.from_id as string;
+      const toId = row.to_id as string;
+      state.edges.set(edgeId, {
+        id: edgeId,
+        fromId,
+        toId,
+        type: row.type as string,
+        evidenceStrength: (row.evidence_strength as number | null) ?? null,
+        evidence: (row.evidence as string | null) ?? null,
+        evidenceVerbatim: (row.evidence_verbatim as number | null) ?? 0,
+        sourceId: (row.source_id as string | null) ?? null,
+        runId: (row.run_id as string | null) ?? null,
+        createdAt: (row.created_at as string | null) ?? null,
+      });
+      // Build reverse indexes
+      const fromSet = state.edgesByFromId.get(fromId) ?? new Set();
+      fromSet.add(edgeId);
+      state.edgesByFromId.set(fromId, fromSet);
+      const toSet = state.edgesByToId.get(toId) ?? new Set();
+      toSet.add(edgeId);
+      state.edgesByToId.set(toId, toSet);
+    }
+
+    // Load families
+    const families = db.prepare('SELECT * FROM kg_families').all() as Record<string, unknown>[];
+    for (const row of families) {
+      state.families.set(row.id as string, {
+        id: row.id as string,
+        label: row.label as string,
+        description: (row.description as string | null) ?? null,
+        createdAt: (row.created_at as string | null) ?? null,
+        lastActivity: (row.last_activity as string | null) ?? null,
+        runCount: (row.run_count as number | null) ?? null,
+        relatedFamilies: (row.related_families as string | null) ?? null,
+      });
+    }
+
+    // Load sources
+    const sources = db.prepare('SELECT * FROM kg_sources').all() as Record<string, unknown>[];
+    for (const row of sources) {
+      state.sources.set(row.id as string, {
+        id: row.id as string,
+        url: row.url as string,
+        canonicalUrl: (row.canonical_url as string | null) ?? null,
+        title: (row.title as string | null) ?? null,
+        domain: (row.domain as string | null) ?? null,
+        sourceKind: (row.source_kind as string | null) ?? null,
+        authorityScore: (row.authority_score as number | null) ?? null,
+        runId: row.run_id as string,
+        retrievedAt: row.retrieved_at as string,
+        publishedAt: (row.published_at as string | null) ?? null,
+        contentHash: row.content_hash as string,
+        rawHash: (row.raw_hash as string | null) ?? null,
+        toolName: (row.tool_name as string | null) ?? null,
+      });
+    }
+
+    // Load node families
+    const nodeFams = db.prepare('SELECT * FROM kg_node_families').all() as Record<string, unknown>[];
+    for (const row of nodeFams) {
+      const nf = {
+        nodeId: row.node_id as string,
+        familyId: row.family_id as string,
+        confidence: (row.confidence as number | null) ?? null,
+        isPrimary: (row.is_primary as number | null) ?? 0,
+        runId: (row.run_id as string | null) ?? null,
+        classifierVersion: (row.classifier_version as string | null) ?? null,
+      };
+      state.nodeFamilies.push(nf);
+      state.nodeFamilyKeys.add(`${nf.nodeId}|${nf.familyId}`);
+    }
+
+    // Load event refs
+    const refs = db.prepare('SELECT * FROM kg_event_refs').all() as Record<string, unknown>[];
+    for (const row of refs) {
+      state.eventRefs.push({
+        eventId: row.event_id as string,
+        refType: row.ref_type as string,
+        refId: row.ref_id as string,
+      });
+    }
+
+    logger.info(
+      {
+        nodes: state.nodes.size,
+        edges: state.edges.size,
+        families: state.families.size,
+        sources: state.sources.size,
+        nodeFamilies: state.nodeFamilies.length,
+        eventRefs: state.eventRefs.length,
+      },
+      'kg: loaded existing projection state from DB for incremental rebuild',
+    );
+  } catch (err) {
+    state.nodes.clear();
+    state.edges.clear();
+    state.edgesByFromId.clear();
+    state.edgesByToId.clear();
+    state.families.clear();
+    state.sources.clear();
+    state.nodeFamilies.length = 0;
+    state.nodeFamilyKeys.clear();
+    state.eventRefs.length = 0;
+    state.rolledBackRuns.clear();
+    state.mergeHistory.clear();
+    logger.warn({ err }, 'kg: failed to load state from DB for incremental rebuild');
+  }
+}
+
+// ────────────────────────────────────────────────────────────────────
 // Main rebuild function
 // ────────────────────────────────────────────────────────────────────
 
@@ -300,6 +439,10 @@ export function rebuildProjection(
   const state = createEmptyState();
 
   // Step 1: Determine starting cursor
+  // For genesis rebuilds, start from the beginning. For incremental rebuilds
+  // (fromEventId), load the current projection state from DB tables first,
+  // then replay only new events on top. This avoids truncating older state
+  // that the cursor skips.
   let fromGenesis = true;
   let fromEventId: string | undefined;
 
@@ -341,6 +484,11 @@ export function rebuildProjection(
         state.rolledBackRuns.add(payload.run_id);
       }
     }
+  }
+
+  // Step 3a.5: For incremental rebuilds, load existing state from DB first
+  if (!fromGenesis && events.length > 0) {
+    loadStateFromDb(state);
   }
 
   // Step 3b: Replay events into in-memory state

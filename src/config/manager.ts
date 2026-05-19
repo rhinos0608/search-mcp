@@ -1,5 +1,6 @@
 import { readFileSync, writeFileSync, existsSync, renameSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { randomBytes } from 'node:crypto';
 import { encryptConfig, decryptConfig } from './crypto.js';
 import { loadConfig, resetConfig } from '../config.js';
@@ -164,8 +165,11 @@ function validateConfigValues(cfg: Record<string, unknown>): string | null {
   return null;
 }
 
+// Project root: dist/config/manager.js → resolve two levels up
+const MODULE_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
+
 export interface ConfigManagerOptions {
-  configDir?: string;  // defaults to process.cwd()
+  configDir?: string;  // defaults to directory containing this module's project root
 }
 
 export class ConfigKeyMissingError extends Error {
@@ -183,7 +187,7 @@ export class ConfigManager {
   private readonly configPath: string;
 
   constructor(opts: ConfigManagerOptions = {}) {
-    const dir = opts.configDir ?? process.cwd();
+    const dir = opts.configDir ?? MODULE_ROOT;
     this.configPath = join(dir, 'config.enc');
   }
 

@@ -18,7 +18,13 @@ const STRICT_BLOCKED = new Set([
 ]);
 
 function isPrivateIPv4(hostname: string): boolean {
-  const parts = hostname.split('.');
+  // Strip IPv6-mapped IPv4 prefix (::ffff:x.x.x.x)
+  let normalized = hostname.toLowerCase();
+  if (normalized.startsWith('::ffff:')) {
+    normalized = normalized.slice(7);
+  }
+
+  const parts = normalized.split('.');
   if (parts.length !== 4) return false;
 
   const octets = parts.map((p) => parseInt(p, 10));
@@ -36,7 +42,22 @@ function isPrivateIPv4(hostname: string): boolean {
   if (a === 169 && b === 254) return true;
   // 0.x.x.x
   if (a === 0) return true;
+  // 127.x.x.x (loopback)
+  if (a === 127) return true;
 
+  return false;
+}
+
+/**
+ * Check if a hostname is a raw IP address (IPv4 or IPv6).
+ */
+function isRawIpAddress(hostname: string): boolean {
+  // IPv4
+  const ipv4Pattern = /^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/;
+  if (ipv4Pattern.test(hostname)) return true;
+  // IPv6 (bracketed or bare)
+  if (hostname.startsWith('[')) return true;
+  if (hostname.includes(':')) return true;
   return false;
 }
 
@@ -62,6 +83,30 @@ export function assertSafeUrl(url: string, allowInternal = false): void {
 
   const hostname = parsed.hostname.toLowerCase();
 
+  // Block raw IP addresses early — prevents DNS rebind style attacks
+  // where a domain resolves to an internal IP after passing this check.
+  // For domain names, the check is best-effort; callers should also
+  // validate after resolution if possible.
+  if (isRawIpAddress(hostname) && !allowInternal) {
+    // Check both original and IPv6-mapped-decoded form
+    if (isPrivateIPv4(hostname)) {
+      throw new Error(`Blocked request to private IP address "${hostname}"`);
+    }
+    if (hostname.startsWith('[')) {
+      const inner = hostname.slice(1, -1).toLowerCase();
+      if (inner === '::1' || inner.startsWith('fe80') || inner.startsWith('fc00') || inner.startsWith('fd00')) {
+        throw new Error(`Blocked request to private IPv6 address "${hostname}"`);
+      }
+      if (inner.startsWith('::ffff:')) {
+        const ipv4 = inner.slice(7);
+        if (isPrivateIPv4(ipv4)) {
+          throw new Error(`Blocked request to private IPv6 address "${hostname}"`);
+        }
+      }
+    }
+    return;
+  }
+
   // When allowInternal is true, only block cloud metadata endpoints
   if (allowInternal) {
     if (STRICT_BLOCKED.has(hostname)) {
@@ -80,14 +125,15 @@ export function assertSafeUrl(url: string, allowInternal = false): void {
 
   // Block IPv6 private ranges (::1, fe80::, fc00::, fd00::)
   if (hostname.startsWith('[')) {
-    const inner = hostname.slice(1, -1);
-    if (
-      inner === '::1' ||
-      inner.startsWith('fe80') ||
-      inner.startsWith('fc00') ||
-      inner.startsWith('fd00')
-    ) {
+    const inner = hostname.slice(1, -1).toLowerCase();
+    if (inner === '::1' || inner.startsWith('fe80') || inner.startsWith('fc00') || inner.startsWith('fd00')) {
       throw new Error(`Blocked request to private IPv6 address "${hostname}"`);
+    }
+    if (inner.startsWith('::ffff:')) {
+      const ipv4 = inner.slice(7);
+      if (isPrivateIPv4(ipv4)) {
+        throw new Error(`Blocked request to private IPv6 address "${hostname}"`);
+      }
     }
   }
 }

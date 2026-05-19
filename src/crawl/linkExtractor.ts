@@ -145,13 +145,17 @@ export class LinkExtractor {
       // If deny patterns exist and URL matches any, reject
       if (rule.deny) {
         for (const pattern of rule.deny) {
+          pattern.lastIndex = 0;
           if (pattern.test(url)) return false;
         }
       }
 
       // If allow patterns exist, URL must match at least one
       if (rule.allow && rule.allow.length > 0) {
-        const matched = rule.allow.some((pattern) => pattern.test(url));
+        const matched = rule.allow.some((pattern) => {
+          pattern.lastIndex = 0;
+          return pattern.test(url);
+        });
         if (!matched) return false;
       }
 

@@ -324,6 +324,10 @@ export class BudgetTracker {
   snapshot(): BudgetState {
     return { ...this.state };
   }
+  /** Restore state from a previously saved snapshot. Useful after pruning/rehydration. */
+  restore(snapshot: BudgetState): void {
+    this.state = { ...snapshot };
+  }
   /** Record a cost against a named research step. */
   recordStepCost(step: string, cost: number): void {
     this.state.stepCosts[step] = (this.state.stepCosts[step] ?? 0) + cost;
@@ -1039,6 +1043,9 @@ export class ResearchStateEngine {
       subQuestionCoverage: state.subQuestionCoverage.map((c) => ({ ...c })),
       ...(state.language ? { language: { ...state.language } } : {}),
     };
+    // Sync the BudgetTracker with the restored budget state so time/usage
+    // counters reflect the pruned state, not the original full run.
+    this.budget.restore(state.budget);
   }
 
   /** Produce a compressed view for gap analysis (no full text, just summaries). */

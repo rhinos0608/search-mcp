@@ -677,6 +677,10 @@ const browserFamily: FamilyDefinition = {
         };
         return withSession(cfg, async (page) => {
           const { click } = await import('../../browser/actions.js');
+          // Support snapshot ref targeting via 'ref:' prefix
+          if (target.startsWith('ref:')) {
+            return click(page, { type: 'ref', ref: target.slice(4) }, { button, doubleClick });
+          }
           const targetObj =
             target.startsWith('#') || target.startsWith('.') || target.startsWith('[')
               ? { type: 'selector' as const, selector: target }
@@ -686,7 +690,7 @@ const browserFamily: FamilyDefinition = {
       },
       configIssue: browserDisabledIssue,
     },
-    // ── type ───────────────────────────────────────────────────────────────
+    // ── type ─────────────────────────────────────────────────────────────
     {
       name: 'type',
       description: 'Type text into an editable element',
@@ -700,6 +704,10 @@ const browserFamily: FamilyDefinition = {
         };
         return withSession(cfg, async (page) => {
           const { typeText } = await import('../../browser/actions.js');
+          // Support snapshot ref targeting via 'ref:' prefix
+          if (target.startsWith('ref:')) {
+            return typeText(page, { type: 'ref', ref: target.slice(4) }, text, { submit, slowly });
+          }
           const targetObj = { type: 'selector' as const, selector: target };
           return typeText(page, targetObj, text, { submit, slowly });
         });

@@ -86,6 +86,7 @@ export async function handleCurrentDialog(
   try {
     // Playwright auto-dismisses dialogs by default, so we need a race
     let dialogResult: DialogResult | null = null;
+    let handlerRef: ((dialog: import('playwright-core').Dialog) => void) | undefined;
 
     const dialogPromise = new Promise<DialogResult>((resolve) => {
       const handler = async (dialog: import('playwright-core').Dialog) => {
@@ -109,7 +110,7 @@ export async function handleCurrentDialog(
         dialogHistoryByPage.set(page, history);
         resolve(result);
       };
-
+      handlerRef = handler;
       page.once('dialog', handler);
     });
 
@@ -119,6 +120,13 @@ export async function handleCurrentDialog(
     });
 
     dialogResult = await Promise.race([dialogPromise, timeout]);
+
+    // Clean up the listener if the timeout won the race
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
+    if (dialogResult === null && handlerRef) {
+      page.off('dialog', handlerRef);
+    }
+
     return dialogResult;
   } catch {
     return null;

@@ -160,7 +160,8 @@ export function dedupeByFingerprint<T extends { text: string; id: string }>(
 
     const groupItems: T[] = [item];
     const fpA = fingerprints.get(item.id);
-    if (!fpA) continue;
+    // Skip items with no fingerprint (e.g. empty/short texts)
+    if (fpA === undefined || fpA === '') continue;
 
     for (const other of items) {
       if (other.id === item.id || assignedToGroup.has(other.id)) continue;

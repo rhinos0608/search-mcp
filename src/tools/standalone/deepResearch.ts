@@ -450,8 +450,17 @@ function resolveResultPath(
 ): string {
   const safeBaseDir = path.resolve(getResultsDir());
   if (requestedPath) {
+    // Reject absolute paths outright — they bypass the base directory
+    if (path.isAbsolute(requestedPath)) {
+      throw new Error(
+        `Path "${requestedPath}" is absolute. Use a relative filename or omit path to save to the default location.`,
+      );
+    }
     const resolved = path.resolve(safeBaseDir, requestedPath);
-    if (!resolved.startsWith(safeBaseDir)) {
+    // Use path boundary check to prevent prefix-collision escapes
+    // e.g. safeBaseDir=/a/research-results, resolved=/a/research-results-evil/x.json
+    const boundarySafe = resolved === safeBaseDir || resolved.startsWith(safeBaseDir + path.sep);
+    if (!boundarySafe) {
       throw new Error(
         `Path "${requestedPath}" escapes the results directory "${safeBaseDir}". Use a relative filename or omit path to save to the default location.`,
       );

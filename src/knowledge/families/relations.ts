@@ -21,7 +21,13 @@ function getLastPass2RunId(): string | null {
 
 function setLastPass2RunId(): void {
   const db = getKgDb(); if (db === null) return;
-  try { db.prepare('INSERT OR REPLACE INTO kg_event_refs (event_id, ref_type, ref_id) VALUES (?, ?, ?)').run(LAST_PASS_2_KEY, 'checkpoint', String(Date.now())); } catch { /* best effort */ }
+  try {
+    // Store the actual last event ID from the events table as the ref_id
+    // so shouldRunPass2 can use it to count subsequent events.
+    const lastEvent = db.prepare('SELECT id FROM kg_events ORDER BY id DESC LIMIT 1').get() as { id: string } | undefined;
+    const refId = lastEvent?.id ?? String(Date.now());
+    db.prepare('INSERT OR REPLACE INTO kg_event_refs (event_id, ref_type, ref_id) VALUES (?, ?, ?)').run(LAST_PASS_2_KEY, 'checkpoint', refId);
+  } catch { /* best effort */ }
 }
 
 export function shouldRunPass2(): boolean {

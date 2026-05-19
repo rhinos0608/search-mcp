@@ -387,8 +387,9 @@ export class ResearchJobManager {
 
     // Clear old timeout, set new one
     if (job.runtimeTimeout) clearTimeout(job.runtimeTimeout);
+    // maxTimeMs already includes additionalMs via totalExtensionsMs, so no need to add it again
     const remaining = job.maxTimeMs - (Date.now() - (job.startedAt ?? Date.now()));
-    const effectiveTimeout = Math.max(remaining + additionalMs, 0);
+    const effectiveTimeout = Math.max(remaining, 0);
 
     job.runtimeTimeout = setTimeout(() => {
       if (job.abortController && !job.abortController.signal.aborted) {

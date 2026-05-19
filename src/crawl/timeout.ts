@@ -9,6 +9,6 @@ export function computeCrawlTimeout(maxPages: number): number {
       `computeCrawlTimeout: maxPages must be a non-negative integer, got ${String(maxPages)}`,
     );
   }
-  // 60s base + 20s per maxPage, capped at 5 minutes.
-  return Math.min(60_000 + maxPages * 20_000, 300_000);
+  // 30s base + 15s per maxPage, capped at 5 minutes.
+  return Math.min(30_000 + maxPages * 15_000, 300_000);
 }
