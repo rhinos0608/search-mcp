@@ -29,7 +29,8 @@ export class GapLoopPhase extends BasePhase {
       return;
     }
 
-    let maxLoops = ctx.budget.profile.maxGapLoops;
+    const initialMaxLoops = ctx.budget.profile.maxGapLoops;
+    let maxLoops = initialMaxLoops;
     const gapFiller = new GapFiller(ctx.state, ctx.budget);
     let skipExtension = false;
 
@@ -159,7 +160,7 @@ export class GapLoopPhase extends BasePhase {
       const criticalGaps =
         currentGapLoops < minGapLoops
           ? (allGaps.length > 0 ? allGaps : ctx.state.getOpenGaps()).filter((g) => g.priority <= 5)
-          : gaps.filter((g) => g.priority <= 2);
+          : allGaps.filter((g) => g.priority <= 2);
       if (criticalGaps.length === 0) break;
 
       // ── Adaptive band extension: extend loop budget for complex topics ───
@@ -170,6 +171,7 @@ export class GapLoopPhase extends BasePhase {
       // Band triggers: contradictions found + low source diversity + thin findings
       if (totalContradictions >= 2 && sourceTypeCount < 4 && loopIdx + 1 >= maxLoops - 1) {
         maxLoops += 2;
+        maxLoops = Math.min(maxLoops, ctx.budget.profile.maxGapLoops);
         logger.info(
           {
             contradictions: totalContradictions,
@@ -180,6 +182,7 @@ export class GapLoopPhase extends BasePhase {
         );
       } else if (totalFindings < 15 && loopIdx + 1 >= maxLoops - 1) {
         maxLoops += 2;
+        maxLoops = Math.min(maxLoops, ctx.budget.profile.maxGapLoops);
         logger.info(
           { findings: totalFindings, newMaxLoops: maxLoops },
           'Adaptive band: extending gap loop budget (thin coverage)',
@@ -199,7 +202,7 @@ export class GapLoopPhase extends BasePhase {
           ctx.budget.extendTimeBudget(extensionMs);
         }
       }
-      const loopProgress = 50 + Math.round((loopIdx / maxLoops) * 10);
+      const loopProgress = 50 + Math.round((loopIdx / initialMaxLoops) * 10);
       await this.reportProgress(
         ctx,
         loopProgress,

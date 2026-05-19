@@ -191,15 +191,15 @@ function compactContradiction(c: Contradiction): CompactContradiction {
 
 // ── Layer 3: Write to file ────────────────────────────────────────────────────
 
-let cleanupTimer: ReturnType<typeof setTimeout> | null = null;
+const cleanupTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
 /**
  * Schedule periodic cleanup of old result files (>1 hour).
  */
 function scheduleCleanup(dir: string): void {
-  if (cleanupTimer) return;
-  cleanupTimer = setTimeout(() => {
-    cleanupTimer = null;
+  if (cleanupTimers.has(dir)) return;
+  const timer = setTimeout(() => {
+    cleanupTimers.delete(dir);
     try {
       const cutoff = Date.now() - 3_600_000; // 1 hour
       for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
@@ -215,7 +215,8 @@ function scheduleCleanup(dir: string): void {
       // Non-fatal — best-effort cleanup
     }
   }, 300_000); // Check every 5 minutes
-  cleanupTimer.unref();
+  timer.unref();
+  cleanupTimers.set(dir, timer);
 }
 
 /**

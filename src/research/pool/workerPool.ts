@@ -53,6 +53,7 @@ export class WorkerPoolManager {
     const tools = createResearchTools({
       onToolCall: (tool, query) => {
         workerToolCallsUsed++;
+        ctx.budget.recordToolCall();
         logger.debug({ tool, query: query.slice(0, 60) }, `Worker tool: ${tool}`);
       },
     });
@@ -126,13 +127,9 @@ export class WorkerPoolManager {
       );
     }
 
-    // Batch-report consumed worker tool calls to global budget after all work done.
-    for (let t = 0; t < workerToolCallsUsed; t++) {
-      ctx.budget.recordToolCall();
-    }
     logger.info(
       { allocated: workerPool, consumed: workerToolCallsUsed },
-      'Worker tool call budget: batch report',
+      'Worker tool call budget: immediate reporting',
     );
 
     await this.ingestWorkerReports(ctx);
@@ -196,7 +193,7 @@ export class WorkerPoolManager {
             .replace(/[^\w\s]/g, '')
             .trim(),
           subQuestionIds: report.parentSubQuestionId ? [report.parentSubQuestionId] : [],
-          sourceIds: [...new Set(allSourceIds)],
+          sourceIds: [...new Set(allSourceIds)].filter(Boolean),
           evidenceSummary: wf.evidence,
           evidenceExcerpt: wf.evidence.slice(0, 500),
           evidenceDirectness: this.deriveEvidenceDirectness(wf, firstSourceQuality),

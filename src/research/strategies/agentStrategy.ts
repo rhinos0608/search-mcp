@@ -183,6 +183,23 @@ export class AgentStrategy implements ResearchStrategy {
     const seededQueries = generateEntityBasedQueries(entities, 3, query);
     this.seededQueries = seededQueries;
 
+    // Create a default sub-question for agent findings so they are visible to coverage/gap analysis
+    const existingSq = ctx.state.getSubQuestions().find((sq) => sq.text === query);
+    const defaultSqId = existingSq?.id ?? `agent-${randomUUID().slice(0, 12)}`;
+    if (!existingSq) {
+      ctx.state.addSubQuestion({
+        id: defaultSqId,
+        text: query,
+        classification: 'explainer' as const,
+        evidenceType: 'general',
+        preferredSources: [],
+        freshnessRequirement: 'any',
+        failureModes: [],
+        budgetPriority: 1,
+        status: 'pending' as const,
+      });
+    }
+
     const systemPrompt = this.buildSystemPrompt(route, entities);
     let iteration = 0;
     let finalAnswer: string | null = null;
@@ -337,7 +354,7 @@ export class AgentStrategy implements ResearchStrategy {
     }
 
     // Extract findings from final answer and populate state
-    this.extractFindingsFromAnswer(finalAnswer, ctx.state, sourceMap);
+    this.extractFindingsFromAnswer(finalAnswer, ctx.state, sourceMap, defaultSqId);
 
     const sourceTypeCounts = new Map<string, number>();
     for (const citation of citations) {
@@ -454,6 +471,7 @@ Search strategy tips:
     answer: string,
     state: ResearchStateEngine,
     sourceMap: Map<number, string>,
+    defaultSqId?: string,
   ): void {
     // Simple sentence splitter that looks for citations [N]
     // We regex for sentences containing [N]
@@ -477,7 +495,7 @@ Search strategy tips:
         claim: trimmed,
         normalizedClaim: trimmed.toLowerCase(),
         sourceIds,
-        subQuestionIds: [],
+        subQuestionIds: defaultSqId ? [defaultSqId] : [],
         evidenceSummary: trimmed,
         evidenceDirectness: 'direct' as const,
         freshnessSensitive: false,

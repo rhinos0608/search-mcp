@@ -18,7 +18,6 @@ import {
   GapLoopPhase,
   PostProcessingPhase,
   AuditPhase,
-  SynthesisPhase,
 } from '../phases/index.js';
 import { DeepTreeResearchEngine } from '../treeEngine.js';
 import { PruningEngine } from '../pruning.js';
@@ -245,9 +244,6 @@ export class PipelineStrategy implements ResearchStrategy {
     ctx: StrategyContext,
     startTime: number,
   ): Promise<ResearchResult> {
-    const synthesisPhase = new SynthesisPhase();
-    await synthesisPhase.execute(ctx.state.getState().query, ctx);
-
     const state = ctx.state.getState();
     let report: ResearchReport;
 
@@ -257,6 +253,25 @@ export class PipelineStrategy implements ResearchStrategy {
       report = await llmSynth.synthesize(state);
     } else {
       report = new ResearchSynthesizer(state).synthesize();
+    }
+
+    // URL validation after synthesis
+    try {
+      const allUrls = state.sources.map((s) => s.url);
+      if (allUrls.length > 0) {
+        const { validateUrls } = await import('../urlHealth.js');
+        const urlResults = await validateUrls(allUrls);
+        const hallucinated = urlResults.filter((r) => r.status === 'LIKELY_HALLUCINATED');
+        const dead = urlResults.filter((r) => r.status === 'DEAD');
+        if (hallucinated.length > 0) {
+          report.openQuestions.push(`${String(hallucinated.length)} cited URL(s) may be hallucinated.`);
+        }
+        if (dead.length > 0) {
+          report.sourceNotes.push(`${String(dead.length)} cited URL(s) appear to be dead.`);
+        }
+      }
+    } catch (e) {
+      logger.warn({ err: e }, 'Citation URL validation failed');
     }
 
     this.report = report;
