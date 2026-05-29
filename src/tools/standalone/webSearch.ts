@@ -16,7 +16,7 @@ import { formatCollatedFindings, type FindingEntry } from '../../utils/collatedF
 import { makeResult, errorResponse, successResponse } from '../response.js';
 import type { SearchResult } from '../../types.js';
 import type { KnowledgeGraphHook } from '../../knowledge/hook.js';
-import { SEARCH_CATEGORIES } from '../../utils/searchCategories.js';
+import { CATEGORY_NAMES } from '../../utils/searchCategories.js';
 export function registerWebSearch(
   server: McpServer,
   cfg: SearchConfig,
@@ -46,7 +46,7 @@ export function registerWebSearch(
             'Generate query variations (question, concept, scope, opposition) and merge results for broader coverage.',
           ),
         category: z
-          .enum([...Object.keys(SEARCH_CATEGORIES)])
+          .enum(CATEGORY_NAMES)
           .optional()
           .describe(
             'Search category profile to enhance the query (company, research paper, news, pdf, github, tweet, personal site, people, financial report)',
@@ -122,10 +122,9 @@ export function registerWebSearch(
           data = formatCollatedFindings(findings);
         }
 
-        // For collated format, the result is already a formatted string
-        // Wrap it in the standard result structure
-        if (resultFormat === 'collated' && typeof data === 'string') {
-          const result = makeResult('web_search', { text: data }, Date.now() - start, {
+        // collated format produces a formatted string
+        if (resultFormat === 'collated') {
+          const result = makeResult('web_search', { text: data as string }, Date.now() - start, {
             ...(correction ? { correction } : {}),
             ...(provenanceRef.current ? { provenance: provenanceRef.current } : {}),
           });
