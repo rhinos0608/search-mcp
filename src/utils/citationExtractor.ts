@@ -14,33 +14,46 @@ const DISCOVERY_DOMAINS = new Set([
 
 const TRACKING_PARAMS = new Set(['utm_source', 'utm_medium', 'utm_campaign', 'utm_content', 'utm_term', 'ref', 'source']);
 
-const URL_REGEX = /https?:\/\/[^\s)\]]+/g;
+// Matches URLs up to whitespace or common structural delimiters.
+// Allows parentheses and brackets which are valid in URLs.
+const URL_REGEX = /https?:\/\/[^\s<>"{}|\\^`\[\]]+/g;
 
-export function extractSourceBlock(text: string): string[] {
+/** Locates the SOURCES block and returns its trimmed content, or null. */
+function parseSourcesBlock(text: string): string | null {
   const startIndex = text.indexOf(SOURCES_START);
   const endIndex = text.lastIndexOf(SOURCES_END);
 
-  if (startIndex !== -1 && endIndex !== -1 && endIndex > startIndex) {
-    const blockStart = startIndex + SOURCES_START.length;
-    const blockContent = text.slice(blockStart, endIndex).trim();
-
-    if (blockContent.toUpperCase() === 'NONE') {
-      return [];
-    }
-
-    const urls = blockContent
-      .split('\n')
-      .map((line) => line.trim())
-      .filter((line) => line.length > 0)
-      .filter((line) => !isDiscoveryDomain(line));
-
-    return deduplicate(urls);
+  if (startIndex === -1 || endIndex === -1 || endIndex <= startIndex) {
+    return null;
   }
 
-  const fallbackUrls = text.match(URL_REGEX) ?? [];
-  return fallbackUrls
-    .filter((url) => !isDiscoveryDomain(url))
-    .filter((url) => !url.includes('source=g'));
+  const blockStart = startIndex + SOURCES_START.length;
+  return text.slice(blockStart, endIndex).trim();
+}
+
+export function extractSourceBlock(text: string): string[] {
+  const blockContent = parseSourcesBlock(text);
+
+  if (blockContent === null) {
+    const fallbackUrls = text.match(URL_REGEX) ?? [];
+    return deduplicate(
+      fallbackUrls
+        .filter((url) => !isDiscoveryDomain(url))
+        .filter((url) => !url.includes('source=g')),
+    );
+  }
+
+  if (blockContent.toUpperCase() === 'NONE') {
+    return [];
+  }
+
+  const urls = blockContent
+    .split('\n')
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0)
+    .filter((line) => !isDiscoveryDomain(line));
+
+  return deduplicate(urls);
 }
 
 function deduplicate(urls: string[]): string[] {
@@ -62,16 +75,8 @@ function isDiscoveryDomain(url: string): boolean {
 }
 
 export function isExplicitNone(answer: string): boolean {
-  const startIndex = answer.indexOf(SOURCES_START);
-  const endIndex = answer.lastIndexOf(SOURCES_END);
-
-  if (startIndex !== -1 && endIndex !== -1 && endIndex > startIndex) {
-    const blockStart = startIndex + SOURCES_START.length;
-    const blockContent = answer.slice(blockStart, endIndex).trim();
-    return blockContent.toUpperCase() === 'NONE';
-  }
-
-  return false;
+  const blockContent = parseSourcesBlock(answer);
+  return blockContent !== null && blockContent.toUpperCase() === 'NONE';
 }
 
 export function normalizeUrlForCitation(url: string): string {
@@ -79,7 +84,7 @@ export function normalizeUrlForCitation(url: string): string {
     const parsed = new URL(url);
 
     parsed.protocol = parsed.protocol.toLowerCase();
-    parsed.hostname = parsed.hostname.toLowerCase();
+    parsed.hostname = parsed.hostname.toLowerCase().replace(/^www\./, '');
 
     parsed.searchParams.forEach((_, key) => {
       if (TRACKING_PARAMS.has(key.toLowerCase())) {
