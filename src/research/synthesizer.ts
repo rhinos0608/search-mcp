@@ -19,6 +19,7 @@ import type {
 import { curateEvidenceSources } from './sourceQuality.js';
 import { buildFindingLinkage, clusterIdByFindingId } from './findingLinkage.js';
 import { applyReportValidation } from './provenance.js';
+import { extractSourceBlock, normalizeUrlForCitation } from '../utils/citationExtractor.js';
 
 // ── Utilities ───────────────────────────────────────────────────────────────────
 
@@ -133,7 +134,43 @@ export class ResearchSynthesizer {
       findingClusterEdges: linkage.edges,
     };
 
+    // Extract citations from SOURCES blocks in the narrative
+    const extractedCitations = this.extractCitationsFromReport(report, evidenceSources);
+    report.extractedCitations = extractedCitations;
+    report.noSourcesExplicit = extractedCitations.length === 0 && report.narrativeMarkdown.includes('SOURCES');
+
     return applyReportValidation(report, sources, findings);
+  }
+
+  /**
+   * Extract source URLs from SOURCES blocks in the narrative.
+   * Adds any URLs not already in the curated evidenceSources.
+   */
+  private extractCitationsFromReport(
+    report: ResearchReport,
+    evidenceSources: ResearchReport['evidenceSources'],
+  ): string[] {
+    const reportText = report.narrativeMarkdown;
+    const urls = extractSourceBlock(reportText);
+
+    if (urls.length === 0) return [];
+
+    // Collect URLs already in evidenceSources
+    const existingUrls = new Set(
+      evidenceSources.map((s) => normalizeUrlForCitation(s.url)),
+    );
+
+    // Add any new URLs not already present
+    const newUrls: string[] = [];
+    for (const url of urls) {
+      const normalized = normalizeUrlForCitation(url);
+      if (!existingUrls.has(normalized)) {
+        existingUrls.add(normalized); // dedup within newUrls too
+        newUrls.push(normalized);
+      }
+    }
+
+    return newUrls;
   }
 
   // ── Internal builders ──────────────────────────────────────────────────

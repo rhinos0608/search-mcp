@@ -10,6 +10,7 @@ import { CLUSTERED_REVISION, ORCHESTRATOR_SYNTHESIS_V2 } from './prompts.js';
 import { logger } from '../../logger.js';
 import { embedTexts } from '../../rag/embedding.js';
 import { ResearchSynthesizer } from '../synthesizer.js';
+import { extractSourceBlock, isExplicitNone } from '../../utils/citationExtractor.js';
 import {
   applyReportValidation,
   enrichFindingsWithSemanticEvidenceAlignment,
@@ -373,6 +374,10 @@ export class LlmSynthesizer {
       state.sources,
       validationFindings,
     );
+
+    // ── Extract citations from SOURCES blocks in the LLM-generated narrative ──
+    validated.extractedCitations = extractSourceBlock(validated.narrativeMarkdown);
+    validated.noSourcesExplicit = isExplicitNone(validated.narrativeMarkdown);
 
     // ── Ground synthesis claims against source evidence ──
     try {

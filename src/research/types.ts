@@ -1123,6 +1123,10 @@ export interface ResearchReport {
   reportAudit?: ReportAuditResult;
   /** Per-sub-question coverage summary for gap detection. */
   subQuestionCoverage?: SubQuestionCoverage[];
+  /** URLs extracted from SOURCES blocks in LLM-generated narrative. */
+  extractedCitations?: string[];
+  /** True when the SOURCES block in the LLM response explicitly said "NONE". */
+  noSourcesExplicit?: boolean;
 }
 
 export interface ResearchResult {
