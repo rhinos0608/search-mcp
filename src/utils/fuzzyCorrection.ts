@@ -10,6 +10,8 @@
  *   – word length > 12: max 3 edits
  */
 
+import { ENGLISH_WORDS } from './englishWords.js';
+
 // ── Levenshtein distance ───────────────────────────────────────────────────
 
 export function levenshteinDistance(a: string, b: string): number {
@@ -380,6 +382,9 @@ export function correctQuery(
 
     // Fast path: word is already in vocabulary
     if (VOCABULARY_SET.has(lower)) return word;
+
+    // Never correct recognized English words
+    if (ENGLISH_WORDS.has(lower)) return word;
 
     // Skip if we've already made maxCorrections changes
     if (changes.length >= maxCorrections) return word;
