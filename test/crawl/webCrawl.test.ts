@@ -56,7 +56,7 @@ import { computeCrawlTimeout } from '../../src/tools/webCrawl.js';
 
 test('webCrawl: re-exports computeCrawlTimeout', () => {
   assert.equal(typeof computeCrawlTimeout, 'function');
-  assert.equal(computeCrawlTimeout(1), 80_000);
+  assert.equal(computeCrawlTimeout(1), 45_000);
 });
 
 test('webCrawl: options shape preserved through chain', async () => {

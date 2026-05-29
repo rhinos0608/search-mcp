@@ -98,14 +98,9 @@ export class ChunkPipeline {
           if (err instanceof DropChunk) {
             const count = droppedReasons.get(err.reason) ?? 0;
             droppedReasons.set(err.reason, count + 1);
-            // Remove the dropped chunk from working set
-            workingChunks = workingChunks.filter((chunk) => {
-              return !('dropChunkId' in chunk && chunk.dropChunkId === err.reason);
-            });
-            // If no chunks remain, the whole page was dropped
-            if (workingChunks.length === 0) {
-              break;
-            }
+            // Stage-level DropChunk drops all chunks for this page
+            workingChunks = [];
+            break;
           } else {
             throw err;
           }
