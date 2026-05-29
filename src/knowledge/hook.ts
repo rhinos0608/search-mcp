@@ -298,8 +298,8 @@ export class KnowledgeGraphHook {
         },
       ]);
 
-      // 7. Rebuild projection async so completed deep research is immediately queryable.
-      // Deferred to avoid blocking the event loop during an expensive full rebuild.
+      // 7. Schedule projection rebuild so completed deep research becomes queryable.
+      // Deferred via setImmediate to avoid blocking the event loop during an expensive full rebuild.
       setImmediate(() => { rebuildProjection({ full: true }); });
 
       // 8. Clear active run flag
@@ -394,6 +394,20 @@ export class KnowledgeGraphHook {
     runId: string,
     extractions: FlushedPendingExtraction[],
   ): Promise<void> {
+    // Emit RUN_STARTED before any other lifecycle event
+    appendEvents([{
+      timestamp: new Date().toISOString(),
+      eventType: 'RUN_STARTED',
+      eventVersion: 1,
+      runId,
+      batchId: null,
+      actor: 'system',
+      entityId: runId,
+      entityType: 'run',
+      payload: JSON.stringify({ sessionId, session_mode: true }),
+      payloadHash: null,
+    }]);
+
     if (extractions.length === 0) {
       appendEvents([{
         timestamp: new Date().toISOString(),
@@ -410,20 +424,6 @@ export class KnowledgeGraphHook {
       updateRunStatus(runId, 'failed', { lastError: 'No flushed extraction content' });
       return;
     }
-
-    // Emit RUN_STARTED before extraction begins
-    appendEvents([{
-      timestamp: new Date().toISOString(),
-      eventType: 'RUN_STARTED',
-      eventVersion: 1,
-      runId,
-      batchId: null,
-      actor: 'system',
-      entityId: runId,
-      entityType: 'run',
-      payload: JSON.stringify({ sessionId, session_mode: true }),
-      payloadHash: null,
-    }]);
 
     const startTime = Date.now();
     updateRunStatus(runId, 'extracting');
