@@ -18,6 +18,7 @@ import { gitHubCapabilities } from './tools/families/github.js';
 import { packagesCapabilities } from './tools/families/packages.js';
 import { researchCapabilities } from './tools/families/research.js';
 import { browserCapabilities } from './tools/families/browser.js';
+import { agenticBrowseCapabilities } from './tools/families/agenticBrowse.js';
 import { knowledgeGraphCapabilities } from './tools/families/knowledgeGraph.js';
 import { outputBudget } from './utils/outputBudget.js';
 import type { OutputBudgetStats } from './utils/outputBudget.js';
@@ -111,7 +112,7 @@ const OPTIONAL_CONFIG: Record<string, OptionalRule> = {
 // These tools operate entirely locally (e.g. Readability extraction).
 // If a tool gains a new dependency (sidecar, API key), move it out of
 // FREE_TOOLS into GATED_TOOLS or OPTIONAL_CONFIG accordingly.
-export const FREE_TOOLS = ['web_read'] as const;
+export const FREE_TOOLS = [] as const;
 
 // ── configHealth (sync, startup) ────────────────────────────────────────────
 
@@ -217,6 +218,16 @@ export function configHealth(cfg: SearchConfig): Record<string, ToolHealth> {
           status: 'unconfigured' as const,
           message: 'Missing required configuration.',
           ...(cap.issue ? { remediation: cap.issue } : {}),
+        };
+  }
+
+  for (const cap of agenticBrowseCapabilities(cfg)) {
+    report[cap.name] = cap.available
+      ? { status: 'healthy' as const, message: 'Configured.' }
+      : {
+          status: 'unconfigured' as const,
+          message: 'Missing required configuration.',
+          remediation: cap.issue ?? undefined,
         };
   }
 
@@ -628,7 +639,7 @@ export function getNetworkProbes(cfg: SearchConfig): NetworkProbe[] {
     probes.push({
       label: 'raga-bridge',
       url: `${cfg.raga.baseUrl.replace(/\/+$/, '')}/health`,
-      tools: ['web_read', 'raga_bridge'],
+      tools: ['web_crawl', 'raga_bridge'],
     });
   }
 
@@ -698,7 +709,7 @@ export async function runHealthProbes(cfg: SearchConfig): Promise<HealthReport> 
       for (const tool of probe.tools) {
         const existing = tools[tool];
         if (existing === undefined || existing.status === 'unconfigured') continue;
-        if (tool === 'web_read') {
+        if (tool === 'web_crawl') {
           tools[tool] = {
             status: 'degraded',
             message: `${probe.label} probe failed: ${msg} (Readability fallback still available).`,

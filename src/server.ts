@@ -13,7 +13,6 @@ import { getVersion } from './version.js';
 
 // Standalone tools
 import { registerWebSearch } from './tools/standalone/webSearch.js';
-import { registerWebRead } from './tools/standalone/webRead.js';
 import { registerWebCrawl } from './tools/standalone/webCrawl.js';
 import { registerSemanticCrawl } from './tools/standalone/semanticCrawl.js';
 import { registerSemanticCrawlListCorpora } from './tools/standalone/semanticCrawlListCorpora.js';
@@ -29,6 +28,7 @@ import { registerGitHubTool } from './tools/families/github.js';
 import { registerPackagesTool } from './tools/families/packages.js';
 import { registerResearchTool } from './tools/families/research.js';
 import { registerBrowserTool } from './tools/families/browser.js';
+import { registerAgenticBrowseTool } from './tools/families/agenticBrowse.js';
 
 // Deep research
 import { registerDeepResearchTool } from './tools/standalone/deepResearch.js';
@@ -75,7 +75,6 @@ export function createServer(
 
   // Standalone tools (pass kgHook for passive capture)
   registerWebSearch(server, cfg, kgHook ?? undefined);
-  registerWebRead(server, cfg, kgHook ?? undefined);
   registerWebCrawl(server, cfg, kgHook ?? undefined);
 
   // Gated standalone tools
@@ -97,6 +96,7 @@ export function createServer(
   // and session-heavy, and the extraction pipeline is not designed for DOM trees.
   // If browser capture is added later, registerBrowserTool should accept kgHook.
   registerBrowserTool(server, cfg);
+  registerAgenticBrowseTool(server, cfg, kgHook ?? undefined);
 
   // Conditional / gated tools
   registerFetchFocus(server, cfg);

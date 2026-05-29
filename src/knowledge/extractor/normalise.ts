@@ -55,7 +55,7 @@ export interface NormalizedExtractionInput {
  */
 function toolToSourceKind(toolName: string): SourceKind {
   const lower = toolName.toLowerCase();
-  if (lower.startsWith('web_search') || lower.startsWith('web_read') || lower.startsWith('web_crawl') || lower.startsWith('semantic_crawl')) {
+  if (lower.startsWith('web_search') || lower.startsWith('web_crawl') || lower.startsWith('semantic_crawl')) {
     return 'documentation'; // generic web content
   }
   if (lower.startsWith('reddit')) return 'forum';

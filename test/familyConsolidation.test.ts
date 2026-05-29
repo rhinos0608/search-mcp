@@ -23,7 +23,6 @@ interface RegisteredToolEntry {
 /** All expected tool names. Families are single-entry, per-action tools are gone. */
 const STANDALONE_TOOLS = new Set([
   'web_search',
-  'web_read',
   'health_check',
 ]);
 

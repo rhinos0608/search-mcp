@@ -372,7 +372,7 @@ const DEFAULTS: Omit<SearchConfig, 'rescoreWeights'> = {
     cloakGeoip: false,
     cloakStealthArgs: true,
     credentials: {},
-    mode: 'stealth' as const,
+    mode: 'user' as const,
     browserPort: 9222,
     autoConnect: false,
   },
