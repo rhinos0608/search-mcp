@@ -38,7 +38,7 @@ export interface GitIgnoreRule {
 
 /**
  * Default max file bytes when fetching GitHub file content.
- * 50KB is enough for most source files; documentation pages up to 500KB.
+ * ~200KB is enough for most source files; documentation pages up to 500KB.
  */
 export const DEFAULT_GITHUB_MAX_FILE_BYTES = 200_000;
 
