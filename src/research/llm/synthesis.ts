@@ -311,8 +311,6 @@ export class LlmSynthesizer {
     data.themes ??= [];
     data.uncertainties ??= [];
 
-    data.executiveSummary ??= 'Research complete. See sections for findings.';
-
     if (!data.executiveSummary) {
       data.executiveSummary = 'Research complete. See sections for findings.';
     }
@@ -579,6 +577,9 @@ export class LlmSynthesizer {
           return sum + 5;
         case 'low':
           return sum + 1;
+        default:
+          logger.warn({ severity: issue.severity }, 'Unexpected audit severity');
+          return sum + 0;
       }
     }, 0);
     return issueScore + (audit.pass ? 0 : 10);
