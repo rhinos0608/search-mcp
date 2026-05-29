@@ -13,9 +13,13 @@ export interface FindingEntry {
   rank?: number;
 }
 
-/** Escapes triple backticks to prevent breaking markdown parsers. */
+/**
+ * Escapes backtick runs to prevent breaking markdown fenced code blocks.
+ * Splits each run with a zero-width space so no three consecutive backticks
+ * can close the fence prematurely.
+ */
 function escapeBackticks(text: string): string {
-  return text.replace(/```/g, '`\u200b`');
+  return text.replace(/`+/g, (match) => match.split('').join('\u200b'));
 }
 
 /** Nullish coalescing fallback helper. */
@@ -45,8 +49,8 @@ export function formatCollatedFindings(findings: FindingEntry[]): string {
     const rank = finding.rank !== undefined ? `#${String(finding.rank)}` : '';
 
     let meta = `**Title:** ${title}\n`;
-    if (finding.author) meta += `**Author:** ${author}\n`;
-    if (finding.published) meta += `**Published Date:** ${published}\n`;
+    if (author) meta += `**Author:** ${author}\n`;
+    if (published) meta += `**Published Date:** ${published}\n`;
     if (domain) meta += `**Domain:** ${domain}\n`;
     if (rank) meta += `**Rank:** ${rank}\n`;
     meta += `**URL:** ${finding.url}`;
