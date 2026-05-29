@@ -752,6 +752,7 @@ export function registerDeepResearchTool(
         'The pipeline strategy uses a fixed 7-phase pipeline: decomposition → discovery → extraction → gap analysis → audit → synthesis.\n\n' +
         'Use the `deterministic` flag to force research without any LLM calls (algorithmic decomposition, regex extraction).',
       inputSchema: deepResearchSchema,
+      annotations: { readOnlyHint: true },
     },
     async (rawArgs: unknown, extra) => {
       return handleDeepResearch(rawArgs, cfg, extra as DeepResearchExtra | undefined, kgHook);

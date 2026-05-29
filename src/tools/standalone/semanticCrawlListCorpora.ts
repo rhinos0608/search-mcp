@@ -19,6 +19,7 @@ export function registerSemanticCrawlListCorpora(server: McpServer): void {
           .default(25)
           .describe('Maximum cached corpora to return (1–100, default 25)'),
       },
+      annotations: { readOnlyHint: true },
     },
     async ({ limit }) => {
       const start = Date.now();

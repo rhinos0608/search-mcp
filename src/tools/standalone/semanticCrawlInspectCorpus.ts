@@ -14,6 +14,7 @@ export function registerSemanticCrawlInspectCorpus(server: McpServer): void {
       inputSchema: {
         corpusId: z.string().describe('Corpus ID returned by semantic_crawl'),
       },
+      annotations: { readOnlyHint: true },
     },
     async ({ corpusId }) => {
       const start = Date.now();

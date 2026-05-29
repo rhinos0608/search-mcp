@@ -31,7 +31,7 @@ export function registerWebCrawl(
     {
       description:
         'Crawl a URL using a headless Playwright browser (via a crawl4ai sidecar). ' +
-        'Unlike web_read, this handles JavaScript-rendered SPAs, React/Vue apps, consent popups, and shadow DOM. ' +
+        'Handles JavaScript-rendered SPAs, React/Vue apps, consent popups, and shadow DOM. ' +
         'Returns clean LLM-ready Markdown with title, description, and extracted links for each crawled page. ' +
         'Supports deep crawling across multiple pages. Requires CRAWL4AI_BASE_URL env var (self-hosted Docker sidecar).',
       inputSchema: {
@@ -88,6 +88,7 @@ export function registerWebCrawl(
             'Custom JavaScript to execute on the page (e.g. scroll to bottom, click "Load More"). Runs after wait_for completes.',
           ),
       },
+      annotations: { readOnlyHint: true },
     },
     async (
       {

@@ -21,6 +21,7 @@ import {
 } from '../../utils/ragaFallback.js';
 import { readabilityFallbackResult } from '../../utils/crawlResultShaping.js';
 import { extractionConfigSchema, validateExtractionConfig } from '../../utils/extractionConfig.js';
+import { createProgressReporter } from '../progress.js';
 import type { KnowledgeGraphHook } from '../../knowledge/hook.js';
 
 export function registerSemanticCrawl(
@@ -161,52 +162,6 @@ export function registerSemanticCrawl(
           .optional()
           .default(DEFAULT_SEMANTIC_MAX_BYTES)
           .describe('Maximum total bytes to crawl (1–250MB, default 250MB)'),
-        useReranker: z
-          .boolean()
-          .optional()
-          .default(false)
-          .describe('Apply cross-encoder re-ranking to top candidates (default false)'),
-        minScore: tolerant(z.number().min(0).max(1))
-          .optional()
-          .describe('Minimum bi-encoder score required for returned chunks (0–1)'),
-        useContextualEmbeddings: z
-          .boolean()
-          .optional()
-          .default(false)
-          .describe('Use LLM-generated context for embedding corpus chunks (default false)'),
-        maxChunkTokens: tolerant(z.number().int().min(100).max(8000))
-          .optional()
-          .describe(
-            'Override max tokens per chunk (100–8000, default 400). ' +
-              'Larger values produce fewer chunks, reducing LLM calls when useContextualEmbeddings is enabled. ' +
-              'Auto-scaled to 1200 when useContextualEmbeddings is on and this is not set.',
-          ),
-        allowPathDrift: z
-          .boolean()
-          .optional()
-          .default(false)
-          .describe(
-            'Allow crawler to follow links outside the seed URL path prefix (default false). When false, only pages under the seed path are kept.',
-          ),
-        includeElements: z
-          .boolean()
-          .optional()
-          .default(true)
-          .describe(
-            'Include page-level structured elements in the response (default true). Set false for lower-context output.',
-          ),
-        elementsLimit: tolerant(z.number().int().min(0).max(1000))
-          .optional()
-          .describe(
-            'Maximum structured elements to include when includeElements is true (0–1000).',
-          ),
-        outputMode: z
-          .enum(['full', 'passages'])
-          .optional()
-          .default('full')
-          .describe(
-            'full returns chunks plus metadata/elements; passages suppresses noisy page elements and extraction details.',
-          ),
         extractionConfig: extractionConfigSchema
           .optional()
           .describe(
@@ -235,6 +190,7 @@ export function registerSemanticCrawl(
             'Custom JavaScript to execute on the page (e.g. scroll to bottom, click "Load More"). Runs after wait_for completes.',
           ),
       },
+      annotations: { readOnlyHint: true },
     },
     async (rawArgs, extra) => {
       const {
@@ -247,14 +203,6 @@ export function registerSemanticCrawl(
         maxPages,
         includeExternalLinks,
         maxBytes,
-        useReranker,
-        minScore,
-        useContextualEmbeddings,
-        maxChunkTokens,
-        allowPathDrift,
-        includeElements,
-        elementsLimit,
-        outputMode,
         extractionConfig,
         waitFor,
         delayBeforeReturnHtml,
@@ -273,20 +221,21 @@ export function registerSemanticCrawl(
         maxPages: number;
         includeExternalLinks: boolean;
         maxBytes: number;
-        useReranker: boolean;
-        minScore?: number;
-        useContextualEmbeddings: boolean;
-        maxChunkTokens?: number;
-        allowPathDrift: boolean;
-        includeElements: boolean;
-        elementsLimit?: number;
-        outputMode: 'full' | 'passages';
         extractionConfig?: import('../../utils/extractionConfig.js').ExtractionConfig;
         waitFor?: string;
         delayBeforeReturnHtml: number;
         pageTimeout: number;
         jsCode?: string;
       };
+      // Server-level defaults for removed power-user params
+      const useReranker = false;
+      const minScore = undefined as number | undefined;
+      const useContextualEmbeddings = false;
+      const maxChunkTokens = undefined as number | undefined;
+      const allowPathDrift = false;
+      const includeElements = true;
+      const elementsLimit = undefined as number | undefined;
+      const outputMode = 'full' as const;
       logger.info(
         {
           tool: 'semantic_crawl',
@@ -298,7 +247,21 @@ export function registerSemanticCrawl(
         'Tool invoked',
       );
       const start = Date.now();
+
+      // MCP-native progress reporting (coarse-grained phases)
+      const extraAny = extra as
+        | {
+            _meta?: { progressToken?: string | number };
+            sendNotification?: (n: { method: string; params: Record<string, unknown> }) => Promise<void>;
+          }
+        | undefined;
+      const progressReporter =
+        extraAny?._meta?.progressToken !== undefined && extraAny.sendNotification
+          ? createProgressReporter(extraAny.sendNotification, extraAny._meta.progressToken, 100)
+          : undefined;
+
       try {
+        await progressReporter?.update(10, 'Crawling...');
         if (extractionConfig) {
           validateExtractionConfig(extractionConfig, normalizeLlmForValidation(cfg.llm));
         }
@@ -375,6 +338,9 @@ export function registerSemanticCrawl(
         }
 
         const llmFallback = buildLlmFallback(extractionConfig, cfg.llm);
+
+        await progressReporter?.update(50, 'Embedding and ranking...');
+
         const resolvedQuery = singleQuery ?? '';
 
         const effectiveMaxBytes = maxBytes;
@@ -436,6 +402,7 @@ export function registerSemanticCrawl(
           const result = makeResult('semantic_crawl', data, Date.now() - start, {
             warnings: [...warnings, ...(data.warnings ?? [])],
           });
+          await progressReporter?.done();
           if (kgHook && cfg.knowledgeGraph.enabled) {
             void kgHook.onToolCall('semantic_crawl', data).catch((err: unknown) => {
               logger.warn({ err, tool: 'semantic_crawl' }, 'KG passive capture failed (non-fatal)');
@@ -480,6 +447,7 @@ export function registerSemanticCrawl(
         const result = makeResult('semantic_crawl', data, Date.now() - start, {
           warnings: [...warnings, ...(data.warnings ?? [])],
         });
+        await progressReporter?.done();
 
         // KG passive capture (fire-and-forget, never fails the tool call)
         if (kgHook && cfg.knowledgeGraph.enabled) {
@@ -490,6 +458,7 @@ export function registerSemanticCrawl(
 
         return successResponse(result);
       } catch (err: unknown) {
+        await progressReporter?.done();
         logger.error({ err, tool: 'semantic_crawl' }, 'Tool failed');
         return errorResponse(err, 'semantic_crawl');
       }

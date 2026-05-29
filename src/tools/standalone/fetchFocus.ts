@@ -31,6 +31,7 @@ export function registerFetchFocus(server: McpServer, cfg: SearchConfig): void {
         url: z.url().describe('The URL to fetch'),
         focus: z.string().min(1).describe('The specific information to extract from the page'),
       },
+      annotations: { readOnlyHint: true },
     },
     async ({ url, focus }) => {
       logger.info({ tool: 'fetch_focus', url }, 'Tool invoked');

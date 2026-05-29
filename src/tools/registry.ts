@@ -31,6 +31,7 @@ import { coerceNumericString, coerceArgs } from './normalize.js';
 import { correctQuery } from '../utils/fuzzyCorrection.js';
 import { applyIntentFilter } from '../utils/intentFilter.js';
 import type { IntentFilterResult } from '../utils/intentFilter.js';
+import { toolStats } from './stats.js';
 
 // ── Input normalization ─────────────────────────────────────────────────────
 
@@ -62,6 +63,21 @@ function nullTolerantMergedField(fieldType: z.ZodType): z.ZodType {
 }
 
 // ── Types ──────────────────────────────────────
+
+/**
+ * MCP tool annotations shape for client hints.
+ * Matches the MCP spec ToolAnnotations minus `deprecationReason`.
+ */
+export interface ToolAnnotations {
+  /** Optional display title for the tool. */
+  title?: string;
+  /** Hint: tool is read-only and safe to auto-call. */
+  readOnlyHint?: boolean;
+  /** Hint: tool may have destructive side-effects. */
+  destructiveHint?: boolean;
+  /** Hint: repeated calls with same args produce same result. */
+  idempotentHint?: boolean;
+}
 
 /**
  * Result that an action handler may return.
@@ -99,6 +115,10 @@ export interface FamilyAction<TSchema extends z.ZodType> {
    * human-readable remediation string if it isn't (e.g. "Set YOUTUBE_API_KEY").
    */
   configIssue?: (cfg: SearchConfig) => string | null;
+  /** Optional MCP tool annotations for client hints (readOnlyHint, destructiveHint, etc.). */
+  annotations?: ToolAnnotations;
+  /** Optional Zod schema for validating the handler's return data. Non-fatal: logs a warning on mismatch. */
+  outputSchema?: z.ZodType;
 }
 
 /**
@@ -111,6 +131,8 @@ export interface FamilyDefinition {
   description: string;
   /** All actions in this family. */
   actions: FamilyAction<z.ZodType>[];
+  /** Top-level MCP tool annotations — applied to the family-level tool registration. */
+  annotations?: ToolAnnotations;
 }
 
 // ── Registration ─────────────────────────────────────────────────────────────
@@ -144,15 +166,6 @@ function buildMergedSchema(family: FamilyDefinition): z.ZodObject<z.ZodRawShape>
   const names = family.actions.map((a) => a.name) as [string, ...string[]];
   const merged: Record<string, unknown> = {
     action: z.enum(names).describe(family.name + ' action: ' + names.join(', ')),
-    fuzzyCorrect: z
-      .boolean()
-      .optional()
-      .default(true)
-      .describe('Auto-correct typos in query using fuzzy matching'),
-    intent: z
-      .string()
-      .optional()
-      .describe('Natural language intent for result filtering when output exceeds ~5KB'),
   };
   for (const [key, fieldType] of allFields) {
     if (key === 'action') continue;
@@ -200,6 +213,7 @@ export function registerFamily(
     {
       description: family.description,
       inputSchema: mergedSchema,
+      ...(family.annotations ? { annotations: family.annotations } : {}),
     },
     async (rawArgs: unknown, extra: unknown) => {
       const args = rawArgs as Record<string, string>;
@@ -355,6 +369,16 @@ export function registerFamily(
           }
         }
 
+        if (action.outputSchema) {
+          const outputResult = action.outputSchema.safeParse(responseData);
+          if (!outputResult.success) {
+            logger.warn(
+              { tool: toolLabel, issues: outputResult.error.issues.map((i) => i.message) },
+              'Tool output failed schema validation',
+            );
+          }
+        }
+
         const meta: Record<string, unknown> = {};
         if (ws !== undefined) meta.warnings = ws;
         if (correction) meta.correction = correction;
@@ -378,6 +402,7 @@ export function registerFamily(
           Date.now() - start,
           meta as MakeResultOpts,
         );
+        toolStats.recordSuccess(toolLabel, Date.now() - start);
 
         // KG passive capture (fire-and-forget, never fails the tool call)
         if (kgHook && cfg.knowledgeGraph.enabled) {
@@ -388,6 +413,7 @@ export function registerFamily(
 
         return successResponse(full);
       } catch (err: unknown) {
+        toolStats.recordError(`${family.name}.${actionName}`);
         logger.error({ err, tool: family.name, action: actionName }, 'Action failed');
         return errorResponse(err, `${family.name}.${actionName}`);
       }
