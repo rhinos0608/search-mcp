@@ -36,6 +36,12 @@ export interface GitIgnoreRule {
   anchored: boolean;
 }
 
+/**
+ * Default max file bytes when fetching GitHub file content.
+ * 50KB is enough for most source files; documentation pages up to 500KB.
+ */
+export const DEFAULT_GITHUB_MAX_FILE_BYTES = 200_000;
+
 const DEFAULT_EXTENSIONS = [
   '.md',
   '.mdx',
@@ -69,6 +75,38 @@ const EXCLUDED_DIRS = new Set([
   '.venv',
   'venv',
 ]);
+
+/**
+ * Process an array of items with a concurrency limit.
+ * Each item is processed by `fn`, and results are returned in order.
+ * Failures are caught and returned, matching the error-handling style
+ * used throughout this module.
+ */
+async function batchAsync<T, R>(
+  items: T[],
+  concurrency: number,
+  fn: (item: T, index: number) => Promise<R>,
+): Promise<R[]> {
+  const results: R[] = [];
+  let nextIndex = 0;
+
+  const worker = async (): Promise<void> => {
+    while (nextIndex < items.length) {
+      const idx = nextIndex++;
+      const item = items[idx];
+      if (item === undefined) {
+        throw new Error(
+          `batchAsync: items[${String(idx)}] is undefined — array contains a hole at index ${String(idx)}`,
+        );
+      }
+      results[idx] = await fn(item, idx);
+    }
+  };
+
+  const workers = Array.from({ length: Math.min(concurrency, items.length) }, () => worker());
+  await Promise.all(workers);
+  return results;
+}
 
 const CORE_DIR_HINTS = new Set([
   'src',
@@ -243,35 +281,32 @@ async function rerankByContent(
 ): Promise<GitHubTreeEntry[]> {
   if (entries.length <= 1 || terms.length === 0) return entries;
   const sampleLimit = Math.min(Math.max((opts.maxFiles ?? 100) * 4, 20), 40, entries.length);
-  const headByteLimit = Math.min(opts.maxFileBytes ?? 50_000, 4_000);
+  const headByteLimit = Math.min(opts.maxFileBytes ?? DEFAULT_GITHUB_MAX_FILE_BYTES, 4_000);
   const sampleEntries = entries.slice(0, sampleLimit);
-  const contentScores = new Map<string, number>();
-  // Parallel fetch with concurrency limit of 4
-  const results = await Promise.all(
-    sampleEntries.map(async (entry) => {
-      try {
-        const result = await getFile(
-          opts.owner,
-          opts.repo,
-          entry.path,
-          opts.branch,
-          true,
-          undefined,
-          undefined,
-          0,
-          headByteLimit,
-        );
-        if (result.isBinary) return { path: entry.path, score: 0 };
-        return { path: entry.path, score: scoreSnippetForQuery(result.content, terms) };
-      } catch (err) {
-        logger.debug({ err, path: entry.path }, 'fetchGitHubCorpus: content prefilter fetch failed');
-        return { path: entry.path, score: 0 };
-      }
-    }),
-  );
-  for (const result of results) {
-    contentScores.set(result.path, result.score);
-  }
+
+  // Fetch content headers in parallel with concurrency limit of 4
+  const results = await batchAsync(sampleEntries, 4, async (entry) => {
+    try {
+      const result = await getFile(
+        opts.owner,
+        opts.repo,
+        entry.path,
+        opts.branch,
+        true,
+        undefined,
+        undefined,
+        0,
+        headByteLimit,
+      );
+      if (result.isBinary) return { path: entry.path, score: 0 };
+      return { path: entry.path, score: scoreSnippetForQuery(result.content, terms) };
+    } catch (err) {
+      logger.debug({ err, path: entry.path }, 'fetchGitHubCorpus: content prefilter fetch failed');
+      return { path: entry.path, score: 0 };
+    }
+  });
+
+  const contentScores = new Map(results.map((r) => [r.path, r.score]));
 
   return [...entries].sort((a, b) => {
     const aScore = (contentScores.get(a.path) ?? 0) * 4 + scoreGitHubPathForQuery(a, terms) * 2 + scoreBroadCorpusFile(a) * 0.25;
@@ -405,7 +440,7 @@ export async function fetchGitHubCorpus(
   // Pre-convert extensions to lowercase for efficient matching
   const extensions = (opts.extensions ?? DEFAULT_EXTENSIONS).map((e) => e.toLowerCase());
   const maxFiles = opts.maxFiles ?? 100;
-  const maxFileBytes = opts.maxFileBytes ?? 50_000;
+  const maxFileBytes = opts.maxFileBytes ?? DEFAULT_GITHUB_MAX_FILE_BYTES;
   const getTree = deps.getGitHubRepoTree ?? getGitHubRepoTree;
   const getFile = deps.getGitHubRepoFile ?? getGitHubRepoFile;
   const getSearch = deps.getGitHubRepoSearch ?? getGitHubRepoSearch;
@@ -483,9 +518,9 @@ export async function fetchGitHubCorpus(
     candidateFiles = await rerankByContent(candidateFiles, opts, getFile, queryTerms);
   }
   const selectedFiles = candidateFiles.slice(0, maxFiles);
-  const docs: GitHubCorpusDocument[] = [];
 
-  for (const file of selectedFiles) {
+  // Fetch file contents in parallel with concurrency limit of 10
+  const fileResults = await batchAsync(selectedFiles, 10, async (file) => {
     try {
       const result = await getFile(
         opts.owner,
@@ -498,16 +533,19 @@ export async function fetchGitHubCorpus(
         undefined,
         maxFileBytes,
       );
-      if (result.isBinary) continue;
-      docs.push({
+      if (result.isBinary) return null;
+      return {
         path: file.path,
         content: result.content,
         url: result.htmlUrl,
-      });
+      } satisfies GitHubCorpusDocument;
     } catch (err) {
       logger.warn({ err, path: file.path }, 'Failed to fetch GitHub file for corpus');
+      return null;
     }
-  }
+  });
+
+  const docs: GitHubCorpusDocument[] = fileResults.filter((d): d is GitHubCorpusDocument => d !== null);
 
   return docs;
 }
