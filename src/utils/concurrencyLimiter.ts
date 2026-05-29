@@ -7,6 +7,7 @@ interface Waiter {
   reject: (reason: Error) => void;
   signal?: AbortSignal;
   abortMessage?: string;
+  cleanup?: () => void;
 }
 
 export class ConcurrencyLimiter {
@@ -33,7 +34,7 @@ export class ConcurrencyLimiter {
 
     if (this._active < this._maxConcurrency) {
       this._active++;
-      return this._release;
+      return this.makeRelease();
     }
 
     return new Promise<() => void>((resolve, reject) => {
@@ -46,16 +47,22 @@ export class ConcurrencyLimiter {
           reject(new Error(abortMessage));
         };
         signal.addEventListener('abort', onAbort, { once: true });
+        waiter.cleanup = () => signal.removeEventListener('abort', onAbort);
       }
 
       this._queue.push(waiter);
     });
   }
 
-  private _release = (): void => {
-    this._active--;
-    this.drain();
-  };
+  private makeRelease(): () => void {
+    let called = false;
+    return () => {
+      if (called) return;
+      called = true;
+      this._active--;
+      this.drain();
+    };
+  }
 
   private drain(): void {
     while (this._active < this._maxConcurrency && this._queue.length > 0) {
@@ -67,8 +74,10 @@ export class ConcurrencyLimiter {
         continue;
       }
 
+      const release = this.makeRelease();
+      waiter.cleanup?.();
       this._active++;
-      waiter.resolve(this._release);
+      waiter.resolve(release);
     }
   }
 }
