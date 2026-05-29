@@ -41,6 +41,34 @@ setInterval(() => {
 
 // ── Content extraction helpers ──────────────────────────────────────────────
 
+/** Fetches a URL with SSRF guard, timeout, and safe text extraction. */
+async function fetchPage(url: string): Promise<{ content: string; status: number }> {
+  assertSafeUrl(url);
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => { controller.abort(); }, 30000);
+
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      signal: controller.signal,
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (compatible; search-mcp/1.0)',
+        Accept: 'text/html,application/xhtml+xml',
+      },
+    });
+  } finally {
+    clearTimeout(timeout);
+  }
+
+  if (!response.ok) {
+    throw new Error(`HTTP ${String(response.status)} ${response.statusText} for URL "${url}"`);
+  }
+
+  const content = await safeResponseText(response, url);
+  return { content, status: response.status };
+}
+
 /**
  * Parse the page title from HTML content.
  */
@@ -63,11 +91,12 @@ function stripHtml(html: string): string {
     .replace(/<[^>]+>/g, ' ')
     // Decode common HTML entities
     .replace(/&nbsp;/g, ' ')
-    .replace(/&/g, '&')
     .replace(/</g, '<')
     .replace(/>/g, '>')
     .replace(/"/g, '"')
     .replace(/&#39;/g, "'")
+    // &amp; last so entities like &amp;lt; are not double-decoded
+    .replace(/&amp;/g, '&')
     // Collapse whitespace
     .replace(/\s+/g, ' ')
     .trim();
@@ -121,41 +150,15 @@ const agenticBrowseFamily: FamilyDefinition = {
       schema: browseSchema,
       handler: async (args) => {
         const { url } = args as { url: string };
+        const { content, status } = await fetchPage(url);
 
-        // Validate URL with SSRF guard
-        assertSafeUrl(url);
-
-        // Fetch the page
-        const controller = new AbortController();
-        const timeout = setTimeout(() => { controller.abort(); }, 30000);
-
-        let response: Response;
-        try {
-          response = await fetch(url, {
-            signal: controller.signal,
-            headers: {
-              'User-Agent': 'Mozilla/5.0 (compatible; search-mcp/1.0)',
-              Accept: 'text/html,application/xhtml+xml',
-            },
-          });
-        } finally {
-          clearTimeout(timeout);
-        }
-
-        if (!response.ok) {
-          throw new Error(`HTTP ${String(response.status)} ${response.statusText} for URL "${url}"`);
-        }
-
-        const content = await safeResponseText(response, url);
-
-        // Generate document ID and store
         const documentId = randomUUID();
         documentStore.set(documentId, { url, content, timestamp: Date.now() });
 
         return {
           documentId,
           url,
-          status: response.status,
+          status,
           bytes: new TextEncoder().encode(content).length,
         };
       },
@@ -195,41 +198,14 @@ const agenticBrowseFamily: FamilyDefinition = {
       schema: browseAndPresentSchema,
       handler: async (args) => {
         const { url, maxChars } = args as { url: string; maxChars: number };
+        const { content } = await fetchPage(url);
 
-        // Validate URL with HTTP guard
-        assertSafeUrl(url);
-
-        // Fetch the page
-        const controller = new AbortController();
-        const timeout = setTimeout(() => { controller.abort(); }, 30000);
-
-        let response: Response;
-        try {
-          response = await fetch(url, {
-            signal: controller.signal,
-            headers: {
-              'User-Agent': 'Mozilla/5.0 (compatible; search-mcp/1.0)',
-              Accept: 'text/html,application/xhtml+xml',
-            },
-          });
-        } finally {
-          clearTimeout(timeout);
-        }
-
-        if (!response.ok) {
-          throw new Error(`HTTP ${String(response.status)} ${response.statusText} for URL "${url}"`);
-        }
-
-        const content = await safeResponseText(response, url);
-
-        // Extract and format content
         const title = extractTitle(content);
         const plainContent = stripHtml(content);
         const truncated = plainContent.length > maxChars;
         const truncatedContent = truncated ? plainContent.slice(0, maxChars) : plainContent;
         const wordCount = truncatedContent.split(/\s+/).filter(Boolean).length;
 
-        // Generate document ID and store for subsequent present calls
         const documentId = randomUUID();
         documentStore.set(documentId, { url, content, timestamp: Date.now() });
 
@@ -251,9 +227,9 @@ const agenticBrowseFamily: FamilyDefinition = {
 export function registerAgenticBrowseTool(
   server: McpServer,
   cfg: SearchConfig,
-  _kgHook?: KnowledgeGraphHook,
+  kgHook?: KnowledgeGraphHook,
 ): void {
-  registerFamily(server, agenticBrowseFamily, cfg);
+  registerFamily(server, agenticBrowseFamily, cfg, kgHook);
 }
 
 /**
