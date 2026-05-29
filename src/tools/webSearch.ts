@@ -13,6 +13,7 @@ import { isDegraded, recordOutcome } from '../utils/backendHealth.js';
 import { isCircuitTripped, recordChallenge } from '../utils/botChallenge.js';
 import { isToolError } from '../errors.js';
 import type { SearchResult } from '../types.js';
+import { getCategoryProfile } from '../utils/searchCategories.js';
 
 // ── Fallback order ───────────────────────────────────────────────────────────
 
@@ -360,9 +361,20 @@ export async function webSearch(
   mergeBackends = true,
   fuzzyCorrect = true,
   provenanceResult?: { current: ProvenanceResult | null },
+  category?: string,
 ): Promise<SearchResult[]> {
-  return searchWithBackends(
-    query,
+  // Apply category hint if provided
+  let effectiveQuery = query;
+  if (category) {
+    const profile = getCategoryProfile(category);
+    if (profile.queryHint) {
+      effectiveQuery = `${query} ${profile.queryHint}`;
+      logger.info({ original: query, category, effectiveQuery }, 'webSearch: category hint applied');
+    }
+  }
+
+  const results = await searchWithBackends(
+    effectiveQuery,
     limit,
     safeSearch,
     {
@@ -378,4 +390,6 @@ export async function webSearch(
     undefined,
     provenanceResult,
   );
+
+  return results;
 }

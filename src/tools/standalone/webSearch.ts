@@ -12,10 +12,11 @@ import type { SearchConfig } from '../../config.js';
 import { logger } from '../../logger.js';
 import { webSearch, type ProvenanceResult } from '../webSearch.js';
 import { correctQuery } from '../../utils/fuzzyCorrection.js';
-import { applyIntentFilter, type IntentFilterResult } from '../../utils/intentFilter.js';
+import { formatCollatedFindings, type FindingEntry } from '../../utils/collatedFindings.js';
 import { makeResult, errorResponse, successResponse } from '../response.js';
-import type { KnowledgeGraphHook } from '../../knowledge/hook.js';
 import type { SearchResult } from '../../types.js';
+import type { KnowledgeGraphHook } from '../../knowledge/hook.js';
+import { SEARCH_CATEGORIES } from '../../utils/searchCategories.js';
 export function registerWebSearch(
   server: McpServer,
   cfg: SearchConfig,
@@ -44,46 +45,38 @@ export function registerWebSearch(
           .describe(
             'Generate query variations (question, concept, scope, opposition) and merge results for broader coverage.',
           ),
-        mergeSearchBackends: z
-          .boolean()
-          .optional()
-          .default(true)
-          .describe(
-            'When multiple search backends are configured, query all of them and merge + deduplicate results. Adds engines field tracking which backend returned each result.',
-          ),
-        fuzzyCorrect: z
-          .boolean()
-          .optional()
-          .default(true)
-          .describe(
-            'Auto-correct typos in the query using Levenshtein fuzzy matching against a domain vocabulary.',
-          ),
-        intent: z
-          .string()
+        category: z
+          .enum([...Object.keys(SEARCH_CATEGORIES)])
           .optional()
           .describe(
-            'Natural language intent description. When provided and results exceed ~5KB, only intent-matched results are returned. E.g., "implementation details and code examples" keeps only results related to that intent.',
+            'Search category profile to enhance the query (company, research paper, news, pdf, github, tweet, personal site, people, financial report)',
           ),
+        resultFormat: z
+          .enum(['raw', 'collated'])
+          .optional()
+          .default('raw')
+          .describe('Output format: raw passes through backend results, collated assembles structured findings with source blocks'),
       },
+      annotations: { readOnlyHint: true },
     },
     async ({
       query,
       limit,
       safeSearch,
       expandQuery,
-      mergeSearchBackends,
-      fuzzyCorrect,
-      intent,
+      category,
+      resultFormat,
     }) => {
+      // Server-level defaults (always on, hidden from schema to reduce param noise)
+      const mergeSearchBackends = true;
+      const fuzzyCorrect = true;
+
       logger.info(
         {
           tool: 'web_search',
           limit,
           safeSearch,
           expandQuery,
-          mergeSearchBackends,
-          fuzzyCorrect,
-          intent,
         },
         'Tool invoked',
       );
@@ -96,7 +89,8 @@ export function registerWebSearch(
               changes: { original: string; corrected: string; distance: number }[];
             }
           | undefined;
-        if (fuzzyCorrect) {
+        // Always apply fuzzy correction (was a param, now always-on default)
+        {
           const cr = correctQuery(query);
           if (cr.changes.length > 0) {
             correction = { original: query, corrected: cr.corrected, changes: cr.changes };
@@ -104,7 +98,7 @@ export function registerWebSearch(
         }
 
         const provenanceRef: { current: ProvenanceResult | null } = { current: null };
-        let data = await webSearch(
+        const searchResults = await webSearch(
           query,
           limit,
           safeSearch,
@@ -112,23 +106,36 @@ export function registerWebSearch(
           mergeSearchBackends,
           fuzzyCorrect,
           provenanceRef,
+          category,
         );
-        let intentFilterResult: IntentFilterResult<SearchResult> | undefined;
 
-        // Apply intent filtering at the handler level when intent is provided
-        if (intent) {
-          intentFilterResult = applyIntentFilter<SearchResult>(
-            data,
-            intent,
-            5000,
-            (item: SearchResult) => `${item.title} ${item.description}`,
-          );
-          data = intentFilterResult.results;
+        // Post-process: collated format transforms results into a structured markdown string
+        let data: SearchResult[] | string = searchResults;
+        if (resultFormat === 'collated') {
+          const findings: FindingEntry[] = searchResults.map((r, i) => ({
+            url: r.url,
+            title: r.title,
+            domain: new URL(r.url).hostname,
+            rank: i + 1,
+            content: r.description,
+          }));
+          data = formatCollatedFindings(findings);
         }
+
+        // For collated format, the result is already a formatted string
+        // Wrap it in the standard result structure
+        if (resultFormat === 'collated' && typeof data === 'string') {
+          const result = makeResult('web_search', { text: data }, Date.now() - start, {
+            ...(correction ? { correction } : {}),
+            ...(provenanceRef.current ? { provenance: provenanceRef.current } : {}),
+          });
+          return successResponse(result);
+        }
+        // Intent filtering removed from schema — auto-applied when output exceeds 5KB.
+        // The `intent` param is still accepted via raw args for backward-compat but hidden from schema.
 
         const result = makeResult('web_search', data, Date.now() - start, {
           ...(correction ? { correction } : {}),
-          ...(intentFilterResult ? { intentFilter: intentFilterResult } : {}),
           ...(provenanceRef.current ? { provenance: provenanceRef.current } : {}),
         });
 

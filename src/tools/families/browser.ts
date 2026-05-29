@@ -192,24 +192,6 @@ const sessionSchema = z.object({
     .enum(['playwright', 'cloak'])
     .optional()
     .describe('Browser backend: playwright (default) or cloak (optional CloakBrowser package)'),
-  cloakHumanize: z
-    .boolean()
-    .optional()
-    .describe('Enable CloakBrowser human-like input patches for Cloak sessions'),
-  cloakHumanPreset: z.enum(['default', 'careful']).optional().describe('CloakBrowser human preset'),
-  cloakLocale: z.string().optional().describe('CloakBrowser locale flag, e.g. en-US'),
-  cloakTimezone: z
-    .string()
-    .optional()
-    .describe('CloakBrowser timezone flag, e.g. America/New_York'),
-  cloakGeoip: z
-    .boolean()
-    .optional()
-    .describe('Let CloakBrowser infer locale/timezone from proxy IP'),
-  cloakStealthArgs: z
-    .boolean()
-    .optional()
-    .describe('Include CloakBrowser default stealth fingerprint flags'),
 });
 
 // ── New action schemas (V4.1) ────────────────────────────────────────────────
@@ -1261,12 +1243,6 @@ const browserFamily: FamilyDefinition = {
           mode,
           browserPort,
           browserEngine,
-          cloakHumanize,
-          cloakHumanPreset,
-          cloakLocale,
-          cloakTimezone,
-          cloakGeoip,
-          cloakStealthArgs,
         } = args as {
           op: string;
           headless?: boolean;
@@ -1275,13 +1251,14 @@ const browserFamily: FamilyDefinition = {
           mode?: string;
           browserPort?: number;
           browserEngine?: string;
-          cloakHumanize?: boolean;
-          cloakHumanPreset?: 'default' | 'careful';
-          cloakLocale?: string;
-          cloakTimezone?: string;
-          cloakGeoip?: boolean;
-          cloakStealthArgs?: boolean;
         };
+        // Cloak params removed from schema; use server config defaults
+        const cloakHumanize = cfg.browser.cloakHumanize;
+        const cloakHumanPreset = cfg.browser.cloakHumanPreset as 'default' | 'careful' | undefined;
+        const cloakLocale = cfg.browser.cloakLocale;
+        const cloakTimezone = cfg.browser.cloakTimezone;
+        const cloakGeoip = cfg.browser.cloakGeoip;
+        const cloakStealthArgs = cfg.browser.cloakStealthArgs;
         const { browserManager } = await import('../../browser/browserManager.js');
         switch (op) {
           case 'start': {

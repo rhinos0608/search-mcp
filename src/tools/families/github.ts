@@ -30,6 +30,7 @@ import { getGitHubRepoTree } from '../githubRepoTree.js';
 import { getGitHubRepoSearch } from '../githubRepoSearch.js';
 import { getGitHubTrending } from '../githubTrending.js';
 import { semanticGitHubCode } from '../semanticGitHubCode.js';
+import { DEFAULT_GITHUB_MAX_FILE_BYTES } from '../../utils/githubCorpus.js';
 import { wrapResponse } from '../response.js';
 import { registerFamily, type FamilyDefinition } from '../registry.js';
 import { resolveGitHubRepoLocator } from '../normalize.js';
@@ -187,16 +188,6 @@ const searchAction = z.object({
   language: z.string().optional().describe('Filter by language (e.g. "typescript")'),
   path: z.string().optional().describe('Filter to files under this path'),
   limit: z.number().int().min(1).max(1000).optional().default(30).describe('Max results (1–1000)'),
-  useCodeSearchAsDefault: z
-    .boolean()
-    .optional()
-    .default(true)
-    .describe('Use AST-aware semantic code search as the default path (recommended)'),
-  fallbackToBasicSearch: z
-    .boolean()
-    .optional()
-    .default(false)
-    .describe('Fall back to basic GitHub search when code_search finds no results'),
 });
 
 const trendingAction = z.object({
@@ -249,23 +240,10 @@ const codeSearchAction = z
       .optional()
       .default(100)
       .describe('Max files to collect (1–500)'),
-    maxFileBytes: z
-      .number()
-      .int()
-      .min(1)
-      .max(500_000)
-      .optional()
-      .default(50_000)
-      .describe('Max bytes per file before truncation'),
     fileFilter: z
       .array(z.string())
       .optional()
       .describe('Path prefixes, substrings, or * globs to keep'),
-    preFilterByContent: z
-      .boolean()
-      .optional()
-      .default(true)
-      .describe('Run a lightweight content-based prefilter before downloading full files'),
     topK: z
       .number()
       .int()
@@ -287,28 +265,11 @@ const codeSearchAction = z
       .optional()
       .default('lexical-heavy')
       .describe('Retrieval profile (defaults to lexical-heavy for code)'),
-    useCodeSearchAsDefault: z
-      .boolean()
-      .optional()
-      .default(true)
-      .describe('Use AST-aware semantic code search as the default search path (recommended)'),
-    fallbackToBasicSearch: z
-      .boolean()
-      .optional()
-      .default(false)
-      .describe('Fall back to basic GitHub search when code_search finds no results'),
-    minScore: z
-      .number()
-      .min(0)
-      .max(1)
-      .optional()
-      .describe('Minimum bi-encoder score required for returned chunks (0–1)'),
     includeContext: z
       .boolean()
       .optional()
       .default(false)
       .describe('Include source code text in results'),
-    debug: z.boolean().optional().default(false).describe('Include debug corpus counts'),
   })
   .superRefine((data, ctx) => {
     if (!data.repo && !data.repository) {
@@ -364,6 +325,20 @@ const githubFamily: FamilyDefinition = {
         const data = await getGitHubRepo(resolvedOwner, resolvedRepo, includeReadme);
         return data;
       },
+      outputSchema: z.object({
+        name: z.string(),
+        fullName: z.string(),
+        description: z.string().nullable(),
+        stars: z.number(),
+        forks: z.number(),
+        language: z.string().nullable(),
+        license: z.string().nullable(),
+        topics: z.array(z.string()),
+        url: z.string(),
+        homepage: z.string().nullable(),
+        readme: z.string().optional(),
+        readmeError: z.string().optional(),
+      }),
     },
     {
       name: 'file',
@@ -516,8 +491,6 @@ const githubFamily: FamilyDefinition = {
           language,
           path,
           limit,
-          useCodeSearchAsDefault,
-          fallbackToBasicSearch,
         } = args as {
           query: string;
           owner?: string;
@@ -525,13 +498,11 @@ const githubFamily: FamilyDefinition = {
           language?: string;
           path?: string;
           limit: number;
-          useCodeSearchAsDefault?: boolean;
-          fallbackToBasicSearch?: boolean;
         };
 
         // Route to AST-aware semantic code search by default (requires a repo)
         const repoSpec = owner && repo ? `${owner}/${repo}` : undefined;
-        if (useCodeSearchAsDefault && repoSpec) {
+        if (repoSpec) {
           const data = await semanticGitHubCode({
             query,
             repo: repoSpec,
@@ -541,8 +512,8 @@ const githubFamily: FamilyDefinition = {
             preFilterByContent: true,
           });
 
-          // Fall back to basic search if no results and fallback is enabled
-          if (fallbackToBasicSearch && data.topKDelivered === 0) {
+          // Fall back to basic search if no results
+          if (data.topKDelivered === 0) {
             const basicResults = await getGitHubRepoSearch(
               query,
               owner,
@@ -604,14 +575,10 @@ const githubFamily: FamilyDefinition = {
           ref,
           language,
           maxFiles,
-          maxFileBytes,
           fileFilter,
-          preFilterByContent,
           topK,
           profile,
-          minScore,
           includeContext,
-          debug,
         } = args as {
           query: string;
           repo?: string;
@@ -619,15 +586,16 @@ const githubFamily: FamilyDefinition = {
           ref?: string;
           language?: string;
           maxFiles: number;
-          maxFileBytes: number;
           fileFilter?: string[];
-          preFilterByContent: boolean;
           topK: number;
           profile: string;
-          minScore?: number;
           includeContext: boolean;
-          debug: boolean;
         };
+        // Server-level default — 200KB covers most source and doc files
+        const maxFileBytes = DEFAULT_GITHUB_MAX_FILE_BYTES;
+        const preFilterByContent = true;
+        const minScore = undefined as number | undefined;
+        const debug = false;
 
         let repo = rawRepo;
         if (!repo && repository) {

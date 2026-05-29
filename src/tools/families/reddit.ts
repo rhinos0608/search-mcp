@@ -228,14 +228,6 @@ const semanticSchema = z.object({
     .optional()
     .default(10)
     .describe('Number of most-relevant comment passages to return (1–50, default 10)'),
-  maxBytes: z
-    .number()
-    .int()
-    .min(1)
-    .max(DEFAULT_SEMANTIC_MAX_BYTES)
-    .optional()
-    .default(DEFAULT_SEMANTIC_MAX_BYTES)
-    .describe('Maximum bytes of comment content to embed (1–250MB, default 250MB)'),
 });
 
 // ── Family definition ───────────────────────────────────────────────────────
@@ -341,7 +333,6 @@ const redditFamily: FamilyDefinition = {
           commentLimit,
           profile,
           topK,
-          maxBytes,
         } = args as {
           query: string;
           subreddit: string;
@@ -351,8 +342,9 @@ const redditFamily: FamilyDefinition = {
           commentLimit: number;
           profile: 'balanced' | 'fast' | 'precision' | 'recall';
           topK: number;
-          maxBytes: number;
         };
+        // Use server default for maxBytes
+        const maxBytes = DEFAULT_SEMANTIC_MAX_BYTES;
 
         const data = await semanticReddit({
           query,

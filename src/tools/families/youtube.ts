@@ -97,14 +97,6 @@ const semanticSchema = z.object({
     .optional()
     .default(10)
     .describe('Number of most-relevant transcript passages to return (1–50, default 10)'),
-  maxBytes: z
-    .number()
-    .int()
-    .min(1)
-    .max(DEFAULT_SEMANTIC_MAX_BYTES)
-    .optional()
-    .default(DEFAULT_SEMANTIC_MAX_BYTES)
-    .describe('Maximum bytes of transcript content to embed (1–250MB, default 250MB)'),
 });
 
 // ── Family definition ───────────────────────────────────────────────────────
@@ -177,7 +169,7 @@ const youtubeFamily: FamilyDefinition = {
         'Search YouTube for videos, fetch transcripts, and rank passages by relevance to a query',
       schema: semanticSchema,
       handler: async (args, cfg) => {
-        const { query, maxVideos, channel, sort, transcriptLanguage, profile, topK, maxBytes } =
+        const { query, maxVideos, channel, sort, transcriptLanguage, profile, topK } =
           args as {
             query: string;
             maxVideos: number;
@@ -186,8 +178,9 @@ const youtubeFamily: FamilyDefinition = {
             transcriptLanguage: string;
             profile: 'balanced' | 'fast' | 'precision' | 'recall';
             topK: number;
-            maxBytes: number;
           };
+        // Use server default for maxBytes
+        const maxBytes = DEFAULT_SEMANTIC_MAX_BYTES;
 
         const data = await semanticYoutube({
           query,
