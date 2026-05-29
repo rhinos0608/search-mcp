@@ -68,6 +68,29 @@ export BRAVE_API_KEY=your_key
 claude --mcp 'search-mcp'
 ```
 
+## Browser Modes
+
+The `browser` tool family supports three modes selected via `BROWSER_MODE` (default: `user`):
+
+- **user** — Connects to an existing browser via CDP (you start Chrome manually with `--remote-debugging-port=9222`)
+- **stealth** — Launches an ephemeral Playwright browser with anti-detection patches
+- **headless** — Runs stealth/Playwright without a visible window (`BROWSER_HEADLESS=true`)
+
+To opt into automated scraping (old default):
+
+```bash
+export BROWSER_MODE=stealth
+export BROWSER_HEADLESS=true   # already the default
+```
+
+Set explicitly in config:
+
+```json
+{ "browser": { "mode": "stealth", "stealthEnabled": true } }
+```
+
+See `docs/tools.md` for a full migration guide from stealth to user mode.
+
 ## HTTP Mode & Browser Dashboard
 
 Set `HTTP_PORT` to enable an HTTP MCP endpoint and a React dashboard for managing providers and API keys without touching config files.

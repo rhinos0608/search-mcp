@@ -117,7 +117,7 @@ Copy [`config.example.json`](config.example.json) to `config.json` and fill in y
 | Variable | Default | Description |
 |---|---|---|
 | `BROWSER_ENABLED` | `false` | Enable interactive browser/CDP tools |
-| `BROWSER_MODE` | `stealth` | Browser mode: `stealth`, `user`, or `profile` |
+| `BROWSER_MODE` | `user` | Browser mode: `user`, `stealth`, or `profile` |
 | `BROWSER_ENGINE` | `playwright` | Launch backend: `playwright` or `cloak` (requires `npm install cloakbrowser playwright-core`) |
 | `BROWSER_EXECUTABLE_PATH` | — | Path to custom browser binary |
 | `BROWSER_HEADLESS` | `true` | Run headless |
