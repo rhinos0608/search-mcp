@@ -36,18 +36,16 @@ function getRegisteredTool(server: ReturnType<typeof createServer>['server'], na
   return entry;
 }
 
-test('web_search input schema defaults expansion and backend merging to true', () => {
+test('web_search input schema defaults expandQuery to true', () => {
   const { server } = createServer(loadConfig());
   const entry = getRegisteredTool(server, 'web_search');
   assert.ok(entry.inputSchema !== undefined);
 
   const parsed = entry.inputSchema.parse({ query: 'api' }) as {
     expandQuery: boolean;
-    mergeSearchBackends: boolean;
   };
 
   assert.equal(parsed.expandQuery, true);
-  assert.equal(parsed.mergeSearchBackends, true);
 });
 
 test('searchWithBackends defaults to expanded, merged results', async () => {
