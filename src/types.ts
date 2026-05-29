@@ -534,6 +534,8 @@ export interface WebCrawlResult {
   totalPages: number;
   successfulPages: number;
   warnings?: string[];
+  /** Number of pages filtered out because they were detected as challenge/blocker pages (Cloudflare, CAPTCHA, etc.). */
+  filteredChallenges?: number;
 }
 
 // ── Semantic Crawl ────────────────────────────────────────────────────────

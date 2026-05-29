@@ -12,6 +12,7 @@ import {
 } from '../crawl/middlewares.js';
 import { unavailableError } from '../errors.js';
 import { cleanMarkdownContent } from '../utils/contentCleanup.js';
+import { detectContentChallenge } from '../utils/contentChallengeDetector.js';
 import type { WebCrawlResult, CrawlPageResult } from '../types.js';
 import type { DomainTrustConfig } from '../config.js';
 import type { ExtractionConfig } from '../utils/extractionConfig.js';
@@ -119,8 +120,25 @@ export async function webCrawl(
   // navigation boilerplate, excessive whitespace
   const cleanedPages: CrawlPageResult[] = response.result.pages.map(cleanPageMarkdown);
 
+  // Filter out pages that are challenge/blocker pages (Cloudflare, CAPTCHA, etc.)
+  let filteredChallenges = 0;
+  const filteredPages: CrawlPageResult[] = [];
+  for (const page of cleanedPages) {
+    const challenge = detectContentChallenge(page.title ?? '', page.markdown);
+    if (challenge.isChallenge) {
+      filteredChallenges++;
+      logger.warn(
+        { url: page.url, challengeReason: challenge.reason },
+        'web_crawl: filtered challenge page',
+      );
+    } else {
+      filteredPages.push(page);
+    }
+  }
+
   return {
     ...response.result,
-    pages: cleanedPages,
+    pages: filteredPages,
+    filteredChallenges,
   };
 }

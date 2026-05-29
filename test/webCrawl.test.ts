@@ -372,12 +372,12 @@ test('webCrawl sets html to undefined when no HTML fields present', async () => 
 
 // ── Timeout formula ───────────────────────────────────────────────────────────
 
-test('computeCrawlTimeout: 1 page → 80s (60s base + 20s/page)', () => {
-  assert.equal(computeCrawlTimeout(1), 80_000);
+test('computeCrawlTimeout: 1 page → 45s (30s base + 15s/page)', () => {
+  assert.equal(computeCrawlTimeout(1), 45_000);
 });
 
-test('computeCrawlTimeout: 10 pages → 260s (60s base + 20s/page)', () => {
-  assert.equal(computeCrawlTimeout(10), 260_000);
+test('computeCrawlTimeout: 10 pages → 180s (30s base + 15s/page)', () => {
+  assert.equal(computeCrawlTimeout(10), 180_000);
 });
 
 test('computeCrawlTimeout: 25 pages → capped at 300s', () => {
@@ -386,4 +386,91 @@ test('computeCrawlTimeout: 25 pages → capped at 300s', () => {
 
 test('computeCrawlTimeout: 50 pages → capped at 300s', () => {
   assert.equal(computeCrawlTimeout(50), 300_000);
+});
+
+// ── Challenge page filtering ────────────────────────────────
+
+test('webCrawl filters out Cloudflare challenge pages and reports count', async () => {
+  globalThis.fetch = async () =>
+    buildMockResponse({
+      results: [
+        { url: 'https://a.com', success: true, markdown: '# Real page\n\nUseful content here.' },
+        {
+          url: 'https://challenge.com',
+          success: true,
+          title: 'Just a moment',
+          markdown: 'Checking your browser before accessing the site.',
+        },
+        { url: 'https://b.com', success: true, markdown: '# Another real page' },
+      ],
+    });
+
+  const result = await webCrawl('https://a.com', 'https://crawl4ai.example.com', '', defaultOpts);
+
+  // Only non-challenge pages should be in the result
+  assert.equal(result.pages.length, 2);
+  assert.ok(result.pages[0]);
+  assert.ok(result.pages[1]);
+  assert.equal(result.pages[0]!.url, 'https://a.com');
+  assert.equal(result.pages[1]!.url, 'https://b.com');
+  // Challenge page should be filtered out
+  assert.ok(!result.pages.some((p) => p.url === 'https://challenge.com'));
+  // filteredChallenges count should reflect the number removed
+  assert.equal(result.filteredChallenges, 1);
+});
+
+test('webCrawl sets filteredChallenges to 0 when no challenge pages are present', async () => {
+  globalThis.fetch = async () =>
+    buildMockResponse({
+      results: [
+        { url: 'https://a.com', success: true, markdown: '# Real page' },
+        { url: 'https://b.com', success: true, markdown: '# Another real page' },
+      ],
+    });
+
+  const result = await webCrawl('https://a.com', 'https://crawl4ai.example.com', '', defaultOpts);
+
+  assert.equal(result.pages.length, 2);
+  assert.equal(result.filteredChallenges, 0);
+});
+
+test('webCrawl filters multiple challenge pages in a single crawl', async () => {
+  globalThis.fetch = async () =>
+    buildMockResponse({
+      results: [
+        { url: 'https://a.com', success: true, markdown: '# Real page' },
+        { url: 'https://cf.com', success: true, title: 'Attention Required', markdown: 'Cloudflare' },
+        { url: 'https://b.com', success: true, markdown: '# Real page 2' },
+        { url: 'https://captcha.com', success: true, markdown: 'CAPTCHA verify you are human' },
+      ],
+    });
+
+  const result = await webCrawl('https://a.com', 'https://crawl4ai.example.com', '', defaultOpts);
+
+  assert.equal(result.pages.length, 2);
+  assert.ok(!result.pages.some((p) => p.url === 'https://cf.com'));
+  assert.ok(!result.pages.some((p) => p.url === 'https://captcha.com'));
+  assert.equal(result.filteredChallenges, 2);
+});
+
+test('webCrawl handles pages with null title in challenge detection', async () => {
+  globalThis.fetch = async () =>
+    buildMockResponse({
+      results: [
+        {
+          url: 'https://challenge.com',
+          success: true,
+          title: null,
+          markdown: 'access denied checking your browser',
+        },
+        { url: 'https://real.com', success: true, markdown: '# Real page' },
+      ],
+    });
+
+  const result = await webCrawl('https://real.com', 'https://crawl4ai.example.com', '', defaultOpts);
+
+  assert.equal(result.pages.length, 1);
+  assert.ok(result.pages[0]);
+  assert.equal(result.pages[0]!.url, 'https://real.com');
+  assert.equal(result.filteredChallenges, 1);
 });
