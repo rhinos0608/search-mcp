@@ -39,7 +39,7 @@ export function detectContentChallenge(
     // Apply length condition to the subset of patterns that require it.
     if (
       (token === 'enable javascript' || token === 'please enable cookies') &&
-      contentOnlyShort
+      !contentOnlyShort
     ) {
       continue;
     }
