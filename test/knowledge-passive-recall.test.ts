@@ -139,6 +139,7 @@ test('newly consolidated research actions are passively captured and queryable',
     },
   ]);
   await hook.flushSession('research-session');
+  await waitForNode('PubMed Recall');
 
   assert.equal(getChatCalls(), 1);
   const nodes = queryNodes({ label: 'PubMed Recall', limit: 5 }).nodes;
@@ -176,6 +177,7 @@ test('deep research completion is extracted and immediately queryable', async ()
   };
 
   await hook.onDeepResearchComplete('job-1', result);
+  await waitForNode('Deep Research Recall');
 
   assert.ok(getChatCalls() >= 1);
   const nodes = queryNodes({ label: 'Deep Research Recall', limit: 5 }).nodes;

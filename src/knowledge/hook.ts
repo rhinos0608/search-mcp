@@ -37,7 +37,6 @@ import { scrubContent } from '../utils/contentScrubber.js';
 
 const PASSIVE_CAPTURE_ALLOWLIST = new Set([
   'web_search',
-  'web_read',
   'web_crawl',
   'semantic_crawl',
   'reddit.search',
@@ -299,8 +298,9 @@ export class KnowledgeGraphHook {
         },
       ]);
 
-      // 7. Rebuild projection now so completed deep research is immediately queryable.
-      rebuildProjection({ full: true });
+      // 7. Rebuild projection async so completed deep research is immediately queryable.
+      // Deferred to avoid blocking the event loop during an expensive full rebuild.
+      setImmediate(() => { rebuildProjection({ full: true }); });
 
       // 8. Clear active run flag
       this.setActiveRun(null);
@@ -395,10 +395,37 @@ export class KnowledgeGraphHook {
     extractions: FlushedPendingExtraction[],
   ): Promise<void> {
     if (extractions.length === 0) {
+      appendEvents([{
+        timestamp: new Date().toISOString(),
+        eventType: 'RUN_FAILED',
+        eventVersion: 1,
+        runId,
+        batchId: null,
+        actor: 'system',
+        entityId: runId,
+        entityType: 'run',
+        payload: JSON.stringify({ lastError: 'No flushed extraction content' }),
+        payloadHash: null,
+      }]);
       updateRunStatus(runId, 'failed', { lastError: 'No flushed extraction content' });
       return;
     }
 
+    // Emit RUN_STARTED before extraction begins
+    appendEvents([{
+      timestamp: new Date().toISOString(),
+      eventType: 'RUN_STARTED',
+      eventVersion: 1,
+      runId,
+      batchId: null,
+      actor: 'system',
+      entityId: runId,
+      entityType: 'run',
+      payload: JSON.stringify({ sessionId, session_mode: true }),
+      payloadHash: null,
+    }]);
+
+    const startTime = Date.now();
     updateRunStatus(runId, 'extracting');
     const extractor = new KnowledgeGraphExtractor(this.config);
     let entityCount = 0;
@@ -425,11 +452,37 @@ export class KnowledgeGraphHook {
       }
     }
 
+    const duration = Date.now() - startTime;
     if (entityCount === 0 && failureCount > 0) {
+      appendEvents([{
+        timestamp: new Date().toISOString(),
+        eventType: 'RUN_FAILED',
+        eventVersion: 1,
+        runId,
+        batchId: null,
+        actor: 'system',
+        entityId: runId,
+        entityType: 'run',
+        payload: JSON.stringify({ lastError: 'Passive extraction produced no entities', duration, entityCount, failureCount }),
+        payloadHash: null,
+      }]);
       updateRunStatus(runId, 'failed', { lastError: 'Passive extraction produced no entities' });
     } else {
       updateRunStatus(runId, 'completed', { entityCount, edgeCount });
-      rebuildProjection({ full: true });
+      appendEvents([{
+        timestamp: new Date().toISOString(),
+        eventType: 'RUN_COMPLETED',
+        eventVersion: 1,
+        runId,
+        batchId: null,
+        actor: 'system',
+        entityId: runId,
+        entityType: 'run',
+        payload: JSON.stringify({ entity_count: entityCount, edge_count: edgeCount, duration }),
+        payloadHash: null,
+      }]);
+      // Deferred to avoid blocking the event loop during an expensive full rebuild.
+      setImmediate(() => { rebuildProjection({ full: true }); });
     }
   }
 
