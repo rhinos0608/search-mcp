@@ -11,7 +11,6 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { SearchConfig } from '../../config.js';
 import { logger } from '../../logger.js';
 import { webSearch, type ProvenanceResult } from '../webSearch.js';
-import { correctQuery } from '../../utils/fuzzyCorrection.js';
 import { formatCollatedFindings, type FindingEntry } from '../../utils/collatedFindings.js';
 import { makeResult, errorResponse, successResponse } from '../response.js';
 import type { SearchResult } from '../../types.js';
@@ -69,7 +68,6 @@ export function registerWebSearch(
     }) => {
       // Server-level defaults (always on, hidden from schema to reduce param noise)
       const mergeSearchBackends = true;
-      const fuzzyCorrect = true;
 
       logger.info(
         {
@@ -82,21 +80,6 @@ export function registerWebSearch(
       );
       const start = Date.now();
       try {
-        let correction:
-          | {
-              original: string;
-              corrected: string;
-              changes: { original: string; corrected: string; distance: number }[];
-            }
-          | undefined;
-        // Always apply fuzzy correction (was a param, now always-on default)
-        {
-          const cr = correctQuery(query);
-          if (cr.changes.length > 0) {
-            correction = { original: query, corrected: cr.corrected, changes: cr.changes };
-          }
-        }
-
         const provenanceRef: { current: ProvenanceResult | null } = { current: null };
         const searchResults = await webSearch(
           query,
@@ -104,7 +87,6 @@ export function registerWebSearch(
           safeSearch,
           expandQuery,
           mergeSearchBackends,
-          fuzzyCorrect,
           provenanceRef,
           category,
         );
@@ -125,16 +107,14 @@ export function registerWebSearch(
         // collated format produces a formatted string
         if (resultFormat === 'collated') {
           const result = makeResult('web_search', { text: data as string }, Date.now() - start, {
-            ...(correction ? { correction } : {}),
             ...(provenanceRef.current ? { provenance: provenanceRef.current } : {}),
-          });
+            });
           return successResponse(result);
         }
         // Intent filtering removed from schema — auto-applied when output exceeds 5KB.
         // The `intent` param is still accepted via raw args for backward-compat but hidden from schema.
 
         const result = makeResult('web_search', data, Date.now() - start, {
-          ...(correction ? { correction } : {}),
           ...(provenanceRef.current ? { provenance: provenanceRef.current } : {}),
         });
 

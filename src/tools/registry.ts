@@ -28,7 +28,6 @@ import {
   type MakeResultOpts,
 } from './response.js';
 import { coerceNumericString, coerceArgs } from './normalize.js';
-import { correctQuery } from '../utils/fuzzyCorrection.js';
 import { applyIntentFilter } from '../utils/intentFilter.js';
 import type { IntentFilterResult } from '../utils/intentFilter.js';
 import { toolStats } from './stats.js';
@@ -267,29 +266,8 @@ export function registerFamily(
         `${family.name}.${actionName} invoked`,
       );
 
-      // ── Context protection: fuzzy correction ──
-      let correction:
-        | {
-            original: string;
-            corrected: string;
-            changes: { original: string; corrected: string; distance: number }[];
-          }
-        | undefined;
-      const rawFuzzyCorrect = (rawArgs as Record<string, unknown>).fuzzyCorrect;
-      const fuzzyOpt = rawFuzzyCorrect !== false;
-      const rawQuery = typeof parsed.data.query === 'string' ? parsed.data.query : undefined;
-      if (fuzzyOpt && rawQuery) {
-        const cr = correctQuery(rawQuery);
-        if (cr.changes.length > 0) {
-          correction = { original: rawQuery, corrected: cr.corrected, changes: cr.changes };
-        }
-      }
-
       // Build handler args from parsed.data (honours Zod defaults)
       const handlerArgs = { ...parsed.data } as Record<string, unknown>;
-      if (correction && typeof handlerArgs.query === 'string') {
-        handlerArgs.query = correction.corrected;
-      }
 
       try {
         const result = await action.handler(handlerArgs, cfg, extra);
@@ -381,7 +359,6 @@ export function registerFamily(
 
         const meta: Record<string, unknown> = {};
         if (ws !== undefined) meta.warnings = ws;
-        if (correction) meta.correction = correction;
         if (wrapped?.provenance) meta.provenance = wrapped.provenance;
         if (wrapped?.retry) meta.retry = wrapped.retry;
         if (wrapped?.normalized) meta.normalized = wrapped.normalized;

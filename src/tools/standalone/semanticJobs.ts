@@ -13,7 +13,6 @@ import { logger } from '../../logger.js';
 import { DEFAULT_SEMANTIC_MAX_BYTES } from '../../semanticLimits.js';
 import { semanticJobs } from '../semanticJobs.js';
 import { makeResult, errorResponse, successResponse } from '../response.js';
-import { correctQuery } from '../../utils/fuzzyCorrection.js';
 
 export function registerSemanticJobs(server: McpServer, cfg: SearchConfig): void {
   server.registerTool(
@@ -114,25 +113,8 @@ export function registerSemanticJobs(server: McpServer, cfg: SearchConfig): void
       logger.info({ tool: 'semantic_jobs', query, maxPages, topK }, 'Tool invoked');
       const start = Date.now();
       try {
-        let query_ = query;
-        let correction:
-          | {
-              original: string;
-              corrected: string;
-              changes: { original: string; corrected: string; distance: number }[];
-            }
-          | undefined;
-        // Always apply fuzzy correction (was a param, now always-on default)
-        {
-          const cr = correctQuery(query);
-          if (cr.changes.length > 0) {
-            correction = { original: query, corrected: cr.corrected, changes: cr.changes };
-            query_ = cr.corrected;
-          }
-        }
-
         const data = await semanticJobs({
-          query: query_,
+          query,
           embeddingBaseUrl: cfg.embeddingSidecar.baseUrl,
           ...(cfg.embeddingSidecar.apiToken
             ? { embeddingApiToken: cfg.embeddingSidecar.apiToken }
@@ -176,7 +158,6 @@ export function registerSemanticJobs(server: McpServer, cfg: SearchConfig): void
           },
           elapsed,
           {
-            ...(correction ? { correction } : {}),
             ...(data.warnings.length > 0 ? { warnings: data.warnings } : {}),
           },
         );

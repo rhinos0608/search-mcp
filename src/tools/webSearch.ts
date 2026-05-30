@@ -7,7 +7,6 @@ import { tavilySearch } from './tavilySearch.js';
 import { normalizeUrl, rrfMerge } from '../utils/fusion.js';
 import { multiSignalRescore, extractWebSearchSignals } from '../utils/rescore.js';
 import { expandQuery, type QueryVariation } from './queryExpansion.js';
-import { correctQuery, type CorrectQueryResult } from '../utils/fuzzyCorrection.js';
 import { mergeSearchResults } from '../utils/searchMerge.js';
 import { isDegraded, recordOutcome } from '../utils/backendHealth.js';
 import { isCircuitTripped, recordChallenge } from '../utils/botChallenge.js';
@@ -185,33 +184,14 @@ export async function searchWithBackends(
   overrideBackends?: SearchBackend[],
   expandQueryOpt = true,
   mergeBackends = true,
-  fuzzyCorrect = true,
-  correctionResult?: { current: CorrectQueryResult | null },
   provenanceResult?: { current: ProvenanceResult | null },
 ): Promise<SearchResult[]> {
   const cfg = loadConfig();
 
-  // ── Fuzzy correction (before expansion) ──────────────────────────────
-  let effectiveQuery = query;
-  if (fuzzyCorrect) {
-    const result = correctQuery(query);
-    if (result.changes.length > 0) {
-      effectiveQuery = result.corrected;
-      logger.info(
-        { original: query, corrected: result.corrected, changes: result.changes },
-        'fuzzyCorrection: query corrected',
-      );
-      // Surface correction via mutable ref if caller provided one
-      if (correctionResult) {
-        correctionResult.current = result;
-      }
-    }
-  }
-
   // ── Query expansion ──────────────────────────────────────────────────
   const queries: QueryVariation[] = expandQueryOpt
-    ? expandQuery(effectiveQuery)
-    : [{ query: effectiveQuery, strategy: 'original' as const }];
+    ? expandQuery(query)
+    : [{ query: query, strategy: 'original' as const }];
 
   if (queries.length > 1) {
     logger.info(
@@ -359,7 +339,6 @@ export async function webSearch(
   safeSearch: 'strict' | 'moderate' | 'off' = 'moderate',
   expandQueryOpt = true,
   mergeBackends = true,
-  fuzzyCorrect = true,
   provenanceResult?: { current: ProvenanceResult | null },
   category?: string,
 ): Promise<SearchResult[]> {
@@ -386,8 +365,6 @@ export async function webSearch(
     undefined,
     expandQueryOpt,
     mergeBackends,
-    fuzzyCorrect,
-    undefined,
     provenanceResult,
   );
 

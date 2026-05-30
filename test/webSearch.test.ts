@@ -284,9 +284,8 @@ void test('searchWithBackends tracks provenance when primary succeeds', async ()
   // Disable query features to test bare search path
   const expandQueryOpt = false;
   const mergeBackends = false;
-  const fuzzyCorrect = false;
   const provenanceRef: { current: ProvenanceResult | null } = { current: null };
-  const results = await searchWithBackends('test', 1, 'moderate', deps, ['brave', 'searxng'], expandQueryOpt, mergeBackends, fuzzyCorrect, undefined, provenanceRef);
+  const results = await searchWithBackends('test', 1, 'moderate', deps, ['brave', 'searxng'], expandQueryOpt, mergeBackends, provenanceRef);
   assert.ok(results.length > 0);
   assert.ok(provenanceRef.current !== null);
   assert.equal(provenanceRef.current!.usedBackend, 'brave');
@@ -307,9 +306,8 @@ void test('searchWithBackends tracks provenance when fallback occurs', async () 
   // Disable query features to test bare fallback path
   const expandQueryOpt = false;
   const mergeBackends = false;
-  const fuzzyCorrect = false;
   const provenanceRef: { current: ProvenanceResult | null } = { current: null };
-  const results = await searchWithBackends('test', 1, 'moderate', deps, ['brave', 'searxng'], expandQueryOpt, mergeBackends, fuzzyCorrect, undefined, provenanceRef);
+  const results = await searchWithBackends('test', 1, 'moderate', deps, ['brave', 'searxng'], expandQueryOpt, mergeBackends, provenanceRef);
   assert.ok(results.length > 0);
   assert.ok(provenanceRef.current !== null);
   assert.equal(provenanceRef.current!.usedBackend, 'brave');
