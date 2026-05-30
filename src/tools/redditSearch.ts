@@ -10,6 +10,7 @@ import {
   mergeRedditClientOptions,
   type RedditClientOptions,
 } from './redditClient.js';
+import { arcticShiftSearch } from './arcticShiftClient.js';
 import { parseRedditSearchListing } from './redditSearchParser.js';
 import { rrfMerge } from '../utils/fusion.js';
 import { multiSignalRescore, extractRedditSignals } from '../utils/rescore.js';
@@ -90,9 +91,27 @@ export async function redditSearch(
         }
 
         if (res.status === 403) {
+          let bodyText = '';
+          try {
+            bodyText = await res.clone().text();
+          } catch { /* body read failure is non-fatal */ }
+          const isNetworkBlock = /blocked\s+by\s+network\s+security/i.test(bodyText);
+          if (isNetworkBlock) {
+            logger.warn(
+              { subreddit, query },
+              'Reddit public API blocked, falling back to Arctic Shift for search',
+            );
+            const fallbackJson = await arcticShiftSearch(query, subreddit, sort, limit, timeframe);
+            return { __fallback: true as const, json: fallbackJson };
+          }
           throw new ToolError(
             `Reddit returned 403. The subreddit "${subreddit}" may be private, banned, or quarantined.`,
-            { code: 'UNAVAILABLE', retryable: false, statusCode: 403, backend: 'reddit' },
+            {
+              code: 'UNAVAILABLE',
+              retryable: false as const,
+              statusCode: 403,
+              backend: 'reddit',
+            },
           );
         }
 
@@ -120,7 +139,13 @@ export async function redditSearch(
     { label: 'reddit-search', maxAttempts: 2 },
   );
 
-  const json: unknown = await safeResponseJson(response.response, response.url);
+  let json: unknown;
+  if ('__fallback' in response) {
+    json = (response as { __fallback: true; json: unknown }).json;
+  } else {
+    const httpResponse = response as { response: Response; url: string };
+    json = await safeResponseJson(httpResponse.response, httpResponse.url);
+  }
   let results = parseRedditSearchListing(json);
 
   // Single-source RRF + rescoring

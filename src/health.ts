@@ -293,11 +293,11 @@ function redditOAuthHealth(cfg: SearchConfig): ToolHealth {
   }
 
   return {
-    status: 'healthy',
+    status: 'degraded',
     message:
-      'Reddit OAuth not configured (using public Reddit JSON API, ~10 QPM unauthenticated quota).',
+      'Reddit OAuth not configured (using public Reddit JSON API which Reddit may block from cloud/datacenter IPs).',
     remediation:
-      'Set REDDIT_CLIENT_ID and REDDIT_CLIENT_SECRET to enable OAuth and raise the quota to 100 QPM.',
+      'Set REDDIT_CLIENT_ID and REDDIT_CLIENT_SECRET to enable OAuth access via oauth.reddit.com.',
   };
 }
 

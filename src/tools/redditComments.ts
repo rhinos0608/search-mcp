@@ -16,6 +16,7 @@ import {
   type NormalizedRedditMore,
   type ParsedRedditThreadRequest,
 } from './redditThreadParser.js';
+import { arcticShiftFetchComments } from './arcticShiftClient.js';
 
 const REQUEST_TIMEOUT_MS = 30_000;
 
@@ -103,6 +104,19 @@ export async function redditComments(
         }
 
         if (response.status === 403) {
+          let bodyText = '';
+          try {
+            bodyText = await response.clone().text();
+          } catch { /* body read failure is non-fatal */ }
+          const isNetworkBlock = /blocked\s+by\s+network\s+security/i.test(bodyText);
+          if (isNetworkBlock) {
+            logger.warn(
+              { subreddit: request.subreddit, article: request.article },
+              'Reddit public API blocked, falling back to Arctic Shift',
+            );
+            const fallbackJson = await arcticShiftFetchComments(request.article, request.limit ?? 50);
+            return { json: fallbackJson };
+          }
           throw new ToolError(
             `Reddit returned 403. The subreddit "${request.subreddit}" may be private, banned, or quarantined.`,
             { code: 'UNAVAILABLE', retryable: false, statusCode: 403, backend: 'reddit' },
