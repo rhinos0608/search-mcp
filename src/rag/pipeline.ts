@@ -55,7 +55,7 @@ function corpusIdFor(options: PrepareCorpusOptions, chunks: RagChunk[]): string 
   return createHash('sha256').update(payload).digest('hex');
 }
 
-function cosineSimilarity(a: number[], b: number[]): number {
+export function cosineSimilarity(a: number[], b: number[]): number {
   let dot = 0;
   let aNorm = 0;
   let bNorm = 0;

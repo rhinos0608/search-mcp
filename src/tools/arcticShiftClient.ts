@@ -90,6 +90,12 @@ function arcticShiftSort(sort: string): string | undefined {
  *
  * Note: Arctic Shift is an archive. Results are sorted by created_utc; relevance sort is not available.
  */
+interface QueryAttempt {
+  query?: string | undefined;
+  after?: string | undefined;
+  label: string;
+}
+
 export async function arcticShiftSearch(
   query: string,
   subreddit: string,
@@ -97,29 +103,68 @@ export async function arcticShiftSearch(
   limit = 25,
   timeframe?: string,
 ): Promise<unknown> {
-  const params = new URLSearchParams();
-  params.set('subreddit', subreddit);
-  params.set('query', query);
-  params.set('limit', String(Math.min(limit, 100)));
-
   const arcticSort = arcticShiftSort(sort);
-  if (arcticSort) params.set('sort', arcticSort);
-
   const after = timeframeToAfter(timeframe ?? '');
-  if (after) params.set('after', after);
+  const keywords = extractKeywords(query);
 
-  const url = `${ARCTIC_SHIFT_BASE_URL}/posts/search?${params.toString()}`;
-  logger.info({ tool: 'reddit_search_fallback', backend: 'arctic-shift', subreddit, sort, limit }, 'Searching Reddit via Arctic Shift');
+  // Query cascade: progressively broaden the search until we get results.
+  // Arctic Shift is a literal-matching archive — long natural-language queries
+  // and restrictive date filters often return zero matches for niche subreddits.
+  const attempts: QueryAttempt[] = [
+    { query, after, label: 'full query with timeframe' },
+    { query, after: undefined, label: 'full query without timeframe' },
+  ];
 
-  const response = await fetchWithTimeout(url);
-
-  if (!response.ok) {
-    throw new Error(`Arctic Shift API returned ${response.status} for search`);
+  // If we extracted keywords that differ from the original, try them.
+  // Single keyword first (most likely the main topic), then broader.
+  if (keywords.length > 0 && keywords.join(' ') !== query.toLowerCase()) {
+    if (keywords[0] && keywords[0] !== query.toLowerCase()) {
+      attempts.push({ query: keywords[0], after: undefined, label: `keyword "${keywords[0]}"` });
+    }
+    if (keywords.length >= 2 && keywords.slice(0, 2).join(' ') !== query.toLowerCase()) {
+      attempts.push({ query: keywords.slice(0, 2).join(' '), after: undefined, label: `keywords "${keywords.slice(0, 2).join(' ')}"` });
+    }
   }
 
-  const json: unknown = await safeResponseJson(response, url);
-  const data = (json as Record<string, unknown>)?.data;
-  const posts = Array.isArray(data) ? data : [];
+  // Last resort: no query filter, just recent posts from the subreddit
+  attempts.push({ query: undefined, after: undefined, label: 'no query (subreddit only)' });
+
+  const params = new URLSearchParams();
+  params.set('subreddit', subreddit);
+  params.set('limit', String(Math.min(limit, 100)));
+  if (arcticSort) params.set('sort', arcticSort);
+
+  let posts: unknown[] = [];
+
+  for (const attempt of attempts) {
+    if (attempt.query !== undefined) {
+      params.set('query', attempt.query);
+    } else {
+      params.delete('query');
+    }
+    if (attempt.after !== undefined) {
+      params.set('after', attempt.after);
+    } else {
+      params.delete('after');
+    }
+
+    const url = `${ARCTIC_SHIFT_BASE_URL}/posts/search?${params.toString()}`;
+    logger.info(
+      { tool: 'reddit_search_fallback', backend: 'arctic-shift', subreddit, sort, limit, attempt: attempt.label },
+      `Arctic Shift search (${attempt.label})`,
+    );
+
+    const response = await fetchWithTimeout(url);
+    if (!response.ok) {
+      throw new Error(`Arctic Shift API returned ${String(response.status)} for search`);
+    }
+
+    const json: unknown = await safeResponseJson(response, url);
+    const data = (json as Record<string, unknown>).data;
+    posts = Array.isArray(data) ? data : [];
+
+    if (posts.length > 0) break;
+  }
 
   // Wrap in Reddit-native Listing format
   return {
@@ -128,6 +173,27 @@ export async function arcticShiftSearch(
       children: posts.map((p: unknown) => ({ kind: 't3', data: p })),
     },
   };
+}
+
+const QUERY_STOP_WORDS = new Set([
+  'the', 'and', 'for', 'are', 'but', 'not', 'you', 'all', 'can', 'had', 'her',
+  'was', 'one', 'our', 'out', 'has', 'have', 'from', 'they', 'that', 'with',
+  'this', 'what', 'when', 'your', 'which', 'their', 'them', 'about', 'into',
+  'than', 'then', 'also', 'after', 'over', 'very', 'just', 'does', 'did',
+  'most', 'much', 'some', 'such', 'only', 'other', 'more', 'been', 'being',
+  'will', 'would', 'could', 'should', 'best', 'good', 'like', 'make', 'need',
+  'want', 'looking', 'help', 'know', 'find', 'alternative', 'alternatives',
+  'compare', 'comparison', 'versus', 'better', 'lighter', 'heavier', 'faster',
+  'slower', 'lightweight', 'heavyweight', 'recommend', 'recommendation',
+  'anyone', 'anybody', 'someone', 'something', 'everyone', 'everything',
+]);
+
+/** Extract significant keywords from a query, in original order. */
+function extractKeywords(query: string): string[] {
+  return query
+    .toLowerCase()
+    .split(/\s+/)
+    .filter((w) => w.length > 2 && !/^\d+$/.test(w) && !QUERY_STOP_WORDS.has(w));
 }
 
 async function fetchWithTimeout(url: string, options: RequestInit = {}): Promise<Response> {

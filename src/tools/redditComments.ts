@@ -108,14 +108,30 @@ export async function redditComments(
           try {
             bodyText = await response.clone().text();
           } catch { /* body read failure is non-fatal */ }
-          const isNetworkBlock = /blocked\s+by\s+network\s+security/i.test(bodyText);
+          // Detects both the explicit "blocked by network security" message and
+          // any HTML response on a JSON endpoint (Reddit API should never return HTML).
+          const isNetworkBlock =
+            /blocked\s+by\s+network\s+security/i.test(bodyText) ||
+            (bodyText.length > 0 && bodyText.trim().startsWith('<'));
           if (isNetworkBlock) {
             logger.warn(
               { subreddit: request.subreddit, article: request.article },
               'Reddit public API blocked, falling back to Arctic Shift',
             );
-            const fallbackJson = await arcticShiftFetchComments(request.article, request.limit ?? 50);
-            return { json: fallbackJson };
+            try {
+              const fallbackJson = await arcticShiftFetchComments(request.article, request.limit ?? 50);
+              return { json: fallbackJson };
+            } catch (fallbackErr) {
+              logger.error({ err: fallbackErr }, 'Arctic Shift fallback also failed');
+              throw new ToolError(
+                'Both Reddit API and Arctic Shift fallback are unavailable',
+                {
+                  code: 'UNAVAILABLE',
+                  retryable: false as const,
+                  backend: 'reddit',
+                },
+              );
+            }
           }
           throw new ToolError(
             `Reddit returned 403. The subreddit "${request.subreddit}" may be private, banned, or quarantined.`,

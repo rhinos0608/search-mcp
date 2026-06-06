@@ -15,6 +15,7 @@ import { parseRedditSearchListing } from './redditSearchParser.js';
 import { rrfMerge } from '../utils/fusion.js';
 import { multiSignalRescore, extractRedditSignals } from '../utils/rescore.js';
 import { loadConfig } from '../config.js';
+import { semanticMatch } from '../utils/semanticMatch.js';
 
 const cache = new ToolCache<RedditPost[]>({ maxSize: 100, ttlMs: 10 * 60 * 1000 });
 
@@ -95,14 +96,30 @@ export async function redditSearch(
           try {
             bodyText = await res.clone().text();
           } catch { /* body read failure is non-fatal */ }
-          const isNetworkBlock = /blocked\s+by\s+network\s+security/i.test(bodyText);
+          // Detects both the explicit "blocked by network security" message and
+          // any HTML response on a JSON endpoint (Reddit API should never return HTML).
+          const isNetworkBlock =
+            /blocked\s+by\s+network\s+security/i.test(bodyText) ||
+            (bodyText.length > 0 && bodyText.trim().startsWith('<'));
           if (isNetworkBlock) {
             logger.warn(
               { subreddit, query },
               'Reddit public API blocked, falling back to Arctic Shift for search',
             );
-            const fallbackJson = await arcticShiftSearch(query, subreddit, sort, limit, timeframe);
-            return { __fallback: true as const, json: fallbackJson };
+            try {
+              const fallbackJson = await arcticShiftSearch(query, subreddit, sort, limit, timeframe);
+              return { __fallback: true as const, json: fallbackJson };
+            } catch (fallbackErr) {
+              logger.error({ err: fallbackErr }, 'Arctic Shift fallback also failed');
+              throw new ToolError(
+                'Both Reddit API and Arctic Shift fallback are unavailable',
+                {
+                  code: 'UNAVAILABLE',
+                  retryable: false as const,
+                  backend: 'reddit',
+                },
+              );
+            }
           }
           throw new ToolError(
             `Reddit returned 403. The subreddit "${subreddit}" may be private, banned, or quarantined.`,
@@ -146,15 +163,33 @@ export async function redditSearch(
     const httpResponse = response as { response: Response; url: string };
     json = await safeResponseJson(httpResponse.response, httpResponse.url);
   }
-  let results = parseRedditSearchListing(json);
+  const results = parseRedditSearchListing(json);
+  const cfg = loadConfig();
 
-  // Single-source RRF + rescoring
+  if (cfg.embeddingSidecar.baseUrl && results.length > 0) {
+    logger.info({ query, resultCount: results.length }, 'Using semantic ranking for Reddit search');
+    const ranked = await semanticMatch({
+      query,
+      candidates: results,
+      getText: (post) => `${post.title} ${post.selftext.slice(0, 300)}`,
+      embeddingBaseUrl: cfg.embeddingSidecar.baseUrl,
+      ...(cfg.embeddingSidecar.apiToken
+        ? { embeddingApiToken: cfg.embeddingSidecar.apiToken }
+        : {}),
+      embeddingDimensions: cfg.embeddingSidecar.dimensions,
+      topK: limit,
+    });
+    cache.set(key, ranked.map((r) => r.item));
+    logger.debug({ resultCount: ranked.length }, 'Reddit search complete');
+    return ranked.map((r) => r.item);
+  }
+
   const rescoreSort: 'relevance' | 'date' | 'top' =
     sort === 'new'
       ? 'date'
       : sort === 'hot' || sort === 'top'
         ? 'top'
-        : 'relevance'; // covers 'relevance' and 'comments'
+        : 'relevance';
 
   const merged = rrfMerge([[...results]], { k: 60 });
   const allSignals = extractRedditSignals(results, rescoreSort);
@@ -163,12 +198,11 @@ export async function redditSearch(
     rrfScore: m.rrfScore,
     signals: allSignals[i] ?? {},
   }));
-  const rescoreWeights = loadConfig().rescoreWeights.redditSearch;
-  const rescored = multiSignalRescore(signaled, rescoreWeights, limit);
-  results = rescored.map((r) => r.item);
+  const rescored = multiSignalRescore(signaled, cfg.rescoreWeights.redditSearch, limit);
+  const finalResults = rescored.map((r) => r.item);
 
-  cache.set(key, results);
-  logger.debug({ resultCount: results.length }, 'Reddit search complete');
+  cache.set(key, finalResults);
+  logger.debug({ resultCount: finalResults.length }, 'Reddit search complete');
 
-  return results;
+  return finalResults;
 }
