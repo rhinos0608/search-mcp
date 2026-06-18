@@ -107,7 +107,9 @@ export async function redditComments(
           let bodyText = '';
           try {
             bodyText = await response.clone().text();
-          } catch { /* body read failure is non-fatal */ }
+          } catch {
+            /* body read failure is non-fatal */
+          }
           // Detects both the explicit "blocked by network security" message and
           // any HTML response on a JSON endpoint (Reddit API should never return HTML).
           const isNetworkBlock =
@@ -119,18 +121,18 @@ export async function redditComments(
               'Reddit public API blocked, falling back to Arctic Shift',
             );
             try {
-              const fallbackJson = await arcticShiftFetchComments(request.article, request.limit ?? 50);
+              const fallbackJson = await arcticShiftFetchComments(
+                request.article,
+                request.limit ?? 50,
+              );
               return { json: fallbackJson };
             } catch (fallbackErr) {
               logger.error({ err: fallbackErr }, 'Arctic Shift fallback also failed');
-              throw new ToolError(
-                'Both Reddit API and Arctic Shift fallback are unavailable',
-                {
-                  code: 'UNAVAILABLE',
-                  retryable: false as const,
-                  backend: 'reddit',
-                },
-              );
+              throw new ToolError('Both Reddit API and Arctic Shift fallback are unavailable', {
+                code: 'UNAVAILABLE',
+                retryable: false as const,
+                backend: 'reddit',
+              });
             }
           }
           throw new ToolError(

@@ -46,7 +46,9 @@ async function fetchPage(url: string): Promise<{ content: string; status: number
   assertSafeUrl(url);
 
   const controller = new AbortController();
-  const timeout = setTimeout(() => { controller.abort(); }, 30000);
+  const timeout = setTimeout(() => {
+    controller.abort();
+  }, 30000);
 
   let response: Response;
   try {
@@ -81,25 +83,27 @@ function extractTitle(html: string): string {
  * Strip HTML tags from content.
  */
 function stripHtml(html: string): string {
-  return html
-    // Remove script and style elements with their contents
-    .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
-    .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
-    // Remove HTML comments
-    .replace(/<!--[\s\S]*?-->/g, '')
-    // Remove all HTML tags
-    .replace(/<[^>]+>/g, ' ')
-    // Decode common HTML entities
-    .replace(/&nbsp;/g, ' ')
-    .replace(/</g, '<')
-    .replace(/>/g, '>')
-    .replace(/"/g, '"')
-    .replace(/&#39;/g, "'")
-    // &amp; last so entities like &amp;lt; are not double-decoded
-    .replace(/&amp;/g, '&')
-    // Collapse whitespace
-    .replace(/\s+/g, ' ')
-    .trim();
+  return (
+    html
+      // Remove script and style elements with their contents
+      .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
+      .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
+      // Remove HTML comments
+      .replace(/<!--[\s\S]*?-->/g, '')
+      // Remove all HTML tags
+      .replace(/<[^>]+>/g, ' ')
+      // Decode common HTML entities
+      .replace(/&nbsp;/g, ' ')
+      .replace(/</g, '<')
+      .replace(/>/g, '>')
+      .replace(/"/g, '"')
+      .replace(/&#39;/g, "'")
+      // &amp; last so entities like &amp;lt; are not double-decoded
+      .replace(/&amp;/g, '&')
+      // Collapse whitespace
+      .replace(/\s+/g, ' ')
+      .trim()
+  );
 }
 
 // ── Action schemas (discriminated on "action") ──────────────────────────────
@@ -172,7 +176,9 @@ const agenticBrowseFamily: FamilyDefinition = {
 
         const stored = documentStore.get(documentId);
         if (!stored) {
-          throw new Error(`Document not found: "${documentId}". Call browse first to fetch the page.`);
+          throw new Error(
+            `Document not found: "${documentId}". Call browse first to fetch the page.`,
+          );
         }
 
         const { url, content } = stored;

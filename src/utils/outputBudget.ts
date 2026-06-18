@@ -66,10 +66,7 @@ export class OutputBudgetTracker {
    */
   getStats(): OutputBudgetStats {
     const totalCalls = Object.values(this.calls).reduce((sum, c) => sum + c, 0);
-    const totalBytesReturned = Object.values(this.bytesReturned).reduce(
-      (sum, b) => sum + b,
-      0,
-    );
+    const totalBytesReturned = Object.values(this.bytesReturned).reduce((sum, b) => sum + b, 0);
     const byTool: Record<string, ToolBudgetStats> = {};
 
     for (const [tool, calls] of Object.entries(this.calls)) {
@@ -82,8 +79,7 @@ export class OutputBudgetTracker {
     }
 
     const totalBytes = totalBytesReturned + this.bytesSandboxedTotal;
-    const savingsRatio =
-      totalBytes > 0 ? this.bytesSandboxedTotal / totalBytes : 0;
+    const savingsRatio = totalBytes > 0 ? this.bytesSandboxedTotal / totalBytes : 0;
 
     return {
       totalCalls,

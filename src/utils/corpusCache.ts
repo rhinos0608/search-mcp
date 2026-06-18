@@ -891,7 +891,9 @@ export function listCorpora(opts?: CacheOpts): CorpusSummary[] {
           const chunkRows = db
             .prepare('SELECT chunk_json FROM chunks WHERE corpus_id = ? ORDER BY position ASC')
             .all(row.corpus_id) as { chunk_json: string }[];
-          const chunks = chunkRows.map((chunkRow) => JSON.parse(chunkRow.chunk_json) as CorpusChunk);
+          const chunks = chunkRows.map(
+            (chunkRow) => JSON.parse(chunkRow.chunk_json) as CorpusChunk,
+          );
           const urlSummary = summarizeChunkUrls(chunks);
           return [
             {

@@ -72,7 +72,7 @@ async function captureDomState(page: Page, selector: string): Promise<DomState> 
         }
         const parent: Element | null = current.parentElement;
         if (parent) {
-        const cur = current;
+          const cur = current;
           const siblings = Array.from(parent.children).filter(
             (c: Element) => c.tagName === cur.tagName,
           );
@@ -94,7 +94,25 @@ async function captureDomState(page: Page, selector: string): Promise<DomState> 
       const attrs: Record<string, string> = {};
 
       // Collect significant attributes
-      for (const attr of ['id', 'class', 'href', 'src', 'type', 'name', 'value', 'disabled', 'checked', 'selected', 'aria-expanded', 'aria-hidden', 'data-*', 'style', 'hidden', 'title', 'placeholder']) {
+      for (const attr of [
+        'id',
+        'class',
+        'href',
+        'src',
+        'type',
+        'name',
+        'value',
+        'disabled',
+        'checked',
+        'selected',
+        'aria-expanded',
+        'aria-hidden',
+        'data-*',
+        'style',
+        'hidden',
+        'title',
+        'placeholder',
+      ]) {
         const val = el.getAttribute(attr);
         if (val !== null && val !== '') {
           attrs[attr] = val.slice(0, 200);
@@ -121,11 +139,7 @@ async function captureDomState(page: Page, selector: string): Promise<DomState> 
 }
 
 /** Compute the structural diff between two DOM states. */
-function computeDiff(
-  before: DomState,
-  after: DomState,
-  maxChanges: number,
-): DiffResult {
+function computeDiff(before: DomState, after: DomState, maxChanges: number): DiffResult {
   const changes: DomChange[] = [];
   let additions = 0;
   let removals = 0;
@@ -189,10 +203,7 @@ function computeDiff(
     }
 
     // Check attribute changes
-    const allAttrKeys = new Set([
-      ...Object.keys(beforeEl.attrs),
-      ...Object.keys(afterEl.attrs),
-    ]);
+    const allAttrKeys = new Set([...Object.keys(beforeEl.attrs), ...Object.keys(afterEl.attrs)]);
     for (const attrKey of allAttrKeys) {
       if (changes.length >= maxChanges) break;
       const beforeVal = beforeEl.attrs[attrKey] ?? '';

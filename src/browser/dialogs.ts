@@ -11,10 +11,7 @@ const activeHandlersByPage = new WeakMap<Page, () => void>();
  * Start auto-handling browser dialogs (alert, confirm, prompt).
  * Once started, dialogs are handled automatically according to config.
  */
-export function startDialogHandler(
-  page: Page,
-  config: DialogHandlerConfig,
-): void {
+export function startDialogHandler(page: Page, config: DialogHandlerConfig): void {
   // Remove any existing handler first
   stopDialogHandler(page);
 
@@ -23,7 +20,9 @@ export function startDialogHandler(
 
   const handler = (dialog: import('playwright-core').Dialog) => {
     if (handledCount >= max) {
-      dialog.dismiss().catch(() => { /* intentionally empty */ });
+      dialog.dismiss().catch(() => {
+        /* intentionally empty */
+      });
       return;
     }
 
@@ -37,11 +36,17 @@ export function startDialogHandler(
     if (dialog.type() === 'prompt' && config.accept) {
       const promptText = config.promptText ?? '';
       result.promptText = promptText;
-      dialog.accept(promptText).catch(() => { /* intentionally empty */ });
+      dialog.accept(promptText).catch(() => {
+        /* intentionally empty */
+      });
     } else if (config.accept) {
-      dialog.accept().catch(() => { /* intentionally empty */ });
+      dialog.accept().catch(() => {
+        /* intentionally empty */
+      });
     } else {
-      dialog.dismiss().catch(() => { /* intentionally empty */ });
+      dialog.dismiss().catch(() => {
+        /* intentionally empty */
+      });
     }
 
     const history = dialogHistoryByPage.get(page) ?? [];
@@ -89,7 +94,7 @@ export async function handleCurrentDialog(
     let handlerRef: ((dialog: import('playwright-core').Dialog) => void) | undefined;
 
     const dialogPromise = new Promise<DialogResult>((resolve) => {
-      const handler = async (dialog: import('playwright-core').Dialog) => {
+      const handler = (dialog: import('playwright-core').Dialog) => {
         const result: DialogResult = {
           type: dialog.type() as 'alert' | 'confirm' | 'prompt',
           message: dialog.message(),
@@ -98,11 +103,11 @@ export async function handleCurrentDialog(
 
         if (dialog.type() === 'prompt' && accept) {
           result.promptText = promptText ?? '';
-          await dialog.accept(promptText ?? '');
+          void dialog.accept(promptText ?? '');
         } else if (accept) {
-          await dialog.accept();
+          void dialog.accept();
         } else {
-          await dialog.dismiss();
+          void dialog.dismiss();
         }
 
         const history = dialogHistoryByPage.get(page) ?? [];
@@ -116,13 +121,14 @@ export async function handleCurrentDialog(
 
     // Race: either a dialog appears within 500ms, or we assume none
     const timeout = new Promise<null>((resolve) => {
-      setTimeout(() => { resolve(null); }, 500);
+      setTimeout(() => {
+        resolve(null);
+      }, 500);
     });
 
     dialogResult = await Promise.race([dialogPromise, timeout]);
 
     // Clean up the listener if the timeout won the race
-    // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
     if (dialogResult === null && handlerRef) {
       page.off('dialog', handlerRef);
     }

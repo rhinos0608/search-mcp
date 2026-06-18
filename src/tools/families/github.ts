@@ -484,14 +484,7 @@ const githubFamily: FamilyDefinition = {
       schema: searchAction,
       handler: async (args, cfg) => {
         void cfg;
-        const {
-          query,
-          owner,
-          repo,
-          language,
-          path,
-          limit,
-        } = args as {
+        const { query, owner, repo, language, path, limit } = args as {
           query: string;
           owner?: string;
           repo?: string;

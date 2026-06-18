@@ -140,13 +140,15 @@ const PATTERNS: Pattern[] = [
   {
     type: 'xss_injection',
     confidence: 0.85,
-    regex: /on(?:error|load|click|mouseover|submit|focus|blur|change|dblclick|keydown|keyup|keypress|mousedown|mouseup|mousemove|mouseenter|mouseleave|scroll|resize|drag|drop|contextmenu)\s*=\s*['"][^'"]{0,1000}/gi,
+    regex:
+      /on(?:error|load|click|mouseover|submit|focus|blur|change|dblclick|keydown|keyup|keypress|mousedown|mouseup|mousemove|mouseenter|mouseleave|scroll|resize|drag|drop|contextmenu)\s*=\s*['"][^'"]{0,1000}/gi,
     description: 'Inline event handler (quoted)',
   },
   {
     type: 'xss_injection',
     confidence: 0.85,
-    regex: /<[a-zA-Z][^>]*\s+on(?:error|load|click|mouseover|submit|focus|blur|change|dblclick|keydown|keyup|keypress|mousedown|mouseup|mousemove|mouseenter|mouseleave|scroll|resize|drag|drop|contextmenu)\s*=\s*[^\s>"'`]+/gi,
+    regex:
+      /<[a-zA-Z][^>]*\s+on(?:error|load|click|mouseover|submit|focus|blur|change|dblclick|keydown|keyup|keypress|mousedown|mouseup|mousemove|mouseenter|mouseleave|scroll|resize|drag|drop|contextmenu)\s*=\s*[^\s>"'`]+/gi,
     description: 'Inline event handler (unquoted)',
   },
 ];

@@ -47,7 +47,9 @@ export class ConcurrencyLimiter {
           reject(new Error(abortMessage));
         };
         signal.addEventListener('abort', onAbort, { once: true });
-        waiter.cleanup = () => signal.removeEventListener('abort', onAbort);
+        waiter.cleanup = () => {
+          signal.removeEventListener('abort', onAbort);
+        };
       }
 
       this._queue.push(waiter);

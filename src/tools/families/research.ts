@@ -294,7 +294,9 @@ const wikidataAction = z.object({
 // ── Auto-action schema ────────────────────────────────────────────────────────
 
 const autoAction = z.object({
-  action: z.literal('auto').describe('Auto-route research queries to the best backend based on query hints'),
+  action: z
+    .literal('auto')
+    .describe('Auto-route research queries to the best backend based on query hints'),
   query: z.string().min(1).describe('The research query string'),
   limit: z
     .number()
@@ -321,7 +323,10 @@ interface AutoRoute {
  * Build available route candidates based on query content.
  * Returns the best match plus any other candidates that were considered.
  */
-function autoRouteQuery(query: string, limit: number): {
+function autoRouteQuery(
+  query: string,
+  limit: number,
+): {
   selected: AutoRoute;
   candidates: AutoRoute[];
 } {
@@ -361,7 +366,9 @@ function autoRouteQuery(query: string, limit: number): {
     }
 
     // 3. PubMed / biomedical hints
-    if (/\b(?:pubmed|pmid|clinical trial|randomized\s+controlled|biomedical|pmc\d+)\b/i.test(lower)) {
+    if (
+      /\b(?:pubmed|pmid|clinical trial|randomized\s+controlled|biomedical|pmc\d+)\b/i.test(lower)
+    ) {
       candidates.push({
         actionName: 'pubmed',
         hint: 'PubMed/biomedical keywords detected',
@@ -385,7 +392,11 @@ function autoRouteQuery(query: string, limit: number): {
     }
 
     // 5. Stack Overflow hints
-    if (/\b(?:stack\s*overflow|stackoverflow|so\s+question|code\s+error|syntax\s+error|how\s+to\s+fix|debug|typescript\s+error|react\s+error)\b/i.test(lower)) {
+    if (
+      /\b(?:stack\s*overflow|stackoverflow|so\s+question|code\s+error|syntax\s+error|how\s+to\s+fix|debug|typescript\s+error|react\s+error)\b/i.test(
+        lower,
+      )
+    ) {
       candidates.push({
         actionName: 'stackoverflow',
         hint: 'Stack Overflow / code debugging keywords detected',
@@ -410,7 +421,11 @@ function autoRouteQuery(query: string, limit: number): {
     }
 
     // 7. Academic / research paper keywords (catch-all academic indicator)
-    if (/\b(?:paper|research|study|survey|review\s+of|literature|publication|journal|conference|proceedings|thesis|dissertation|methodology|experiment)\b/i.test(lower)) {
+    if (
+      /\b(?:paper|research|study|survey|review\s+of|literature|publication|journal|conference|proceedings|thesis|dissertation|methodology|experiment)\b/i.test(
+        lower,
+      )
+    ) {
       candidates.push({
         actionName: 'academic',
         hint: 'Academic/research keywords detected',
@@ -658,6 +673,14 @@ const researchFamily: FamilyDefinition = {
         'Auto-route research queries to the best backend based on query hints ' +
         '(DOI, arXiv ID, PubMed/HN/SO/Wikipedia keywords, or academic fan-out by default).',
       schema: autoAction,
+      /**
+       * Single-fallback strategy: try selected candidate first, then fall back
+       * exclusively to the last candidate (academic fan-out). Intermediate
+       * candidates in the array are deliberately skipped — this is a deliberate
+       * "best or safest" design choice rather than sequential fallback chaining.
+       * If the selected candidate IS the last candidate, the error propagates
+       * instead of looping. See autoRouteQuery() for candidate priority order.
+       */
       handler: async (args, _cfg) => {
         void _cfg;
         const { query, limit } = args as { query: string; limit: number };
@@ -711,7 +734,11 @@ export { autoAction, autoRouteQuery, researchFamily };
 
 // ── Registration ─────────────────────────────────────────────────────────────
 
-export function registerResearchTool(server: McpServer, cfg: SearchConfig, kgHook?: KnowledgeGraphHook): void {
+export function registerResearchTool(
+  server: McpServer,
+  cfg: SearchConfig,
+  kgHook?: KnowledgeGraphHook,
+): void {
   registerFamily(server, researchFamily, cfg, kgHook);
 }
 

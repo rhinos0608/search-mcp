@@ -41,8 +41,18 @@ async function embedBatches(
   return embeddings;
 }
 
-export async function semanticMatch<T>(options: SemanticMatchOptions<T>): Promise<SemanticMatchResult<T>[]> {
-  const { query, candidates, getText, embeddingBaseUrl, embeddingApiToken, embeddingDimensions, topK } = options;
+export async function semanticMatch<T>(
+  options: SemanticMatchOptions<T>,
+): Promise<SemanticMatchResult<T>[]> {
+  const {
+    query,
+    candidates,
+    getText,
+    embeddingBaseUrl,
+    embeddingApiToken,
+    embeddingDimensions,
+    topK,
+  } = options;
 
   if (candidates.length === 0) {
     return [];
@@ -67,12 +77,18 @@ export async function semanticMatch<T>(options: SemanticMatchOptions<T>): Promis
         err.name === 'TimeoutError' ||
         err.name === 'AbortError'
       ) {
-        logger.warn({ err }, 'semanticMatch query embedding timed out, returning unsorted candidates');
+        logger.warn(
+          { err },
+          'semanticMatch query embedding timed out, returning unsorted candidates',
+        );
       } else {
         logger.warn({ err }, 'semanticMatch query embedding failed, returning unsorted candidates');
       }
     } else {
-      logger.warn({ err: String(err) }, 'semanticMatch query embedding failed (non-Error throw), returning unsorted candidates');
+      logger.warn(
+        { err: String(err) },
+        'semanticMatch query embedding failed (non-Error throw), returning unsorted candidates',
+      );
     }
     return candidates.map((item) => ({ item, score: 0, rank: 0 }));
   }
@@ -91,12 +107,21 @@ export async function semanticMatch<T>(options: SemanticMatchOptions<T>): Promis
         err.name === 'TimeoutError' ||
         err.name === 'AbortError'
       ) {
-        logger.warn({ err }, 'semanticMatch candidate embedding timed out, returning unsorted candidates');
+        logger.warn(
+          { err },
+          'semanticMatch candidate embedding timed out, returning unsorted candidates',
+        );
       } else {
-        logger.warn({ err }, 'semanticMatch candidate embedding failed, returning unsorted candidates');
+        logger.warn(
+          { err },
+          'semanticMatch candidate embedding failed, returning unsorted candidates',
+        );
       }
     } else {
-      logger.warn({ err: String(err) }, 'semanticMatch candidate embedding failed (non-Error throw), returning unsorted candidates');
+      logger.warn(
+        { err: String(err) },
+        'semanticMatch candidate embedding failed (non-Error throw), returning unsorted candidates',
+      );
     }
     return candidates.map((item) => ({ item, score: 0, rank: 0 }));
   }

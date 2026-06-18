@@ -188,7 +188,9 @@ export async function semanticGitHubCode(
   const chunkTitles = chunks.map((chunk) => {
     const path = stringMetadata(chunk.metadata?.path);
     const symbolName = stringMetadata(chunk.metadata?.symbolName);
-    return symbolName !== undefined && path !== undefined ? `${path} > ${symbolName}` : path ?? chunk.section;
+    return symbolName !== undefined && path !== undefined
+      ? `${path} > ${symbolName}`
+      : (path ?? chunk.section);
   });
   const [docEmbeddings, queryEmbedding] = await Promise.all([
     embedTextsBatched({

@@ -223,9 +223,7 @@ export function evaluateDomainTrust(
     ...ESTABLISHED_DOMAINS,
     ...(options.trustedDomains ?? []).map((d) => normalizeHost(d)),
   ];
-  const blockedDomains = [
-    ...(options.blockedDomains ?? []).map((d) => normalizeHost(d)),
-  ];
+  const blockedDomains = [...(options.blockedDomains ?? []).map((d) => normalizeHost(d))];
   const https = parsed.protocol === 'https:';
   const tld = getTld(hostname);
   const reasons: string[] = [];

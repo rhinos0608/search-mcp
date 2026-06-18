@@ -1,9 +1,5 @@
 import type { Page } from 'playwright-core';
-import type {
-  NavigationTiming,
-  ResourceTimingEntry,
-  ResourceTimingResult,
-} from './types.js';
+import type { NavigationTiming, ResourceTimingEntry, ResourceTimingResult } from './types.js';
 
 /**
  * Extract Navigation Timing and Resource Timing data from the current page.
@@ -13,7 +9,6 @@ export async function getResourceTiming(page: Page): Promise<ResourceTimingResul
   const url = page.url();
 
   const raw = await page.evaluate(() => {
-
     // Navigation Timing
     const navEntries = performance.getEntriesByType('navigation');
     let navTiming: Record<string, number> | null = null;

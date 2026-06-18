@@ -49,6 +49,7 @@ function getNestedValue(obj: unknown, path: string): unknown {
   let current: unknown = obj;
   for (const part of parts) {
     if (current === null || typeof current !== 'object') return undefined;
+    if (!(part in (current as Record<string, unknown>))) return undefined;
     current = (current as Record<string, unknown>)[part];
   }
   return current;
@@ -180,7 +181,11 @@ export interface ToolWrappedResponse<T> {
   readonly warnings?: readonly string[];
   readonly provenance?: ToolProvenance;
   readonly retry?: { recommended: boolean; reason?: string; minimalCall?: Record<string, unknown> };
-  readonly normalized?: { aliases?: Record<string, string>; defaults?: Record<string, unknown>; ignoredFields?: string[] };
+  readonly normalized?: {
+    aliases?: Record<string, string>;
+    defaults?: Record<string, unknown>;
+    ignoredFields?: string[];
+  };
   readonly partial?: boolean;
 }
 
@@ -191,7 +196,11 @@ export function wrapResponse<T>(
   extra?: {
     provenance?: ToolProvenance;
     retry?: { recommended: boolean; reason?: string; minimalCall?: Record<string, unknown> };
-    normalized?: { aliases?: Record<string, string>; defaults?: Record<string, unknown>; ignoredFields?: string[] };
+    normalized?: {
+      aliases?: Record<string, string>;
+      defaults?: Record<string, unknown>;
+      ignoredFields?: string[];
+    };
     partial?: boolean;
   },
 ): ToolWrappedResponse<T> {
@@ -207,7 +216,11 @@ export function wrapResponse<T>(
 export interface MakeResultOpts {
   warnings?: string[];
   rateLimit?: RateLimitInfo;
-  correction?: { original: string; corrected: string; changes: { original: string; corrected: string; distance: number }[] };
+  correction?: {
+    original: string;
+    corrected: string;
+    changes: { original: string; corrected: string; distance: number }[];
+  };
   intentFilter?: {
     filtered: boolean;
     totalResults: number;
@@ -218,7 +231,11 @@ export interface MakeResultOpts {
   };
   provenance?: ToolProvenance;
   retry?: { recommended: boolean; reason?: string; minimalCall?: Record<string, unknown> };
-  normalized?: { aliases?: Record<string, string>; defaults?: Record<string, unknown>; ignoredFields?: string[] };
+  normalized?: {
+    aliases?: Record<string, string>;
+    defaults?: Record<string, unknown>;
+    ignoredFields?: string[];
+  };
   partial?: boolean;
 }
 
@@ -276,7 +293,10 @@ function sanitizeErrorMessage(err: unknown): string {
   return baseMessage;
 }
 
-export function errorResponse(err: unknown, toolName?: string): {
+export function errorResponse(
+  err: unknown,
+  toolName?: string,
+): {
   content: { type: 'text'; text: string }[];
   isError: true;
 } {

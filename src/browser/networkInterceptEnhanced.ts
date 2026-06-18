@@ -1,3 +1,4 @@
+import { logger } from '../logger.js';
 import type { Page } from 'playwright-core';
 import type {
   NetworkBlockConfig,
@@ -38,14 +39,20 @@ export async function blockResources(
 
       // Check allow-list first
       if (allowPatterns?.some((p) => matchGlob(request.url(), p))) {
-        route.continue().catch(() => { /* intentionally empty */ });
+        route.continue().catch((err: unknown) => {
+          logger.debug({ err }, 'network: route.continue failed (allowlist match)');
+        });
         return;
       }
 
-      if (blockTypes.includes(resourceType as typeof blockTypes[number])) {
-        route.abort().catch(() => { /* intentionally empty */ });
+      if (blockTypes.includes(resourceType as (typeof blockTypes)[number])) {
+        route.abort().catch((err: unknown) => {
+          logger.debug({ err }, 'network: route.abort failed (blocked type)');
+        });
       } else {
-        route.continue().catch(() => { /* intentionally empty */ });
+        route.continue().catch((err: unknown) => {
+          logger.debug({ err }, 'network: route.continue failed (non-blocked type)');
+        });
       }
     });
 
@@ -57,7 +64,9 @@ export async function blockResources(
   if (blockPatterns && blockPatterns.length > 0) {
     for (const pattern of blockPatterns) {
       await page.route(pattern, (route) => {
-        route.abort().catch(() => { /* intentionally empty */ });
+        route.abort().catch((err: unknown) => {
+          logger.debug({ err }, 'network: route.abort failed (blocked pattern)');
+        });
       });
       rulesApplied++;
       rules.push({ type: 'block-pattern', pattern });
@@ -87,7 +96,9 @@ export async function injectHeaders(
         try {
           await route.continue({ headers: newHeaders });
         } catch {
-          route.abort().catch(() => { /* intentionally empty */ });
+          route.abort().catch((err: unknown) => {
+            logger.debug({ err }, 'network: route.abort failed after header inject failure');
+          });
         }
       });
       rulesApplied++;
@@ -100,7 +111,9 @@ export async function injectHeaders(
       try {
         await route.continue({ headers: newHeaders });
       } catch {
-        route.abort().catch(() => { /* intentionally empty */ });
+        route.abort().catch((err: unknown) => {
+          logger.debug({ err }, 'network: route.abort failed after header inject failure (global)');
+        });
       }
     });
     rulesApplied = 1;

@@ -5,10 +5,7 @@ import type { PaginateConfig, PaginateResult, PaginatePageContent } from './type
  * Auto-walk paginated content by detecting "next" links/buttons
  * and collecting content from each page up to a limit.
  */
-export async function paginate(
-  page: Page,
-  config: PaginateConfig = {},
-): Promise<PaginateResult> {
+export async function paginate(page: Page, config: PaginateConfig = {}): Promise<PaginateResult> {
   const maxPages = config.maxPages ?? 10;
   const waitBetweenMs = config.waitBetweenMs ?? 2000;
   const contentSelector = config.contentSelector ?? null;
@@ -37,7 +34,9 @@ export async function paginate(
     try {
       // Click the next link and wait for navigation or content change
       await Promise.all([
-        page.waitForLoadState('domcontentloaded', { timeout: 15000 }).catch(() => { /* intentionally empty */ }),
+        page.waitForLoadState('domcontentloaded', { timeout: 15000 }).catch(() => {
+          /* intentionally empty */
+        }),
         nextLocator.click({ timeout: 5000 }),
       ]);
       await page.waitForTimeout(waitBetweenMs);
@@ -59,15 +58,20 @@ async function extractPageContent(
 ): Promise<PaginatePageContent> {
   let text: string;
   if (contentSelector) {
-    text = await page.locator(contentSelector).first().textContent() ?? '';
+    text = (await page.locator(contentSelector).first().textContent()) ?? '';
   } else if (mode === 'full') {
     text = await page.evaluate(() => document.body.innerText);
   } else {
     // content-only: try common content containers first
     text = await page.evaluate(() => {
       const contentSelectors = [
-        'main', 'article', '.content', '#content',
-        '.post-content', '.article-content', '[role="main"]',
+        'main',
+        'article',
+        '.content',
+        '#content',
+        '.post-content',
+        '.article-content',
+        '[role="main"]',
       ];
       for (const sel of contentSelectors) {
         const el = document.querySelector(sel);
@@ -94,7 +98,7 @@ async function findNextLink(
 ): Promise<ReturnType<Page['locator']> | null> {
   if (customSelector) {
     const loc = page.locator(customSelector).first();
-    if (await loc.count() > 0) return loc;
+    if ((await loc.count()) > 0) return loc;
     return null;
   }
 

@@ -5,18 +5,21 @@
 const SOURCES_START = 'SOURCES';
 const SOURCES_END = 'SOURCES';
 
-const DISCOVERY_DOMAINS = new Set([
-  'duckduckgo.com',
-  'bing.com',
-  'google.com',
-  'search.brave.com',
+const DISCOVERY_DOMAINS = new Set(['duckduckgo.com', 'bing.com', 'google.com', 'search.brave.com']);
+
+const TRACKING_PARAMS = new Set([
+  'utm_source',
+  'utm_medium',
+  'utm_campaign',
+  'utm_content',
+  'utm_term',
+  'ref',
+  'source',
 ]);
 
-const TRACKING_PARAMS = new Set(['utm_source', 'utm_medium', 'utm_campaign', 'utm_content', 'utm_term', 'ref', 'source']);
-
 // Matches URLs up to whitespace or common structural delimiters.
-// Allows parentheses and brackets which are valid in URLs.
-const URL_REGEX = /https?:\/\/[^\s<>"{}|\\^`\[\]]+/g;
+// Excludes brackets and other delimiters to avoid mangling markdown link syntax.
+const URL_REGEX = /https?:\/\/[^\s<>"{}|\\^`[\]]+/g;
 
 /** Locates the SOURCES block and returns its trimmed content, or null. */
 function parseSourcesBlock(text: string): string | null {

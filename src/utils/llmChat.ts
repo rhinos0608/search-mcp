@@ -42,16 +42,7 @@ export const LLM_DEFAULT_INITIAL_BACKOFF_MS = 1_000;
 export const LLM_DEFAULT_MAX_BACKOFF_MS = 30_000;
 export const LLM_DEFAULT_BACKOFF_MULTIPLIER = 2;
 
-export const LLM_RETRYABLE_HTTP_STATUSES = new Set([
-  408,
-  409,
-  425,
-  429,
-  500,
-  502,
-  503,
-  504,
-]);
+export const LLM_RETRYABLE_HTTP_STATUSES = new Set([408, 409, 425, 429, 500, 502, 503, 504]);
 
 function normalizeOpenAiBaseUrl(baseUrl: string): string {
   return baseUrl
@@ -69,18 +60,13 @@ function nonNegativeNumber(value: number | undefined, fallback: number): number 
 }
 
 function nonNegativeInteger(value: number | undefined, fallback: number): number {
-  return value !== undefined && Number.isFinite(value) && value >= 0
-    ? Math.floor(value)
-    : fallback;
+  return value !== undefined && Number.isFinite(value) && value >= 0 ? Math.floor(value) : fallback;
 }
 
 function retryDelayMs(
   attemptIndex: number,
   options: Required<
-    Pick<
-      OpenAiChatCompletionOptions,
-      'initialBackoffMs' | 'maxBackoffMs' | 'backoffMultiplier'
-    >
+    Pick<OpenAiChatCompletionOptions, 'initialBackoffMs' | 'maxBackoffMs' | 'backoffMultiplier'>
   >,
 ): number {
   const exponential = options.initialBackoffMs * options.backoffMultiplier ** attemptIndex;
@@ -137,10 +123,7 @@ function buildErrorResult(
 export async function callOpenAiChatCompletion(
   options: OpenAiChatCompletionOptions,
 ): Promise<OpenAiChatCompletionResult> {
-  const totalTimeoutMs = positiveNumber(
-    options.totalTimeoutMs,
-    LLM_DEFAULT_TOTAL_TIMEOUT_MS,
-  );
+  const totalTimeoutMs = positiveNumber(options.totalTimeoutMs, LLM_DEFAULT_TOTAL_TIMEOUT_MS);
   const maxRetries = nonNegativeInteger(options.maxRetries, LLM_DEFAULT_MAX_RETRIES);
   const initialBackoffMs = nonNegativeInteger(
     options.initialBackoffMs,

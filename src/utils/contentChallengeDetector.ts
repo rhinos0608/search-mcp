@@ -28,19 +28,13 @@ const CHALLENGE_PATTERNS = [
  * Checks for common challenge/blocker phrases in the combined title+content.
  * Token-length conditions apply to a subset of patterns.
  */
-export function detectContentChallenge(
-  title: string,
-  content: string,
-): ContentChallengeResult {
+export function detectContentChallenge(title: string, content: string): ContentChallengeResult {
   const haystack = `${title}\n${content}`.toLowerCase();
   const contentOnlyShort = content.length < SHORT_CONTENT_THRESHOLD;
 
   for (const token of CHALLENGE_PATTERNS) {
     // Apply length condition to the subset of patterns that require it.
-    if (
-      (token === 'enable javascript' || token === 'please enable cookies') &&
-      !contentOnlyShort
-    ) {
+    if ((token === 'enable javascript' || token === 'please enable cookies') && !contentOnlyShort) {
       continue;
     }
 

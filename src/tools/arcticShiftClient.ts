@@ -11,21 +11,27 @@ const ARCTIC_SHIFT_TIMEOUT_MS = 15_000;
  *
  * Note: Arctic Shift is an archive. Very recent posts (<24h old) may not be available.
  */
-export async function arcticShiftFetchComments(
-  article: string,
-  limit = 50,
-): Promise<unknown[]> {
+export async function arcticShiftFetchComments(article: string, limit = 50): Promise<unknown[]> {
   // Fetch comment tree
-  const treeUrl = `${ARCTIC_SHIFT_BASE_URL}/comments/tree?link_id=t3_${article}&limit=${Math.min(limit, 25000)}`;
-  logger.info({ tool: 'reddit_comments_fallback', backend: 'arctic-shift', limit }, 'Fetching Reddit thread via Arctic Shift');
+  const treeUrl = `${ARCTIC_SHIFT_BASE_URL}/comments/tree?link_id=t3_${article}&limit=${String(Math.min(limit, 25000))}`;
+  logger.info(
+    { tool: 'reddit_comments_fallback', backend: 'arctic-shift', limit },
+    'Fetching Reddit thread via Arctic Shift',
+  );
 
   const treeResponse = await fetchWithTimeout(treeUrl);
   if (!treeResponse.ok) {
-    throw new Error(`Arctic Shift API returned ${treeResponse.status} for comment tree`);
+    throw new Error(`Arctic Shift API returned ${String(treeResponse.status)} for comment tree`);
   }
 
   const treeJson: unknown = await safeResponseJson(treeResponse, treeUrl);
-  const treeData = (treeJson as Record<string, unknown>)?.data;
+  const treeData = (treeJson as Record<string, unknown>).data;
+  if (!Array.isArray(treeData)) {
+    logger.warn(
+      { dataType: typeof treeData },
+      'Arctic Shift API returned malformed response: data field is not an array',
+    );
+  }
   const comments = Array.isArray(treeData) ? treeData : [];
 
   // Fetch post metadata
@@ -35,7 +41,7 @@ export async function arcticShiftFetchComments(
     const postResponse = await fetchWithTimeout(postUrl);
     if (postResponse.ok) {
       const postJson: unknown = await safeResponseJson(postResponse, postUrl);
-      const postResult = (postJson as Record<string, unknown>)?.data;
+      const postResult = (postJson as Record<string, unknown>).data;
       if (Array.isArray(postResult)) {
         postData = postResult;
       }
@@ -48,7 +54,21 @@ export async function arcticShiftFetchComments(
 
   if (postData.length === 0) {
     // Build minimal post stub so normalization doesn't break
-    postData = [{ id: article, title: '', selftext: '', author: '[deleted]', subreddit: '', score: 0, num_comments: comments.length, created_utc: 0, permalink: `/r/_/comments/${article}/`, url: '', is_video: false }];
+    postData = [
+      {
+        id: article,
+        title: '',
+        selftext: '',
+        author: '[deleted]',
+        subreddit: '',
+        score: 0,
+        num_comments: comments.length,
+        created_utc: 0,
+        permalink: `/r/_/comments/${article}/`,
+        url: '',
+        is_video: false,
+      },
+    ];
   }
 
   return [
@@ -60,26 +80,37 @@ export async function arcticShiftFetchComments(
 function timeframeToAfter(timeframe: string): string | undefined {
   const now = Date.now() / 1000;
   switch (timeframe) {
-    case 'hour': return isoDate(now - 3600);
-    case 'day': return isoDate(now - 86400);
-    case 'week': return isoDate(now - 604800);
-    case 'month': return isoDate(now - 2592000);
-    case 'year': return isoDate(now - 31536000);
-    default: return undefined;
+    case 'hour':
+      return isoDate(now - 3600);
+    case 'day':
+      return isoDate(now - 86400);
+    case 'week':
+      return isoDate(now - 604800);
+    case 'month':
+      return isoDate(now - 2592000);
+    case 'year':
+      return isoDate(now - 31536000);
+    default:
+      return undefined;
   }
 }
 
 function isoDate(unixSec: number): string {
-  return new Date(unixSec * 1000).toISOString().split('T')[0]!;
+  return new Date(unixSec * 1000).toISOString().split('T')[0] ?? '';
 }
 
 function arcticShiftSort(sort: string): string | undefined {
   switch (sort) {
-    case 'new': return 'desc';
-    case 'top': return 'desc';
-    case 'relevance': return undefined; // Arctic Shift sorts by created_utc; no relevance sort
-    case 'comments': return undefined;
-    default: return undefined;
+    case 'new':
+      return 'desc';
+    case 'top':
+      return 'desc';
+    case 'relevance':
+      return undefined; // Arctic Shift sorts by created_utc; no relevance sort
+    case 'comments':
+      return undefined;
+    default:
+      return undefined;
   }
 }
 
@@ -122,7 +153,11 @@ export async function arcticShiftSearch(
       attempts.push({ query: keywords[0], after: undefined, label: `keyword "${keywords[0]}"` });
     }
     if (keywords.length >= 2 && keywords.slice(0, 2).join(' ') !== query.toLowerCase()) {
-      attempts.push({ query: keywords.slice(0, 2).join(' '), after: undefined, label: `keywords "${keywords.slice(0, 2).join(' ')}"` });
+      attempts.push({
+        query: keywords.slice(0, 2).join(' '),
+        after: undefined,
+        label: `keywords "${keywords.slice(0, 2).join(' ')}"`,
+      });
     }
   }
 
@@ -150,7 +185,14 @@ export async function arcticShiftSearch(
 
     const url = `${ARCTIC_SHIFT_BASE_URL}/posts/search?${params.toString()}`;
     logger.info(
-      { tool: 'reddit_search_fallback', backend: 'arctic-shift', subreddit, sort, limit, attempt: attempt.label },
+      {
+        tool: 'reddit_search_fallback',
+        backend: 'arctic-shift',
+        subreddit,
+        sort,
+        limit,
+        attempt: attempt.label,
+      },
       `Arctic Shift search (${attempt.label})`,
     );
 
@@ -176,16 +218,88 @@ export async function arcticShiftSearch(
 }
 
 const QUERY_STOP_WORDS = new Set([
-  'the', 'and', 'for', 'are', 'but', 'not', 'you', 'all', 'can', 'had', 'her',
-  'was', 'one', 'our', 'out', 'has', 'have', 'from', 'they', 'that', 'with',
-  'this', 'what', 'when', 'your', 'which', 'their', 'them', 'about', 'into',
-  'than', 'then', 'also', 'after', 'over', 'very', 'just', 'does', 'did',
-  'most', 'much', 'some', 'such', 'only', 'other', 'more', 'been', 'being',
-  'will', 'would', 'could', 'should', 'best', 'good', 'like', 'make', 'need',
-  'want', 'looking', 'help', 'know', 'find', 'alternative', 'alternatives',
-  'compare', 'comparison', 'versus', 'better', 'lighter', 'heavier', 'faster',
-  'slower', 'lightweight', 'heavyweight', 'recommend', 'recommendation',
-  'anyone', 'anybody', 'someone', 'something', 'everyone', 'everything',
+  'the',
+  'and',
+  'for',
+  'are',
+  'but',
+  'not',
+  'you',
+  'all',
+  'can',
+  'had',
+  'her',
+  'was',
+  'one',
+  'our',
+  'out',
+  'has',
+  'have',
+  'from',
+  'they',
+  'that',
+  'with',
+  'this',
+  'what',
+  'when',
+  'your',
+  'which',
+  'their',
+  'them',
+  'about',
+  'into',
+  'than',
+  'then',
+  'also',
+  'after',
+  'over',
+  'very',
+  'just',
+  'does',
+  'did',
+  'most',
+  'much',
+  'some',
+  'such',
+  'only',
+  'other',
+  'more',
+  'been',
+  'being',
+  'will',
+  'would',
+  'could',
+  'should',
+  'best',
+  'good',
+  'like',
+  'make',
+  'need',
+  'want',
+  'looking',
+  'help',
+  'know',
+  'find',
+  'alternative',
+  'alternatives',
+  'compare',
+  'comparison',
+  'versus',
+  'better',
+  'lighter',
+  'heavier',
+  'faster',
+  'slower',
+  'lightweight',
+  'heavyweight',
+  'recommend',
+  'recommendation',
+  'anyone',
+  'anybody',
+  'someone',
+  'something',
+  'everyone',
+  'everything',
 ]);
 
 /** Extract significant keywords from a query, in original order. */
@@ -198,12 +312,17 @@ function extractKeywords(query: string): string[] {
 
 async function fetchWithTimeout(url: string, options: RequestInit = {}): Promise<Response> {
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), ARCTIC_SHIFT_TIMEOUT_MS);
+  const timeout = setTimeout(() => {
+    controller.abort();
+  }, ARCTIC_SHIFT_TIMEOUT_MS);
   try {
     const response = await fetch(url, {
       ...options,
       signal: controller.signal,
-      headers: { 'User-Agent': 'search-mcp/7.0 (arctic-shift-fallback)', ...options.headers as Record<string, string> },
+      headers: {
+        'User-Agent': 'search-mcp/7.0 (arctic-shift-fallback)',
+        ...(options.headers as Record<string, string>),
+      },
     });
     return response;
   } finally {

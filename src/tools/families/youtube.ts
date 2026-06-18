@@ -169,16 +169,15 @@ const youtubeFamily: FamilyDefinition = {
         'Search YouTube for videos, fetch transcripts, and rank passages by relevance to a query',
       schema: semanticSchema,
       handler: async (args, cfg) => {
-        const { query, maxVideos, channel, sort, transcriptLanguage, profile, topK } =
-          args as {
-            query: string;
-            maxVideos: number;
-            channel?: string;
-            sort: 'relevance' | 'date' | 'viewCount';
-            transcriptLanguage: string;
-            profile: 'balanced' | 'fast' | 'precision' | 'recall';
-            topK: number;
-          };
+        const { query, maxVideos, channel, sort, transcriptLanguage, profile, topK } = args as {
+          query: string;
+          maxVideos: number;
+          channel?: string;
+          sort: 'relevance' | 'date' | 'viewCount';
+          transcriptLanguage: string;
+          profile: 'balanced' | 'fast' | 'precision' | 'recall';
+          topK: number;
+        };
         // Use server default for maxBytes
         const maxBytes = DEFAULT_SEMANTIC_MAX_BYTES;
 
@@ -216,7 +215,11 @@ const youtubeFamily: FamilyDefinition = {
 
 // ── Registration ─────────────────────────────────────────────────────────────
 
-export function registerYoutubeTool(server: McpServer, cfg: SearchConfig, kgHook?: KnowledgeGraphHook): void {
+export function registerYoutubeTool(
+  server: McpServer,
+  cfg: SearchConfig,
+  kgHook?: KnowledgeGraphHook,
+): void {
   registerFamily(server, youtubeFamily, cfg, kgHook);
 }
 

@@ -489,7 +489,16 @@ export interface TableExtractResult {
 /** Configuration for network resource blocking. */
 export interface NetworkBlockConfig {
   /** Resource types to block. */
-  blockTypes?: ('image' | 'font' | 'stylesheet' | 'media' | 'script' | 'fetch' | 'websocket' | 'other')[];
+  blockTypes?: (
+    | 'image'
+    | 'font'
+    | 'stylesheet'
+    | 'media'
+    | 'script'
+    | 'fetch'
+    | 'websocket'
+    | 'other'
+  )[];
   /** URL patterns to block (glob-style). */
   blockPatterns?: string[];
   /** URL patterns to allow (overrides blockPatterns). */

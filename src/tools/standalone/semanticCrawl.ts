@@ -230,7 +230,6 @@ export function registerSemanticCrawl(
       // Server-level defaults for removed power-user params
       const useReranker = false;
       const minScore = undefined as number | undefined;
-      const useContextualEmbeddings = false;
       const maxChunkTokens = undefined as number | undefined;
       const allowPathDrift = false;
       const includeElements = true;
@@ -252,7 +251,10 @@ export function registerSemanticCrawl(
       const extraAny = extra as
         | {
             _meta?: { progressToken?: string | number };
-            sendNotification?: (n: { method: string; params: Record<string, unknown> }) => Promise<void>;
+            sendNotification?: (n: {
+              method: string;
+              params: Record<string, unknown>;
+            }) => Promise<void>;
           }
         | undefined;
       const progressReporter =
@@ -373,9 +375,6 @@ export function registerSemanticCrawl(
                   jsCode,
                   ...(extractionConfig ? { extractionConfig } : {}),
                   ...(llmFallback ? { llmFallback } : {}),
-                  ...(useContextualEmbeddings
-                    ? { useContextualEmbeddings, contextualEmbedding: cfg.llm }
-                    : {}),
                 },
                 cfg.crawl4ai,
                 cfg.embeddingSidecar.baseUrl,
@@ -434,9 +433,6 @@ export function registerSemanticCrawl(
             jsCode,
             ...(extractionConfig ? { extractionConfig } : {}),
             ...(llmFallback ? { llmFallback } : {}),
-            ...(useContextualEmbeddings
-              ? { useContextualEmbeddings, contextualEmbedding: cfg.llm }
-              : {}),
           },
           cfg.crawl4ai,
           cfg.embeddingSidecar.baseUrl,

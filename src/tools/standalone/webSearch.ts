@@ -54,18 +54,13 @@ export function registerWebSearch(
           .enum(['raw', 'collated'])
           .optional()
           .default('raw')
-          .describe('Output format: raw passes through backend results, collated assembles structured findings with source blocks'),
+          .describe(
+            'Output format: raw passes through backend results, collated assembles structured findings with source blocks',
+          ),
       },
       annotations: { readOnlyHint: true },
     },
-    async ({
-      query,
-      limit,
-      safeSearch,
-      expandQuery,
-      category,
-      resultFormat,
-    }) => {
+    async ({ query, limit, safeSearch, expandQuery, category, resultFormat }) => {
       // Server-level defaults (always on, hidden from schema to reduce param noise)
       const mergeSearchBackends = true;
 
@@ -108,7 +103,7 @@ export function registerWebSearch(
         if (resultFormat === 'collated') {
           const result = makeResult('web_search', { text: data as string }, Date.now() - start, {
             ...(provenanceRef.current ? { provenance: provenanceRef.current } : {}),
-            });
+          });
           return successResponse(result);
         }
         // Intent filtering removed from schema — auto-applied when output exceeds 5KB.

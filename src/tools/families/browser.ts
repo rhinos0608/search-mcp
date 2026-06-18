@@ -201,9 +201,7 @@ const waitForSchema = z.object({
   conditions: z
     .array(
       z.object({
-        condition: z
-          .enum(['visible', 'gone', 'has-text', 'count'])
-          .describe('Condition type'),
+        condition: z.enum(['visible', 'gone', 'has-text', 'count']).describe('Condition type'),
         selector: z.string().describe('CSS selector for the target element'),
         timeout: z.number().int().min(1000).max(60000).optional().describe('Max wait time in ms'),
         text: z.string().optional().describe('Expected text for has-text condition'),
@@ -223,10 +221,7 @@ const dialogSchema = z.object({
     .enum(['auto-accept', 'auto-dismiss', 'handle-current', 'stop', 'history', 'clear'])
     .describe('Dialog operation'),
   accept: z.boolean().optional().describe('Accept (true) or dismiss (false) for handle-current'),
-  promptText: z
-    .string()
-    .optional()
-    .describe('Default text for prompt dialogs when auto-accepting'),
+  promptText: z.string().optional().describe('Default text for prompt dialogs when auto-accepting'),
   maxDialogs: z
     .number()
     .int()
@@ -266,20 +261,8 @@ const scrollToLoadSchema = z.object({
     .optional()
     .describe('Delay between scrolls in ms'),
   direction: z.enum(['down', 'up']).optional().describe('Scroll direction'),
-  scrollPixels: z
-    .number()
-    .int()
-    .min(50)
-    .max(5000)
-    .optional()
-    .describe('Pixels per scroll step'),
-  timeoutMs: z
-    .number()
-    .int()
-    .min(1000)
-    .max(300000)
-    .optional()
-    .describe('Max total time in ms'),
+  scrollPixels: z.number().int().min(50).max(5000).optional().describe('Pixels per scroll step'),
+  timeoutMs: z.number().int().min(1000).max(300000).optional().describe('Max total time in ms'),
   scrollContainer: z
     .string()
     .optional()
@@ -288,14 +271,11 @@ const scrollToLoadSchema = z.object({
 
 const paginateSchema = z.object({
   action: z.literal('paginate').describe('Auto-walk paginated content'),
-  nextSelector: z.string().optional().describe('CSS selector for next link (auto-detected if omitted)'),
-  maxPages: z
-    .number()
-    .int()
-    .min(1)
-    .max(100)
+  nextSelector: z
+    .string()
     .optional()
-    .describe('Maximum pages to collect'),
+    .describe('CSS selector for next link (auto-detected if omitted)'),
+  maxPages: z.number().int().min(1).max(100).optional().describe('Maximum pages to collect'),
   waitBetweenMs: z
     .number()
     .int()
@@ -303,21 +283,13 @@ const paginateSchema = z.object({
     .max(30000)
     .optional()
     .describe('Wait between pages in ms'),
-  contentSelector: z
-    .string()
-    .optional()
-    .describe('CSS selector for content area'),
-  extractMode: z
-    .enum(['full', 'content-only'])
-    .optional()
-    .describe('Extraction mode'),
+  contentSelector: z.string().optional().describe('CSS selector for content area'),
+  extractMode: z.enum(['full', 'content-only']).optional().describe('Extraction mode'),
 });
 
 const downloadSchema = z.object({
   action: z.literal('download').describe('Intercept file downloads and return content'),
-  op: z
-    .enum(['intercept', 'start-collection', 'get-collected'])
-    .describe('Download operation'),
+  op: z.enum(['intercept', 'start-collection', 'get-collected']).describe('Download operation'),
   savePath: z.string().optional().describe('Directory to save downloaded files'),
   maxSize: z
     .number()
@@ -339,63 +311,34 @@ const downloadSchema = z.object({
 const tableExtractSchema = z.object({
   action: z.literal('table_extract').describe('Extract structured HTML tables'),
   selector: z.string().optional().describe('CSS selector for a specific table'),
-  maxTables: z
-    .number()
-    .int()
-    .min(1)
-    .max(50)
-    .optional()
-    .describe('Maximum tables to extract'),
-  includeCaptions: z
-    .boolean()
-    .optional()
-    .describe('Include table captions in output'),
-  flattenSpans: z
-    .boolean()
-    .optional()
-    .describe('Flatten colspan/rowspan into individual cells'),
+  maxTables: z.number().int().min(1).max(50).optional().describe('Maximum tables to extract'),
+  includeCaptions: z.boolean().optional().describe('Include table captions in output'),
+  flattenSpans: z.boolean().optional().describe('Flatten colspan/rowspan into individual cells'),
 });
 
 const networkInterceptSchema = z.object({
   action: z
     .literal('network_intercept')
     .describe('Enhanced network interception: block, inject headers, modify responses'),
-  op: z
-    .enum(['block', 'inject', 'modify', 'unblock', 'list'])
-    .describe('Interception operation'),
+  op: z.enum(['block', 'inject', 'modify', 'unblock', 'list']).describe('Interception operation'),
   blockTypes: z
     .array(
       z.enum(['image', 'font', 'stylesheet', 'media', 'script', 'fetch', 'websocket', 'other']),
     )
     .optional()
     .describe('Resource types to block'),
-  blockPatterns: z
-    .array(z.string())
-    .optional()
-    .describe('URL patterns to block (glob-style)'),
+  blockPatterns: z.array(z.string()).optional().describe('URL patterns to block (glob-style)'),
   allowPatterns: z
     .array(z.string())
     .optional()
     .describe('URL patterns to allow (overrides blocks)'),
-  injectPatterns: z
-    .array(z.string())
-    .optional()
-    .describe('URL patterns for header injection'),
+  injectPatterns: z.array(z.string()).optional().describe('URL patterns for header injection'),
   injectHeaders: z
     .record(z.string(), z.string())
     .optional()
     .describe('Headers to inject {key: value}'),
-  modifyPatterns: z
-    .array(z.string())
-    .optional()
-    .describe('URL patterns for response modification'),
-  modifyStatus: z
-    .number()
-    .int()
-    .min(100)
-    .max(599)
-    .optional()
-    .describe('New HTTP status code'),
+  modifyPatterns: z.array(z.string()).optional().describe('URL patterns for response modification'),
+  modifyStatus: z.number().int().min(100).max(599).optional().describe('New HTTP status code'),
   modifyBody: z.string().optional().describe('Replacement response body'),
   modifyHeaders: z
     .record(z.string(), z.string())
@@ -425,17 +368,8 @@ const diffSchema = z.object({
       }),
     )
     .describe('Actions to perform between snapshots'),
-  selector: z
-    .string()
-    .optional()
-    .describe('Scope diff to a CSS selector (default: body)'),
-  maxChanges: z
-    .number()
-    .int()
-    .min(1)
-    .max(500)
-    .optional()
-    .describe('Maximum changes to report'),
+  selector: z.string().optional().describe('Scope diff to a CSS selector (default: body)'),
+  maxChanges: z.number().int().min(1).max(500).optional().describe('Maximum changes to report'),
 });
 
 // ── Config gates ─────────────────────────────────────────────────────────────
@@ -460,7 +394,10 @@ function llmRequiredForAct(cfg: SearchConfig): string | null {
 const trackingPages = new WeakSet();
 
 /** Track download collectors per page to avoid casting Page to Record<string, unknown>. */
-const downloadCollectors = new WeakMap<object, { cleanup: () => void; waitForDownloads: () => Promise<DownloadResult[]> }>();
+const downloadCollectors = new WeakMap<
+  object,
+  { cleanup: () => void; waitForDownloads: () => Promise<DownloadResult[]> }
+>();
 
 async function getOrCreateSession(
   cfg: SearchConfig,
@@ -1235,15 +1172,7 @@ const browserFamily: FamilyDefinition = {
         'Browser session lifecycle: start, close, check status, or discover user browsers',
       schema: sessionSchema,
       handler: async (args, cfg) => {
-        const {
-          op,
-          headless,
-          profile,
-          cdpEndpoint,
-          mode,
-          browserPort,
-          browserEngine,
-        } = args as {
+        const { op, headless, profile, cdpEndpoint, mode, browserPort, browserEngine } = args as {
           op: string;
           headless?: boolean;
           profile?: string;
@@ -1419,7 +1348,10 @@ const browserFamily: FamilyDefinition = {
               if (by === 'index' && typeof value !== 'number') {
                 throw new Error('value must be a number when by is "index"');
               }
-              if ((by === 'name' || by === 'url' || by === 'selector') && typeof value !== 'string') {
+              if (
+                (by === 'name' || by === 'url' || by === 'selector') &&
+                typeof value !== 'string'
+              ) {
                 throw new Error('value must be a string when by is "name", "url", or "selector"');
               }
               return switchToFrame(page, { by, value });
@@ -1571,7 +1503,8 @@ const browserFamily: FamilyDefinition = {
     // ── network_intercept ─────────────────────────────────────────────────
     {
       name: 'network_intercept',
-      description: 'Enhanced network interception: block resources, inject headers, modify responses',
+      description:
+        'Enhanced network interception: block resources, inject headers, modify responses',
       schema: networkInterceptSchema,
       handler: async (args, cfg) => {
         const {
@@ -1587,7 +1520,16 @@ const browserFamily: FamilyDefinition = {
           modifyHeaders,
         } = args as {
           op: string;
-          blockTypes?: ('image' | 'font' | 'stylesheet' | 'media' | 'script' | 'fetch' | 'websocket' | 'other')[];
+          blockTypes?: (
+            | 'image'
+            | 'font'
+            | 'stylesheet'
+            | 'media'
+            | 'script'
+            | 'fetch'
+            | 'websocket'
+            | 'other'
+          )[];
           blockPatterns?: string[];
           allowPatterns?: string[];
           injectPatterns?: string[];
@@ -1615,7 +1557,8 @@ const browserFamily: FamilyDefinition = {
               return blockResources(page, blockCfg);
             }
             case 'inject': {
-              if (!injectHeadersConfig) throw new Error('injectHeaders is required for network_intercept.inject');
+              if (!injectHeadersConfig)
+                throw new Error('injectHeaders is required for network_intercept.inject');
               type InjCfg = Parameters<typeof doInjectHeaders>[1];
               const injCfg: InjCfg = {
                 headers: injectHeadersConfig,
@@ -1684,7 +1627,7 @@ const browserFamily: FamilyDefinition = {
                     if (step.target) await page.locator(step.target).click();
                     break;
                   case 'type':
-                    if (step.target && step.value)
+                    if (step.target != null && step.value != null)
                       await page.locator(step.target).fill(step.value);
                     break;
                   case 'select':

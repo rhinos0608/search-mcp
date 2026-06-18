@@ -37,14 +37,7 @@ export async function redditSearch(
     );
   }
 
-  const key = cacheKey(
-    'reddit',
-    query,
-    subreddit,
-    sort,
-    timeframe,
-    String(limit),
-  );
+  const key = cacheKey('reddit', query, subreddit, sort, timeframe, String(limit));
   const cached = cache.get(key);
   if (cached !== null) {
     logger.debug({ cacheHit: true }, 'Reddit search cache hit');
@@ -95,7 +88,9 @@ export async function redditSearch(
           let bodyText = '';
           try {
             bodyText = await res.clone().text();
-          } catch { /* body read failure is non-fatal */ }
+          } catch {
+            /* body read failure is non-fatal */
+          }
           // Detects both the explicit "blocked by network security" message and
           // any HTML response on a JSON endpoint (Reddit API should never return HTML).
           const isNetworkBlock =
@@ -107,18 +102,21 @@ export async function redditSearch(
               'Reddit public API blocked, falling back to Arctic Shift for search',
             );
             try {
-              const fallbackJson = await arcticShiftSearch(query, subreddit, sort, limit, timeframe);
+              const fallbackJson = await arcticShiftSearch(
+                query,
+                subreddit,
+                sort,
+                limit,
+                timeframe,
+              );
               return { __fallback: true as const, json: fallbackJson };
             } catch (fallbackErr) {
               logger.error({ err: fallbackErr }, 'Arctic Shift fallback also failed');
-              throw new ToolError(
-                'Both Reddit API and Arctic Shift fallback are unavailable',
-                {
-                  code: 'UNAVAILABLE',
-                  retryable: false as const,
-                  backend: 'reddit',
-                },
-              );
+              throw new ToolError('Both Reddit API and Arctic Shift fallback are unavailable', {
+                code: 'UNAVAILABLE',
+                retryable: false as const,
+                backend: 'reddit',
+              });
             }
           }
           throw new ToolError(
@@ -156,9 +154,12 @@ export async function redditSearch(
     { label: 'reddit-search', maxAttempts: 2 },
   );
 
+  function isFallbackResponse(r: unknown): r is { __fallback: true; json: unknown } {
+    return typeof r === 'object' && r !== null && '__fallback' in r;
+  }
   let json: unknown;
-  if ('__fallback' in response) {
-    json = (response as { __fallback: true; json: unknown }).json;
+  if (isFallbackResponse(response)) {
+    json = response.json;
   } else {
     const httpResponse = response as { response: Response; url: string };
     json = await safeResponseJson(httpResponse.response, httpResponse.url);
@@ -179,17 +180,16 @@ export async function redditSearch(
       embeddingDimensions: cfg.embeddingSidecar.dimensions,
       topK: limit,
     });
-    cache.set(key, ranked.map((r) => r.item));
+    cache.set(
+      key,
+      ranked.map((r) => r.item),
+    );
     logger.debug({ resultCount: ranked.length }, 'Reddit search complete');
     return ranked.map((r) => r.item);
   }
 
   const rescoreSort: 'relevance' | 'date' | 'top' =
-    sort === 'new'
-      ? 'date'
-      : sort === 'hot' || sort === 'top'
-        ? 'top'
-        : 'relevance';
+    sort === 'new' ? 'date' : sort === 'hot' || sort === 'top' ? 'top' : 'relevance';
 
   const merged = rrfMerge([[...results]], { k: 60 });
   const allSignals = extractRedditSignals(results, rescoreSort);

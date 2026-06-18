@@ -43,7 +43,9 @@ export async function scrollToLoad(
 
   // Get initial height
   if (scrollContainer) {
-    initialHeight = await page.locator(scrollContainer).evaluate((el) => (el as HTMLElement).scrollHeight);
+    initialHeight = await page
+      .locator(scrollContainer)
+      .evaluate((el) => (el as HTMLElement).scrollHeight);
   } else {
     initialHeight = await page.evaluate(() => document.body.scrollHeight);
   }
@@ -67,10 +69,9 @@ export async function scrollToLoad(
 
     // Scroll
     if (scrollContainer) {
-      await page.locator(scrollContainer).evaluate(
-        (el, delta) => { (el as HTMLElement).scrollBy(0, delta); },
-        scrollDelta,
-      );
+      await page.locator(scrollContainer).evaluate((el, delta) => {
+        (el as HTMLElement).scrollBy(0, delta);
+      }, scrollDelta);
     } else {
       await page.mouse.wheel(0, scrollDelta);
     }
@@ -83,7 +84,9 @@ export async function scrollToLoad(
     // Check if height changed
     let currentHeight: number;
     if (scrollContainer) {
-      currentHeight = await page.locator(scrollContainer).evaluate((el) => (el as HTMLElement).scrollHeight);
+      currentHeight = await page
+        .locator(scrollContainer)
+        .evaluate((el) => (el as HTMLElement).scrollHeight);
     } else {
       currentHeight = await page.evaluate(() => document.body.scrollHeight);
     }

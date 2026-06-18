@@ -92,10 +92,7 @@ export function extractSmartSnippet(
       currentEnd = Math.min(content.length, currentStart + maxChars);
     } else {
       // Extend current window to encompass this position
-      currentEnd = Math.min(
-        content.length,
-        Math.max(currentEnd, pos + surroundChars),
-      );
+      currentEnd = Math.min(content.length, Math.max(currentEnd, pos + surroundChars));
     }
   }
   windows.push({ start: currentStart, end: currentEnd });
@@ -127,14 +124,8 @@ export function extractSmartSnippet(
   // Multiple windows: join with a separator marker
   return windows
     .map((w, i) => {
-      const prefix =
-        i > 0
-          ? '\n... [between matches] ...\n'
-          : w.start > 0
-            ? '…\n'
-            : '';
-      const suffix =
-        i < windows.length - 1 ? '' : w.end < content.length ? '\n…' : '';
+      const prefix = i > 0 ? '\n... [between matches] ...\n' : w.start > 0 ? '…\n' : '';
+      const suffix = i < windows.length - 1 ? '' : w.end < content.length ? '\n…' : '';
       return prefix + content.slice(w.start, w.end) + suffix;
     })
     .join('');

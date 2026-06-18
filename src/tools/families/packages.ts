@@ -82,7 +82,11 @@ const packagesFamily: FamilyDefinition = {
   ],
 };
 
-export function registerPackagesTool(server: McpServer, cfg: SearchConfig, kgHook?: KnowledgeGraphHook): void {
+export function registerPackagesTool(
+  server: McpServer,
+  cfg: SearchConfig,
+  kgHook?: KnowledgeGraphHook,
+): void {
   registerFamily(server, packagesFamily, cfg, kgHook);
 }
 

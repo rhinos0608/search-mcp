@@ -6,10 +6,7 @@ import type { WaitCondition, WaitResult } from './types.js';
  * Supports: visible (element appears), gone (element disappears),
  * has-text (element contains specific text), count (N elements match selector).
  */
-export async function waitForCondition(
-  page: Page,
-  condition: WaitCondition,
-): Promise<WaitResult> {
+export async function waitForCondition(page: Page, condition: WaitCondition): Promise<WaitResult> {
   const startTime = Date.now();
   const timeout = condition.timeout ?? 30000;
 
@@ -52,12 +49,18 @@ export async function waitForCondition(
           ({ sel, exp, op }: { sel: string; exp: number; op: string }) => {
             const count = document.querySelectorAll(sel).length;
             switch (op) {
-              case '>=': return count >= exp;
-              case '<=': return count <= exp;
-              case '==': return count === exp;
-              case '>': return count > exp;
-              case '<': return count < exp;
-              default: return count >= exp;
+              case '>=':
+                return count >= exp;
+              case '<=':
+                return count <= exp;
+              case '==':
+                return count === exp;
+              case '>':
+                return count > exp;
+              case '<':
+                return count < exp;
+              default:
+                return count >= exp;
             }
           },
           { sel: condition.selector, exp: expected, op: operator },
@@ -100,7 +103,8 @@ export async function waitForCondition(
     return result;
   } catch (err) {
     const elapsedMs = Date.now() - startTime;
-    const isTimeout = err instanceof Error && (err.name === 'TimeoutError' || err.message.includes('Timeout'));
+    const isTimeout =
+      err instanceof Error && (err.name === 'TimeoutError' || err.message.includes('Timeout'));
 
     const result: WaitResult = {
       satisfied: false,

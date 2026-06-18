@@ -135,7 +135,9 @@ const searchSchema = z.object({
   query: z.string().describe('The search query string'),
   subreddit: z
     .string()
-    .describe('Subreddit to search (without r/ prefix). Required — Reddit search is always subreddit-scoped.'),
+    .describe(
+      'Subreddit to search (without r/ prefix). Required — Reddit search is always subreddit-scoped.',
+    ),
   sort: SORT_SEARCH.optional().default('relevance').describe('Sort order'),
   timeframe: TIMEFRAME.optional().default('year').describe('Time window'),
   limit: z
@@ -196,7 +198,9 @@ const semanticSchema = z.object({
   query: z.string().describe('The semantic search query — what are you looking for in comments?'),
   subreddit: z
     .string()
-    .describe('Subreddit to search (without r/ prefix). Required — Reddit search is always subreddit-scoped.'),
+    .describe(
+      'Subreddit to search (without r/ prefix). Required — Reddit search is always subreddit-scoped.',
+    ),
   sort: SORT_SEMANTIC.optional().default('relevance').describe('Sort order for post search'),
   timeframe: TIMEFRAME.optional().default('year').describe('Time window for post search'),
   maxPosts: z
@@ -264,20 +268,21 @@ const redditFamily: FamilyDefinition = {
       schema: commentsSchema,
       handler: async (args, _cfg) => {
         void _cfg;
-        const { post, url, comment, context, sort, depth, limit, commentLimit, showMore } = args as {
-          post?:
-            | { type: 'url'; url: string }
-            | { type: 'permalink'; permalink: string }
-            | { type: 'id'; subreddit: string; postId: string };
-          url?: string;
-          comment?: string;
-          context?: number;
-          sort: 'confidence' | 'top' | 'new' | 'controversial' | 'old' | 'qa';
-          depth?: number;
-          limit?: number;
-          commentLimit?: number;
-          showMore: boolean;
-        };
+        const { post, url, comment, context, sort, depth, limit, commentLimit, showMore } =
+          args as {
+            post?:
+              | { type: 'url'; url: string }
+              | { type: 'permalink'; permalink: string }
+              | { type: 'id'; subreddit: string; postId: string };
+            url?: string;
+            comment?: string;
+            context?: number;
+            sort: 'confidence' | 'top' | 'new' | 'controversial' | 'old' | 'qa';
+            depth?: number;
+            limit?: number;
+            commentLimit?: number;
+            showMore: boolean;
+          };
 
         // Support 'url' as an alternative to 'post' (common LLM mistake)
         let resolvedPost = post;
@@ -324,25 +329,17 @@ const redditFamily: FamilyDefinition = {
         'Search Reddit for posts, fetch comments, and rank passages by relevance to a query',
       schema: semanticSchema,
       handler: async (args, cfg) => {
-        const {
-          query,
-          subreddit,
-          sort,
-          timeframe,
-          maxPosts,
-          commentLimit,
-          profile,
-          topK,
-        } = args as {
-          query: string;
-          subreddit: string;
-          sort: 'relevance' | 'hot' | 'new' | 'top';
-          timeframe: 'hour' | 'day' | 'week' | 'month' | 'year' | 'all';
-          maxPosts: number;
-          commentLimit: number;
-          profile: 'balanced' | 'fast' | 'precision' | 'recall';
-          topK: number;
-        };
+        const { query, subreddit, sort, timeframe, maxPosts, commentLimit, profile, topK } =
+          args as {
+            query: string;
+            subreddit: string;
+            sort: 'relevance' | 'hot' | 'new' | 'top';
+            timeframe: 'hour' | 'day' | 'week' | 'month' | 'year' | 'all';
+            maxPosts: number;
+            commentLimit: number;
+            profile: 'balanced' | 'fast' | 'precision' | 'recall';
+            topK: number;
+          };
         // Use server default for maxBytes
         const maxBytes = DEFAULT_SEMANTIC_MAX_BYTES;
 
@@ -377,7 +374,11 @@ const redditFamily: FamilyDefinition = {
 
 // ── Registration ─────────────────────────────────────────────────────────────
 
-export function registerRedditTool(server: McpServer, cfg: SearchConfig, kgHook?: KnowledgeGraphHook): void {
+export function registerRedditTool(
+  server: McpServer,
+  cfg: SearchConfig,
+  kgHook?: KnowledgeGraphHook,
+): void {
   registerFamily(server, redditFamily, cfg, kgHook);
 }
 

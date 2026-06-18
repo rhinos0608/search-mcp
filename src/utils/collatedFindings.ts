@@ -72,9 +72,7 @@ export function formatFailedCalls(errors: { url: string; error: string }[]): str
   }
 
   const header = '## Failed Calls\n\n';
-  const items = errors
-    .map((e) => `- **URL:** ${e.url}\n  - **Error:** ${e.error}`)
-    .join('\n');
+  const items = errors.map((e) => `- **URL:** ${e.url}\n  - **Error:** ${e.error}`).join('\n');
 
   return header + items;
 }

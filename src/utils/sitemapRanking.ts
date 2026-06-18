@@ -77,7 +77,10 @@ function stripLocaleFromUrl(parsed: URL): string {
   return next.origin.toLowerCase() + next.pathname.replace(/\/+$/u, '') + next.search + next.hash;
 }
 
-function localePreferenceScore(locale: string | undefined, preferredLocale: string | undefined): number {
+function localePreferenceScore(
+  locale: string | undefined,
+  preferredLocale: string | undefined,
+): number {
   if (locale === undefined) return preferredLocale === undefined ? 1 : 0;
   if (preferredLocale !== undefined) {
     if (locale === preferredLocale) return 4;

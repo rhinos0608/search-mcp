@@ -348,7 +348,10 @@ export async function webSearch(
     const profile = getCategoryProfile(category);
     if (profile.queryHint) {
       effectiveQuery = `${query} ${profile.queryHint}`;
-      logger.info({ original: query, category, effectiveQuery }, 'webSearch: category hint applied');
+      logger.info(
+        { original: query, category, effectiveQuery },
+        'webSearch: category hint applied',
+      );
     }
   }
 

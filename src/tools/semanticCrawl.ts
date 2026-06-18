@@ -273,8 +273,7 @@ export async function retrieveSemanticChunks(
     if (scoreFiltered.length < scoredChunks.length) {
       opts.structuredWarnings?.push({
         code: 'SEMANTIC_CRAWL_MIN_SCORE_FILTER',
-        message:
-          `Filtered ${String(scoredChunks.length - scoreFiltered.length)} chunk(s) below minScore=${String(minScore)}.`,
+        message: `Filtered ${String(scoredChunks.length - scoreFiltered.length)} chunk(s) below minScore=${String(minScore)}.`,
         minScore,
         removedCount: scoredChunks.length - scoreFiltered.length,
       });
@@ -308,7 +307,8 @@ export async function retrieveSemanticChunks(
       'Soft lexical constraint filtered chunks',
     );
   }
-  const afterLexical = lexicalResult.filtered.length >= opts.topK ? lexicalResult.filtered : coherent;
+  const afterLexical =
+    lexicalResult.filtered.length >= opts.topK ? lexicalResult.filtered : coherent;
 
   // Optional cross-encoder reranking
   let topChunks: SemanticCrawlChunk[];
@@ -549,8 +549,7 @@ export async function embedAndRank(
     if (scoreFiltered.length < scoredChunks.length) {
       opts.structuredWarnings?.push({
         code: 'SEMANTIC_CRAWL_MIN_SCORE_FILTER',
-        message:
-          `Filtered ${String(scoredChunks.length - scoreFiltered.length)} chunk(s) below minScore=${String(minScore)}.`,
+        message: `Filtered ${String(scoredChunks.length - scoreFiltered.length)} chunk(s) below minScore=${String(minScore)}.`,
         minScore,
         removedCount: scoredChunks.length - scoreFiltered.length,
       });
@@ -591,7 +590,8 @@ export async function embedAndRank(
       'Soft lexical constraint filtered chunks',
     );
   }
-  const afterLexical = lexicalResult.filtered.length >= opts.topK ? lexicalResult.filtered : coherent;
+  const afterLexical =
+    lexicalResult.filtered.length >= opts.topK ? lexicalResult.filtered : coherent;
 
   // 9. Optional cross-encoder re-ranking (opt-in, default false)
   let topChunks: SemanticCrawlChunk[];
@@ -968,7 +968,9 @@ export async function crawlSeeds(
   const targetPageMode = opts.sourceType === 'search' || opts.sourceType === 'sitemap';
   const perSeedPages = targetPageMode ? 1 : divideBudget(resolvedMaxPages, numSeeds);
   const perSeedBytes =
-    opts.maxBytes !== undefined && !targetPageMode ? divideBudget(opts.maxBytes, numSeeds) : undefined;
+    opts.maxBytes !== undefined && !targetPageMode
+      ? divideBudget(opts.maxBytes, numSeeds)
+      : undefined;
 
   if (numSeeds > 1 && !targetPageMode) {
     const msg =
@@ -1103,13 +1105,16 @@ export async function crawlSeeds(
     warnings.push(...(result.warnings ?? []));
 
     // Path focus filter
-    const pathFilter = filterByPathPrefix(result.pages, entry.seedUrl, opts.allowPathDrift ?? false);
+    const pathFilter = filterByPathPrefix(
+      result.pages,
+      entry.seedUrl,
+      opts.allowPathDrift ?? false,
+    );
     let pages = pathFilter.kept;
     if (pathFilter.droppedCount > 0) {
       structuredWarnings.push({
         code: 'SEMANTIC_CRAWL_PATH_DRIFT_FILTERED',
-        message:
-          `Dropped ${String(pathFilter.droppedCount)} page(s) outside the seed path for ${entry.seedUrl}.`,
+        message: `Dropped ${String(pathFilter.droppedCount)} page(s) outside the seed path for ${entry.seedUrl}.`,
         seedUrl: entry.seedUrl,
         droppedCount: pathFilter.droppedCount,
         droppedUrls: pathFilter.droppedUrls.slice(0, 10),
@@ -1412,14 +1417,18 @@ function detectPageQuality(page: CrawlPageResult): {
 } {
   const normalized = page.markdown.toLowerCase();
   const paywallSuspected =
-    /subscribe to read|become a subscriber|members only|premium content|paywall/i.test(normalized) ||
-    (Buffer.byteLength(page.markdown, 'utf8') < 800 && /subscribe|sign up|membership/i.test(normalized));
+    /subscribe to read|become a subscriber|members only|premium content|paywall/i.test(
+      normalized,
+    ) ||
+    (Buffer.byteLength(page.markdown, 'utf8') < 800 &&
+      /subscribe|sign up|membership/i.test(normalized));
   const loginWallSuspected =
     /sign in to continue|log in to continue|create an account|please sign in|please log in/i.test(
       normalized,
     );
   const truncatedSuspected =
-    Buffer.byteLength(page.markdown, 'utf8') < 800 && /continue reading|read more|subscribe|sign in/i.test(normalized);
+    Buffer.byteLength(page.markdown, 'utf8') < 800 &&
+    /continue reading|read more|subscribe|sign in/i.test(normalized);
   const consentWallSuspected = isConsentWallRedirect(page.url, page.markdown);
   return {
     paywallSuspected,
@@ -1658,8 +1667,7 @@ export async function semanticCrawl(
       if (localeCollapsed.collapsedCount > 0) {
         crawlStructuredWarnings.push({
           code: 'SEMANTIC_CRAWL_SITEMAP_LOCALE_COLLAPSED',
-          message:
-            `Collapsed ${String(localeCollapsed.collapsedCount)} locale-duplicate sitemap URL(s) before ranking.`,
+          message: `Collapsed ${String(localeCollapsed.collapsedCount)} locale-duplicate sitemap URL(s) before ranking.`,
           urlsBefore: safeUrls.length,
           urlsAfter: localeCollapsed.urls.length,
           collapsedCount: localeCollapsed.collapsedCount,

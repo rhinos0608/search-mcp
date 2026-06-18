@@ -28,7 +28,10 @@ export function createProgressReporter(
 
   async function send(progress: number, message?: string): Promise<void> {
     if (progress <= lastReported) {
-      console.debug('ProgressReporter: stale/out-of-order update suppressed', { progress, lastReported });
+      console.debug('ProgressReporter: stale/out-of-order update suppressed', {
+        progress,
+        lastReported,
+      });
       return;
     }
     lastReported = progress;

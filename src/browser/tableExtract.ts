@@ -12,15 +12,12 @@ export async function extractTables(
 ): Promise<TableExtractResult> {
   const maxTables = config.maxTables ?? 10;
   const includeCaptions = config.includeCaptions ?? true;
-  const _flattenSpans = config.flattenSpans; void _flattenSpans; // reserved for future flatten implementation
+  const _flattenSpans = config.flattenSpans;
+  void _flattenSpans; // reserved for future flatten implementation
 
   try {
     const result = await page.evaluate(
-      ({ sel, max, captions }: {
-        sel: string | undefined;
-        max: number;
-        captions: boolean;
-      }) => {
+      ({ sel, max, captions }: { sel: string | undefined; max: number; captions: boolean }) => {
         /* eslint-disable @typescript-eslint/prefer-nullish-coalescing */
         const tables: {
           index: number;
@@ -126,9 +123,10 @@ export async function extractTables(
         function buildPath(el: Element, idx: number): string {
           const tag = el.tagName.toLowerCase();
           const id = el.id ? `#${el.id}` : '';
-          const cls = el.className && typeof el.className === 'string'
-            ? `.${el.className.trim().split(/\s+/).join('.')}`
-            : '';
+          const cls =
+            el.className && typeof el.className === 'string'
+              ? `.${el.className.trim().split(/\s+/).join('.')}`
+              : '';
           if (id) return `${tag}${id}`;
           if (cls) return `${tag}${cls}`;
           return `${tag}:nth-of-type(${String(idx + 1)})`;

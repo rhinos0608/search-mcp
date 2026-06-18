@@ -309,8 +309,14 @@ async function rerankByContent(
   const contentScores = new Map(results.map((r) => [r.path, r.score]));
 
   return [...entries].sort((a, b) => {
-    const aScore = (contentScores.get(a.path) ?? 0) * 4 + scoreGitHubPathForQuery(a, terms) * 2 + scoreBroadCorpusFile(a) * 0.25;
-    const bScore = (contentScores.get(b.path) ?? 0) * 4 + scoreGitHubPathForQuery(b, terms) * 2 + scoreBroadCorpusFile(b) * 0.25;
+    const aScore =
+      (contentScores.get(a.path) ?? 0) * 4 +
+      scoreGitHubPathForQuery(a, terms) * 2 +
+      scoreBroadCorpusFile(a) * 0.25;
+    const bScore =
+      (contentScores.get(b.path) ?? 0) * 4 +
+      scoreGitHubPathForQuery(b, terms) * 2 +
+      scoreBroadCorpusFile(b) * 0.25;
     const delta = bScore - aScore;
     if (delta !== 0) return delta;
     return a.path.localeCompare(b.path);
@@ -545,7 +551,9 @@ export async function fetchGitHubCorpus(
     }
   });
 
-  const docs: GitHubCorpusDocument[] = fileResults.filter((d): d is GitHubCorpusDocument => d !== null);
+  const docs: GitHubCorpusDocument[] = fileResults.filter(
+    (d): d is GitHubCorpusDocument => d !== null,
+  );
 
   return docs;
 }
