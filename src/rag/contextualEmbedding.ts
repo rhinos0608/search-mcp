@@ -97,7 +97,10 @@ export async function enrichChunkWithContext(
     });
 
     if (!response.success) {
-      logger.warn({ error: response.error, status: response.status }, 'LLM contextual enrichment request failed');
+      logger.warn(
+        { error: response.error, status: response.status },
+        'LLM contextual enrichment request failed',
+      );
       return { embedText: chunk, originalText: chunk, context: '', enriched: false };
     }
 

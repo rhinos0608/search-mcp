@@ -3,7 +3,7 @@ import type { DedupeConfig } from './types.js';
 // ── Types ────────────────────────────────────────────────────────────────────
 
 export interface DedupeLayer {
-  name: 'url' | 'fingerprint' | 'semantic';
+  name: 'url' | 'fingerprint' | 'semantic' | 'entityOverlap';
   removed: number;
   kept: number;
   timeMs: number;
@@ -12,7 +12,7 @@ export interface DedupeLayer {
 export interface DedupeDecision<T> {
   item: T;
   kept: boolean;
-  reason: 'unique' | 'duplicate' | 'preferred';
+  reason: 'unique' | 'duplicate' | 'preferred' | 'cap';
   duplicateOf?: string;
 }
 
@@ -224,6 +224,450 @@ export function dedupeByFingerprint<T extends { text: string; id: string }>(
   };
 }
 
+// ── Entity overlap deduplication ─────────────────────────────────────────────
+
+/** Additional words that should not be considered entities despite passing length/case heuristics */
+const ENTITY_GENERIC_WORDS = new Set([
+  'have',
+  'find',
+  'give',
+  'tell',
+  'call',
+  'try',
+  'ask',
+  'feel',
+  'leave',
+  'put',
+  'mean',
+  'keep',
+  'let',
+  'begin',
+  'seem',
+  'help',
+  'show',
+  'hear',
+  'play',
+  'run',
+  'move',
+  'live',
+  'believe',
+  'bring',
+  'happen',
+  'write',
+  'provide',
+  'sit',
+  'stand',
+  'lose',
+  'pay',
+  'meet',
+  'include',
+  'continue',
+  'set',
+  'learn',
+  'change',
+  'lead',
+  'understand',
+  'watch',
+  'follow',
+  'stop',
+  'create',
+  'speak',
+  'read',
+  'allow',
+  'add',
+  'grow',
+  'open',
+  'walk',
+  'win',
+  'offer',
+  'remember',
+  'love',
+  'consider',
+  'appear',
+  'buy',
+  'wait',
+  'serve',
+  'die',
+  'send',
+  'expect',
+  'build',
+  'stay',
+  'fall',
+  'cut',
+  'reach',
+  'kill',
+  'remain',
+  'you',
+  'your',
+  'our',
+  'them',
+  'their',
+  'very',
+  'still',
+  'only',
+  'any',
+  'most',
+  'other',
+  'such',
+  'same',
+  'own',
+  'too',
+  'should',
+  'may',
+  'might',
+  'must',
+  'against',
+  'between',
+  'during',
+  'before',
+  'since',
+  'while',
+  'where',
+  'when',
+  'why',
+  'which',
+  'there',
+  'then',
+  'these',
+  'those',
+  'upon',
+  'every',
+  'each',
+  'much',
+  'many',
+  'also',
+  'than',
+  'into',
+  'over',
+  'after',
+  'just',
+  'being',
+  'having',
+  'doing',
+  'does',
+  'done',
+  'make',
+  'made',
+  'take',
+  'took',
+  'look',
+  'seen',
+  'need',
+  'know',
+  'used',
+  'using',
+  'based',
+  'part',
+  'high',
+  'long',
+  'few',
+  'old',
+  'big',
+  'sure',
+  'next',
+  'last',
+  'best',
+  'good',
+  'well',
+  'come',
+  'came',
+  'turn',
+  'gave',
+  'work',
+  'works',
+  'want',
+  'went',
+  'hard',
+  'easy',
+  'less',
+  'more',
+  'able',
+  'even',
+  'ever',
+  'still',
+  'early',
+  'late',
+  'real',
+  'life',
+  'hand',
+  'fact',
+  'way',
+  'day',
+  'end',
+  'right',
+  'left',
+  'top',
+  'bottom',
+  'side',
+  'sort',
+  'kind',
+  'form',
+  'part',
+  'case',
+  'area',
+  'line',
+  'type',
+  'held',
+  'told',
+  'shown',
+  'kept',
+  'felt',
+  'means',
+  'seems',
+  'often',
+  'thus',
+]);
+
+const ENTITY_STOPWORDS = new Set([
+  'the',
+  'a',
+  'an',
+  'to',
+  'for',
+  'how',
+  'is',
+  'in',
+  'of',
+  'on',
+  'and',
+  'with',
+  'from',
+  'by',
+  'at',
+  'this',
+  'that',
+  'it',
+  'what',
+  'are',
+  'do',
+  'can',
+  'his',
+  'her',
+  'he',
+  'she',
+  'its',
+  'was',
+  'has',
+  'new',
+  'just',
+  'says',
+  'said',
+  'will',
+  'about',
+  'after',
+  'now',
+  'all',
+  'been',
+  'here',
+  'not',
+  'out',
+  'up',
+  'more',
+  'also',
+  'but',
+  'who',
+  'year',
+  'first',
+  'make',
+  'being',
+  'making',
+  'over',
+  'into',
+  'than',
+  'they',
+  'their',
+  'would',
+  'could',
+  'get',
+  'got',
+  'some',
+  'like',
+  'back',
+  'going',
+  'breaking',
+  'https',
+  'http',
+  'www',
+  'com',
+]);
+
+/**
+ * Extract significant words (proper nouns, numbers, capitalized words) from text.
+ * Used for cross-source entity overlap dedup where phrasing differs but entities overlap.
+ */
+export function extractEntities(text: string): Set<string> {
+  const words = text.replace(/[^\w\s]/g, ' ').split(/\s+/);
+  const entities = new Set<string>();
+  for (const word of words) {
+    const lower = word.toLowerCase();
+    if (ENTITY_STOPWORDS.has(lower) || ENTITY_GENERIC_WORDS.has(lower)) continue;
+    // Keep words that are: capitalized (>=2 chars), ALL CAPS (>=2 chars),
+    // contain digits, or 4+ chars. This preserves 2-char all-caps
+    // abbreviations (AI, UK, EU) that were previously lost to length <= 2.
+    const firstChar = word[0];
+    const isAllCaps = word === word.toUpperCase();
+    if (
+      (firstChar?.toUpperCase() === firstChar && word.length >= 2) ||
+      (isAllCaps && word.length >= 2) ||
+      /\d/.test(word) ||
+      word.length >= 4
+    ) {
+      entities.add(lower);
+    }
+  }
+  return entities;
+}
+
+/**
+ * Overlap coefficient (intersection / min set size).
+ * Not Jaccard: a short tweet about the same event has fewer total entities
+ * but high overlap with a longer post.
+ */
+export function overlapCoefficient(a: Set<string>, b: Set<string>): number {
+  if (a.size === 0 || b.size === 0) return 0;
+  const intersection = new Set([...a].filter((x) => b.has(x)));
+  const smaller = Math.min(a.size, b.size);
+  return smaller > 0 ? intersection.size / smaller : 0;
+}
+
+/**
+ * Dedup by entity overlap. Merges items sharing high entity overlap across
+ * different URLs. Catches cases like "Reddit thread about Kanye West" +
+ * "X post about Kanye West" with different URLs but same underlying story.
+ * Only merges items with different URLs (same-URL dedup handled by URL layer).
+ */
+export function dedupeByEntityOverlap<T extends { id: string; text: string; url: string }>(
+  items: T[],
+  threshold = 0.45,
+): DedupeResult<T> {
+  const startMs = performance.now();
+  const decisions: DedupeDecision<T>[] = [];
+  const entityCache = new Map<string, Set<string>>();
+  const assigned = new Set<string>();
+  const groups: DedupeGroup<T>[] = [];
+
+  // Pre-compute entity sets
+  for (const item of items) {
+    entityCache.set(item.id, extractEntities(item.text));
+  }
+
+  // Build overlap groups across different URLs
+  for (const item of items) {
+    if (assigned.has(item.id)) continue;
+
+    const groupItems: T[] = [item];
+    const entitiesA = entityCache.get(item.id);
+    if (!entitiesA) continue;
+
+    for (const other of items) {
+      if (other.id === item.id || assigned.has(other.id)) continue;
+      if (other.url === item.url) continue; // same URL: handled by Layer 1
+
+      const entitiesB = entityCache.get(other.id);
+      if (!entitiesB) continue;
+
+      const overlap = overlapCoefficient(entitiesA, entitiesB);
+      if (overlap >= threshold) {
+        groupItems.push(other);
+      }
+    }
+
+    // Only form a group if we found at least one overlap
+    if (groupItems.length === 1) {
+      decisions.push({
+        item,
+        kept: true,
+        reason: 'unique',
+      });
+      assigned.add(item.id);
+      continue;
+    }
+
+    for (const gItem of groupItems) {
+      assigned.add(gItem.id);
+    }
+
+    // Select the longest text as preferred (most complete)
+    groupItems.sort((a, b) => b.text.length - a.text.length);
+    const [selected] = groupItems;
+    if (!selected) continue;
+    const discarded = groupItems.filter((i) => i.id !== selected.id);
+
+    groups.push({
+      key: item.id,
+      items: groupItems,
+      selected,
+      discarded,
+    });
+  }
+
+  // Build decisions for group items
+  for (const group of groups) {
+    for (const gItem of group.items) {
+      const isSelected = gItem.id === (group.selected as { id: string }).id;
+      if (isSelected) {
+        decisions.push({
+          item: gItem,
+          kept: true,
+          reason: 'preferred',
+        });
+      } else {
+        decisions.push({
+          item: gItem,
+          kept: false,
+          reason: 'duplicate',
+          duplicateOf: (group.selected as { id: string }).id,
+        });
+      }
+    }
+  }
+
+  // Items not in any group — already added as 'unique' above
+  const keptItems = decisions.filter((d) => d.kept).map((d) => d.item);
+  const removed = items.length - keptItems.length;
+
+  return {
+    items: keptItems,
+    decisions,
+    layers: [
+      {
+        name: 'entityOverlap',
+        removed,
+        kept: keptItems.length,
+        timeMs: performance.now() - startMs,
+      },
+    ],
+    totalTimeMs: performance.now() - startMs,
+  };
+}
+
+/**
+ * Cap items per author. Prevents any single author/handle from dominating.
+ * Items without an author are always kept.
+ */
+export function capPerAuthor<T extends { author?: string; source?: string }>(
+  items: T[],
+  maxPerAuthor = 3,
+): T[] {
+  const authorCounts = new Map<string, number>();
+  const result: T[] = [];
+
+  for (const item of items) {
+    const author = item.author?.trim().toLowerCase();
+    if (author === undefined || author === '') {
+      result.push(item);
+      continue;
+    }
+    const count = authorCounts.get(author) ?? 0;
+    if (count < maxPerAuthor) {
+      result.push(item);
+      authorCounts.set(author, count + 1);
+    }
+  }
+
+  return result;
+}
+
 // ── Semantic deduplication ───────────────────────────────────────────────────
 
 function cosineSimilarity(a: number[], b: number[]): number {
@@ -428,6 +872,8 @@ export async function deduplicateCorpus<
     text: string;
     id: string;
     embedding?: number[];
+    author?: string;
+    source?: string;
   },
 >(
   items: T[],
@@ -481,6 +927,35 @@ export async function deduplicateCorpus<
     currentItems = semResult.items;
   }
 
+  // Layer 4: Entity overlap (cross-source)
+  if (config.layers.entityOverlap) {
+    const entityResult = dedupeByEntityOverlap(currentItems);
+    allLayers.push(...entityResult.layers);
+    for (const d of entityResult.decisions) {
+      const id = (d.item as { id: string }).id;
+      if (d.kept || allDecisions.get(id)?.kept) {
+        allDecisions.set(id, d);
+      }
+    }
+    currentItems = entityResult.items;
+  }
+
+  // Optional post-processing: per-author cap
+  if (config.maxPerAuthor !== undefined) {
+    const beforeIds = new Set(currentItems.map((i) => (i as { id: string }).id));
+    const authorItems = currentItems as unknown as { author?: string; source?: string }[];
+    const capped = capPerAuthor(authorItems, config.maxPerAuthor);
+    currentItems = capped as unknown as T[];
+    // Track cap-removed items so decisions stay consistent with items
+    const afterIds = new Set(currentItems.map((i) => (i as { id: string }).id));
+    for (const item of items) {
+      const itemId = (item as { id: string }).id;
+      if (beforeIds.has(itemId) && !afterIds.has(itemId)) {
+        allDecisions.set(itemId, { item, kept: false, reason: 'cap' });
+      }
+    }
+  }
+
   // Rebuild consistent decisions for all original items
   const finalDecisions: DedupeDecision<T>[] = items.map((item) => {
     const id = item.id;
@@ -495,12 +970,19 @@ export async function deduplicateCorpus<
     };
   });
 
-  // For items that are kept but have no explicit decision, set to unique
+  // For items that are kept but have no explicit decision, set to unique.
+  // Also fix cap-removed items that may still show kept=true from prior layers.
   const keptSet = new Set(currentItems.map((i) => (i as { id: string }).id));
   for (const d of finalDecisions) {
     if (keptSet.has((d.item as { id: string }).id) && !d.kept) {
       d.kept = true;
       d.reason = 'unique';
+    }
+  }
+  // Ensure cap-removed items are marked as not kept regardless of prior layers
+  for (const d of finalDecisions) {
+    if (d.reason === 'cap' && d.kept) {
+      d.kept = false;
     }
   }
 

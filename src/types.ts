@@ -37,28 +37,34 @@ export interface ToolResult<T> {
     rateLimit?: RateLimitInfo | undefined;
     correction?: QueryCorrection | undefined;
     /** Intent-driven filter metadata when the tool supports result filtering. */
-    intentFilter?: {
-      filtered: boolean;
-      totalResults: number;
-      filteredCount: number;
-      searchableTerms: string[];
-      bytesBefore: number;
-      bytesAfter: number;
-    } | undefined;
+    intentFilter?:
+      | {
+          filtered: boolean;
+          totalResults: number;
+          filteredCount: number;
+          searchableTerms: string[];
+          bytesBefore: number;
+          bytesAfter: number;
+        }
+      | undefined;
     /** Which backend served the result and whether fallback occurred. */
     provenance?: ToolProvenance | undefined;
     /** Retry recommendation when the caller could get a richer result on re-request. */
-    retry?: {
-      recommended: boolean;
-      reason?: string;
-      minimalCall?: Record<string, unknown>;
-    } | undefined;
+    retry?:
+      | {
+          recommended: boolean;
+          reason?: string;
+          minimalCall?: Record<string, unknown>;
+        }
+      | undefined;
     /** Input normalization metadata (alias resolution, default application, ignored fields). */
-    normalized?: {
-      aliases?: Record<string, string>;
-      defaults?: Record<string, unknown>;
-      ignoredFields?: string[];
-    } | undefined;
+    normalized?:
+      | {
+          aliases?: Record<string, string>;
+          defaults?: Record<string, unknown>;
+          ignoredFields?: string[];
+        }
+      | undefined;
     /** True when the result is a partial/subset (budget limit, truncation, etc.). */
     partial?: boolean | undefined;
   };

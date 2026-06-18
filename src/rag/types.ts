@@ -42,10 +42,13 @@ export interface DedupeConfig {
     url: boolean;
     fingerprint: boolean;
     semantic: boolean;
+    entityOverlap: boolean;
   };
   fingerprintThreshold: number; // default 0.95
   semanticThreshold: number; // default 0.90
   preferKeep: 'newest' | 'mostComplete' | 'highestScore';
+  /** Optional per-author cap: limits items from any single author. Default undefined (disabled). */
+  maxPerAuthor?: number;
 }
 
 // ── Constraint evaluation result ───────────────────────────────────────────
@@ -193,4 +196,12 @@ export interface ProfileSettings {
   lexicalWeight: number;
   rrfK: number;
   useReranker: boolean;
+}
+
+// ── Uncertainty annotations for search results ─────────────────────────────
+
+export type UncertaintyTag = 'single-source' | 'thin-evidence' | null;
+
+export interface UncertaintyAnnotated {
+  uncertainty: UncertaintyTag;
 }

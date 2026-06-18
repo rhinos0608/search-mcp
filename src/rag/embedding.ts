@@ -307,9 +307,7 @@ async function embedWithOpenAICompatible(
     : `${resolvedRawBase.replace(/\/+$/u, '')}/v1`;
   // Resolve model: env var → config.codeModel → OpenAI default
   const model =
-    process.env.EMBEDDING_OPENAI_MODEL ??
-    sidecarConfig?.codeModel ??
-    'text-embedding-3-small';
+    process.env.EMBEDDING_OPENAI_MODEL ?? sidecarConfig?.codeModel ?? 'text-embedding-3-small';
   // Resolve API key: env var → request → config (empty = no auth for local servers)
   const apiKey = (
     process.env.EMBEDDING_OPENAI_API_KEY ??
