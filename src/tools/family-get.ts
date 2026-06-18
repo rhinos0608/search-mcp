@@ -53,12 +53,15 @@ export function registerFamilyGetTool(server: McpServer, _cfg: SearchConfig): vo
           try {
             const parsed = JSON.parse(family.relatedFamilies) as unknown;
             if (Array.isArray(parsed)) {
-              relatedFamilies = (parsed as Record<string, unknown>[]).map((rf: Record<string, unknown>) => ({
-                relation_id: (rf.relation_id as string | undefined) ?? '',
-                family_id: (rf.family_id as string | undefined) ?? '',
-                label: (rf.label as string | undefined) ?? (rf.family_id as string | undefined) ?? '',
-                relation_type: (rf.relation_type as string | undefined) ?? '',
-              }));
+              relatedFamilies = (parsed as Record<string, unknown>[]).map(
+                (rf: Record<string, unknown>) => ({
+                  relation_id: (rf.relation_id as string | undefined) ?? '',
+                  family_id: (rf.family_id as string | undefined) ?? '',
+                  label:
+                    (rf.label as string | undefined) ?? (rf.family_id as string | undefined) ?? '',
+                  relation_type: (rf.relation_type as string | undefined) ?? '',
+                }),
+              );
             }
           } catch {
             // malformed JSON
@@ -114,7 +117,9 @@ export function registerFamilyGetTool(server: McpServer, _cfg: SearchConfig): vo
         }
 
         // Runs
-        let runs: { run_id: string; topic: string; started_at: string; status: string }[] | undefined;
+        let runs:
+          | { run_id: string; topic: string; started_at: string; status: string }[]
+          | undefined;
         if (args.include_runs && db !== null) {
           try {
             const rows = db

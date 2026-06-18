@@ -254,8 +254,9 @@ export function initializeKgSchema(db: BetterSqliteDatabase): void {
     // Invalidate all checkpoints before updating to prevent rebuilds
     // from using checkpoints created under the old schema
     invalidateAllCheckpoints();
-    db.prepare(
-      'UPDATE kg_projection_checkpoints SET schema_version = ? WHERE id = ?',
-    ).run(SCHEMA_VERSION, '__schema_version');
+    db.prepare('UPDATE kg_projection_checkpoints SET schema_version = ? WHERE id = ?').run(
+      SCHEMA_VERSION,
+      '__schema_version',
+    );
   }
 }

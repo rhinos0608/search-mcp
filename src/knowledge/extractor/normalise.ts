@@ -55,16 +55,22 @@ export interface NormalizedExtractionInput {
  */
 function toolToSourceKind(toolName: string): SourceKind {
   const lower = toolName.toLowerCase();
-  if (lower.startsWith('web_search') || lower.startsWith('web_crawl') || lower.startsWith('semantic_crawl')) {
+  if (
+    lower.startsWith('web_search') ||
+    lower.startsWith('web_crawl') ||
+    lower.startsWith('semantic_crawl')
+  ) {
     return 'documentation'; // generic web content
   }
   if (lower.startsWith('reddit')) return 'forum';
   if (lower.startsWith('youtube')) return 'social';
   if (lower.startsWith('github')) return 'code_repo';
-  if (lower.startsWith('packages') || lower.startsWith('npm') || lower.startsWith('pypi')) return 'package_registry';
+  if (lower.startsWith('packages') || lower.startsWith('npm') || lower.startsWith('pypi'))
+    return 'package_registry';
   if (lower.startsWith('academic') || lower.startsWith('arxiv')) return 'research_paper';
   if (lower.startsWith('hackernews') || lower.startsWith('stackoverflow')) return 'forum';
-  if (lower.startsWith('research.hackernews') || lower.startsWith('research.stackoverflow')) return 'forum';
+  if (lower.startsWith('research.hackernews') || lower.startsWith('research.stackoverflow'))
+    return 'forum';
   if (lower.startsWith('research.wikipedia')) return 'documentation';
   if (lower.startsWith('research')) return 'research_paper';
   return 'unknown';
@@ -95,13 +101,62 @@ function stringValue(obj: Record<string, unknown>, keys: readonly string[]): str
 }
 
 function textKeysForTool(tool: string): string[] {
-  if (tool === 'web_search') return ['content', 'text', 'textContent', 'snippet', 'description', 'extraSnippet'];
-  if (tool.startsWith('reddit')) return ['title', 'selftext', 'body', 'content', 'text', 'textContent', 'snippet', 'description', 'extraSnippet'];
+  if (tool === 'web_search')
+    return ['content', 'text', 'textContent', 'snippet', 'description', 'extraSnippet'];
+  if (tool.startsWith('reddit'))
+    return [
+      'title',
+      'selftext',
+      'body',
+      'content',
+      'text',
+      'textContent',
+      'snippet',
+      'description',
+      'extraSnippet',
+    ];
   if (tool.startsWith('youtube')) return ['title', 'description', 'fullText', 'text', 'content'];
-  if (tool.startsWith('github')) return ['name', 'path', 'description', 'readme', 'content', 'fragment', 'packageOverview', 'text'];
-  if (tool.startsWith('research')) return ['title', 'abstract', 'snippet', 'summary', 'description', 'body', 'storyText', 'text', 'content'];
+  if (tool.startsWith('github'))
+    return [
+      'name',
+      'path',
+      'description',
+      'readme',
+      'content',
+      'fragment',
+      'packageOverview',
+      'text',
+    ];
+  if (tool.startsWith('research'))
+    return [
+      'title',
+      'abstract',
+      'snippet',
+      'summary',
+      'description',
+      'body',
+      'storyText',
+      'text',
+      'content',
+    ];
   if (tool.startsWith('packages')) return ['name', 'description', 'summary', 'text', 'content'];
-  return ['title', 'name', 'content', 'text', 'textContent', 'markdown', 'snippet', 'description', 'abstract', 'summary', 'body', 'selftext', 'storyText', 'fullText', 'extraSnippet'];
+  return [
+    'title',
+    'name',
+    'content',
+    'text',
+    'textContent',
+    'markdown',
+    'snippet',
+    'description',
+    'abstract',
+    'summary',
+    'body',
+    'selftext',
+    'storyText',
+    'fullText',
+    'extraSnippet',
+  ];
 }
 
 function urlFromObject(obj: Record<string, unknown>): string | undefined {
@@ -133,7 +188,19 @@ function extractFromToolResult(
   const itemTextKeys = textKeysForTool(tool);
 
   // ── Direct content fields ──
-  const directText = stringValue(result, ['content', 'fullText', 'markdown', 'readme', 'abstract', 'body', 'selftext', 'storyText', 'snippet', 'description', 'text']);
+  const directText = stringValue(result, [
+    'content',
+    'fullText',
+    'markdown',
+    'readme',
+    'abstract',
+    'body',
+    'selftext',
+    'storyText',
+    'snippet',
+    'description',
+    'text',
+  ]);
   if (directText !== undefined) {
     return {
       text: directText,

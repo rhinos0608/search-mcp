@@ -25,11 +25,7 @@ const INSERT_ASSIGNMENT_SQL = `
  * These are Pass 1 classifier outputs that have not yet been
  * committed as events.
  */
-export function queueFamilyAssignment(
-  entityId: string,
-  familyId: string,
-  runId: string,
-): void {
+export function queueFamilyAssignment(entityId: string, familyId: string, runId: string): void {
   const db = getKgDb();
   if (db === null) {
     logger.warn('kg: queueFamilyAssignment called before database initialised');
@@ -44,10 +40,7 @@ export function queueFamilyAssignment(
       queuedAt: new Date().toISOString(),
     });
   } catch (err) {
-    logger.warn(
-      { err, entityId, familyId },
-      'kg: queueFamilyAssignment failed',
-    );
+    logger.warn({ err, entityId, familyId }, 'kg: queueFamilyAssignment failed');
   }
 }
 

@@ -21,26 +21,60 @@ import type { KnowledgeGraphConfig, KgFamily } from '../types.js';
 
 export interface Pass1ClassifierResult {
   assignments: { entityId: string; familyId: string }[];
-  newCandidates: { id: string; label: string; description?: string; entityIds: string[]; runIds: string[] }[];
+  newCandidates: {
+    id: string;
+    label: string;
+    description?: string;
+    entityIds: string[];
+    runIds: string[];
+  }[];
 }
 
-export interface RunEntity { id: string; label: string; type: string }
-export interface RunMetadata { topic?: string; query?: string; description?: string; familyHint?: string }
+export interface RunEntity {
+  id: string;
+  label: string;
+  type: string;
+}
+export interface RunMetadata {
+  topic?: string;
+  query?: string;
+  description?: string;
+  familyHint?: string;
+}
 
 const TOP_K_SIMILAR = 10;
 const SIMILARITY_THRESHOLD = 0.5;
 
-export async function createFamilyEmbedding(label: string, description?: string): Promise<number[] | null> {
+export async function createFamilyEmbedding(
+  label: string,
+  description?: string,
+): Promise<number[] | null> {
   try {
     const config = loadConfig();
     const embedText = description ? `${label}: ${description}` : label;
-    const response = await embedTexts({ texts: [embedText], mode: 'document', dimensions: config.embeddingSidecar.dimensions });
+    const response = await embedTexts({
+      texts: [embedText],
+      mode: 'document',
+      dimensions: config.embeddingSidecar.dimensions,
+    });
     const embedding = response.embeddings[0] ?? null;
-    if (embedding === null) { logger.warn({ label }, 'kg: createFamilyEmbedding returned null'); return null; }
+    if (embedding === null) {
+      logger.warn({ label }, 'kg: createFamilyEmbedding returned null');
+      return null;
+    }
     const contentHash = crypto.createHash('sha256').update(embedText).digest('hex');
-    storeEmbedding(label, 'family', response.model || config.embeddingSidecar.provider, embedding, contentHash);
+    storeEmbedding(
+      label,
+      'family',
+      response.model || config.embeddingSidecar.provider,
+      embedding,
+      contentHash,
+    );
     return embedding;
-  } catch (err) { logger.warn({ err, label }, 'kg: createFamilyEmbedding failed'); return null; }
+  } catch (err) {
+    logger.warn({ err, label }, 'kg: createFamilyEmbedding failed');
+    return null;
+  }
 }
 
 const CLASSIFIER_SYSTEM_PROMPT = `You are a knowledge graph family classifier. Your job is to group entities into families based on shared topics, concepts, or domains.
@@ -63,7 +97,11 @@ Rules:
 
 Respond with only ASSIGN and NEW lines, one per line, no markdown, no commentary.`;
 
-function buildClassifierUserPrompt(entities: RunEntity[], metadata: RunMetadata, existingFamilies: KgFamily[]): string {
+function buildClassifierUserPrompt(
+  entities: RunEntity[],
+  metadata: RunMetadata,
+  existingFamilies: KgFamily[],
+): string {
   let prompt = '## Run Metadata\n';
   if (metadata.topic) prompt += `Topic: ${metadata.topic}\n`;
   if (metadata.query) prompt += `Query: ${metadata.query}\n`;
@@ -73,12 +111,19 @@ function buildClassifierUserPrompt(entities: RunEntity[], metadata: RunMetadata,
   for (const ent of entities) prompt += `- ${ent.id} | ${ent.type}: ${ent.label}\n`;
   if (existingFamilies.length > 0) {
     prompt += `\n## Existing Families (${String(existingFamilies.length)})\n`;
-    for (const fam of existingFamilies) prompt += `- ${fam.id} | ${fam.label}${fam.description ? ` — ${fam.description}` : ''}\n`;
+    for (const fam of existingFamilies)
+      prompt += `- ${fam.id} | ${fam.label}${fam.description ? ` — ${fam.description}` : ''}\n`;
   }
   return prompt;
 }
 
-function parseClassifierResponse(content: string, maxNewFamilies = 5): { assignments: { entityId: string; familyId: string }[]; newFamilyCandidates: { label: string; entityIds: string[]; description?: string }[] } {
+function parseClassifierResponse(
+  content: string,
+  maxNewFamilies = 5,
+): {
+  assignments: { entityId: string; familyId: string }[];
+  newFamilyCandidates: { label: string; entityIds: string[]; description?: string }[];
+} {
   const assignments: { entityId: string; familyId: string }[] = [];
   const newFamilyCandidates: { label: string; entityIds: string[]; description?: string }[] = [];
   for (const raw of content.split('\n')) {
@@ -97,8 +142,14 @@ function parseClassifierResponse(content: string, maxNewFamilies = 5): { assignm
       const idEnd = afterLabel.indexOf(' ');
       const idCsv = idEnd === -1 ? afterLabel : afterLabel.slice(0, idEnd);
       const description = idEnd === -1 ? undefined : afterLabel.slice(idEnd + 1).trim();
-      const entityIds = idCsv.split(',').map(s => s.trim()).filter(s => s.length > 0);
-      if (entityIds.length > 0) newFamilyCandidates.push(description !== undefined ? { label, entityIds, description } : { label, entityIds });
+      const entityIds = idCsv
+        .split(',')
+        .map((s) => s.trim())
+        .filter((s) => s.length > 0);
+      if (entityIds.length > 0)
+        newFamilyCandidates.push(
+          description !== undefined ? { label, entityIds, description } : { label, entityIds },
+        );
     }
   }
   return { assignments, newFamilyCandidates };
@@ -114,12 +165,22 @@ function typeBasedFallback(entities: RunEntity[], runId: string): Pass1Classifie
   const newCandidates: Pass1ClassifierResult['newCandidates'] = [];
   for (const [type, typeEntities] of grouped) {
     const label = type.charAt(0).toUpperCase() + type.slice(1);
-    newCandidates.push({ id: `fallback-${type}-${runId.slice(0, 8)}`, label, entityIds: typeEntities.map(e => e.id), runIds: [runId] });
+    newCandidates.push({
+      id: `fallback-${type}-${runId.slice(0, 8)}`,
+      label,
+      entityIds: typeEntities.map((e) => e.id),
+      runIds: [runId],
+    });
   }
   return { assignments: [], newCandidates };
 }
 
-export async function runPass1Classifier(runEntities: RunEntity[], runMetadata: RunMetadata, runId: string, _config: KnowledgeGraphConfig): Promise<Pass1ClassifierResult> {
+export async function runPass1Classifier(
+  runEntities: RunEntity[],
+  runMetadata: RunMetadata,
+  runId: string,
+  _config: KnowledgeGraphConfig,
+): Promise<Pass1ClassifierResult> {
   logger.info({ runId, entityCount: runEntities.length }, 'kg: runPass1Classifier starting');
   try {
     const queryText = runMetadata.query ?? runMetadata.topic ?? '';
@@ -130,18 +191,33 @@ export async function runPass1Classifier(runEntities: RunEntity[], runMetadata: 
         const dimensions = configGlobal.embeddingSidecar.dimensions;
         const embedResponse = await embedTexts({ texts: [queryText], mode: 'query', dimensions });
         const queryEmbedding = embedResponse.embeddings[0];
-        if (queryEmbedding) similarFamilies = findSimilarEmbeddings(queryEmbedding, 'family', SIMILARITY_THRESHOLD, TOP_K_SIMILAR);
-      } catch { logger.warn({ err: null }, 'kg: Pass1 embedding search failed, continuing without'); }
+        if (queryEmbedding)
+          similarFamilies = findSimilarEmbeddings(
+            queryEmbedding,
+            'family',
+            SIMILARITY_THRESHOLD,
+            TOP_K_SIMILAR,
+          );
+      } catch {
+        logger.warn({ err: null }, 'kg: Pass1 embedding search failed, continuing without');
+      }
     }
     const candidateFamilies: KgFamily[] = [];
-    for (const s of similarFamilies) { const fam = getFamily(s.objectId); if (fam !== null) candidateFamilies.push(fam); }
+    for (const s of similarFamilies) {
+      const fam = getFamily(s.objectId);
+      if (fam !== null) candidateFamilies.push(fam);
+    }
     if (!configGlobal.llm.baseUrl || !configGlobal.llm.provider) {
       logger.info('kg: LLM not configured, using type-based fallback');
       const fallback = typeBasedFallback(runEntities, runId);
       for (const c of fallback.newCandidates) queueFamilyCandidate(c);
       return fallback;
     }
-    const llmResponse = await callSimpleLlm(configGlobal.llm, CLASSIFIER_SYSTEM_PROMPT, buildClassifierUserPrompt(runEntities, runMetadata, candidateFamilies));
+    const llmResponse = await callSimpleLlm(
+      configGlobal.llm,
+      CLASSIFIER_SYSTEM_PROMPT,
+      buildClassifierUserPrompt(runEntities, runMetadata, candidateFamilies),
+    );
     if (!llmResponse.success) {
       logger.warn({ error: llmResponse.error }, 'kg: Pass1 LLM failed, falling back');
       const fallback = typeBasedFallback(runEntities, runId);
@@ -149,12 +225,21 @@ export async function runPass1Classifier(runEntities: RunEntity[], runMetadata: 
       return fallback;
     }
     const parsed = parseClassifierResponse(llmResponse.content);
-    logger.info({ assignments: parsed.assignments.length, newCandidates: parsed.newFamilyCandidates.length }, 'kg: Pass1 LLM response parsed');
+    logger.info(
+      { assignments: parsed.assignments.length, newCandidates: parsed.newFamilyCandidates.length },
+      'kg: Pass1 LLM response parsed',
+    );
     for (const a of parsed.assignments) queueFamilyAssignment(a.entityId, a.familyId, runId);
     const candidates: Pass1ClassifierResult['newCandidates'] = [];
     for (const nc of parsed.newFamilyCandidates) {
       const id = generateUlid();
-      const candidate: { id: string; label: string; description?: string; entityIds: string[]; runIds: string[] } = { id, label: nc.label, entityIds: nc.entityIds, runIds: [runId] };
+      const candidate: {
+        id: string;
+        label: string;
+        description?: string;
+        entityIds: string[];
+        runIds: string[];
+      } = { id, label: nc.label, entityIds: nc.entityIds, runIds: [runId] };
       if (nc.description !== undefined) candidate.description = nc.description;
       queueFamilyCandidate(candidate);
       candidates.push(candidate);
@@ -162,9 +247,16 @@ export async function runPass1Classifier(runEntities: RunEntity[], runMetadata: 
     return { assignments: parsed.assignments, newCandidates: candidates };
   } catch (err) {
     logger.warn({ err, runId }, 'kg: runPass1Classifier failed');
-    try { const fallback = typeBasedFallback(runEntities, runId); for (const c of fallback.newCandidates) queueFamilyCandidate(c); return fallback; }
-    catch { return { assignments: [], newCandidates: [] }; }
-  } finally { void _config; }
+    try {
+      const fallback = typeBasedFallback(runEntities, runId);
+      for (const c of fallback.newCandidates) queueFamilyCandidate(c);
+      return fallback;
+    } catch {
+      return { assignments: [], newCandidates: [] };
+    }
+  } finally {
+    void _config;
+  }
 }
 
 export function solidifyFamilies(config: KnowledgeGraphConfig): number {
@@ -179,7 +271,8 @@ export function solidifyFamilies(config: KnowledgeGraphConfig): number {
         const distinctRunCount = new Set(pf.runIds).size;
         const entityCount = pf.entityIds.length;
         let shouldSolidify = false;
-        if (distinctRunCount >= solid.minRuns && entityCount >= solid.minEntities) shouldSolidify = true;
+        if (distinctRunCount >= solid.minRuns && entityCount >= solid.minEntities)
+          shouldSolidify = true;
         if (!shouldSolidify && distinctRunCount === 1 && entityCount >= solid.minEntities) {
           // High-confidence single-run override (spec lines 539-543):
           // Requires extraction_confidence >= 0.85 on all entities,
@@ -191,16 +284,55 @@ export function solidifyFamilies(config: KnowledgeGraphConfig): number {
         }
         if (shouldSolidify) {
           const familyId = generateUlid();
-          appendEvents([{ timestamp: new Date().toISOString(), eventType: 'FAMILY_CREATED', eventVersion: 1, runId: pf.runIds[0] ?? 'unknown', batchId: null, actor: 'classifier', entityId: familyId, entityType: 'family', payload: JSON.stringify({ family_id: familyId, label: pf.label, description: pf.description, entityIds: pf.entityIds, runIds: pf.runIds, createdAt: new Date().toISOString() }), payloadHash: null }]);
-          const classifyRaw = pf.assignments.map(a => ({ timestamp: new Date().toISOString(), eventType: 'FAMILY_CLASSIFIED' as const, eventVersion: 1, runId: a.runId, batchId: null as string | null, actor: 'classifier' as const, entityId: a.entityId, entityType: 'node' as const, payload: JSON.stringify({ entity_id: a.entityId, family_id: familyId }), payloadHash: null as string | null }));
+          appendEvents([
+            {
+              timestamp: new Date().toISOString(),
+              eventType: 'FAMILY_CREATED',
+              eventVersion: 1,
+              runId: pf.runIds[0] ?? 'unknown',
+              batchId: null,
+              actor: 'classifier',
+              entityId: familyId,
+              entityType: 'family',
+              payload: JSON.stringify({
+                family_id: familyId,
+                label: pf.label,
+                description: pf.description,
+                entityIds: pf.entityIds,
+                runIds: pf.runIds,
+                createdAt: new Date().toISOString(),
+              }),
+              payloadHash: null,
+            },
+          ]);
+          const classifyRaw = pf.assignments.map((a) => ({
+            timestamp: new Date().toISOString(),
+            eventType: 'FAMILY_CLASSIFIED' as const,
+            eventVersion: 1,
+            runId: a.runId,
+            batchId: null as string | null,
+            actor: 'classifier' as const,
+            entityId: a.entityId,
+            entityType: 'node' as const,
+            payload: JSON.stringify({ entity_id: a.entityId, family_id: familyId }),
+            payloadHash: null as string | null,
+          }));
           if (classifyRaw.length > 0) appendEvents(classifyRaw);
           solidifyFamily(familyId, pf.assignments);
           solidified++;
-          logger.info({ familyId, label: pf.label, entityCount, distinctRunCount }, 'kg: family solidified');
+          logger.info(
+            { familyId, label: pf.label, entityCount, distinctRunCount },
+            'kg: family solidified',
+          );
         }
-      } catch (err) { logger.warn({ err, pendingId: pf.id }, 'kg: failed to process pending family'); }
+      } catch (err) {
+        logger.warn({ err, pendingId: pf.id }, 'kg: failed to process pending family');
+      }
     }
     logger.info({ solidified, totalPending: pending.length }, 'kg: solidifyFamilies complete');
     return solidified;
-  } catch (err) { logger.warn({ err }, 'kg: solidifyFamilies failed'); return solidified; }
+  } catch (err) {
+    logger.warn({ err }, 'kg: solidifyFamilies failed');
+    return solidified;
+  }
 }

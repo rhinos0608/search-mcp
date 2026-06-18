@@ -15,11 +15,10 @@ const graphRebuildSchema = z.object({
     .boolean()
     .optional()
     .default(true)
-    .describe('Replay all events from the beginning. Full rebuild is the safe default because projection swaps require complete state.'),
-  from_event_id: z
-    .string()
-    .optional()
-    .describe('Rebuild from this event cursor (exclusive)'),
+    .describe(
+      'Replay all events from the beginning. Full rebuild is the safe default because projection swaps require complete state.',
+    ),
+  from_event_id: z.string().optional().describe('Rebuild from this event cursor (exclusive)'),
   validate: z
     .boolean()
     .optional()

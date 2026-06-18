@@ -63,8 +63,7 @@ const SELECT_EXTRACTIONS_SQL =
   'SELECT * FROM kg_pending_extractions WHERE session_id = ? AND run_id IS NULL ORDER BY queued_at ASC';
 const UPDATE_EXTRACTION_RUN_SQL =
   'UPDATE kg_pending_extractions SET run_id = @runId WHERE id = @id';
-const DELETE_EXTRACTIONS_SQL =
-  'DELETE FROM kg_pending_extractions WHERE session_id = ?';
+const DELETE_EXTRACTIONS_SQL = 'DELETE FROM kg_pending_extractions WHERE session_id = ?';
 
 export interface FlushedPendingExtraction {
   id: string;
@@ -98,7 +97,12 @@ export function flushSessionExtractions(sessionId: string): FlushResult | null {
 
   try {
     // Quick check before creating run (optimization, not atomic)
-    const hasRows = db.prepare('SELECT 1 FROM kg_pending_extractions WHERE session_id = ? AND run_id IS NULL LIMIT 1').get(sessionId) !== undefined;
+    const hasRows =
+      db
+        .prepare(
+          'SELECT 1 FROM kg_pending_extractions WHERE session_id = ? AND run_id IS NULL LIMIT 1',
+        )
+        .get(sessionId) !== undefined;
     if (!hasRows) return null;
 
     const run = createRun({ sessionMode: 1 });
@@ -125,16 +129,22 @@ export function flushSessionExtractions(sessionId: string): FlushResult | null {
       deleteStmt.run(sessionId);
       extractionCount = rows.length;
       extractions = rows.flatMap((row) => {
-        if (typeof row.id !== 'string' || typeof row.tool_name !== 'string' || typeof row.content !== 'string') {
+        if (
+          typeof row.id !== 'string' ||
+          typeof row.tool_name !== 'string' ||
+          typeof row.content !== 'string'
+        ) {
           return [];
         }
-        return [{
-          id: row.id,
-          toolName: row.tool_name,
-          content: row.content,
-          sourceUrl: typeof row.source_url === 'string' ? row.source_url : undefined,
-          contentHash: typeof row.content_hash === 'string' ? row.content_hash : undefined,
-        }];
+        return [
+          {
+            id: row.id,
+            toolName: row.tool_name,
+            content: row.content,
+            sourceUrl: typeof row.source_url === 'string' ? row.source_url : undefined,
+            contentHash: typeof row.content_hash === 'string' ? row.content_hash : undefined,
+          },
+        ];
       });
     });
 
@@ -142,10 +152,7 @@ export function flushSessionExtractions(sessionId: string): FlushResult | null {
 
     if (extractionCount === 0) return null;
 
-    logger.info(
-      { sessionId, runId, count: extractionCount },
-      'kg: flushed session extractions',
-    );
+    logger.info({ sessionId, runId, count: extractionCount }, 'kg: flushed session extractions');
 
     return { runId, extractionCount, extractions };
   } catch (err) {

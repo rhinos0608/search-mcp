@@ -101,16 +101,16 @@ export interface StructuredWarning {
 // ────────────────────────────────────────────────────────────────────
 
 export interface KgEvent {
-  id: string;           // ULID (sortable, no clock skew)
-  timestamp: string;    // ISO-8601
+  id: string; // ULID (sortable, no clock skew)
+  timestamp: string; // ISO-8601
   eventType: KgEventType;
   eventVersion: number;
   runId: string;
   batchId: string | null;
-  actor: string;        // system|user|classifier|rollback
+  actor: string; // system|user|classifier|rollback
   entityId: string | null;
   entityType: string | null;
-  payload: string;      // JSON
+  payload: string; // JSON
   payloadHash: string | null;
 }
 
@@ -123,7 +123,7 @@ export interface KgRun {
   status: RunStatus;
   topic: string | null;
   query: string | null;
-  sessionMode: number;          // 0 = run mode, 1 = session mode
+  sessionMode: number; // 0 = run mode, 1 = session mode
   startedAt: string;
   completedAt: string | null;
   failedAt: string | null;
@@ -133,7 +133,7 @@ export interface KgRun {
   sourceCount: number | null;
   artifactPaths: string | null; // JSON
   idempotencyKey: string | null;
-  active: number;               // 0 or 1
+  active: number; // 0 or 1
 }
 
 // ────────────────────────────────────────────────────────────────────
@@ -147,10 +147,10 @@ export interface KgNode {
   type: string;
   extractionConfidence: number | null;
   primaryFamilyId: string | null;
-  aliases: string | null;        // JSON array
+  aliases: string | null; // JSON array
   firstSeenRunId: string | null;
   lastUpdated: string | null;
-  metadata: string | null;       // JSON
+  metadata: string | null; // JSON
 }
 
 export interface KgEdge {
@@ -160,7 +160,7 @@ export interface KgEdge {
   type: string;
   evidenceStrength: number | null;
   evidence: string | null;
-  evidenceVerbatim: number;      // boolean
+  evidenceVerbatim: number; // boolean
   sourceId: string | null;
   runId: string | null;
   createdAt: string | null;
@@ -196,7 +196,7 @@ export interface KgNodeFamily {
   nodeId: string;
   familyId: string;
   confidence: number | null;
-  isPrimary: number;            // 0 or 1
+  isPrimary: number; // 0 or 1
   runId: string | null;
   classifierVersion: string | null;
 }
@@ -205,9 +205,7 @@ export interface KgNodeFamily {
 // Event version adapter types
 // ────────────────────────────────────────────────────────────────────
 
-export type EventVersionAdapter = (
-  event: KgEvent,
-) => KgEvent;
+export type EventVersionAdapter = (event: KgEvent) => KgEvent;
 
 export type EventVersionAdapters = Record<number, EventVersionAdapter>;
 
@@ -271,12 +269,7 @@ export interface CompensationEvent {
 // Family relation types
 // ────────────────────────────────────────────────────────────────────
 
-export type FamilyRelationType =
-  | 'adjacent'
-  | 'contradicts'
-  | 'parent'
-  | 'child'
-  | 'supersedes';
+export type FamilyRelationType = 'adjacent' | 'contradicts' | 'parent' | 'child' | 'supersedes';
 
 // ────────────────────────────────────────────────────────────────────
 // SOURCE_RETRACTED reason_type values

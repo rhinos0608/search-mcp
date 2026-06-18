@@ -126,10 +126,7 @@ export function createEmptyState(): ProjectionState {
 // Rollback skip helper
 // ────────────────────────────────────────────────────────────────────
 
-export function isEventSkippedByRollback(
-  event: KgEvent,
-  state: ProjectionState,
-): boolean {
+export function isEventSkippedByRollback(event: KgEvent, state: ProjectionState): boolean {
   if (AUDIT_ONLY_EVENTS.has(event.eventType)) return true;
 
   const rollbackClass = ROLLBACK_CLASSES[event.eventType];

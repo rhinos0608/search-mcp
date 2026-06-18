@@ -53,12 +53,21 @@ const ingestSchema = z.object({
   topic: z.string().max(500).optional().describe('Optional topic for the run'),
   family_hint: z.string().max(200).optional().describe('Suggested family label'),
   sync: z.boolean().optional().default(true).describe('When false, return immediately'),
-  timeout_ms: z.number().int().min(1_000).max(300_000).optional().default(30_000).describe('Max extraction time (ms)'),
+  timeout_ms: z
+    .number()
+    .int()
+    .min(1_000)
+    .max(300_000)
+    .optional()
+    .default(30_000)
+    .describe('Max extraction time (ms)'),
   idempotency_key: z.string().max(200).optional().describe('Prevent duplicate runs'),
 });
 
 const querySchema = z.object({
-  action: z.literal('query').describe('Query the knowledge graph by entity ID, label, or full-text search'),
+  action: z
+    .literal('query')
+    .describe('Query the knowledge graph by entity ID, label, or full-text search'),
   query: z.string().max(5000).optional().describe('Full-text search query (alias-aware)'),
   entity_id: z.string().optional().describe('Lookup by exact entity ID'),
   entity_label: z.string().optional().describe('Lookup by label (alias-aware)'),
@@ -73,35 +82,58 @@ const querySchema = z.object({
   cursor: z.string().optional().describe('Pagination cursor'),
 });
 
-const entityLookupBatchSchema = z.object({
-  action: z.literal('entity_lookup_batch').describe('Batch resolve up to 100 entity IDs by exact ID, or a single label query that can return multiple labeled nodes'),
-  entity_ids: z
-    .array(z.string().min(1))
-    .min(1)
-    .max(100)
-    .optional()
-    .describe('Entity IDs to resolve (max 100)'),
-  entity_label: z.string().min(1).max(500).optional().describe('Single label/substring query — returns all matching labeled nodes up to limit'),
-  limit: z.number().int().min(1).max(100).optional().default(20).describe('Max results when using entity_label lookup'),
-}).refine((value) => value.entity_ids !== undefined || value.entity_label !== undefined, {
-  message: 'Either entity_ids or entity_label is required',
-});
+const entityLookupBatchSchema = z
+  .object({
+    action: z
+      .literal('entity_lookup_batch')
+      .describe(
+        'Batch resolve up to 100 entity IDs by exact ID, or a single label query that can return multiple labeled nodes',
+      ),
+    entity_ids: z
+      .array(z.string().min(1))
+      .min(1)
+      .max(100)
+      .optional()
+      .describe('Entity IDs to resolve (max 100)'),
+    entity_label: z
+      .string()
+      .min(1)
+      .max(500)
+      .optional()
+      .describe('Single label/substring query — returns all matching labeled nodes up to limit'),
+    limit: z
+      .number()
+      .int()
+      .min(1)
+      .max(100)
+      .optional()
+      .default(20)
+      .describe('Max results when using entity_label lookup'),
+  })
+  .refine((value) => value.entity_ids !== undefined || value.entity_label !== undefined, {
+    message: 'Either entity_ids or entity_label is required',
+  });
 
-const statusSchema = z.object({
-  action: z.literal('status').describe('Knowledge graph health and status'),
-}).describe('No input parameters; returns event count, projection age, storage size, node/edge/family counts');
+const statusSchema = z
+  .object({
+    action: z.literal('status').describe('Knowledge graph health and status'),
+  })
+  .describe(
+    'No input parameters; returns event count, projection age, storage size, node/edge/family counts',
+  );
 
 const rebuildSchema = z.object({
-  action: z.literal('rebuild').describe('Rebuild projection tables from the append-only event store'),
+  action: z
+    .literal('rebuild')
+    .describe('Rebuild projection tables from the append-only event store'),
   full: z
     .boolean()
     .optional()
     .default(true)
-    .describe('Replay all events from the beginning. Full rebuild is the safe default because projection swaps require complete state.'),
-  from_event_id: z
-    .string()
-    .optional()
-    .describe('Rebuild from this event cursor (exclusive)'),
+    .describe(
+      'Replay all events from the beginning. Full rebuild is the safe default because projection swaps require complete state.',
+    ),
+  from_event_id: z.string().optional().describe('Rebuild from this event cursor (exclusive)'),
   validate: z
     .boolean()
     .optional()
@@ -110,7 +142,9 @@ const rebuildSchema = z.object({
 });
 
 const familyListSchema = z.object({
-  action: z.literal('family_list').describe('List all knowledge graph families with stats and merge candidates'),
+  action: z
+    .literal('family_list')
+    .describe('List all knowledge graph families with stats and merge candidates'),
   cursor: z.string().optional().describe('Pagination cursor'),
   limit: z
     .number()
@@ -123,7 +157,9 @@ const familyListSchema = z.object({
 });
 
 const familyGetSchema = z.object({
-  action: z.literal('family_get').describe('Retrieve full family detail with optional entities and runs'),
+  action: z
+    .literal('family_get')
+    .describe('Retrieve full family detail with optional entities and runs'),
   family_id: z.string().min(1).describe('Family ID to retrieve'),
   include_entities: z
     .boolean()
@@ -138,7 +174,9 @@ const familyGetSchema = z.object({
 });
 
 const familyMergeSchema = z.object({
-  action: z.literal('family_merge').describe('Merge one family into another (one-way, irreversible)'),
+  action: z
+    .literal('family_merge')
+    .describe('Merge one family into another (one-way, irreversible)'),
   from_id: z.string().min(1).describe('Family ID to merge FROM (will be retired)'),
   into_id: z.string().min(1).describe('Family ID to merge INTO (will absorb)'),
   reason: z.string().min(1).max(1000).describe('Reason for the merge'),
@@ -156,14 +194,7 @@ const runListSchema = z.object({
   status: z.string().optional().describe('Filter by run status (queued, extracting, etc.)'),
   after: z.string().optional().describe('ISO-8601; runs started after this timestamp'),
   before: z.string().optional().describe('ISO-8601; runs started before this timestamp'),
-  limit: z
-    .number()
-    .int()
-    .min(1)
-    .max(200)
-    .optional()
-    .default(20)
-    .describe('Max runs (default 20)'),
+  limit: z.number().int().min(1).max(200).optional().default(20).describe('Max runs (default 20)'),
   cursor: z.string().optional().describe('Pagination cursor (started_at|run_id)'),
 });
 
@@ -185,10 +216,31 @@ function parseJsonArr(raw: string | null): string[] {
   if (raw === null || raw === '') return [];
   try {
     const parsed = JSON.parse(raw) as unknown;
-    if (Array.isArray(parsed)) return parsed.filter((item): item is string => typeof item === 'string');
+    if (Array.isArray(parsed))
+      return parsed.filter((item): item is string => typeof item === 'string');
     return [];
   } catch {
     return [];
+  }
+}
+
+/**
+ * Run extraction asynchronously and emit events on success or failure.
+ * Used by the async (non-sync) ingest path to avoid blocking the tool response.
+ */
+async function runAsyncExtraction(
+  extractor: KnowledgeGraphExtractor,
+  normInput: NormalizedExtractionInput,
+  runId: string,
+  timeoutMs: number,
+): Promise<void> {
+  try {
+    const result = await extractor.extract(normInput, runId, { totalTimeoutMs: timeoutMs });
+    emitEventsFromResult(result, runId);
+  } catch (err: unknown) {
+    updateRunStatus(runId, 'failed', {
+      lastError: err instanceof Error ? err.message : String(err),
+    });
   }
 }
 
@@ -220,7 +272,9 @@ async function buildNormInput(
     });
   }
   const controller = new AbortController();
-  const timer = setTimeout(() => { controller.abort(); }, timeoutMs);
+  const timer = setTimeout(() => {
+    controller.abort();
+  }, timeoutMs);
   try {
     assertSafeUrl(content.value);
     const resp = await fetch(content.value, { signal: controller.signal });
@@ -258,23 +312,29 @@ const knowledgeGraphFamily: FamilyDefinition = {
       schema: ingestSchema,
       handler: async (args, cfg) => {
         const start = Date.now();
-        const { content, topic, sync, timeout_ms: timeoutMs, idempotency_key: idKey, family_hint: familyHint } =
-          args as {
-            content: { type: 'text' | 'url'; value: string };
-            topic?: string;
-            sync: boolean;
-            timeout_ms: number;
-            idempotency_key?: string;
-            family_hint?: string;
-          };
+        const {
+          content,
+          topic,
+          sync,
+          timeout_ms: timeoutMs,
+          idempotency_key: idKey,
+          family_hint: familyHint,
+        } = args as {
+          content: { type: 'text' | 'url'; value: string };
+          topic?: string;
+          sync: boolean;
+          timeout_ms: number;
+          idempotency_key?: string;
+          family_hint?: string;
+        };
 
         const db = getKgDb();
         let runId: string;
 
         if (idKey !== undefined && db !== null) {
-          const row = db.prepare('SELECT run_id FROM kg_runs WHERE idempotency_key = ?').get(idKey) as
-            | { run_id: string }
-            | undefined;
+          const row = db
+            .prepare('SELECT run_id FROM kg_runs WHERE idempotency_key = ?')
+            .get(idKey) as { run_id: string } | undefined;
           if (row !== undefined) {
             runId = row.run_id;
             const existingRun = getRun(runId);
@@ -286,7 +346,11 @@ const knowledgeGraphFamily: FamilyDefinition = {
                 existingRun.status === 'queued')
             ) {
               return successResponse(
-                makeResult('knowledge_graph.ingest', { status: existingRun.status, run_id: runId }, Date.now() - start),
+                makeResult(
+                  'knowledge_graph.ingest',
+                  { status: existingRun.status, run_id: runId },
+                  Date.now() - start,
+                ),
               );
             } else if (
               existingRun !== null &&
@@ -296,7 +360,10 @@ const knowledgeGraphFamily: FamilyDefinition = {
                 makeResult(
                   'knowledge_graph.ingest',
                   {
-                    status: existingRun.status === 'completed' ? ('completed' as const) : ('failed' as const),
+                    status:
+                      existingRun.status === 'completed'
+                        ? ('completed' as const)
+                        : ('failed' as const),
                     run_id: runId,
                   },
                   Date.now() - start,
@@ -304,13 +371,19 @@ const knowledgeGraphFamily: FamilyDefinition = {
               );
             }
           } else {
-            const run = createRun({ topic: topic ?? familyHint ?? null, query: content.value.slice(0, 500) });
+            const run = createRun({
+              topic: topic ?? familyHint ?? null,
+              query: content.value.slice(0, 500),
+            });
             if (run === null) return errorResponse(new Error('DB not ready'));
             runId = run.runId;
             db.prepare('UPDATE kg_runs SET idempotency_key = ? WHERE run_id = ?').run(idKey, runId);
           }
         } else {
-          const run = createRun({ topic: topic ?? familyHint ?? null, query: content.value.slice(0, 500) });
+          const run = createRun({
+            topic: topic ?? familyHint ?? null,
+            query: content.value.slice(0, 500),
+          });
           if (run === null) return errorResponse(new Error('DB not ready'));
           runId = run.runId;
         }
@@ -329,20 +402,13 @@ const knowledgeGraphFamily: FamilyDefinition = {
         if (!sync) {
           updateRunStatus(runId, 'classifying');
           const extractor = new KnowledgeGraphExtractor(cfg);
-          void extractor
-            .extract(normInput, runId, { totalTimeoutMs: timeoutMs })
-            .then(
-              (result) => {
-                emitEventsFromResult(result, runId);
-              },
-              (err: unknown) => {
-                updateRunStatus(runId, 'failed', {
-                  lastError: err instanceof Error ? err.message : String(err),
-                });
-              },
-            );
+          void runAsyncExtraction(extractor, normInput, runId, timeoutMs);
           return successResponse(
-            makeResult('knowledge_graph.ingest', { status: 'processing' as const, run_id: runId }, Date.now() - start),
+            makeResult(
+              'knowledge_graph.ingest',
+              { status: 'processing' as const, run_id: runId },
+              Date.now() - start,
+            ),
           );
         }
 
@@ -381,7 +447,8 @@ const knowledgeGraphFamily: FamilyDefinition = {
         );
       },
       configIssue: (cfg) => {
-        if (!cfg.knowledgeGraph.enabled) return 'Set KG_ENABLED=true to use knowledge_graph.ingest.';
+        if (!cfg.knowledgeGraph.enabled)
+          return 'Set KG_ENABLED=true to use knowledge_graph.ingest.';
         return null;
       },
     },
@@ -398,7 +465,9 @@ const knowledgeGraphFamily: FamilyDefinition = {
         const start = Date.now();
         const provided = [args.query, args.entity_id, args.entity_label].filter(Boolean);
         if (provided.length !== 1) {
-          return errorResponse(new Error('Exactly one of query, entity_id, or entity_label must be provided'));
+          return errorResponse(
+            new Error('Exactly one of query, entity_id, or entity_label must be provided'),
+          );
         }
 
         const {
@@ -426,7 +495,11 @@ const knowledgeGraphFamily: FamilyDefinition = {
         const nodeOpts: Record<string, unknown> = {};
         if (args.entity_id !== undefined) nodeOpts.entityId = args.entity_id;
         if (args.entity_label !== undefined) nodeOpts.label = args.entity_label;
-        if (args.query !== undefined && args.entity_id === undefined && args.entity_label === undefined) {
+        if (
+          args.query !== undefined &&
+          args.entity_id === undefined &&
+          args.entity_label === undefined
+        ) {
           nodeOpts.search = args.query;
         }
         if (entity_type !== undefined) nodeOpts.type = entity_type;
@@ -535,7 +608,11 @@ const knowledgeGraphFamily: FamilyDefinition = {
       schema: entityLookupBatchSchema,
       handler: async (args) => {
         const start = Date.now();
-        const { entity_ids: entityIds, entity_label: entityLabel, limit } = args as {
+        const {
+          entity_ids: entityIds,
+          entity_label: entityLabel,
+          limit,
+        } = args as {
           entity_ids?: string[];
           entity_label?: string;
           limit: number;
@@ -582,7 +659,11 @@ const knowledgeGraphFamily: FamilyDefinition = {
         }
 
         return successResponse(
-          makeResult('knowledge_graph.entity_lookup_batch', { nodes, not_found: notFound, warnings: [] }, Date.now() - start),
+          makeResult(
+            'knowledge_graph.entity_lookup_batch',
+            { nodes, not_found: notFound, warnings: [] },
+            Date.now() - start,
+          ),
         );
       },
       configIssue: (cfg) => {
@@ -628,14 +709,23 @@ const knowledgeGraphFamily: FamilyDefinition = {
         if (db !== null) {
           try {
             families =
-              ((db.prepare('SELECT COUNT(*) as cnt FROM kg_families').get() as { cnt: number } | undefined)
-                ?.cnt ?? 0);
+              (
+                db.prepare('SELECT COUNT(*) as cnt FROM kg_families').get() as
+                  | { cnt: number }
+                  | undefined
+              )?.cnt ?? 0;
             nodes =
-              ((db.prepare('SELECT COUNT(*) as cnt FROM kg_nodes').get() as { cnt: number } | undefined)?.cnt ??
-                0);
+              (
+                db.prepare('SELECT COUNT(*) as cnt FROM kg_nodes').get() as
+                  | { cnt: number }
+                  | undefined
+              )?.cnt ?? 0;
             edges =
-              ((db.prepare('SELECT COUNT(*) as cnt FROM kg_edges').get() as { cnt: number } | undefined)?.cnt ??
-                0);
+              (
+                db.prepare('SELECT COUNT(*) as cnt FROM kg_edges').get() as
+                  | { cnt: number }
+                  | undefined
+              )?.cnt ?? 0;
           } catch {
             // tables may be empty
           }
@@ -647,7 +737,9 @@ const knowledgeGraphFamily: FamilyDefinition = {
         if (db !== null) {
           try {
             const activeRow = db
-              .prepare("SELECT COUNT(*) as cnt FROM kg_runs WHERE status IN ('extracting','classifying','projecting')")
+              .prepare(
+                "SELECT COUNT(*) as cnt FROM kg_runs WHERE status IN ('extracting','classifying','projecting')",
+              )
               .get() as { cnt: number } | undefined;
             activeRuns = activeRow?.cnt ?? 0;
             const failedRow = db
@@ -672,16 +764,16 @@ const knowledgeGraphFamily: FamilyDefinition = {
         let lastConsolidationAt: string | null = null;
         if (db !== null) {
           try {
-            const pfRow = db
-              .prepare('SELECT COUNT(*) as cnt FROM kg_pending_families')
-              .get() as { cnt: number } | undefined;
+            const pfRow = db.prepare('SELECT COUNT(*) as cnt FROM kg_pending_families').get() as
+              | { cnt: number }
+              | undefined;
             pendingFamilyCount = pfRow?.cnt ?? 0;
-            const paRow = db
-              .prepare('SELECT COUNT(*) as cnt FROM kg_pending_assignments')
-              .get() as { cnt: number } | undefined;
+            const paRow = db.prepare('SELECT COUNT(*) as cnt FROM kg_pending_assignments').get() as
+              | { cnt: number }
+              | undefined;
             pendingAssignmentCount = paRow?.cnt ?? 0;
             const peRow = db
-              .prepare("SELECT COUNT(*) as cnt FROM kg_pending_extractions WHERE run_id IS NULL")
+              .prepare('SELECT COUNT(*) as cnt FROM kg_pending_extractions WHERE run_id IS NULL')
               .get() as { cnt: number } | undefined;
             pendingExtractionCount = peRow?.cnt ?? 0;
             const oeRow = db
@@ -691,7 +783,9 @@ const knowledgeGraphFamily: FamilyDefinition = {
               .get() as { queued_at: string } | undefined;
             oldestPendingExtraction = oeRow?.queued_at ?? null;
             const lcRow = db
-              .prepare('SELECT MAX(created_at) as latest FROM kg_projection_checkpoints WHERE compatible = 1')
+              .prepare(
+                'SELECT MAX(created_at) as latest FROM kg_projection_checkpoints WHERE compatible = 1',
+              )
               .get() as { latest: string } | undefined;
             lastConsolidationAt = lcRow?.latest ?? null;
           } catch {
@@ -726,7 +820,8 @@ const knowledgeGraphFamily: FamilyDefinition = {
         );
       },
       configIssue: (cfg) => {
-        if (!cfg.knowledgeGraph.enabled) return 'Set KG_ENABLED=true to use knowledge_graph.status.';
+        if (!cfg.knowledgeGraph.enabled)
+          return 'Set KG_ENABLED=true to use knowledge_graph.status.';
         return null;
       },
     },
@@ -741,9 +836,8 @@ const knowledgeGraphFamily: FamilyDefinition = {
       handler: async (args) => {
         const start = Date.now();
         const rebuildOpts: Record<string, unknown> = { full: true };
-        if ((args).from_event_id !== undefined)
-          rebuildOpts.fromEventId = args.from_event_id;
-        if ((args).validate) rebuildOpts.validate = true;
+        if (args.from_event_id !== undefined) rebuildOpts.fromEventId = args.from_event_id;
+        if (args.validate) rebuildOpts.validate = true;
         const result = rebuildProjection(rebuildOpts);
 
         return successResponse(
@@ -761,7 +855,8 @@ const knowledgeGraphFamily: FamilyDefinition = {
         );
       },
       configIssue: (cfg) => {
-        if (!cfg.knowledgeGraph.enabled) return 'Set KG_ENABLED=true to use knowledge_graph.rebuild.';
+        if (!cfg.knowledgeGraph.enabled)
+          return 'Set KG_ENABLED=true to use knowledge_graph.rebuild.';
         return null;
       },
     },
@@ -776,13 +871,16 @@ const knowledgeGraphFamily: FamilyDefinition = {
       handler: async (args) => {
         const start = Date.now();
         const famOpts: Record<string, unknown> = {};
-        if ((args).cursor !== undefined) famOpts.cursor = args.cursor;
+        if (args.cursor !== undefined) famOpts.cursor = args.cursor;
         famOpts.limit = (args as { limit: number }).limit;
         const result = queryFamilies(famOpts);
         const db = getKgDb();
 
         const nodeCountMap = new Map<string, number>();
-        const mergeCandidatesMap = new Map<string, { family_id: string; label: string; confidence: number }[]>();
+        const mergeCandidatesMap = new Map<
+          string,
+          { family_id: string; label: string; confidence: number }[]
+        >();
 
         if (db !== null && result.families.length > 0) {
           const familyIds = result.families.map((f) => f.id);
@@ -809,7 +907,11 @@ const knowledgeGraphFamily: FamilyDefinition = {
             }[];
             for (const row of mergeRows) {
               const list = mergeCandidatesMap.get(row.family_a) ?? [];
-              list.push({ family_id: row.family_b, label: row.family_b, confidence: row.confidence ?? 0 });
+              list.push({
+                family_id: row.family_b,
+                label: row.family_b,
+                confidence: row.confidence ?? 0,
+              });
               mergeCandidatesMap.set(row.family_a, list);
             }
           } catch (err) {
@@ -820,7 +922,8 @@ const knowledgeGraphFamily: FamilyDefinition = {
         const families = result.families.map((f) => {
           const nodeCount = nodeCountMap.get(f.id) ?? 0;
           const mergeCandidates = mergeCandidatesMap.get(f.id) ?? [];
-          let relatedFamilies: { relation_id: string; family_id: string; relation_type: string }[] = [];
+          let relatedFamilies: { relation_id: string; family_id: string; relation_type: string }[] =
+            [];
           if (f.relatedFamilies !== null && f.relatedFamilies !== '') {
             try {
               const parsed = JSON.parse(f.relatedFamilies) as unknown;
@@ -905,7 +1008,8 @@ const knowledgeGraphFamily: FamilyDefinition = {
                 (rf: Record<string, unknown>) => ({
                   relation_id: (rf.relation_id as string | undefined) ?? '',
                   family_id: (rf.family_id as string | undefined) ?? '',
-                  label: (rf.label as string | undefined) ?? (rf.family_id as string | undefined) ?? '',
+                  label:
+                    (rf.label as string | undefined) ?? (rf.family_id as string | undefined) ?? '',
                   relation_type: (rf.relation_type as string | undefined) ?? '',
                 }),
               );
@@ -919,7 +1023,9 @@ const knowledgeGraphFamily: FamilyDefinition = {
         if (db !== null) {
           try {
             const mergeRows = db
-              .prepare('SELECT family_b, confidence FROM kg_family_merge_candidates WHERE family_a = ?')
+              .prepare(
+                'SELECT family_b, confidence FROM kg_family_merge_candidates WHERE family_a = ?',
+              )
               .all(family_id) as { family_b: string; confidence: number | null }[];
             mergeCandidates = mergeRows.map((r) => ({
               family_id: r.family_b,
@@ -931,9 +1037,7 @@ const knowledgeGraphFamily: FamilyDefinition = {
           }
         }
 
-        let entities:
-          | { id: string; label: string; type: string; confidence: number }[]
-          | undefined;
+        let entities: { id: string; label: string; type: string; confidence: number }[] | undefined;
         if (include_entities && db !== null) {
           try {
             const rows = db
@@ -1059,11 +1163,16 @@ const knowledgeGraphFamily: FamilyDefinition = {
               .get(from_id) as { cnt: number } | undefined;
             affectedEntityCount = eRow?.cnt ?? 0;
             const rRow = db
-              .prepare('SELECT COUNT(DISTINCT run_id) as cnt FROM kg_node_families WHERE family_id = ?')
+              .prepare(
+                'SELECT COUNT(DISTINCT run_id) as cnt FROM kg_node_families WHERE family_id = ?',
+              )
               .get(from_id) as { cnt: number } | undefined;
             affectedRunCount = rRow?.cnt ?? 0;
           } catch (err: unknown) {
-            logger.error({ err, tool: 'knowledge_graph.family_merge', fromId: from_id }, 'Failed to query affected counts');
+            logger.error(
+              { err, tool: 'knowledge_graph.family_merge', fromId: from_id },
+              'Failed to query affected counts',
+            );
           }
         } else {
           dbUnavailable = true;
@@ -1135,15 +1244,7 @@ const knowledgeGraphFamily: FamilyDefinition = {
       handler: async (args) => {
         const start = Date.now();
         const listOpts: Record<string, unknown> = {};
-        const {
-          family_id,
-          topic,
-          status,
-          after,
-          before,
-          limit,
-          cursor,
-        } = args as {
+        const { family_id, topic, status, after, before, limit, cursor } = args as {
           family_id?: string;
           topic?: string;
           status?: string;
@@ -1255,7 +1356,13 @@ const knowledgeGraphFamily: FamilyDefinition = {
         }
 
         const db = getKgDb();
-        const compensationPlan: { original_event_id: string; original_event_type: string; rollback_class: string; compensation_type: string; description: string }[] = [];
+        const compensationPlan: {
+          original_event_id: string;
+          original_event_type: string;
+          rollback_class: string;
+          compensation_type: string;
+          description: string;
+        }[] = [];
         let compensatedEventCount = 0;
 
         if (db !== null) {

@@ -23,7 +23,14 @@ const graphIngestSchema = z.object({
   topic: z.string().max(500).optional().describe('Optional topic for the run'),
   family_hint: z.string().max(200).optional().describe('Suggested family label'),
   sync: z.boolean().optional().default(true).describe('When false, return immediately'),
-  timeout_ms: z.number().int().min(1_000).max(300_000).optional().default(30_000).describe('Max extraction time (ms)'),
+  timeout_ms: z
+    .number()
+    .int()
+    .min(1_000)
+    .max(300_000)
+    .optional()
+    .default(30_000)
+    .describe('Max extraction time (ms)'),
   idempotency_key: z.string().max(200).optional().describe('Prevent duplicate runs'),
 });
 
@@ -55,7 +62,9 @@ function buildNormInput(
   }
   return (async () => {
     const controller = new AbortController();
-    const timer = setTimeout(() => { controller.abort(); }, timeoutMs);
+    const timer = setTimeout(() => {
+      controller.abort();
+    }, timeoutMs);
     try {
       const resp = await fetch(content.value, { signal: controller.signal });
       clearTimeout(timer);
@@ -87,20 +96,33 @@ export function registerGraphIngestTool(server: McpServer, cfg: SearchConfig): v
     async (args) => {
       const start = Date.now();
       try {
-        const { content, topic, sync, timeout_ms: timeoutMs, idempotency_key: idKey, family_hint: familyHint } = args;
+        const {
+          content,
+          topic,
+          sync,
+          timeout_ms: timeoutMs,
+          idempotency_key: idKey,
+          family_hint: familyHint,
+        } = args;
 
         // Idempotency check
         const db = getKgDb();
         let runId: string;
         if (idKey !== undefined && db !== null) {
-          const row = db.prepare('SELECT run_id FROM kg_runs WHERE idempotency_key = ?').get(idKey) as
-            | { run_id: string }
-            | undefined;
+          const row = db
+            .prepare('SELECT run_id FROM kg_runs WHERE idempotency_key = ?')
+            .get(idKey) as { run_id: string } | undefined;
           if (row !== undefined) {
             runId = row.run_id;
             // Verify the existing run is not in a terminal/non-reusable state
             const existingRun = getRun(runId);
-            if (existingRun !== null && (existingRun.status === 'extracting' || existingRun.status === 'classifying' || existingRun.status === 'projecting' || existingRun.status === 'queued')) {
+            if (
+              existingRun !== null &&
+              (existingRun.status === 'extracting' ||
+                existingRun.status === 'classifying' ||
+                existingRun.status === 'projecting' ||
+                existingRun.status === 'queued')
+            ) {
               // Still in progress — return existing run status
               return successResponse(
                 makeResult(
@@ -109,24 +131,39 @@ export function registerGraphIngestTool(server: McpServer, cfg: SearchConfig): v
                   Date.now() - start,
                 ),
               );
-            } else if (existingRun !== null && (existingRun.status === 'completed' || existingRun.status === 'failed')) {
+            } else if (
+              existingRun !== null &&
+              (existingRun.status === 'completed' || existingRun.status === 'failed')
+            ) {
               // Already completed or failed — return early
               return successResponse(
                 makeResult(
                   'graph_ingest',
-                  { status: existingRun.status === 'completed' ? 'completed' as const : 'failed' as const, run_id: runId },
+                  {
+                    status:
+                      existingRun.status === 'completed'
+                        ? ('completed' as const)
+                        : ('failed' as const),
+                    run_id: runId,
+                  },
                   Date.now() - start,
                 ),
               );
             }
           } else {
-            const run = createRun({ topic: topic ?? familyHint ?? null, query: content.value.slice(0, 500) });
+            const run = createRun({
+              topic: topic ?? familyHint ?? null,
+              query: content.value.slice(0, 500),
+            });
             if (run === null) return errorResponse(new Error('DB not ready'));
             runId = run.runId;
             db.prepare('UPDATE kg_runs SET idempotency_key = ? WHERE run_id = ?').run(idKey, runId);
           }
         } else {
-          const run = createRun({ topic: topic ?? familyHint ?? null, query: content.value.slice(0, 500) });
+          const run = createRun({
+            topic: topic ?? familyHint ?? null,
+            query: content.value.slice(0, 500),
+          });
           if (run === null) return errorResponse(new Error('DB not ready'));
           runId = run.runId;
         }
@@ -145,13 +182,21 @@ export function registerGraphIngestTool(server: McpServer, cfg: SearchConfig): v
           updateRunStatus(runId, 'classifying');
           const extractor = new KnowledgeGraphExtractor(cfg);
           void extractor.extract(normInput, runId, { totalTimeoutMs: timeoutMs }).then(
-            (result) => { emitEventsFromResult(result, runId); },
-            (err: unknown) => { updateRunStatus(runId, 'failed', {
-              lastError: err instanceof Error ? err.message : String(err),
-            }); },
+            (result) => {
+              emitEventsFromResult(result, runId);
+            },
+            (err: unknown) => {
+              updateRunStatus(runId, 'failed', {
+                lastError: err instanceof Error ? err.message : String(err),
+              });
+            },
           );
           return successResponse(
-            makeResult('graph_ingest', { status: 'processing' as const, run_id: runId }, Date.now() - start),
+            makeResult(
+              'graph_ingest',
+              { status: 'processing' as const, run_id: runId },
+              Date.now() - start,
+            ),
           );
         }
 

@@ -46,14 +46,28 @@ export function registerGraphQueryTool(server: McpServer, _cfg: SearchConfig): v
           );
         }
 
-        const { family_id, entity_type, min_confidence, run_id, after, before, depth, limit, cursor } = args;
+        const {
+          family_id,
+          entity_type,
+          min_confidence,
+          run_id,
+          after,
+          before,
+          depth,
+          limit,
+          cursor,
+        } = args;
         const limitVal = limit;
 
         // Resolve nodes
         const nodeOpts: Record<string, unknown> = {};
         if (args.entity_id !== undefined) nodeOpts.entityId = args.entity_id;
         if (args.entity_label !== undefined) nodeOpts.label = args.entity_label;
-        if (args.query !== undefined && args.entity_id === undefined && args.entity_label === undefined) {
+        if (
+          args.query !== undefined &&
+          args.entity_id === undefined &&
+          args.entity_label === undefined
+        ) {
           // TODO: args.query should trigger full-text search behavior distinct from label matching.
           // Currently falls back to label/substring match (alias-aware) via nodeOpts.label.
           // Full-text search (e.g. FTS5 on kg_nodes.label + kg_nodes.aliases) is planned.
@@ -105,11 +119,11 @@ export function registerGraphQueryTool(server: McpServer, _cfg: SearchConfig): v
                     }
                   }
                 }
+              }
             }
-          }
 
-          frontier = nextFrontier;
-        }
+            frontier = nextFrontier;
+          }
         }
 
         // Check projection age
@@ -175,7 +189,8 @@ function parseJsonArr(raw: string | null): string[] {
   if (raw === null || raw === '') return [];
   try {
     const parsed = JSON.parse(raw) as unknown;
-    if (Array.isArray(parsed)) return parsed.filter((item): item is string => typeof item === 'string');
+    if (Array.isArray(parsed))
+      return parsed.filter((item): item is string => typeof item === 'string');
     return [];
   } catch {
     return [];

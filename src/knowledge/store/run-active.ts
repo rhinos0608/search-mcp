@@ -61,9 +61,7 @@ export function getActiveRunId(): string | null {
   }
 
   try {
-    const row = db.prepare(GET_ACTIVE_SQL).get() as
-      | { run_id: string }
-      | undefined;
+    const row = db.prepare(GET_ACTIVE_SQL).get() as { run_id: string } | undefined;
     return row?.run_id ?? null;
   } catch (err) {
     logger.warn({ err }, 'kg: getActiveRunId failed');

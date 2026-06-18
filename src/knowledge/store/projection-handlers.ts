@@ -8,6 +8,7 @@
  * Rollback filtering happens in the builder loop before dispatch.
  */
 
+import { createHash } from 'node:crypto';
 import { logger } from '../../logger.js';
 import type { KgEvent, KgNode, KgEdge, KgSource } from '../types.js';
 import type { ProjectionState } from './projection-state.js';
@@ -16,13 +17,8 @@ import type { ProjectionState } from './projection-state.js';
 // Helpers
 // ────────────────────────────────────────────────────────────────────
 
-function getNodeIdFromPayload(
-  payload: Record<string, unknown>,
-): string | undefined {
-  return (
-    (payload.node_id as string | undefined) ??
-    (payload.entity_id as string | undefined)
-  );
+function getNodeIdFromPayload(payload: Record<string, unknown>): string | undefined {
+  return (payload.node_id as string | undefined) ?? (payload.entity_id as string | undefined);
 }
 
 // ────────────────────────────────────────────────────────────────────
@@ -31,8 +27,8 @@ function getNodeIdFromPayload(
 
 export function handleNodeAdded(event: KgEvent, state: ProjectionState): void {
   const payload = JSON.parse(event.payload) as Record<string, unknown>;
-  const nodeId = getNodeIdFromPayload(payload) ?? event.entityId ?? undefined;
-  if (nodeId === undefined) {
+  const nodeId = getNodeIdFromPayload(payload) ?? event.entityId;
+  if (nodeId == null) {
     logger.warn({ eventId: event.id }, 'kg: NODE_ADDED missing node_id in payload');
     return;
   }
@@ -245,7 +241,7 @@ export function handleSourceAdded(event: KgEvent, state: ProjectionState): void 
     const url = typeof payload.url === 'string' && payload.url.length > 0 ? payload.url : null;
     if (url !== null) {
       // Stable ID from URL: same URL always maps to same source, enabling dedup across runs
-      sourceId = `url:${Buffer.from(url).toString('base64').slice(0, 40)}`;
+      sourceId = `url:${createHash('sha256').update(url).digest('hex').slice(0, 16)}`;
     } else {
       sourceId = event.id; // last resort: use event ID
     }

@@ -15,10 +15,7 @@ import { logger } from '../../logger.js';
 import { getKgDb } from './db.js';
 import { queryEvents, countEvents } from './events.js';
 import { normalizeToLatest } from '../extractor/versions/v1.js';
-import {
-  createCheckpoint,
-  computeProjectionChecksum,
-} from './checkpoints.js';
+import { createCheckpoint, computeProjectionChecksum } from './checkpoints.js';
 import {
   AUDIT_ONLY_EVENTS,
   createEmptyState,
@@ -345,7 +342,10 @@ function loadStateFromDb(state: ProjectionState): void {
     }
 
     // Load node families
-    const nodeFams = db.prepare('SELECT * FROM kg_node_families').all() as Record<string, unknown>[];
+    const nodeFams = db.prepare('SELECT * FROM kg_node_families').all() as Record<
+      string,
+      unknown
+    >[];
     for (const row of nodeFams) {
       const nf = {
         nodeId: row.node_id as string,

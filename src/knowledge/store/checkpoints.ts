@@ -173,13 +173,13 @@ export function computeProjectionChecksum(): string {
   }
 
   try {
-    const nodeRows = db
-      .prepare('SELECT id FROM kg_nodes ORDER BY id ASC')
-      .all() as { id: string }[];
+    const nodeRows = db.prepare('SELECT id FROM kg_nodes ORDER BY id ASC').all() as {
+      id: string;
+    }[];
 
-    const edgeRows = db
-      .prepare('SELECT id FROM kg_edges ORDER BY id ASC')
-      .all() as { id: string }[];
+    const edgeRows = db.prepare('SELECT id FROM kg_edges ORDER BY id ASC').all() as {
+      id: string;
+    }[];
 
     const nodeIds = JSON.stringify(nodeRows.map((r) => r.id));
     const edgeIds = JSON.stringify(edgeRows.map((r) => r.id));

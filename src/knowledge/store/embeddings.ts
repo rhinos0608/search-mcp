@@ -213,10 +213,7 @@ export function findSimilarEmbeddings(
  * current hash. If contentHash is null/undefined, all embeddings for the
  * object are removed unconditionally.
  */
-export function deleteStaleEmbeddings(
-  objectId: string,
-  contentHash: string | null,
-): void {
+export function deleteStaleEmbeddings(objectId: string, contentHash: string | null): void {
   const db = getKgDb();
   if (db === null) {
     logger.warn('kg: deleteStaleEmbeddings called before database initialised');
@@ -229,9 +226,10 @@ export function deleteStaleEmbeddings(
       db.prepare('DELETE FROM kg_embeddings WHERE object_id = ?').run(objectId);
     } else {
       // Remove only embeddings whose content hash doesn't match
-      db.prepare(
-        'DELETE FROM kg_embeddings WHERE object_id = ? AND content_hash != ?',
-      ).run(objectId, contentHash);
+      db.prepare('DELETE FROM kg_embeddings WHERE object_id = ? AND content_hash != ?').run(
+        objectId,
+        contentHash,
+      );
     }
   } catch (err) {
     logger.warn({ err, objectId }, 'kg: deleteStaleEmbeddings failed');

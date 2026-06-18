@@ -21,16 +21,7 @@ import { z } from 'zod/v4';
 export const LLMEntityZ = z.object({
   local_id: z.string(),
   label: z.string(),
-  type: z.enum([
-    'concept',
-    'claim',
-    'source',
-    'person',
-    'org',
-    'method',
-    'dataset',
-    'work',
-  ]),
+  type: z.enum(['concept', 'claim', 'source', 'person', 'org', 'method', 'dataset', 'work']),
   extraction_confidence: z.number().min(0).max(1),
   evidence: z.string(),
 });
@@ -239,19 +230,16 @@ export function validateExtraction(
     }
   }
 
-  const normalisedRelationships: NormalizedRelationship[] =
-    validRelationships.map((rel) => {
-      const verbatim = isEvidenceVerbatim(rel.evidence, sourceText);
-      const adjustedStrength = verbatim
-        ? rel.evidence_strength
-        : rel.evidence_strength * 0.6;
+  const normalisedRelationships: NormalizedRelationship[] = validRelationships.map((rel) => {
+    const verbatim = isEvidenceVerbatim(rel.evidence, sourceText);
+    const adjustedStrength = verbatim ? rel.evidence_strength : rel.evidence_strength * 0.6;
 
-      return {
-        ...rel,
-        evidence_strength: adjustedStrength,
-        evidence_verbatim: verbatim,
-      };
-    });
+    return {
+      ...rel,
+      evidence_strength: adjustedStrength,
+      evidence_verbatim: verbatim,
+    };
+  });
 
   // ── Apply edge-level all-non-verbatim cap ──
   // If ALL evidence for a relationship is non-verbatim, cap at 0.4
@@ -283,9 +271,7 @@ export function validateExtraction(
     }
   }
 
-  const filteredRelationships = normalisedRelationships.filter(
-    (_, i) => !violationByRelIdx.has(i),
-  );
+  const filteredRelationships = normalisedRelationships.filter((_, i) => !violationByRelIdx.has(i));
 
   const result: NormalizedExtraction = {
     entities: normalisedEntities,

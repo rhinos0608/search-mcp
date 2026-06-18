@@ -121,10 +121,7 @@ export function storeEntityEmbedding(
  * Gracefully returns empty array when the embedding provider is unavailable
  * or the DB is not initialised.
  */
-export async function searchSimilarEntities(
-  embedding: number[],
-  type: string,
-): Promise<KgNode[]> {
+export async function searchSimilarEntities(embedding: number[], type: string): Promise<KgNode[]> {
   try {
     const threshold = getThresholdForType(type);
 

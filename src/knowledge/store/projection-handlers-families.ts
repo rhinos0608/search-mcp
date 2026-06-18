@@ -16,10 +16,7 @@ import type { ProjectionState, RepointedEdge } from './projection-state.js';
 // Entity merge / split handlers
 // ────────────────────────────────────────────────────────────────────
 
-export function handleEntityMerged(
-  event: KgEvent,
-  state: ProjectionState,
-): void {
+export function handleEntityMerged(event: KgEvent, state: ProjectionState): void {
   const payload = JSON.parse(event.payload) as Record<string, unknown>;
   const fromId = payload.from_id as string | undefined;
   const intoId = payload.into_id as string | undefined;
@@ -37,10 +34,7 @@ export function handleEntityMerged(
     return;
   }
   if (intoNode === undefined) {
-    logger.warn(
-      { eventId: event.id, intoId },
-      'kg: ENTITY_MERGED destination node not found',
-    );
+    logger.warn({ eventId: event.id, intoId }, 'kg: ENTITY_MERGED destination node not found');
     return;
   }
 
@@ -102,10 +96,7 @@ export function handleEntityMerged(
   );
 }
 
-export function handleEntitySplit(
-  event: KgEvent,
-  state: ProjectionState,
-): void {
+export function handleEntitySplit(event: KgEvent, state: ProjectionState): void {
   const payload = JSON.parse(event.payload) as Record<string, unknown>;
   const splitNodeId = payload.split_node_id as string | undefined;
   const mergedEventId = payload.merged_event_id as string;
@@ -184,10 +175,7 @@ export function handleEntitySplit(
 // Family handlers
 // ────────────────────────────────────────────────────────────────────
 
-export function handleFamilyCreated(
-  event: KgEvent,
-  state: ProjectionState,
-): void {
+export function handleFamilyCreated(event: KgEvent, state: ProjectionState): void {
   const payload = JSON.parse(event.payload) as Record<string, unknown>;
   const familyId = payload.family_id as string | undefined;
   if (familyId === undefined) {
@@ -211,19 +199,13 @@ export function handleFamilyCreated(
   state.eventRefs.push({ eventId: event.id, refType: 'family', refId: familyId });
 }
 
-export function handleFamilyClassified(
-  event: KgEvent,
-  state: ProjectionState,
-): void {
+export function handleFamilyClassified(event: KgEvent, state: ProjectionState): void {
   const payload = JSON.parse(event.payload) as Record<string, unknown>;
   const entityId = payload.entity_id as string | undefined;
   const familyId = payload.family_id as string | undefined;
 
   if (entityId === undefined || familyId === undefined) {
-    logger.warn(
-      { eventId: event.id },
-      'kg: FAMILY_CLASSIFIED missing entity_id or family_id',
-    );
+    logger.warn({ eventId: event.id }, 'kg: FAMILY_CLASSIFIED missing entity_id or family_id');
     return;
   }
 
@@ -237,8 +219,7 @@ export function handleFamilyClassified(
   const pairKey = `${entityId}|${familyId}`;
   if (state.nodeFamilyKeys.has(pairKey)) return;
 
-  const isPrimary =
-    node?.primaryFamilyId === familyId ? 1 : 0;
+  const isPrimary = node?.primaryFamilyId === familyId ? 1 : 0;
 
   state.nodeFamilies.push({
     nodeId: entityId,
@@ -269,19 +250,13 @@ export function handleFamilyClassified(
   );
 }
 
-export function handleFamilyRenamed(
-  event: KgEvent,
-  state: ProjectionState,
-): void {
+export function handleFamilyRenamed(event: KgEvent, state: ProjectionState): void {
   const payload = JSON.parse(event.payload) as Record<string, unknown>;
   const familyId = payload.family_id as string;
 
   const family = state.families.get(familyId);
   if (family === undefined) {
-    logger.warn(
-      { eventId: event.id, familyId },
-      'kg: FAMILY_RENAMED family not found',
-    );
+    logger.warn({ eventId: event.id, familyId }, 'kg: FAMILY_RENAMED family not found');
     return;
   }
 
@@ -291,10 +266,7 @@ export function handleFamilyRenamed(
   state.eventRefs.push({ eventId: event.id, refType: 'family', refId: familyId });
 }
 
-export function handleFamilyMerged(
-  event: KgEvent,
-  state: ProjectionState,
-): void {
+export function handleFamilyMerged(event: KgEvent, state: ProjectionState): void {
   const payload = JSON.parse(event.payload) as Record<string, unknown>;
   const fromId = payload.from_id as string | undefined;
   const intoId = payload.into_id as string | undefined;
@@ -312,10 +284,7 @@ export function handleFamilyMerged(
     return;
   }
   if (intoFamily === undefined) {
-    logger.warn(
-      { eventId: event.id, intoId },
-      'kg: FAMILY_MERGED target family not found',
-    );
+    logger.warn({ eventId: event.id, intoId }, 'kg: FAMILY_MERGED target family not found');
     return;
   }
 
@@ -356,8 +325,7 @@ export function handleFamilyMerged(
       intoRelated.push(rel);
     }
   }
-  intoFamily.relatedFamilies =
-    intoRelated.length > 0 ? JSON.stringify(intoRelated) : null;
+  intoFamily.relatedFamilies = intoRelated.length > 0 ? JSON.stringify(intoRelated) : null;
 
   // Update family stats
   const distinctRunIds = new Set(
@@ -377,10 +345,7 @@ export function handleFamilyMerged(
   );
 }
 
-export function handleFamilyRelated(
-  event: KgEvent,
-  state: ProjectionState,
-): void {
+export function handleFamilyRelated(event: KgEvent, state: ProjectionState): void {
   const payload = JSON.parse(event.payload) as Record<string, unknown>;
   const relationId = payload.relation_id as string | undefined;
   const familyA = payload.family_a as string | undefined;
@@ -437,18 +402,12 @@ export function handleFamilyRelated(
   );
 }
 
-export function handleFamilyRelationRemoved(
-  event: KgEvent,
-  state: ProjectionState,
-): void {
+export function handleFamilyRelationRemoved(event: KgEvent, state: ProjectionState): void {
   const payload = JSON.parse(event.payload) as Record<string, unknown>;
   const relationId = payload.relation_id as string | undefined;
 
   if (relationId === undefined) {
-    logger.warn(
-      { eventId: event.id },
-      'kg: FAMILY_RELATION_REMOVED missing relation_id',
-    );
+    logger.warn({ eventId: event.id }, 'kg: FAMILY_RELATION_REMOVED missing relation_id');
     return;
   }
 
@@ -461,8 +420,7 @@ export function handleFamilyRelationRemoved(
     }[];
     const filtered = relations.filter((r) => r.relationId !== relationId);
     if (filtered.length !== relations.length) {
-      family.relatedFamilies =
-        filtered.length > 0 ? JSON.stringify(filtered) : null;
+      family.relatedFamilies = filtered.length > 0 ? JSON.stringify(filtered) : null;
       family.lastActivity = event.timestamp;
     }
   }
@@ -472,10 +430,7 @@ export function handleFamilyRelationRemoved(
 // Run lifecycle handler
 // ────────────────────────────────────────────────────────────────────
 
-export function handleRunRolledBack(
-  event: KgEvent,
-  state: ProjectionState,
-): void {
+export function handleRunRolledBack(event: KgEvent, state: ProjectionState): void {
   const payload = JSON.parse(event.payload) as Record<string, unknown>;
   const runId = payload.run_id as string | undefined;
 

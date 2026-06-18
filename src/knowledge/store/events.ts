@@ -68,9 +68,7 @@ const INSERT_EVENT_SQL = `
  * Computes payload_hash for each event. Returns the fully-populated
  * event array with generated IDs.
  */
-export function appendEvents(
-  events: Omit<KgEvent, 'id'>[],
-): KgEvent[] {
+export function appendEvents(events: Omit<KgEvent, 'id'>[]): KgEvent[] {
   const db = getKgDb();
   if (db === null) {
     logger.warn('kg: appendEvents called before database initialised');
@@ -247,9 +245,11 @@ export function countEvents(): number {
   }
 
   try {
-    const row = db.prepare('SELECT COUNT(*) as cnt FROM kg_events').get() as {
-      cnt: number;
-    } | undefined;
+    const row = db.prepare('SELECT COUNT(*) as cnt FROM kg_events').get() as
+      | {
+          cnt: number;
+        }
+      | undefined;
     return row?.cnt ?? 0;
   } catch (err) {
     logger.warn({ err }, 'kg: countEvents failed');
@@ -264,7 +264,9 @@ export function countEvents(): number {
 function rowToEvent(row: Record<string, unknown>): KgEvent {
   const id = typeof row.id === 'string' ? row.id : '';
   const timestamp = typeof row.timestamp === 'string' ? row.timestamp : new Date().toISOString();
-  const eventType = (typeof row.event_type === 'string' ? row.event_type : 'NODE_ADDED') as KgEventType;
+  const eventType = (
+    typeof row.event_type === 'string' ? row.event_type : 'NODE_ADDED'
+  ) as KgEventType;
   const eventVersion = Number(row.event_version) || 1;
   const runId = typeof row.run_id === 'string' ? row.run_id : '';
   const batchId = typeof row.batch_id === 'string' ? row.batch_id : null;

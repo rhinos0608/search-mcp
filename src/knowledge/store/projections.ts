@@ -41,7 +41,7 @@ export interface QueryFamiliesResult {
 // ────────────────────────────────────────────────────────────────────
 
 const SEARCH_FIELDS = [
-  "LOWER(n.label)",
+  'LOWER(n.label)',
   "LOWER(COALESCE(n.canonical_label, ''))",
   "LOWER(COALESCE(n.aliases, ''))",
 ];
@@ -51,9 +51,7 @@ function escapeLike(value: string): string {
 }
 
 function tokenizeSearch(value: string): string[] {
-  const tokens = value
-    .toLowerCase()
-    .match(/[\p{L}\p{N}]+/gu) ?? [];
+  const tokens = value.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? [];
   const meaningful = tokens.filter((token) => token.length >= 2);
   return [...new Set(meaningful.length > 0 ? meaningful : tokens)];
 }
@@ -135,12 +133,12 @@ export function queryNodes(opts: {
       params.entityId = opts.entityId;
     }
 
-function likeLabelField(paramName: string): string {
-  const fieldMatches = ['n.label', 'n.canonical_label', 'n.aliases'].map(
-    (field) => `LOWER(${field}) LIKE @${paramName} ESCAPE '\\'`,
-  );
-  return fieldMatches.join(' OR ');
-}
+    function likeLabelField(paramName: string): string {
+      const fieldMatches = ['n.label', 'n.canonical_label', 'n.aliases'].map(
+        (field) => `LOWER(${field}) LIKE @${paramName} ESCAPE '\\'`,
+      );
+      return fieldMatches.join(' OR ');
+    }
 
     if (opts.label !== undefined) {
       clauses.push(`(${likeLabelField('label')})`);
@@ -171,16 +169,12 @@ function likeLabelField(paramName: string): string {
     }
 
     if (opts.familyId !== undefined) {
-      clauses.push(
-        'n.id IN (SELECT node_id FROM kg_node_families WHERE family_id = @familyId)',
-      );
+      clauses.push('n.id IN (SELECT node_id FROM kg_node_families WHERE family_id = @familyId)');
       params.familyId = opts.familyId;
     }
 
     if (opts.minConfidence !== undefined) {
-      clauses.push(
-        'n.extraction_confidence >= @minConfidence',
-      );
+      clauses.push('n.extraction_confidence >= @minConfidence');
       params.minConfidence = opts.minConfidence;
     }
 
@@ -206,28 +200,30 @@ function likeLabelField(paramName: string): string {
 
     const where = clauses.length > 0 ? ' WHERE ' + clauses.join(' AND ') : '';
     const pageLimit = opts.limit ?? 20;
-    const limit = opts.limit !== undefined ? ` LIMIT ${String(opts.limit + 1)}` : ` LIMIT ${String(pageLimit + 1)}`;
+    const limit =
+      opts.limit !== undefined
+        ? ` LIMIT ${String(opts.limit + 1)}`
+        : ` LIMIT ${String(pageLimit + 1)}`;
 
     // Count
-    const countRow = db
-      .prepare(`SELECT COUNT(*) as cnt FROM kg_nodes n${where}`)
-      .get(params) as { cnt: number } | undefined;
+    const countRow = db.prepare(`SELECT COUNT(*) as cnt FROM kg_nodes n${where}`).get(params) as
+      | { cnt: number }
+      | undefined;
     const total = countRow?.cnt ?? 0;
 
     const rankExpr = opts.search !== undefined ? searchRankExpression(searchTerms.length) : null;
     const select = rankExpr !== null ? `SELECT n.*, (${rankExpr}) as search_rank` : 'SELECT n.*';
-    const orderBy = rankExpr !== null
-      ? 'ORDER BY search_rank DESC, n.label ASC, n.id ASC'
-      : 'ORDER BY n.last_updated ASC, n.id ASC';
+    const orderBy =
+      rankExpr !== null
+        ? 'ORDER BY search_rank DESC, n.label ASC, n.id ASC'
+        : 'ORDER BY n.last_updated ASC, n.id ASC';
     const sql = `${select} FROM kg_nodes n${where} ${orderBy}${limit}`;
     const rows = db.prepare(sql).all(params) as Record<string, unknown>[];
 
     const hasMore = rows.length > pageLimit;
     const pageRows = hasMore ? rows.slice(0, pageLimit) : rows;
-    const lastRow =
-      pageRows.length > 0 ? pageRows[pageRows.length - 1] : undefined;
-    const nextCursor =
-      hasMore && lastRow !== undefined ? (lastRow.id as string) : null;
+    const lastRow = pageRows.length > 0 ? pageRows[pageRows.length - 1] : undefined;
+    const nextCursor = hasMore && lastRow !== undefined ? (lastRow.id as string) : null;
 
     return {
       nodes: pageRows.map(rowToNode),
@@ -277,10 +273,7 @@ export function getNode(id: string): KgNode | null {
  * Depth parameter controls whether to include edges at distance > 1
  * (not implemented in V7.0 — depth is always 1).
  */
-export function getEdgesForNode(
-  nodeId: string,
-  _depth = 1,
-): KgEdge[] {
+export function getEdgesForNode(nodeId: string, _depth = 1): KgEdge[] {
   const db = getKgDb();
   if (db === null) {
     logger.warn('kg: getEdgesForNode called before database initialised');
@@ -289,9 +282,7 @@ export function getEdgesForNode(
 
   try {
     const rows = db
-      .prepare(
-        'SELECT * FROM kg_edges WHERE from_id = ? OR to_id = ? ORDER BY created_at ASC',
-      )
+      .prepare('SELECT * FROM kg_edges WHERE from_id = ? OR to_id = ? ORDER BY created_at ASC')
       .all(nodeId, nodeId) as Record<string, unknown>[];
     return rows.map(rowToEdge);
   } catch (err) {
@@ -358,11 +349,14 @@ export function queryEdges(opts: {
 
     const where = clauses.length > 0 ? ' WHERE ' + clauses.join(' AND ') : '';
     const pageLimit = opts.limit ?? 20;
-    const limit = opts.limit !== undefined ? ` LIMIT ${String(opts.limit + 1)}` : ` LIMIT ${String(pageLimit + 1)}`;
+    const limit =
+      opts.limit !== undefined
+        ? ` LIMIT ${String(opts.limit + 1)}`
+        : ` LIMIT ${String(pageLimit + 1)}`;
 
-    const countRow = db
-      .prepare(`SELECT COUNT(*) as cnt FROM kg_edges${where}`)
-      .get(params) as { cnt: number } | undefined;
+    const countRow = db.prepare(`SELECT COUNT(*) as cnt FROM kg_edges${where}`).get(params) as
+      | { cnt: number }
+      | undefined;
     const total = countRow?.cnt ?? 0;
 
     const sql = `SELECT * FROM kg_edges${where} ORDER BY created_at ASC, id ASC${limit}`;
@@ -370,10 +364,8 @@ export function queryEdges(opts: {
 
     const hasMore = rows.length > pageLimit;
     const pageRows = hasMore ? rows.slice(0, pageLimit) : rows;
-    const lastRow =
-      pageRows.length > 0 ? pageRows[pageRows.length - 1] : undefined;
-    const nextCursor =
-      hasMore && lastRow !== undefined ? (lastRow.id as string) : null;
+    const lastRow = pageRows.length > 0 ? pageRows[pageRows.length - 1] : undefined;
+    const nextCursor = hasMore && lastRow !== undefined ? (lastRow.id as string) : null;
 
     return {
       edges: pageRows.map(rowToEdge),
@@ -393,10 +385,7 @@ export function queryEdges(opts: {
 /**
  * List all families with pagination.
  */
-export function queryFamilies(opts: {
-  limit?: number;
-  cursor?: string;
-}): QueryFamiliesResult {
+export function queryFamilies(opts: { limit?: number; cursor?: string }): QueryFamiliesResult {
   const db = getKgDb();
   if (db === null) {
     logger.warn('kg: queryFamilies called before database initialised');
@@ -405,19 +394,21 @@ export function queryFamilies(opts: {
 
   try {
     const params: Record<string, unknown> = {};
-    const cursorClause =
-      opts.cursor !== undefined ? ' AND id > @cursor' : '';
+    const cursorClause = opts.cursor !== undefined ? ' AND id > @cursor' : '';
 
     if (opts.cursor !== undefined) {
       params.cursor = opts.cursor;
     }
 
     const pageLimit = opts.limit ?? 20;
-    const limit = opts.limit !== undefined ? ` LIMIT ${String(opts.limit + 1)}` : ` LIMIT ${String(pageLimit + 1)}`;
+    const limit =
+      opts.limit !== undefined
+        ? ` LIMIT ${String(opts.limit + 1)}`
+        : ` LIMIT ${String(pageLimit + 1)}`;
 
-    const countRow = db
-      .prepare('SELECT COUNT(*) as cnt FROM kg_families')
-      .get() as { cnt: number } | undefined;
+    const countRow = db.prepare('SELECT COUNT(*) as cnt FROM kg_families').get() as
+      | { cnt: number }
+      | undefined;
     const totalCount = countRow?.cnt ?? 0;
 
     const sql = `SELECT * FROM kg_families WHERE 1=1${cursorClause} ORDER BY last_activity DESC, id ASC${limit}`;
@@ -425,10 +416,8 @@ export function queryFamilies(opts: {
 
     const hasMore = rows.length > pageLimit;
     const pageRows = hasMore ? rows.slice(0, pageLimit) : rows;
-    const lastRow =
-      pageRows.length > 0 ? pageRows[pageRows.length - 1] : undefined;
-    const nextCursor =
-      hasMore && lastRow !== undefined ? (lastRow.id as string) : null;
+    const lastRow = pageRows.length > 0 ? pageRows[pageRows.length - 1] : undefined;
+    const nextCursor = hasMore && lastRow !== undefined ? (lastRow.id as string) : null;
 
     return {
       families: pageRows.map(rowToFamily),
@@ -503,9 +492,7 @@ function rowToNode(row: Record<string, unknown>): KgNode {
     canonicalLabel: (row.canonical_label as string | null) ?? null,
     type: row.type as string,
     extractionConfidence:
-      row.extraction_confidence != null
-        ? Number(row.extraction_confidence)
-        : null,
+      row.extraction_confidence != null ? Number(row.extraction_confidence) : null,
     primaryFamilyId: (row.primary_family_id as string | null) ?? null,
     aliases: (row.aliases as string | null) ?? null,
     firstSeenRunId: (row.first_seen_run_id as string | null) ?? null,
@@ -520,8 +507,7 @@ function rowToEdge(row: Record<string, unknown>): KgEdge {
     fromId: row.from_id as string,
     toId: row.to_id as string,
     type: row.type as string,
-    evidenceStrength:
-      row.evidence_strength != null ? Number(row.evidence_strength) : null,
+    evidenceStrength: row.evidence_strength != null ? Number(row.evidence_strength) : null,
     evidence: (row.evidence as string | null) ?? null,
     evidenceVerbatim: row.evidence_verbatim != null ? Number(row.evidence_verbatim) : 0,
     sourceId: (row.source_id as string | null) ?? null,

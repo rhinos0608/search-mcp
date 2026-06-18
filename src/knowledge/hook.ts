@@ -68,7 +68,14 @@ const PASSIVE_CAPTURE_ALLOWLIST = new Set([
   'packages.pypi',
 ]);
 
-const NOT_CAPTURED_PREFIXES = ['graph_', 'family_', 'run_', 'entity_', 'deep_research', 'knowledge_graph'];
+const NOT_CAPTURED_PREFIXES = [
+  'graph_',
+  'family_',
+  'run_',
+  'entity_',
+  'deep_research',
+  'knowledge_graph',
+];
 
 function isToolCaptured(toolName: string): boolean {
   for (const prefix of NOT_CAPTURED_PREFIXES) {
@@ -93,7 +100,11 @@ export interface DeepResearchKgMeta {
 // Helpers
 // ────────────────────────────────────────────────────────────────────
 
-function buildWarning(code: StructuredWarning['code'], message: string, source?: string): StructuredWarning {
+function buildWarning(
+  code: StructuredWarning['code'],
+  message: string,
+  source?: string,
+): StructuredWarning {
   return {
     code,
     severity: 'warn' as const,
@@ -102,16 +113,33 @@ function buildWarning(code: StructuredWarning['code'], message: string, source?:
   } as StructuredWarning;
 }
 
-function sourceKindForTool(toolName: string): 'documentation' | 'forum' | 'social' | 'code_repo' | 'package_registry' | 'research_paper' | 'unknown' {
+function sourceKindForTool(
+  toolName: string,
+):
+  | 'documentation'
+  | 'forum'
+  | 'social'
+  | 'code_repo'
+  | 'package_registry'
+  | 'research_paper'
+  | 'unknown' {
   const lower = toolName.toLowerCase();
   if (lower.startsWith('web_') || lower.startsWith('semantic_crawl')) return 'documentation';
-  if (lower.startsWith('reddit') || lower.startsWith('hackernews') || lower.startsWith('stackoverflow')) return 'forum';
-  if (lower.startsWith('research.hackernews') || lower.startsWith('research.stackoverflow')) return 'forum';
+  if (
+    lower.startsWith('reddit') ||
+    lower.startsWith('hackernews') ||
+    lower.startsWith('stackoverflow')
+  )
+    return 'forum';
+  if (lower.startsWith('research.hackernews') || lower.startsWith('research.stackoverflow'))
+    return 'forum';
   if (lower.startsWith('research.wikipedia')) return 'documentation';
   if (lower.startsWith('youtube')) return 'social';
   if (lower.startsWith('github')) return 'code_repo';
-  if (lower.startsWith('packages') || lower.startsWith('npm') || lower.startsWith('pypi')) return 'package_registry';
-  if (lower.startsWith('academic') || lower.startsWith('arxiv') || lower.startsWith('research')) return 'research_paper';
+  if (lower.startsWith('packages') || lower.startsWith('npm') || lower.startsWith('pypi'))
+    return 'package_registry';
+  if (lower.startsWith('academic') || lower.startsWith('arxiv') || lower.startsWith('research'))
+    return 'research_paper';
   return 'unknown';
 }
 
@@ -158,10 +186,7 @@ export class KnowledgeGraphHook {
 
   // ── Deep research completion ──────────────────────────────────────
 
-  async onDeepResearchComplete(
-    jobId: string,
-    result: ResearchResult,
-  ): Promise<DeepResearchKgMeta> {
+  async onDeepResearchComplete(jobId: string, result: ResearchResult): Promise<DeepResearchKgMeta> {
     const meta: DeepResearchKgMeta = {
       runId: '',
       entityCount: 0,
@@ -209,7 +234,20 @@ export class KnowledgeGraphHook {
           buildWarning('EXTRACTION_PARTIAL', 'kg: no synthesis text for extraction', jobId),
         );
         updateRunStatus(run.runId, 'failed', { lastError: 'No synthesis text' });
-        appendEvents([{ timestamp: new Date().toISOString(), eventType: 'RUN_FAILED', eventVersion: 1, runId: run.runId, batchId: null, actor: 'system', entityId: run.runId, entityType: 'run', payload: JSON.stringify({ lastError: 'No synthesis text' }), payloadHash: null }]);
+        appendEvents([
+          {
+            timestamp: new Date().toISOString(),
+            eventType: 'RUN_FAILED',
+            eventVersion: 1,
+            runId: run.runId,
+            batchId: null,
+            actor: 'system',
+            entityId: run.runId,
+            entityType: 'run',
+            payload: JSON.stringify({ lastError: 'No synthesis text' }),
+            payloadHash: null,
+          },
+        ]);
         return meta;
       }
 
@@ -267,10 +305,11 @@ export class KnowledgeGraphHook {
             };
           });
         } catch (classifyErr) {
-          logger.warn({ err: classifyErr, runId: run.runId }, 'kg: pass-1 classifier failed (non-fatal)');
-          meta.warnings.push(
-            buildWarning('FAMILY_PENDING', 'kg: pass-1 classifier failed', jobId),
+          logger.warn(
+            { err: classifyErr, runId: run.runId },
+            'kg: pass-1 classifier failed (non-fatal)',
           );
+          meta.warnings.push(buildWarning('FAMILY_PENDING', 'kg: pass-1 classifier failed', jobId));
         }
       }
 
@@ -300,7 +339,13 @@ export class KnowledgeGraphHook {
 
       // 7. Schedule projection rebuild so completed deep research becomes queryable.
       // Deferred via setImmediate to avoid blocking the event loop during an expensive full rebuild.
-      setImmediate(() => { rebuildProjection({ full: true }); });
+      setImmediate(() => {
+        try {
+          rebuildProjection({ full: true });
+        } catch (err) {
+          logger.warn({ err }, 'kg: deferred projection rebuild failed (non-fatal)');
+        }
+      });
 
       // 8. Clear active run flag
       this.setActiveRun(null);
@@ -311,13 +356,17 @@ export class KnowledgeGraphHook {
       );
     } catch (err) {
       logger.warn({ err, jobId }, 'kg: deep research extraction failed (non-fatal)');
-      meta.warnings.push(buildWarning('EXTRACTION_PARTIAL', 'kg: deep research extraction failed', jobId));
+      meta.warnings.push(
+        buildWarning('EXTRACTION_PARTIAL', 'kg: deep research extraction failed', jobId),
+      );
 
       // Mark run failed
       if (meta.runId) {
         try {
           updateRunStatus(meta.runId, 'failed', { lastError: String(err) });
-        } catch { /* ignore */ }
+        } catch {
+          /* ignore */
+        }
       }
     }
 
@@ -344,7 +393,10 @@ export class KnowledgeGraphHook {
       if (this.config.scrubContent) {
         const scrubResult = scrubContent(normalized.text);
         if (!scrubResult.clean) {
-          logger.debug({ toolName, threats: scrubResult.threats.length }, 'kg: content scrubbed; skipping extraction');
+          logger.debug(
+            { toolName, threats: scrubResult.threats.length },
+            'kg: content scrubbed; skipping extraction',
+          );
           return;
         }
       }
@@ -362,9 +414,7 @@ export class KnowledgeGraphHook {
           contentHash,
         };
         appendPendingExtraction(
-          typeof normalized.url === 'string'
-            ? { ...base, sourceUrl: normalized.url }
-            : base,
+          typeof normalized.url === 'string' ? { ...base, sourceUrl: normalized.url } : base,
         );
       } else {
         // Write to pending extractions (no active run)
@@ -376,9 +426,7 @@ export class KnowledgeGraphHook {
           contentHash,
         };
         appendPendingExtraction(
-          typeof normalized.url === 'string'
-            ? { ...base, sourceUrl: normalized.url }
-            : base,
+          typeof normalized.url === 'string' ? { ...base, sourceUrl: normalized.url } : base,
         );
       }
     } catch (err) {
@@ -395,32 +443,36 @@ export class KnowledgeGraphHook {
     extractions: FlushedPendingExtraction[],
   ): Promise<void> {
     // Emit RUN_STARTED before any other lifecycle event
-    appendEvents([{
-      timestamp: new Date().toISOString(),
-      eventType: 'RUN_STARTED',
-      eventVersion: 1,
-      runId,
-      batchId: null,
-      actor: 'system',
-      entityId: runId,
-      entityType: 'run',
-      payload: JSON.stringify({ sessionId, session_mode: true }),
-      payloadHash: null,
-    }]);
-
-    if (extractions.length === 0) {
-      appendEvents([{
+    appendEvents([
+      {
         timestamp: new Date().toISOString(),
-        eventType: 'RUN_FAILED',
+        eventType: 'RUN_STARTED',
         eventVersion: 1,
         runId,
         batchId: null,
         actor: 'system',
         entityId: runId,
         entityType: 'run',
-        payload: JSON.stringify({ lastError: 'No flushed extraction content' }),
+        payload: JSON.stringify({ sessionId, session_mode: true }),
         payloadHash: null,
-      }]);
+      },
+    ]);
+
+    if (extractions.length === 0) {
+      appendEvents([
+        {
+          timestamp: new Date().toISOString(),
+          eventType: 'RUN_FAILED',
+          eventVersion: 1,
+          runId,
+          batchId: null,
+          actor: 'system',
+          entityId: runId,
+          entityType: 'run',
+          payload: JSON.stringify({ lastError: 'No flushed extraction content' }),
+          payloadHash: null,
+        },
+      ]);
       updateRunStatus(runId, 'failed', { lastError: 'No flushed extraction content' });
       return;
     }
@@ -448,41 +500,59 @@ export class KnowledgeGraphHook {
         failureCount += result.failureEvents.length;
       } catch (err) {
         failureCount += 1;
-        logger.warn({ err, sessionId, runId, pendingId: extraction.id }, 'kg: passive extraction failed');
+        logger.warn(
+          { err, sessionId, runId, pendingId: extraction.id },
+          'kg: passive extraction failed',
+        );
       }
     }
 
     const duration = Date.now() - startTime;
     if (entityCount === 0 && failureCount > 0) {
-      appendEvents([{
-        timestamp: new Date().toISOString(),
-        eventType: 'RUN_FAILED',
-        eventVersion: 1,
-        runId,
-        batchId: null,
-        actor: 'system',
-        entityId: runId,
-        entityType: 'run',
-        payload: JSON.stringify({ lastError: 'Passive extraction produced no entities', duration, entityCount, failureCount }),
-        payloadHash: null,
-      }]);
+      appendEvents([
+        {
+          timestamp: new Date().toISOString(),
+          eventType: 'RUN_FAILED',
+          eventVersion: 1,
+          runId,
+          batchId: null,
+          actor: 'system',
+          entityId: runId,
+          entityType: 'run',
+          payload: JSON.stringify({
+            lastError: 'Passive extraction produced no entities',
+            duration,
+            entityCount,
+            failureCount,
+          }),
+          payloadHash: null,
+        },
+      ]);
       updateRunStatus(runId, 'failed', { lastError: 'Passive extraction produced no entities' });
     } else {
       updateRunStatus(runId, 'completed', { entityCount, edgeCount });
-      appendEvents([{
-        timestamp: new Date().toISOString(),
-        eventType: 'RUN_COMPLETED',
-        eventVersion: 1,
-        runId,
-        batchId: null,
-        actor: 'system',
-        entityId: runId,
-        entityType: 'run',
-        payload: JSON.stringify({ entity_count: entityCount, edge_count: edgeCount, duration }),
-        payloadHash: null,
-      }]);
+      appendEvents([
+        {
+          timestamp: new Date().toISOString(),
+          eventType: 'RUN_COMPLETED',
+          eventVersion: 1,
+          runId,
+          batchId: null,
+          actor: 'system',
+          entityId: runId,
+          entityType: 'run',
+          payload: JSON.stringify({ entity_count: entityCount, edge_count: edgeCount, duration }),
+          payloadHash: null,
+        },
+      ]);
       // Deferred to avoid blocking the event loop during an expensive full rebuild.
-      setImmediate(() => { rebuildProjection({ full: true }); });
+      setImmediate(() => {
+        try {
+          rebuildProjection({ full: true });
+        } catch (err) {
+          logger.warn({ err }, 'kg: deferred projection rebuild failed (non-fatal)');
+        }
+      });
     }
   }
 
@@ -490,7 +560,10 @@ export class KnowledgeGraphHook {
     try {
       const result = flushSessionExtractions(sessionId);
       if (result !== null) {
-        logger.info({ sessionId, runId: result.runId, count: result.extractionCount }, 'kg: session flushed');
+        logger.info(
+          { sessionId, runId: result.runId, count: result.extractionCount },
+          'kg: session flushed',
+        );
         await this.extractFlushedSession(sessionId, result.runId, result.extractions);
       }
     } catch (err) {
@@ -551,7 +624,7 @@ function simpleHash(content: string): string {
     const end = Math.min(start + count, len);
     for (let i = start; i < end; i++) {
       const char = content.charCodeAt(i);
-      hash = ((hash << 5) - hash) + char;
+      hash = (hash << 5) - hash + char;
       hash |= 0; // Convert to 32bit integer
     }
   };

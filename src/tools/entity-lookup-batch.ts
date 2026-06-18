@@ -74,7 +74,8 @@ function parseJsonArr(raw: string | null): string[] {
   if (raw === null || raw === '') return [];
   try {
     const parsed = JSON.parse(raw) as unknown;
-    if (Array.isArray(parsed)) return parsed.filter((item): item is string => typeof item === 'string');
+    if (Array.isArray(parsed))
+      return parsed.filter((item): item is string => typeof item === 'string');
     return [];
   } catch {
     return [];

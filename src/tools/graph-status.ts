@@ -54,11 +54,23 @@ export function registerGraphStatusTool(server: McpServer, _cfg: SearchConfig): 
         if (db !== null) {
           try {
             families =
-              ((db.prepare('SELECT COUNT(*) as cnt FROM kg_families').get() as { cnt: number } | undefined)?.cnt ?? 0);
+              (
+                db.prepare('SELECT COUNT(*) as cnt FROM kg_families').get() as
+                  | { cnt: number }
+                  | undefined
+              )?.cnt ?? 0;
             nodes =
-              ((db.prepare('SELECT COUNT(*) as cnt FROM kg_nodes').get() as { cnt: number } | undefined)?.cnt ?? 0);
+              (
+                db.prepare('SELECT COUNT(*) as cnt FROM kg_nodes').get() as
+                  | { cnt: number }
+                  | undefined
+              )?.cnt ?? 0;
             edges =
-              ((db.prepare('SELECT COUNT(*) as cnt FROM kg_edges').get() as { cnt: number } | undefined)?.cnt ?? 0);
+              (
+                db.prepare('SELECT COUNT(*) as cnt FROM kg_edges').get() as
+                  | { cnt: number }
+                  | undefined
+              )?.cnt ?? 0;
           } catch {
             // projection tables may be empty
           }
@@ -71,7 +83,9 @@ export function registerGraphStatusTool(server: McpServer, _cfg: SearchConfig): 
         if (db !== null) {
           try {
             const activeRow = db
-              .prepare("SELECT COUNT(*) as cnt FROM kg_runs WHERE status IN ('extracting','classifying','projecting')")
+              .prepare(
+                "SELECT COUNT(*) as cnt FROM kg_runs WHERE status IN ('extracting','classifying','projecting')",
+              )
               .get() as { cnt: number } | undefined;
             activeRuns = activeRow?.cnt ?? 0;
 
@@ -81,7 +95,9 @@ export function registerGraphStatusTool(server: McpServer, _cfg: SearchConfig): 
             failedRuns = failedRow?.cnt ?? 0;
 
             const lastErrRow = db
-              .prepare("SELECT last_error FROM kg_runs WHERE status = 'failed' AND last_error IS NOT NULL ORDER BY failed_at DESC LIMIT 1")
+              .prepare(
+                "SELECT last_error FROM kg_runs WHERE status = 'failed' AND last_error IS NOT NULL ORDER BY failed_at DESC LIMIT 1",
+              )
               .get() as { last_error: string } | undefined;
             lastRunError = lastErrRow?.last_error ?? null;
           } catch {
@@ -97,19 +113,33 @@ export function registerGraphStatusTool(server: McpServer, _cfg: SearchConfig): 
         let lastConsolidationAt: string | null = null;
         if (db !== null) {
           try {
-            const pfRow = db.prepare('SELECT COUNT(*) as cnt FROM kg_pending_families').get() as { cnt: number } | undefined;
+            const pfRow = db.prepare('SELECT COUNT(*) as cnt FROM kg_pending_families').get() as
+              | { cnt: number }
+              | undefined;
             pendingFamilyCount = pfRow?.cnt ?? 0;
 
-            const paRow = db.prepare('SELECT COUNT(*) as cnt FROM kg_pending_assignments').get() as { cnt: number } | undefined;
+            const paRow = db.prepare('SELECT COUNT(*) as cnt FROM kg_pending_assignments').get() as
+              | { cnt: number }
+              | undefined;
             pendingAssignmentCount = paRow?.cnt ?? 0;
 
-            const peRow = db.prepare("SELECT COUNT(*) as cnt FROM kg_pending_extractions WHERE run_id IS NULL").get() as { cnt: number } | undefined;
+            const peRow = db
+              .prepare('SELECT COUNT(*) as cnt FROM kg_pending_extractions WHERE run_id IS NULL')
+              .get() as { cnt: number } | undefined;
             pendingExtractionCount = peRow?.cnt ?? 0;
 
-            const oeRow = db.prepare('SELECT queued_at FROM kg_pending_extractions WHERE run_id IS NULL ORDER BY queued_at ASC LIMIT 1').get() as { queued_at: string } | undefined;
+            const oeRow = db
+              .prepare(
+                'SELECT queued_at FROM kg_pending_extractions WHERE run_id IS NULL ORDER BY queued_at ASC LIMIT 1',
+              )
+              .get() as { queued_at: string } | undefined;
             oldestPendingExtraction = oeRow?.queued_at ?? null;
 
-            const lcRow = db.prepare('SELECT MAX(created_at) as latest FROM kg_projection_checkpoints WHERE compatible = 1').get() as { latest: string } | undefined;
+            const lcRow = db
+              .prepare(
+                'SELECT MAX(created_at) as latest FROM kg_projection_checkpoints WHERE compatible = 1',
+              )
+              .get() as { latest: string } | undefined;
             lastConsolidationAt = lcRow?.latest ?? null;
           } catch {
             // tables or queries may be unavailable

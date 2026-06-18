@@ -108,7 +108,11 @@ async function scheduleRebuild(runId: string): Promise<void> {
   logger.info({ runId }, 'kg: starting post-run projection rebuild');
 
   // Use setImmediate to yield the event loop, then rebuild
-  await new Promise<void>((resolve) => setImmediate(() => { resolve(); }));
+  await new Promise<void>((resolve) =>
+    setImmediate(() => {
+      resolve();
+    }),
+  );
 
   // Always replay from genesis: projection rebuild swaps complete tables, so
   // applying only post-checkpoint events would drop previously projected rows.
@@ -144,7 +148,11 @@ async function triggerRebuildInternal(): Promise<void> {
 
   try {
     // Yield event loop before potentially expensive rebuild
-    await new Promise<void>((resolve) => setImmediate(() => { resolve(); }));
+    await new Promise<void>((resolve) =>
+      setImmediate(() => {
+        resolve();
+      }),
+    );
 
     const result = rebuildProjection({ full: true });
 

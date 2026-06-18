@@ -66,9 +66,7 @@ export function resolveKgDbPath(cfg: KnowledgeGraphConfig): string {
  * This function handles programmatic overrides (e.g. from tests or
  * dynamic tool call options).
  */
-export function resolveKgConfig(
-  partial?: Partial<KnowledgeGraphConfig>,
-): KnowledgeGraphConfig {
+export function resolveKgConfig(partial?: Partial<KnowledgeGraphConfig>): KnowledgeGraphConfig {
   const base: KnowledgeGraphConfig = structuredClone(DEFAULT_KG_CONFIG);
 
   if (partial === undefined) return base;

@@ -16,7 +16,11 @@ const familyMergeSchema = z.object({
   from_id: z.string().min(1).describe('Family ID to merge FROM (will be retired)'),
   into_id: z.string().min(1).describe('Family ID to merge INTO (will absorb)'),
   reason: z.string().min(1).max(1000).describe('Reason for the merge'),
-  dry_run: z.boolean().optional().default(false).describe('Preview affected counts without executing'),
+  dry_run: z
+    .boolean()
+    .optional()
+    .default(false)
+    .describe('Preview affected counts without executing'),
 });
 
 export function registerFamilyMergeTool(server: McpServer, _cfg: SearchConfig): void {
@@ -59,11 +63,16 @@ export function registerFamilyMergeTool(server: McpServer, _cfg: SearchConfig): 
             affectedEntityCount = eRow?.cnt ?? 0;
 
             const rRow = db
-              .prepare('SELECT COUNT(DISTINCT run_id) as cnt FROM kg_node_families WHERE family_id = ?')
+              .prepare(
+                'SELECT COUNT(DISTINCT run_id) as cnt FROM kg_node_families WHERE family_id = ?',
+              )
               .get(args.from_id) as { cnt: number } | undefined;
             affectedRunCount = rRow?.cnt ?? 0;
           } catch (err: unknown) {
-            logger.error({ err, tool: 'family_merge', fromId: args.from_id }, 'Failed to query affected counts');
+            logger.error(
+              { err, tool: 'family_merge', fromId: args.from_id },
+              'Failed to query affected counts',
+            );
           }
         } else {
           dbUnavailable = true;
