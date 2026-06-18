@@ -1,14 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {
-  prepareCorpus,
-  retrieveCorpus,
-} from '../src/rag/pipeline.js';
-import {
-  getCounter,
-  getGauge,
-  resetMetrics,
-} from '../src/rag/metrics.js';
+import { prepareCorpus, retrieveCorpus } from '../src/rag/pipeline.js';
+import { getCounter, getGauge, resetMetrics } from '../src/rag/metrics.js';
 
 const TEST_EMBEDDINGS = [
   [1, 0, 0, 0],
@@ -30,7 +23,7 @@ test('prepareCorpus records dedup metrics', () => {
       { id: '3', text: 'foo bar', url: 'http://example.com/b', adapter: 'text' },
     ],
     dedupeConfig: {
-      layers: { url: true, fingerprint: true, semantic: true },
+      layers: { url: true, fingerprint: true, semantic: true, entityOverlap: false },
       fingerprintThreshold: 0.95,
       semanticThreshold: 0.95,
       preferKeep: 'newest',
@@ -50,10 +43,42 @@ test('prepareCorpus records dedup metrics', () => {
 
 test('retrieveCorpus records retrieval metrics', () => {
   const chunks = [
-    { text: 'hello world', url: 'http://example.com/a', chunkIndex: 0, totalChunks: 4, charOffset: 0, metadata: { adapter: 'text' }, section: 'a' },
-    { text: 'hello again', url: 'http://example.com/b', chunkIndex: 1, totalChunks: 4, charOffset: 0, metadata: { adapter: 'text' }, section: 'b' },
-    { text: 'foo bar', url: 'http://example.com/c', chunkIndex: 2, totalChunks: 4, charOffset: 0, metadata: { adapter: 'text' }, section: 'c' },
-    { text: 'baz qux', url: 'http://example.com/d', chunkIndex: 3, totalChunks: 4, charOffset: 0, metadata: { adapter: 'text' }, section: 'd' },
+    {
+      text: 'hello world',
+      url: 'http://example.com/a',
+      chunkIndex: 0,
+      totalChunks: 4,
+      charOffset: 0,
+      metadata: { adapter: 'text' },
+      section: 'a',
+    },
+    {
+      text: 'hello again',
+      url: 'http://example.com/b',
+      chunkIndex: 1,
+      totalChunks: 4,
+      charOffset: 0,
+      metadata: { adapter: 'text' },
+      section: 'b',
+    },
+    {
+      text: 'foo bar',
+      url: 'http://example.com/c',
+      chunkIndex: 2,
+      totalChunks: 4,
+      charOffset: 0,
+      metadata: { adapter: 'text' },
+      section: 'c',
+    },
+    {
+      text: 'baz qux',
+      url: 'http://example.com/d',
+      chunkIndex: 3,
+      totalChunks: 4,
+      charOffset: 0,
+      metadata: { adapter: 'text' },
+      section: 'd',
+    },
   ];
 
   const corpus = prepareCorpus({ adapter: 'text', chunks, embeddings: TEST_EMBEDDINGS });
@@ -79,8 +104,24 @@ test('retrieveCorpus records retrieval metrics', () => {
 
 test('retrieveCorpus records constraint metrics', () => {
   const chunks = [
-    { text: 'senior engineer job in sydney', url: 'http://example.com/a', chunkIndex: 0, totalChunks: 2, charOffset: 0, metadata: { adapter: 'text', location: 'Sydney' }, section: 'a' },
-    { text: 'junior engineer job in melbourne', url: 'http://example.com/b', chunkIndex: 1, totalChunks: 2, charOffset: 0, metadata: { adapter: 'text', location: 'Melbourne' }, section: 'b' },
+    {
+      text: 'senior engineer job in sydney',
+      url: 'http://example.com/a',
+      chunkIndex: 0,
+      totalChunks: 2,
+      charOffset: 0,
+      metadata: { adapter: 'text', location: 'Sydney' },
+      section: 'a',
+    },
+    {
+      text: 'junior engineer job in melbourne',
+      url: 'http://example.com/b',
+      chunkIndex: 1,
+      totalChunks: 2,
+      charOffset: 0,
+      metadata: { adapter: 'text', location: 'Melbourne' },
+      section: 'b',
+    },
   ];
 
   const corpus = prepareCorpus({ adapter: 'text', chunks });
@@ -89,9 +130,7 @@ test('retrieveCorpus records constraint metrics', () => {
     query: 'engineer',
     topK: 10,
     constraintConfig: {
-      hardConstraints: [
-        { type: 'location', values: ['Sydney'], tolerance: 'exact' },
-      ],
+      hardConstraints: [{ type: 'location', values: ['Sydney'], tolerance: 'exact' }],
       softConstraints: [],
       strictMode: true,
     },

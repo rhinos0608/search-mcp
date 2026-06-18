@@ -114,6 +114,7 @@ Generate a strong passphrase with `openssl rand -base64 32`.
 ```text
 {"level":"info","msg":"Generated initial mcpApiKey","key":"smcp_..."}
 ```
+
 This is your dashboard login password and MCP Bearer token. Store it securely — it's only shown once.
 
 ### Use the dashboard
@@ -129,6 +130,7 @@ Open `http://localhost:8050/dashboard`, log in with the key above, then:
 The dashboard **Overview** page auto-generates ready-to-paste config snippets for every client type:
 
 **HTTP (SSE)** — for Claude.ai, Cursor, and other HTTP-capable clients:
+
 ```json
 {
   "mcpServers": {
@@ -142,11 +144,13 @@ The dashboard **Overview** page auto-generates ready-to-paste config snippets fo
 ```
 
 **Quick Connect URL** — enabled by default. The dashboard shows a single URL with your API key embedded that works in most clients (disable with `MCP_ALLOW_QUERY_KEY=false`):
+
 ```
 http://localhost:8050/mcp?key=smcp_xxxxxxxxxxxx
 ```
 
 **Stdio (npx)** — for Claude Desktop and other stdio-only clients:
+
 ```json
 {
   "mcpServers": {
@@ -162,15 +166,18 @@ http://localhost:8050/mcp?key=smcp_xxxxxxxxxxxx
 ```
 
 **Remote (mcp-remote)** — bridge stdio → HTTP for remote servers:
+
 ```json
 {
   "mcpServers": {
     "search-mcp": {
       "command": "npx",
       "args": [
-        "-y", "mcp-remote",
+        "-y",
+        "mcp-remote",
         "http://localhost:8050/mcp",
-        "--header", "Authorization: Bearer smcp_..."
+        "--header",
+        "Authorization: Bearer smcp_..."
       ]
     }
   }
@@ -206,6 +213,7 @@ tailscale serve status
 ```
 
 Then in the dashboard:
+
 - **Access** → select **tailscale** → click **"I configured it"** — the page auto-populates connection URLs and config snippets with your real hostname and API key.
 - **Overview** → the **Tailscale Quick Connect** card shows a single copy-paste URL like `https://<machine>.<tailnet>.ts.net/mcp?key=smcp_...`
 
@@ -214,11 +222,13 @@ Then in the dashboard:
 The dashboard auto-generates all snippets with your real values. Typical formats:
 
 **Quick Connect (Tavily-style URL)** — paste this single URL into any client that supports query-param auth:
+
 ```
 https://<machine>.<tailnet>.ts.net/mcp?key=smcp_xxxxxxxxxxxx
 ```
 
 **HTTP (SSE)** — for Claude.ai, Cursor, etc.:
+
 ```json
 {
   "mcpServers": {
@@ -232,15 +242,18 @@ https://<machine>.<tailnet>.ts.net/mcp?key=smcp_xxxxxxxxxxxx
 ```
 
 **Stdio via mcp-remote** — for Claude Desktop and other stdio-only clients:
+
 ```json
 {
   "mcpServers": {
     "search-mcp": {
       "command": "npx",
       "args": [
-        "-y", "mcp-remote",
+        "-y",
+        "mcp-remote",
         "https://<machine>.<tailnet>.ts.net/mcp",
-        "--header", "Authorization: Bearer smcp_..."
+        "--header",
+        "Authorization: Bearer smcp_..."
       ]
     }
   }

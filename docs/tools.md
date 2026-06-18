@@ -2,11 +2,11 @@
 
 The `browser` tool family supports three modes selected via `BROWSER_MODE` (default: `user`).
 
-| Mode | `BROWSER_MODE` | Launch | Use case |
-|------|---------------|--------|----------|
-| **User** | `user` | Connects to an existing browser via CDP | Persistent profiles, logged-in sessions, manual setup |
-| **Stealth** | `stealth` | Launches ephemeral Playwright with anti-detection patches | Automated scraping, bot-deterrent bypass |
-| **Profile** | `profile` | Launches Playwright with a persistent profile directory | Reusable sessions across restarts |
+| Mode        | `BROWSER_MODE` | Launch                                                    | Use case                                              |
+| ----------- | -------------- | --------------------------------------------------------- | ----------------------------------------------------- |
+| **User**    | `user`         | Connects to an existing browser via CDP                   | Persistent profiles, logged-in sessions, manual setup |
+| **Stealth** | `stealth`      | Launches ephemeral Playwright with anti-detection patches | Automated scraping, bot-deterrent bypass              |
+| **Profile** | `profile`      | Launches Playwright with a persistent profile directory   | Reusable sessions across restarts                     |
 
 ## Security & Behaviour
 

@@ -153,7 +153,7 @@ test('selectPreferred uses scoreFn for highestScore', () => {
 
 test('deduplicateCorpus runs all three layers in sequence', async () => {
   const config = {
-    layers: { url: true, fingerprint: true, semantic: true },
+    layers: { url: true, fingerprint: true, semantic: true, entityOverlap: false },
     fingerprintThreshold: 0.95,
     semanticThreshold: 0.85,
     preferKeep: 'mostComplete' as const,
@@ -175,7 +175,7 @@ test('deduplicateCorpus runs all three layers in sequence', async () => {
 
 test('deduplicateCorpus handles disabled layers', async () => {
   const config = {
-    layers: { url: true, fingerprint: false, semantic: false },
+    layers: { url: true, fingerprint: false, semantic: false, entityOverlap: false },
     fingerprintThreshold: 0.95,
     semanticThreshold: 0.85,
     preferKeep: 'mostComplete' as const,

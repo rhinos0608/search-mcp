@@ -22,7 +22,7 @@ test('prepareCorpus applies URL dedup when dedupeConfig.layers.url is true', () 
     adapter: 'text',
     documents: [doc1, doc2],
     dedupeConfig: {
-      layers: { url: true, fingerprint: false, semantic: false },
+      layers: { url: true, fingerprint: false, semantic: false, entityOverlap: false },
       fingerprintThreshold: 0.95,
       semanticThreshold: 0.9,
       preferKeep: 'mostComplete',
@@ -60,7 +60,7 @@ test('prepareCorpus applies fingerprint dedup when layer enabled', () => {
     adapter: 'text',
     documents: [doc1, doc2, doc3],
     dedupeConfig: {
-      layers: { url: false, fingerprint: true, semantic: false },
+      layers: { url: false, fingerprint: true, semantic: false, entityOverlap: false },
       fingerprintThreshold: 0.95,
       semanticThreshold: 0.9,
       preferKeep: 'mostComplete',
@@ -86,7 +86,7 @@ test('prepareCorpus handles empty documents with dedupeConfig', () => {
     adapter: 'text',
     documents: [],
     dedupeConfig: {
-      layers: { url: true, fingerprint: true, semantic: false },
+      layers: { url: true, fingerprint: true, semantic: false, entityOverlap: false },
       fingerprintThreshold: 0.95,
       semanticThreshold: 0.9,
       preferKeep: 'mostComplete',

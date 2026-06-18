@@ -18,9 +18,9 @@ export function getVersion(): string {
     // import.meta.url is the file URL of *this* compiled module.
     // In dev (tsx):  file://.../src/version.ts   → ../package.json
     // In prod:       file://.../dist/version.js  → ../package.json
-    const pkg = JSON.parse(
-      readFileSync(new URL('../package.json', import.meta.url), 'utf-8'),
-    ) as { version?: string };
+    const pkg = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf-8')) as {
+      version?: string;
+    };
     cached = typeof pkg.version === 'string' && pkg.version.length > 0 ? pkg.version : '0.0.0';
   } catch (err) {
     logger.error(err, 'Failed to read package.json for version');

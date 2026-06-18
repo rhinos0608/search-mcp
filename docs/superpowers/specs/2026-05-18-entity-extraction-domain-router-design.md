@@ -15,6 +15,7 @@ The current deep-research system treats every query generically:
 - **Decomposition** (`ORCHESTRATOR_DECOMPOSE`) generates sub-questions from the raw query text without grounding in concrete entities, producing vague or redundant sub-questions.
 
 LearningCircuit's `local-deep-research` solves this with:
+
 1. **Entity extraction** (`BrowseCompQuestionGenerator._extract_entities`) — regex/LLM extraction of temporal, numerical, name, location, and descriptor entities, used to generate targeted search queries.
 2. **Domain-aware routing** (`REACT_SYSTEM_PROMPT` tool-selection table) — a domain-to-backend mapping that sends medical queries to PubMed, scientific queries to arXiv, etc.
 
@@ -85,11 +86,11 @@ User Query
 // src/research/entityExtractor.ts
 
 export interface ExtractedEntities {
-  temporal: string[];      // years, date ranges, months
-  numerical: string[];     // stats, counts, percentages, units
-  names: string[];         // proper nouns, orgs, products, people
-  locations: string[];     // places, institutions, geographic features
-  descriptors: string[];   // key topic terms (stopword-filtered)
+  temporal: string[]; // years, date ranges, months
+  numerical: string[]; // stats, counts, percentages, units
+  names: string[]; // proper nouns, orgs, products, people
+  locations: string[]; // places, institutions, geographic features
+  descriptors: string[]; // key topic terms (stopword-filtered)
 }
 
 /** Extract entities from a query using regex + heuristics. O(n) on query length. */
@@ -107,18 +108,18 @@ export function generateEntityBasedQueries(
 
 ### 5.2 Heuristic Patterns
 
-| Category | Pattern | Example |
-|----------|---------|---------|
-| Temporal | `\b(19|20)\d{2}(?:\s*[-–]\s*(19|20)\d{2})?\b` | "2023", "2018–2023" |
-| Numerical | `\b\d+(?:\.\d+)?(?:%\|ms\|MB\|km\|million\|billion)\b` | "84.5%", "300ms" |
-| Names | Capitalized sequences of 2–4 words not starting a sentence | "Plastic Man", "Dartmouth College" |
-| Locations | Capitalized word after preposition + location indicator | "in Pennsylvania", "at the Grand Canyon" |
-| Descriptors | Lowercase content words (nouns, verbs, adjectives) after stopword removal | "fusion energy", "attention mechanism" |
+| Category    | Pattern                                                                   | Example                                  |
+| ----------- | ------------------------------------------------------------------------- | ---------------------------------------- |
+| Temporal    | `\b(19\|20)\d{2}(?:\s*[-–]\s*(19\|20)\d{2})?\b`                           | "2023", "2018–2023"                      |
+| Numerical   | `\b\d+(?:\.\d+)?(?:%\|ms\|MB\|km\|million\|billion)\b`                    | "84.5%", "300ms"                         |
+| Names       | Capitalized sequences of 2–4 words not starting a sentence                | "Plastic Man", "Dartmouth College"       |
+| Locations   | Capitalized word after preposition + location indicator                   | "in Pennsylvania", "at the Grand Canyon" |
+| Descriptors | Lowercase content words (nouns, verbs, adjectives) after stopword removal | "fusion energy", "attention mechanism"   |
 
 ### 5.3 Output Format
 
 ```ts
-extractEntities("What is the latency of the new scheduler released by Google in 2024?")
+extractEntities('What is the latency of the new scheduler released by Google in 2024?');
 // => {
 //   temporal: ["2024"],
 //   numerical: [],
@@ -131,6 +132,7 @@ extractEntities("What is the latency of the new scheduler released by Google in 
 ### 5.4 Query Generation
 
 `generateEntityBasedQueries` produces candidates by:
+
 1. Original query (always included)
 2. Name + descriptor combinations (e.g. "Google scheduler")
 3. Name + temporal (e.g. "Google 2024")
@@ -177,33 +179,30 @@ export type SourceType =
 
 export interface DomainRoute {
   category: DomainCategory;
-  confidence: number;           // 0–1
+  confidence: number; // 0–1
   primaryBackends: SourceType[];
   secondaryBackends: SourceType[];
   reasoning: string;
 }
 
 /** Route a query to the best backends. Fast keyword path; optional LLM fallback. */
-export function routeQuery(
-  query: string,
-  entities?: ExtractedEntities,
-): DomainRoute;
+export function routeQuery(query: string, entities?: ExtractedEntities): DomainRoute;
 ```
 
 ### 6.2 Keyword Heuristic Mapping
 
-| Domain | Keywords | Primary Backends | Secondary |
-|--------|----------|------------------|-----------|
-| medical | "treatment", "symptom", "clinical trial", "FDA", "drug" | pubmed, academic | web, wikipedia |
-| scientific | "paper", "arxiv", "study", "hypothesis", "experiment" | academic, arxiv | web, github |
-| technical | "API", "benchmark", "latency", "architecture" | github, documentation | academic, web |
-| current-events | "today", "breaking", "just announced", "2024" | news, web | reddit, hackernews |
-| background-knowledge | "what is", "define", "history of" | wikipedia, web | academic |
-| code | "repo", "github", "npm", "library", "implementation" | github, stackoverflow | documentation, web |
-| community-opinion | "reddit", "best", "vs", "review" | reddit, hackernews | youtube, web |
-| comparative | "compare", "vs", "difference between" | web, reddit | academic, github |
-| how-to | "how to", "tutorial", "guide", "setup" | documentation, stackoverflow | github, web |
-| general | (fallback) | web | academic, wikipedia |
+| Domain               | Keywords                                                | Primary Backends             | Secondary           |
+| -------------------- | ------------------------------------------------------- | ---------------------------- | ------------------- |
+| medical              | "treatment", "symptom", "clinical trial", "FDA", "drug" | pubmed, academic             | web, wikipedia      |
+| scientific           | "paper", "arxiv", "study", "hypothesis", "experiment"   | academic, arxiv              | web, github         |
+| technical            | "API", "benchmark", "latency", "architecture"           | github, documentation        | academic, web       |
+| current-events       | "today", "breaking", "just announced", "2024"           | news, web                    | reddit, hackernews  |
+| background-knowledge | "what is", "define", "history of"                       | wikipedia, web               | academic            |
+| code                 | "repo", "github", "npm", "library", "implementation"    | github, stackoverflow        | documentation, web  |
+| community-opinion    | "reddit", "best", "vs", "review"                        | reddit, hackernews           | youtube, web        |
+| comparative          | "compare", "vs", "difference between"                   | web, reddit                  | academic, github    |
+| how-to               | "how to", "tutorial", "guide", "setup"                  | documentation, stackoverflow | github, web         |
+| general              | (fallback)                                              | web                          | academic, wikipedia |
 
 ### 6.3 Confidence Scoring
 
@@ -233,6 +232,7 @@ how-to, general. Return JSON: {"category": "...", "confidence": 0.0-1.0}
 ### 7.1 Agent Strategy (`src/research/strategies/agentStrategy.ts`)
 
 **Changes:**
+
 1. Import `extractEntities`, `routeQuery`, `generateEntityBasedQueries`.
 2. In `analyze()`, before the ReAct loop:
    ```ts
@@ -248,12 +248,14 @@ how-to, general. Return JSON: {"category": "...", "confidence": 0.0-1.0}
 ### 7.2 Pipeline Strategy (`src/research/strategies/pipelineStrategy.ts`)
 
 **Changes:**
+
 1. In the decomposition phase, call `extractEntities(query)` and pass the result into the `ORCHESTRATOR_DECOMPOSE_V2` prompt.
 2. In the discovery phase, use `routeQuery(query, entities)` to set the initial `preferredBackends` for the first discovery round.
 
 ### 7.3 Prompt Updates (`src/research/llm/prompts.ts`)
 
 **New prompt:**
+
 ```ts
 export const ORCHESTRATOR_DECOMPOSE_V2 = `...
 Extracted entities from the query:
@@ -265,18 +267,20 @@ reference at least one extracted entity when relevant.
 ```
 
 **Updated prompt:**
+
 ```ts
 // WORKER_AGENT_INVESTIGATE — add domain route and entities preamble
 `Query domain: ${route.category} (confidence: ${route.confidence})
 Preferred source types: ${route.primaryBackends.join(', ')}
 Extracted entities: ${JSON.stringify(entities)}
 
-Plan a search strategy...`
+Plan a search strategy...`;
 ```
 
 ### 7.4 Orchestrator (`src/research/orchestrator.ts`)
 
 **Changes:**
+
 - Optionally pre-extract entities in `run()` before strategy selection. If the query is short or entity-poor, skip extraction to save time.
 - Pass `entities` and `route` into the `StrategyContext` so both strategies can access them.
 
@@ -287,6 +291,7 @@ Plan a search strategy...`
 ### 8.1 Unit Tests
 
 **`test/research/entityExtractor.test.ts`** (~30 test cases)
+
 - Temporal extraction: single year, year range, multiple years
 - Numerical extraction: percentages, units, counts
 - Name extraction: proper nouns, multi-word names, acronyms
@@ -296,6 +301,7 @@ Plan a search strategy...`
 - `generateEntityBasedQueries`: deduplication, maxQueries cap
 
 **`test/research/domainRouter.test.ts`** (~25 test cases)
+
 - Keyword-based classification: one test per domain
 - Confidence scoring: exact match vs partial match vs fallback
 - Entity-influenced routing: temporal entities boost current-events
@@ -305,10 +311,12 @@ Plan a search strategy...`
 ### 8.2 Integration Tests
 
 **`test/research/agentStrategy.test.ts`** (augment existing)
+
 - Verify that agent with entity extraction produces initial queries containing extracted entities.
 - Verify that agent system prompt includes domain classification.
 
 **`test/research/pipelineStrategy.test.ts`** (augment existing)
+
 - Verify that pipeline discovery phase uses routed backends for the first round.
 
 ---
@@ -325,6 +333,7 @@ Plan a search strategy...`
 ## 10. Rollback Plan
 
 Both modules are additive:
+
 - Remove imports from `agentStrategy.ts` and `pipelineStrategy.ts` → revert to existing behavior.
 - Delete `entityExtractor.ts` and `domainRouter.ts` → no other dependencies.
 - Prompt changes are versioned (`ORCHESTRATOR_DECOMPOSE_V2` is new; old prompt remains).

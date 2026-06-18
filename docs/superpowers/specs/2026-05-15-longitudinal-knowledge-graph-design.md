@@ -10,12 +10,12 @@
 
 ## Context
 
-| Version | Feature | Status |
-|---|---|---|
-| V4.0.0 | Deep Research Orchestration Engine | ✅ Shipped |
-| V5.0.0 | Persistent Corpus Indexes | ❌ Retired — replaced by this design |
-| V6.0.0 | HTTP Dashboard + Tailscale Integration | ✅ Shipped (undocumented in ROADMAP.md) |
-| **V7.0.0** | **Longitudinal Knowledge Graph** | 📐 This spec |
+| Version    | Feature                                | Status                                  |
+| ---------- | -------------------------------------- | --------------------------------------- |
+| V4.0.0     | Deep Research Orchestration Engine     | ✅ Shipped                              |
+| V5.0.0     | Persistent Corpus Indexes              | ❌ Retired — replaced by this design    |
+| V6.0.0     | HTTP Dashboard + Tailscale Integration | ✅ Shipped (undocumented in ROADMAP.md) |
+| **V7.0.0** | **Longitudinal Knowledge Graph**       | 📐 This spec                            |
 
 The V5 "corpus indexes" abstraction is retired. The knowledge graph is strictly more capable: a current corpus is a projection of the event log, so building corpus indexes first and adding a graph layer later would mean two persistence abstractions for one underlying need. This design replaces both.
 
@@ -92,40 +92,41 @@ CREATE INDEX kg_events_batch_id  ON kg_events(batch_id);
 
 IDs are explicit in payloads — every event that creates an entity, edge, family, or source includes its object ID in the payload. Do not rely on the `entity_id` column as the sole ID reference.
 
-| Event | Payload summary | Rollback class |
-|---|---|---|
-| `RUN_STARTED` | run_id, topic, query, session_mode, artifact_paths | `audit_only` |
-| `RUN_COMPLETED` | run_id, entity_count, edge_count, source_count, duration_ms | `audit_only` |
-| `RUN_FAILED` | run_id, error_summary, extractor_version | `audit_only` |
-| `PROJECTION_REBUILT` | event_cursor, duration_ms, projection_version, schema_version | `audit_only` |
-| `NODE_ADDED` | **node_id**, label, type, extraction_confidence, source_id | `pure_run_local` |
-| `NODE_RELABELED` | **node_id**, old_label, new_label, reason | `cross_run_mutation` |
-| `NODE_METADATA_UPDATED` | **node_id**, field, old_value, new_value | `cross_run_mutation` |
-| `EXTRACTION_CONFIDENCE_REVISED` | **node_id**, old_val, new_val, source_ids | `cross_run_mutation` |
-| `EDGE_ADDED` | **edge_id**, from_id, to_id, type, evidence_strength, evidence, source_id | `pure_run_local` |
-| `EDGE_REMOVED` | **edge_id**, reason | see note* |
-| `RELATIONSHIP_STRENGTH_REVISED` | **edge_id**, old_val, new_val, source_ids | `cross_run_mutation` |
-| `CONTRADICTION_FLAGGED` | claim_a_id, claim_b_id, contradiction_type, evidence_ids[], resolution_status | `pure_run_local` |
-| `ENTITY_MERGED` | from_id, **into_id**, reason, evidence | `cross_run_mutation` |
-| `ENTITY_SPLIT` | **split_node_id**, merged_event_id, reason, restored_label | `cross_run_mutation` |
-| `CLAIM_EXTRACTED` | raw_extraction, **source_id**, extractor_version | `audit_only` |
-| `EXTRACTION_FAILED` | input_summary, error_summary, extractor_version | `audit_only` |
-| `SOURCE_ADDED` | **source_id**, url, canonical_url, domain, source_kind, content_hash, retrieved_at | `pure_run_local` |
-| `SOURCE_CHANGED` | **source_id**, url, old_content_hash, new_content_hash, retrieved_at | `cross_run_mutation` |
-| `SOURCE_RETRACTED` | **source_id**, reason_type, reason, observed_at | `cross_run_mutation` |
-| `FAMILY_CLASSIFIED` | entity_id, **family_id**, classifier_version, confidence | `pure_run_local` |
-| `FAMILY_CREATED` | **family_id**, label, description, classifier_version | see note† |
-| `FAMILY_RELATED` | **relation_id**, family_a, family_b, relation_type, evidence | `pure_run_local` |
-| `FAMILY_RELATION_REMOVED` | **relation_id**, reason | `cross_run_mutation` |
-| `FAMILY_RENAMED` | **family_id**, old_label, new_label, reason | `cross_run_mutation` |
-| `FAMILY_MERGED` | from_id, **into_id**, reason | `cross_run_mutation` |
-| `RUN_ROLLED_BACK` | run_id | `audit_only` |
+| Event                           | Payload summary                                                                    | Rollback class       |
+| ------------------------------- | ---------------------------------------------------------------------------------- | -------------------- |
+| `RUN_STARTED`                   | run_id, topic, query, session_mode, artifact_paths                                 | `audit_only`         |
+| `RUN_COMPLETED`                 | run_id, entity_count, edge_count, source_count, duration_ms                        | `audit_only`         |
+| `RUN_FAILED`                    | run_id, error_summary, extractor_version                                           | `audit_only`         |
+| `PROJECTION_REBUILT`            | event_cursor, duration_ms, projection_version, schema_version                      | `audit_only`         |
+| `NODE_ADDED`                    | **node_id**, label, type, extraction_confidence, source_id                         | `pure_run_local`     |
+| `NODE_RELABELED`                | **node_id**, old_label, new_label, reason                                          | `cross_run_mutation` |
+| `NODE_METADATA_UPDATED`         | **node_id**, field, old_value, new_value                                           | `cross_run_mutation` |
+| `EXTRACTION_CONFIDENCE_REVISED` | **node_id**, old_val, new_val, source_ids                                          | `cross_run_mutation` |
+| `EDGE_ADDED`                    | **edge_id**, from_id, to_id, type, evidence_strength, evidence, source_id          | `pure_run_local`     |
+| `EDGE_REMOVED`                  | **edge_id**, reason                                                                | see note\*           |
+| `RELATIONSHIP_STRENGTH_REVISED` | **edge_id**, old_val, new_val, source_ids                                          | `cross_run_mutation` |
+| `CONTRADICTION_FLAGGED`         | claim_a_id, claim_b_id, contradiction_type, evidence_ids[], resolution_status      | `pure_run_local`     |
+| `ENTITY_MERGED`                 | from_id, **into_id**, reason, evidence                                             | `cross_run_mutation` |
+| `ENTITY_SPLIT`                  | **split_node_id**, merged_event_id, reason, restored_label                         | `cross_run_mutation` |
+| `CLAIM_EXTRACTED`               | raw_extraction, **source_id**, extractor_version                                   | `audit_only`         |
+| `EXTRACTION_FAILED`             | input_summary, error_summary, extractor_version                                    | `audit_only`         |
+| `SOURCE_ADDED`                  | **source_id**, url, canonical_url, domain, source_kind, content_hash, retrieved_at | `pure_run_local`     |
+| `SOURCE_CHANGED`                | **source_id**, url, old_content_hash, new_content_hash, retrieved_at               | `cross_run_mutation` |
+| `SOURCE_RETRACTED`              | **source_id**, reason_type, reason, observed_at                                    | `cross_run_mutation` |
+| `FAMILY_CLASSIFIED`             | entity_id, **family_id**, classifier_version, confidence                           | `pure_run_local`     |
+| `FAMILY_CREATED`                | **family_id**, label, description, classifier_version                              | see note†            |
+| `FAMILY_RELATED`                | **relation_id**, family_a, family_b, relation_type, evidence                       | `pure_run_local`     |
+| `FAMILY_RELATION_REMOVED`       | **relation_id**, reason                                                            | `cross_run_mutation` |
+| `FAMILY_RENAMED`                | **family_id**, old_label, new_label, reason                                        | `cross_run_mutation` |
+| `FAMILY_MERGED`                 | from_id, **into_id**, reason                                                       | `cross_run_mutation` |
+| `RUN_ROLLED_BACK`               | run_id                                                                             | `audit_only`         |
 
 \*`EDGE_REMOVED` is `pure_run_local` if the edge was added in the same run; `cross_run_mutation` if it predates the run. Resolved at rollback time from the original edge's `run_id`.
 
 †`FAMILY_CREATED` is `pure_run_local` if no subsequent run's entities adopt the family before rollback. If later runs have `FAMILY_CLASSIFIED` events pointing to the family, it becomes `cross_run_mutation` and requires compensation.
 
 **Versioning:**
+
 - `event_version` (on the row) = payload schema version; bumps when JSON shape changes
 - `extractor_version` (in payload) = logic version; bumps when extraction prompt changes without changing schema
 - Projection builder uses per-version adapter functions: `normalizeToLatest(event)` dispatches by `event_type + event_version`
@@ -134,35 +135,40 @@ IDs are explicit in payloads — every event that creates an entity, edge, famil
 `publisher_retraction | content_removed | retrieval_failed | user_invalidated | duplicate | replaced | malicious | low_quality`
 
 **Contradiction taxonomy:**
+
 ```typescript
 type ContradictionType =
-  | 'direct'               // mutually exclusive claims
-  | 'temporal'             // true at different times
-  | 'scope'                // different applicability domains
-  | 'numeric'              // conflicting quantitative claims
-  | 'source_disagreement'  // two sources report opposing facts
-  | 'terminology';         // same label, different meaning
+  | 'direct' // mutually exclusive claims
+  | 'temporal' // true at different times
+  | 'scope' // different applicability domains
+  | 'numeric' // conflicting quantitative claims
+  | 'source_disagreement' // two sources report opposing facts
+  | 'terminology'; // same label, different meaning
 
 type ContradictionResolutionStatus =
-  | 'unresolved' | 'resolved' | 'superseded' | 'source_error' | 'scope_distinction';
+  | 'unresolved'
+  | 'resolved'
+  | 'superseded'
+  | 'source_error'
+  | 'scope_distinction';
 ```
 
 ### Rollback Projection Semantics
 
-| Class | Projection rule | Compensation needed? |
-|---|---|---|
-| `pure_run_local` | Projection ignores these events when `RUN_ROLLED_BACK { run_id }` exists | No |
-| `cross_run_mutation` | Requires explicit compensation events before projection excludes them | Yes |
-| `audit_only` | Always visible in event history; never projected to graph tables | No |
+| Class                | Projection rule                                                          | Compensation needed? |
+| -------------------- | ------------------------------------------------------------------------ | -------------------- |
+| `pure_run_local`     | Projection ignores these events when `RUN_ROLLED_BACK { run_id }` exists | No                   |
+| `cross_run_mutation` | Requires explicit compensation events before projection excludes them    | Yes                  |
+| `audit_only`         | Always visible in event history; never projected to graph tables         | No                   |
 
 **Compensation required for `cross_run_mutation` events:**
 
-| Original event | Compensation |
-|---|---|
-| `ENTITY_MERGED` (pre-existing `from_id`) | `ENTITY_SPLIT` — projection resurrects `from_id`, re-assigns pre-merge edges |
+| Original event                               | Compensation                                                                                   |
+| -------------------------------------------- | ---------------------------------------------------------------------------------------------- |
+| `ENTITY_MERGED` (pre-existing `from_id`)     | `ENTITY_SPLIT` — projection resurrects `from_id`, re-assigns pre-merge edges                   |
 | `FAMILY_CREATED` (adopted by surviving runs) | `FAMILY_CLASSIFIED` with surviving run's run_id; family persists with re-attributed provenance |
-| `FAMILY_CREATED` (zero surviving members) | No compensation; projection ignores via run filter |
-| `SOURCE_CHANGED`, `SOURCE_RETRACTED` | Flagged for manual review; no automatic compensation |
+| `FAMILY_CREATED` (zero surviving members)    | No compensation; projection ignores via run filter                                             |
+| `SOURCE_CHANGED`, `SOURCE_RETRACTED`         | Flagged for manual review; no automatic compensation                                           |
 
 **V7.0 ENTITY_SPLIT rule:** split restores the original node and its pre-merge edges. Evidence and aliases added to `into_id` after the merge remain on `into_id`. A `ROLLBACK_FAMILY_REATTRIBUTED` warning is emitted for any post-merge evidence that cannot be cleanly split. V7.1+ can accept `reattribute_event_ids[]` for explicit migration.
 
@@ -247,6 +253,7 @@ CREATE INDEX kg_event_refs_event_id ON kg_event_refs(event_id);
 **Rebuild strategy:** drop-and-refill inside a single SQLite transaction. Readers see either the old complete projection or the new one — never a partially-built state.
 
 **Rebuild triggers:**
+
 - Primary: run completion (`kg_runs.status → completed`)
 - Fallback: every 500 events, or 24 hours (for long-running or failed runs)
 
@@ -357,29 +364,26 @@ Two schema levels: the **LLM output schema** (what the model returns) and the **
 
 ```typescript
 const LLMEntityZ = z.object({
-  local_id:              z.string(),   // pass-scoped, e.g. "e1"
-  label:                 z.string(),
-  type:                  z.enum([
-    'concept', 'claim', 'source', 'person', 'org',
-    'method', 'dataset', 'work'
-  ]),
+  local_id: z.string(), // pass-scoped, e.g. "e1"
+  label: z.string(),
+  type: z.enum(['concept', 'claim', 'source', 'person', 'org', 'method', 'dataset', 'work']),
   extraction_confidence: z.number().min(0).max(1),
-    // "how confident are you this entity is correctly identified from the source text,
-    //  independent of source reliability"
-  evidence:              z.string(),   // intended verbatim quote from source text
+  // "how confident are you this entity is correctly identified from the source text,
+  //  independent of source reliability"
+  evidence: z.string(), // intended verbatim quote from source text
 });
 
 const LLMRelationshipZ = z.object({
-  from_id:           z.string(),   // references LLMEntityZ.local_id
-  to_id:             z.string(),
-  type:              z.enum(['supports', 'contradicts', 'explains', 'implements']),
+  from_id: z.string(), // references LLMEntityZ.local_id
+  to_id: z.string(),
+  type: z.enum(['supports', 'contradicts', 'explains', 'implements']),
   evidence_strength: z.number().min(0).max(1),
-    // "how strongly does this evidence support the relationship claim"
-  evidence:          z.string(),
+  // "how strongly does this evidence support the relationship claim"
+  evidence: z.string(),
 });
 
 const LLMExtractionResultZ = z.object({
-  entities:      z.array(LLMEntityZ),
+  entities: z.array(LLMEntityZ),
   relationships: z.array(LLMRelationshipZ),
 });
 ```
@@ -388,7 +392,7 @@ const LLMExtractionResultZ = z.object({
 
 ```typescript
 interface NormalizedEntity extends z.infer<typeof LLMEntityZ> {
-  evidence_verbatim: boolean;  // set by substring check below
+  evidence_verbatim: boolean; // set by substring check below
 }
 interface NormalizedRelationship extends z.infer<typeof LLMRelationshipZ> {
   evidence_verbatim: boolean;
@@ -396,6 +400,7 @@ interface NormalizedRelationship extends z.infer<typeof LLMRelationshipZ> {
 ```
 
 **Post-extraction validation:**
+
 1. All `from_id`/`to_id` in relationships must resolve to a `local_id` in the same pass
 2. `evidence` substring-checked against source text (light whitespace/punctuation normalisation):
    - Match → `evidence_verbatim: true`
@@ -406,13 +411,13 @@ interface NormalizedRelationship extends z.infer<typeof LLMRelationshipZ> {
 
 **Relationship type-pair constraints** (invalid pairs → warning + edge dropped):
 
-| from type | to type | allowed edge types |
-|---|---|---|
-| source | claim | supports, contradicts |
-| claim | claim | supports, contradicts, explains |
-| work | method | implements |
-| method | concept | implements, explains |
-| *(others)* | *(others)* | any |
+| from type  | to type    | allowed edge types              |
+| ---------- | ---------- | ------------------------------- |
+| source     | claim      | supports, contradicts           |
+| claim      | claim      | supports, contradicts, explains |
+| work       | method     | implements                      |
+| method     | concept    | implements, explains            |
+| _(others)_ | _(others)_ | any                             |
 
 ### CLAIM_EXTRACTED → NODE_ADDED Pipeline
 
@@ -438,12 +443,12 @@ Alias-aware to prevent duplicates after merges. Each `kg_node` carries an `alias
 
 Four timestamps are distinct and must not be conflated:
 
-| Field | Meaning | Where stored |
-|---|---|---|
-| `run.started_at` | When the research run began | `kg_runs.started_at` |
-| `source.retrieved_at` | When the source URL was fetched | `kg_sources.retrieved_at` |
-| `source.published_at` | When the source was published (from metadata) | `kg_sources.published_at` |
-| claim temporal scope | When the claim's subject applies | V7.1+ — not modelled in V7.0 |
+| Field                 | Meaning                                       | Where stored                 |
+| --------------------- | --------------------------------------------- | ---------------------------- |
+| `run.started_at`      | When the research run began                   | `kg_runs.started_at`         |
+| `source.retrieved_at` | When the source URL was fetched               | `kg_sources.retrieved_at`    |
+| `source.published_at` | When the source was published (from metadata) | `kg_sources.published_at`    |
+| claim temporal scope  | When the claim's subject applies              | V7.1+ — not modelled in V7.0 |
 
 In V7.0, `supersedes` family relations (pass 2 only) require temporal evidence at the source level: the superseding family's sources must have `published_at` (or `retrieved_at` as fallback) post-dating the superseded family's.
 
@@ -476,6 +481,7 @@ Before writing to `kg_pending_extractions`, content passes through the existing 
 **Startup recovery:** on startup, scan `kg_pending_extractions` for rows older than `maxIdleMs`. Group by `session_id` and flush as recovery runs. `kg_runs` rows stuck in non-terminal status (`extracting`, `canonicalizing`, `classifying`, `projecting`) are marked `failed` with `last_error: 'process_restart'`.
 
 **Hook failure isolation:**
+
 - Passive capture failure: log warning + metric; never fail the tool call
 - Explicit `knowledge_graph.ingest` failure: structured error in tool result
 - `deep_research` KG failure: append warning to `meta.knowledgeGraph`; return normal research result
@@ -496,37 +502,47 @@ The classifier always reads from the **previous** projection — projection rebu
 
 ```typescript
 const FamilySummaryZ = z.object({
-  id:          z.string(),
-  label:       z.string(),
+  id: z.string(),
+  label: z.string(),
   description: z.string(),
-  representative_entities: z.array(z.object({
-    label: z.string(),
-    type:  z.string(),
-  })).max(5),
+  representative_entities: z
+    .array(
+      z.object({
+        label: z.string(),
+        type: z.string(),
+      }),
+    )
+    .max(5),
 });
 
 const Pass1InputZ = z.object({
-  run_entities:       z.array(z.object({
-    entity_id:             z.string(),
-    label:                 z.string(),
-    type:                  z.string(),
-    extraction_confidence: z.number(),
-  })),
-  run_metadata:       z.object({ topic: z.string(), query: z.string() }),
-  candidate_families: z.array(FamilySummaryZ),  // top-K by embedding similarity, default K=10
+  run_entities: z.array(
+    z.object({
+      entity_id: z.string(),
+      label: z.string(),
+      type: z.string(),
+      extraction_confidence: z.number(),
+    }),
+  ),
+  run_metadata: z.object({ topic: z.string(), query: z.string() }),
+  candidate_families: z.array(FamilySummaryZ), // top-K by embedding similarity, default K=10
 });
 
 const Pass1OutputZ = z.object({
-  assignments: z.array(z.object({
-    entity_id: z.string(),
-    family_id: z.string(),
-  })),
-  new_candidates: z.array(z.object({
-    provisional_id: z.string(),
-    label:          z.string(),
-    description:    z.string(),
-    entity_ids:     z.array(z.string()),
-  })),
+  assignments: z.array(
+    z.object({
+      entity_id: z.string(),
+      family_id: z.string(),
+    }),
+  ),
+  new_candidates: z.array(
+    z.object({
+      provisional_id: z.string(),
+      label: z.string(),
+      description: z.string(),
+      entity_ids: z.array(z.string()),
+    }),
+  ),
 });
 ```
 
@@ -539,6 +555,7 @@ distinct run_ids >= 2  AND  entity_count >= 5
 ```
 
 **High-confidence single-run override** — one run is sufficient **only if all hold:**
+
 - All entities: `extraction_confidence >= 0.85`
 - `evidence_verbatim` ratio >= 0.7
 - At least 3 distinct source IDs in the run
@@ -547,6 +564,7 @@ distinct run_ids >= 2  AND  entity_count >= 5
 Note: `extraction_confidence` is extraction quality, not source reliability. A high-confidence extraction from a single unreliable source can still satisfy this check. The multi-source requirement reduces but does not eliminate the risk. Multi-run threshold is the safer default path.
 
 **On solidification:**
+
 1. `FAMILY_CREATED { family_id, label, description, classifier_version }`
 2. `FAMILY_CLASSIFIED × N` (batch for all queued assignments)
 3. `kg_pending_families` + `kg_pending_assignments` rows deleted
@@ -561,10 +579,10 @@ Entities can belong to multiple families. `kg_nodes.primary_family_id` is a conv
 
 ```typescript
 type FamilyRelationType =
-  | 'adjacent'    // symmetric
+  | 'adjacent' // symmetric
   | 'contradicts' // symmetric
-  | 'parent'      // directional; emit on broader family
-  | 'child'       // directional; always paired with parent
+  | 'parent' // directional; emit on broader family
+  | 'child' // directional; always paired with parent
   | 'supersedes'; // directional; temporal evidence required (pass 2 only)
 ```
 
@@ -599,10 +617,10 @@ type WarningCode =
   | 'CONSOLIDATION_PENDING';
 
 interface StructuredWarning {
-  code:     WarningCode;
+  code: WarningCode;
   severity: 'info' | 'warn' | 'error';
-  message:  string;
-  source?:  string;
+  message: string;
+  source?: string;
 }
 ```
 
@@ -610,18 +628,18 @@ All graph read tools include `warnings: StructuredWarning[]` in their output.
 
 ### V7.0.0 Tool Set
 
-| Tool | Description |
-|---|---|
-| `knowledge_graph.ingest` | Ingest content into the knowledge graph |
-| `knowledge_graph.query` | Semantic search, entity lookup, relationship traversal |
-| `knowledge_graph.entity_lookup_batch` | Resolve a list of entity IDs → labeled nodes |
-| `knowledge_graph.status` | Health, run state, projection age, storage |
-| `knowledge_graph.rebuild` | On-demand projection rebuild |
-| `knowledge_graph.family_list` | All families with stats and merge candidates |
-| `knowledge_graph.family_get` | Full family detail: entities, sources, run history, relations |
-| `knowledge_graph.family_merge` | Manually emit `FAMILY_MERGED` |
-| `knowledge_graph.run_list` | Filterable, paginated list of research runs |
-| `knowledge_graph.run_rollback` | Compensating-event rollback with dry-run mode |
+| Tool                                  | Description                                                   |
+| ------------------------------------- | ------------------------------------------------------------- |
+| `knowledge_graph.ingest`              | Ingest content into the knowledge graph                       |
+| `knowledge_graph.query`               | Semantic search, entity lookup, relationship traversal        |
+| `knowledge_graph.entity_lookup_batch` | Resolve a list of entity IDs → labeled nodes                  |
+| `knowledge_graph.status`              | Health, run state, projection age, storage                    |
+| `knowledge_graph.rebuild`             | On-demand projection rebuild                                  |
+| `knowledge_graph.family_list`         | All families with stats and merge candidates                  |
+| `knowledge_graph.family_get`          | Full family detail: entities, sources, run history, relations |
+| `knowledge_graph.family_merge`        | Manually emit `FAMILY_MERGED`                                 |
+| `knowledge_graph.run_list`            | Filterable, paginated list of research runs                   |
+| `knowledge_graph.run_rollback`        | Compensating-event rollback with dry-run mode                 |
 
 **Deferred V7.1+:** `graph_query_temporal`, `graph_diff`, `graph_consolidate`, `graph_export`.
 
@@ -871,32 +889,33 @@ One-way and irreversible in V7.0. Always run with `dry_run: true` first.
 
 ```typescript
 interface KnowledgeGraphConfig {
-  enabled:   boolean;             // default false
-  dbPath?:   string;              // default ~/.cache/search-mcp/kg/kg.sqlite
+  enabled: boolean; // default false
+  dbPath?: string; // default ~/.cache/search-mcp/kg/kg.sqlite
   projection: {
-    maxEvents: number;            // default 500
-    maxAgeMs:  number;            // default 86_400_000 (24h)
+    maxEvents: number; // default 500
+    maxAgeMs: number; // default 86_400_000 (24h)
   };
   solidification: {
-    minRuns:           number;    // default 2
-    minEntities:       number;    // default 5
-    highConfidenceOverride: number;  // default 0.85
-    minVerbatimRatio:  number;    // default 0.7 (single-run override)
-    minSourceCount:    number;    // default 3 (single-run override)
+    minRuns: number; // default 2
+    minEntities: number; // default 5
+    highConfidenceOverride: number; // default 0.85
+    minVerbatimRatio: number; // default 0.7 (single-run override)
+    minSourceCount: number; // default 3 (single-run override)
   };
   session: {
-    maxBufferItems: number;       // default 20
-    maxIdleMs:      number;       // default 300_000 (5 min)
-    captureStdio:   boolean;      // default true
+    maxBufferItems: number; // default 20
+    maxIdleMs: number; // default 300_000 (5 min)
+    captureStdio: boolean; // default true
   };
   consolidation: {
-    cadenceMs:    number;         // default 604_800_000 (7 days)
-    annThreshold: number;         // default 200; above this family count, use ANN
+    cadenceMs: number; // default 604_800_000 (7 days)
+    annThreshold: number; // default 200; above this family count, use ANN
   };
 }
 ```
 
 **KG vs HTTP_PORT:**
+
 - `enabled: true` is independent of `HTTP_PORT` — graph tools work in both HTTP and stdio modes
 - Dashboard admin UI requires `HTTP_PORT`
 - Passive stdio session accumulation requires `enabled: true` AND `session.captureStdio: true`
@@ -972,13 +991,13 @@ On flush: all buffered results batch-extracted under one `run_id` with `session_
 
 ## Roadmap Update
 
-| Version | Feature | Status |
-|---|---|---|
-| V4.0.0 | Deep Research Orchestration Engine | ✅ Shipped |
-| V5.0.0 | Persistent Corpus Indexes | ❌ Retired — replaced by V7.0.0 |
-| V6.0.0 | HTTP Dashboard + Tailscale Integration | ✅ Shipped |
-| **V7.0.0** | **Longitudinal Knowledge Graph** | 📐 Specced |
-| V7.1+ | graph_consolidate, graph_query_temporal, graph_diff, graph_export, KG-aware gap analysis, structured claim modeling, source snapshot versioning, LightRAG projection | 🔲 Planned |
+| Version    | Feature                                                                                                                                                              | Status                          |
+| ---------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------- |
+| V4.0.0     | Deep Research Orchestration Engine                                                                                                                                   | ✅ Shipped                      |
+| V5.0.0     | Persistent Corpus Indexes                                                                                                                                            | ❌ Retired — replaced by V7.0.0 |
+| V6.0.0     | HTTP Dashboard + Tailscale Integration                                                                                                                               | ✅ Shipped                      |
+| **V7.0.0** | **Longitudinal Knowledge Graph**                                                                                                                                     | 📐 Specced                      |
+| V7.1+      | graph_consolidate, graph_query_temporal, graph_diff, graph_export, KG-aware gap analysis, structured claim modeling, source snapshot versioning, LightRAG projection | 🔲 Planned                      |
 
 ---
 

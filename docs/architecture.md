@@ -201,6 +201,7 @@ Start: `docker compose up -d`
 ### `src/tools/`
 
 Tool registration follows two patterns:
+
 - **Standalone tools** (`standalone/`) — one file per tool, exports a `register*` function
 - **Family tools** (`families/`) — one file per family, uses `registerFamily()` for action-discriminated tools (e.g. `youtube` with `search | transcript | semantic` actions)
 

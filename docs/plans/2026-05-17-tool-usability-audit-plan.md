@@ -21,24 +21,24 @@ Recommended north star:
 
 Registered visible tools in a typical configured server:
 
-| Tool | Shape | Audit note |
-|---|---:|---|
-| `web_search` | standalone | Good first step, but overlaps with research, semantic crawl, packages, Reddit, GitHub, and deep research workflows. |
-| `web_read` | standalone | Clear, but callers must know when a plain page read is enough and when focused extraction, crawl, or browser extraction is better. |
-| `web_crawl` | standalone | Low-level Crawl4AI wrapper; many crawler implementation knobs leak into the public schema. |
-| `semantic_crawl` | standalone | Powerful but cognitively heavy: source union, crawl options, RAG options, reranking, output budgeting, and corpus persistence are all visible. |
-| `semantic_crawl_list_corpora` / `semantic_crawl_inspect_corpus` | standalone | Useful cache utilities, but require understanding corpus workflow. |
-| `fetch_focus` | standalone | Strong workflow concept; overlaps with `web_read`, `semantic_crawl`, and browser extraction. |
-| `deep_research` | action family in one tool | Powerful but the `start` / `poll` / `save` job protocol is friction for common one-shot use. |
-| `semantic_jobs` | standalone | Strong vertical workflow; many provider/config options exposed. |
-| `github` | action family | Useful consolidation; callers still need to know action names and repo locator shapes. |
-| `youtube` | action family | Good grouping; could be easier with URL-first transcript/search defaults. |
-| `reddit` | action family | Good grouping; comments ergonomics improved, but URL/post/subreddit variants still need tolerant input handling. |
-| `research` | large action family | Most confusing non-browser family: many source names compete with generic web/research intent. |
-| `packages` | action family | Simple; good candidate for field normalization and cross-tool output consistency. |
-| `browser` | very large action family | Most complex visible tool. Low-level automation and high-level extraction live in one schema. |
-| `knowledge_graph` | action family | Mixes user workflows and operational/admin actions; should be made clearer through action naming, descriptions, and safety metadata. |
-| `health_check` | standalone | Useful for operators, but not a user workflow. |
+| Tool                                                            |                     Shape | Audit note                                                                                                                                     |
+| --------------------------------------------------------------- | ------------------------: | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| `web_search`                                                    |                standalone | Good first step, but overlaps with research, semantic crawl, packages, Reddit, GitHub, and deep research workflows.                            |
+| `web_read`                                                      |                standalone | Clear, but callers must know when a plain page read is enough and when focused extraction, crawl, or browser extraction is better.             |
+| `web_crawl`                                                     |                standalone | Low-level Crawl4AI wrapper; many crawler implementation knobs leak into the public schema.                                                     |
+| `semantic_crawl`                                                |                standalone | Powerful but cognitively heavy: source union, crawl options, RAG options, reranking, output budgeting, and corpus persistence are all visible. |
+| `semantic_crawl_list_corpora` / `semantic_crawl_inspect_corpus` |                standalone | Useful cache utilities, but require understanding corpus workflow.                                                                             |
+| `fetch_focus`                                                   |                standalone | Strong workflow concept; overlaps with `web_read`, `semantic_crawl`, and browser extraction.                                                   |
+| `deep_research`                                                 | action family in one tool | Powerful but the `start` / `poll` / `save` job protocol is friction for common one-shot use.                                                   |
+| `semantic_jobs`                                                 |                standalone | Strong vertical workflow; many provider/config options exposed.                                                                                |
+| `github`                                                        |             action family | Useful consolidation; callers still need to know action names and repo locator shapes.                                                         |
+| `youtube`                                                       |             action family | Good grouping; could be easier with URL-first transcript/search defaults.                                                                      |
+| `reddit`                                                        |             action family | Good grouping; comments ergonomics improved, but URL/post/subreddit variants still need tolerant input handling.                               |
+| `research`                                                      |       large action family | Most confusing non-browser family: many source names compete with generic web/research intent.                                                 |
+| `packages`                                                      |             action family | Simple; good candidate for field normalization and cross-tool output consistency.                                                              |
+| `browser`                                                       |  very large action family | Most complex visible tool. Low-level automation and high-level extraction live in one schema.                                                  |
+| `knowledge_graph`                                               |             action family | Mixes user workflows and operational/admin actions; should be made clearer through action naming, descriptions, and safety metadata.           |
+| `health_check`                                                  |                standalone | Useful for operators, but not a user workflow.                                                                                                 |
 
 ## Main usability problems
 
@@ -707,3 +707,4 @@ The plan is successful if:
 * Browser common actions are easier to inspect and call.
 * Research source routing is easier without removing direct source control.
 * Client integrations need less bespoke retry/recovery logic.
+```
