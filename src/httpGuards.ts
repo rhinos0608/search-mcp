@@ -94,7 +94,12 @@ export function assertSafeUrl(url: string, allowInternal = false): void {
     }
     if (hostname.startsWith('[')) {
       const inner = hostname.slice(1, -1).toLowerCase();
-      if (inner === '::1' || inner.startsWith('fe80') || inner.startsWith('fc00') || inner.startsWith('fd00')) {
+      if (
+        inner === '::1' ||
+        inner.startsWith('fe80') ||
+        inner.startsWith('fc00') ||
+        inner.startsWith('fd00')
+      ) {
         throw new Error(`Blocked request to private IPv6 address "${hostname}"`);
       }
       if (inner.startsWith('::ffff:')) {
@@ -126,7 +131,12 @@ export function assertSafeUrl(url: string, allowInternal = false): void {
   // Block IPv6 private ranges (::1, fe80::, fc00::, fd00::)
   if (hostname.startsWith('[')) {
     const inner = hostname.slice(1, -1).toLowerCase();
-    if (inner === '::1' || inner.startsWith('fe80') || inner.startsWith('fc00') || inner.startsWith('fd00')) {
+    if (
+      inner === '::1' ||
+      inner.startsWith('fe80') ||
+      inner.startsWith('fc00') ||
+      inner.startsWith('fd00')
+    ) {
       throw new Error(`Blocked request to private IPv6 address "${hostname}"`);
     }
     if (inner.startsWith('::ffff:')) {

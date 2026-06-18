@@ -2,22 +2,35 @@ import type { SearchConfig } from '../config.js';
 
 // ---------- Patch semantics ----------
 
-export type FieldPatch =
-  | { op: 'keep' }
-  | { op: 'set'; value: string }
-  | { op: 'clear' };
+export type FieldPatch = { op: 'keep' } | { op: 'set'; value: string } | { op: 'clear' };
 
 /** Allowed top-level mutable config keys. Unknown keys rejected by ConfigManager.update(). */
 export const MUTABLE_CONFIG_KEYS = new Set([
-  'searchBackend', 'brave', 'searxng', 'exa', 'tavily', 'youtube',
-  'stackexchange', 'github', 'reddit', 'crawl4ai', 'embeddingSidecar',
-  'domainTrust', 'scrubContent', 'llm', 'raga', 'duckduckgo',
-  'ollamaSearch', 'access',
+  'searchBackend',
+  'brave',
+  'searxng',
+  'exa',
+  'tavily',
+  'youtube',
+  'stackexchange',
+  'github',
+  'reddit',
+  'crawl4ai',
+  'embeddingSidecar',
+  'domainTrust',
+  'scrubContent',
+  'llm',
+  'raga',
+  'duckduckgo',
+  'ollamaSearch',
+  'access',
 ] as const);
 
 export type MutableConfigKey = typeof MUTABLE_CONFIG_KEYS extends Set<infer K> ? K : never;
 
-export type ConfigPatch = Partial<Record<MutableConfigKey, Record<string, FieldPatch> | FieldPatch>>;
+export type ConfigPatch = Partial<
+  Record<MutableConfigKey, Record<string, FieldPatch> | FieldPatch>
+>;
 
 // ---------- Access block ----------
 

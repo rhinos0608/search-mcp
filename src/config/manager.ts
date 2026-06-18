@@ -6,16 +6,29 @@ import { encryptConfig, decryptConfig } from './crypto.js';
 import { loadConfig, resetConfig } from '../config.js';
 import type { SearchConfig } from '../config.js';
 import { MUTABLE_CONFIG_KEYS } from './types.js';
-import type { AccessConfig, ConfigPatch, FieldPatch, ProviderTestResult, RedactedConfig } from './types.js';
+import type {
+  AccessConfig,
+  ConfigPatch,
+  FieldPatch,
+  ProviderTestResult,
+  RedactedConfig,
+} from './types.js';
 
 /** Fields whose string values are redacted in getRedacted() output. */
 const SECRET_LEAF_PATHS = new Set([
   'mcpApiKey',
-  'brave.apiKey', 'exa.apiKey', 'tavily.apiKey', 'youtube.apiKey',
-  'stackexchange.apiKey', 'github.token',
-  'reddit.clientId', 'reddit.clientSecret',
-  'crawl4ai.apiToken', 'embeddingSidecar.apiToken',
-  'llm.apiToken', 'raga.apiToken',
+  'brave.apiKey',
+  'exa.apiKey',
+  'tavily.apiKey',
+  'youtube.apiKey',
+  'stackexchange.apiKey',
+  'github.token',
+  'reddit.clientId',
+  'reddit.clientSecret',
+  'crawl4ai.apiToken',
+  'embeddingSidecar.apiToken',
+  'llm.apiToken',
+  'raga.apiToken',
 ]);
 
 /**
@@ -32,21 +45,27 @@ const SECRET_LEAF_PATHS = new Set([
  * - Arrays: replaced wholesale (not merged). If you need partial array
  *   updates, apply them before calling this function.
  */
-function deepMergePreferNonEmpty<T extends object>(
-  defaults: T,
-  raw: Partial<T>,
-): T {
+function deepMergePreferNonEmpty<T extends object>(defaults: T, raw: Partial<T>): T {
   const result = { ...defaults } as Record<string, unknown>;
   for (const [key, rawVal] of Object.entries(raw as Record<string, unknown>)) {
     if (rawVal === undefined) continue; // treat absent-in-raw as "use default"
     const defVal = (defaults as Record<string, unknown>)[key];
-    if (typeof rawVal === 'string' && rawVal === '' && typeof defVal === 'string' && defVal !== '') {
+    if (
+      typeof rawVal === 'string' &&
+      rawVal === '' &&
+      typeof defVal === 'string' &&
+      defVal !== ''
+    ) {
       // Empty raw placeholder — keep the default value from config.json/env
     } else if (rawVal === null && typeof defVal === 'string' && defVal !== '') {
       // Null raw with non-empty string default — keep the default
     } else if (
-      rawVal !== null && typeof rawVal === 'object' && !Array.isArray(rawVal) &&
-      defVal !== null && typeof defVal === 'object' && !Array.isArray(defVal)
+      rawVal !== null &&
+      typeof rawVal === 'object' &&
+      !Array.isArray(rawVal) &&
+      defVal !== null &&
+      typeof defVal === 'object' &&
+      !Array.isArray(defVal)
     ) {
       result[key] = deepMergePreferNonEmpty(
         defVal as Record<string, unknown>,
@@ -76,25 +95,29 @@ function redactValue(path: string, value: unknown): unknown {
 
 function applyFieldPatch(existing: unknown, patch: FieldPatch): unknown {
   switch (patch.op) {
-    case 'keep': return existing;
-    case 'set':  return patch.value;
-    case 'clear': return '';
+    case 'keep':
+      return existing;
+    case 'set':
+      return patch.value;
+    case 'clear':
+      return '';
   }
 }
 
 // ── Config value validation ────────────────────────────────────────────
 
 const VALID_SEARCH_BACKENDS = new Set([
-  'brave', 'searxng', 'exa', 'duckduckgo', 'ollama-search', 'tavily',
+  'brave',
+  'searxng',
+  'exa',
+  'duckduckgo',
+  'ollama-search',
+  'tavily',
 ]);
 
-const VALID_EMBEDDING_PROVIDERS = new Set([
-  'sidecar', 'ollama', 'transformers', 'openai',
-]);
+const VALID_EMBEDDING_PROVIDERS = new Set(['sidecar', 'ollama', 'transformers', 'openai']);
 
-const VALID_RAGA_PARSERS = new Set([
-  'auto', 'docling', 'paddleocr', 'mineru',
-]);
+const VALID_RAGA_PARSERS = new Set(['auto', 'docling', 'paddleocr', 'mineru']);
 
 /**
  * Validate critical config values after a dashboard patch.
@@ -129,10 +152,7 @@ function validateConfigValues(cfg: Record<string, unknown>): string | null {
   }
 
   // Boolean fields must actually be booleans (not strings like "true")
-  const booleanFields = [
-    'scrubContent',
-    'apiKeyClaimed',
-  ];
+  const booleanFields = ['scrubContent', 'apiKeyClaimed'];
   for (const field of booleanFields) {
     const val = cfg[field];
     if (val !== undefined && val !== null && typeof val !== 'boolean') {
@@ -169,14 +189,14 @@ function validateConfigValues(cfg: Record<string, unknown>): string | null {
 const MODULE_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
 
 export interface ConfigManagerOptions {
-  configDir?: string;  // defaults to directory containing this module's project root
+  configDir?: string; // defaults to directory containing this module's project root
 }
 
 export class ConfigKeyMissingError extends Error {
   constructor() {
     super(
       'SEARCH_MCP_CONFIG_KEY env var is required when config.enc exists. ' +
-      'Set it to your encryption password and restart.',
+        'Set it to your encryption password and restart.',
     );
     this.name = 'ConfigKeyMissingError';
   }
@@ -219,10 +239,7 @@ export class ConfigManager {
     //    config.enc was first created).
     resetConfig();
     const defaults = loadConfig();
-    this.config = deepMergePreferNonEmpty<SearchConfig>(
-      defaults,
-      raw,
-    );
+    this.config = deepMergePreferNonEmpty<SearchConfig>(defaults, raw);
   }
 
   get(): Readonly<SearchConfig> {

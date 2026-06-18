@@ -37,8 +37,8 @@ async function tryCli(): Promise<TailscaleStatus | null> {
     const self = (data.Self ?? {}) as Record<string, unknown>;
     const version = (data.Version as string | undefined) ?? undefined;
     const hostname = (self.HostName as string | undefined) ?? undefined;
-    const magicDnsName = ((self.DNSName as string | undefined) ?? '')
-      .replace(/\.$/, '') || undefined;
+    const magicDnsName =
+      ((self.DNSName as string | undefined) ?? '').replace(/\.$/, '') || undefined;
     const selfIp = ((self.TailscaleIPs as string[] | undefined) ?? [])[0] ?? undefined;
     const result: TailscaleStatus = {
       detected: true,

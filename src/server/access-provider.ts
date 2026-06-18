@@ -3,8 +3,11 @@ import type { AccessConfig, Visibility } from '../config/types.js';
 
 export type ExternalAccessProviderType = 'localhost' | 'manual' | 'tailscale';
 export type ProviderStatus =
-  | 'active' | 'configured_unverified' | 'detected_mismatch'
-  | 'unconfigured' | 'unavailable';
+  | 'active'
+  | 'configured_unverified'
+  | 'detected_mismatch'
+  | 'unconfigured'
+  | 'unavailable';
 export type RequestOrigin = 'loopback' | 'tailscale_serve' | 'public' | 'unknown';
 
 export interface ExternalAccessProvider {
@@ -19,13 +22,15 @@ export interface ExternalAccessProvider {
   warnings?: string[];
 }
 
-export type NormalizeResult =
-  | { ok: true; url: string }
-  | { ok: false; error: string };
+export type NormalizeResult = { ok: true; url: string } | { ok: false; error: string };
 
 export function normalizeBaseUrl(input: string): NormalizeResult {
   let parsed: URL;
-  try { parsed = new URL(input); } catch { return { ok: false, error: 'Invalid URL' }; }
+  try {
+    parsed = new URL(input);
+  } catch {
+    return { ok: false, error: 'Invalid URL' };
+  }
   if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:')
     return { ok: false, error: 'URL must use http: or https:' };
   if (parsed.username || parsed.password)
@@ -33,7 +38,10 @@ export function normalizeBaseUrl(input: string): NormalizeResult {
   if (parsed.search || parsed.hash)
     return { ok: false, error: 'URL must not contain query string or fragment' };
   if (parsed.pathname !== '/' && parsed.pathname !== '')
-    return { ok: false, error: 'URL path must be empty (e.g. https://example.com, not https://example.com/mcp)' };
+    return {
+      ok: false,
+      error: 'URL path must be empty (e.g. https://example.com, not https://example.com/mcp)',
+    };
   return { ok: true, url: parsed.origin };
 }
 
@@ -87,13 +95,23 @@ export function resolveAccessProvider(
 
   if (access.provider === 'manual') {
     const raw = access.manualBaseUrl ?? '';
-    if (!raw) return buildProvider('manual', localhost, 'loopback', 'unconfigured', { reason: 'manual_url_missing' });
+    if (!raw)
+      return buildProvider('manual', localhost, 'loopback', 'unconfigured', {
+        reason: 'manual_url_missing',
+      });
     const norm = normalizeBaseUrl(raw);
-    if (!norm.ok) return buildProvider('manual', localhost, 'loopback', 'unconfigured', { reason: norm.error });
-    const vis: Visibility = access.manualVisibility === 'unknown' ? 'custom' : (access.manualVisibility ?? 'custom');
-    const opts = access.manualVisibility === 'unknown'
-      ? { warnings: ['Visibility unknown — treat as custom; confirm with your network administrator'] }
-      : {};
+    if (!norm.ok)
+      return buildProvider('manual', localhost, 'loopback', 'unconfigured', { reason: norm.error });
+    const vis: Visibility =
+      access.manualVisibility === 'unknown' ? 'custom' : (access.manualVisibility ?? 'custom');
+    const opts =
+      access.manualVisibility === 'unknown'
+        ? {
+            warnings: [
+              'Visibility unknown — treat as custom; confirm with your network administrator',
+            ],
+          }
+        : {};
     return buildProvider('manual', norm.url, vis, 'configured_unverified', opts);
   }
 
@@ -122,10 +140,7 @@ export function resolveAccessProvider(
   return buildProvider('tailscale', tsBase, 'tailnet', 'active');
 }
 
-export function dashboardAllowed(
-  origin: RequestOrigin,
-  access: AccessConfig,
-): boolean {
+export function dashboardAllowed(origin: RequestOrigin, access: AccessConfig): boolean {
   if (origin === 'loopback' || origin === 'tailscale_serve') return true;
   if (origin === 'public' && access.exposeDashboardExternally) return true;
   if (origin === 'public' && access.tailscale.allowDashboardOverFunnel) return true;

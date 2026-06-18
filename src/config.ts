@@ -268,10 +268,11 @@ export interface SearchConfig {
   browser: BrowserConfig;
   rescoreWeights: RescoreConfig;
   challengeLatencyThreshold: number;
-  mcpApiKey?: string;   // Generated on first run; stored encrypted.
+  mcpApiKey?: string; // Generated on first run; stored encrypted.
   apiKeyClaimed: boolean; // True once the setup screen has been dismissed.
   access: AccessConfig; // External access configuration.
-  knowledgeGraph: KnowledgeGraphConfig;}
+  knowledgeGraph: KnowledgeGraphConfig;
+}
 
 const DEFAULTS: Omit<SearchConfig, 'rescoreWeights'> = {
   searchBackend: 'searxng',
@@ -387,7 +388,6 @@ const VALID_BACKENDS = new Set<string>([
   'ollama-search',
   'tavily',
 ]);
-
 
 type EnvConfig = Omit<
   Partial<SearchConfig>,
@@ -882,26 +882,26 @@ export function loadConfig(): SearchConfig {
     } else {
       try {
         const buf = readFileSync(encPath);
-        const encryptedConfig = (decryptConfig(buf, configKey) as SearchConfig) ?? {};
+        const encryptedConfig = decryptConfig(buf, configKey) as SearchConfig;
         // Deep merge encrypted config over JSON config with safety checks
         fileConfig = {
           ...fileConfig,
           ...encryptedConfig,
           github: {
             ...(fileConfig.github ?? {}),
-            ...(encryptedConfig?.github && typeof encryptedConfig.github === 'object' ? encryptedConfig.github : {}),
+            ...encryptedConfig.github,
           },
           reddit: {
             ...(fileConfig.reddit ?? {}),
-            ...(encryptedConfig?.reddit && typeof encryptedConfig.reddit === 'object' ? encryptedConfig.reddit : {}),
+            ...encryptedConfig.reddit,
           },
           embeddingSidecar: {
             ...(fileConfig.embeddingSidecar ?? {}),
-            ...(encryptedConfig?.embeddingSidecar && typeof encryptedConfig.embeddingSidecar === 'object' ? encryptedConfig.embeddingSidecar : {}),
+            ...encryptedConfig.embeddingSidecar,
           },
         };
         logger.info(
-          { hasToken: !!encryptedConfig?.github?.token },
+          { hasToken: !!encryptedConfig.github.token },
           'Merged encrypted config from config.enc',
         );
       } catch (err) {
@@ -933,7 +933,8 @@ export function loadConfig(): SearchConfig {
     },
     stackexchange: {
       apiKey:
-        envConfig.stackexchange?.apiKey ?? fileConfig.stackexchange?.apiKey ??
+        envConfig.stackexchange?.apiKey ??
+        fileConfig.stackexchange?.apiKey ??
         DEFAULTS.stackexchange.apiKey ??
         '',
     },
@@ -945,45 +946,56 @@ export function loadConfig(): SearchConfig {
       baseUrl:
         envConfig.crawl4ai?.baseUrl ?? fileConfig.crawl4ai?.baseUrl ?? DEFAULTS.crawl4ai.baseUrl,
       apiToken:
-        envConfig.crawl4ai?.apiToken ?? fileConfig.crawl4ai?.apiToken ??
+        envConfig.crawl4ai?.apiToken ??
+        fileConfig.crawl4ai?.apiToken ??
         DEFAULTS.crawl4ai.apiToken ??
         '',
     },
     embeddingSidecar: {
       provider:
-        envConfig.embeddingSidecar?.provider ?? fileConfig.embeddingSidecar?.provider ??
+        envConfig.embeddingSidecar?.provider ??
+        fileConfig.embeddingSidecar?.provider ??
         DEFAULTS.embeddingSidecar.provider,
       baseUrl:
-        envConfig.embeddingSidecar?.baseUrl ?? fileConfig.embeddingSidecar?.baseUrl ??
+        envConfig.embeddingSidecar?.baseUrl ??
+        fileConfig.embeddingSidecar?.baseUrl ??
         DEFAULTS.embeddingSidecar.baseUrl,
       apiToken:
-        envConfig.embeddingSidecar?.apiToken ?? fileConfig.embeddingSidecar?.apiToken ??
+        envConfig.embeddingSidecar?.apiToken ??
+        fileConfig.embeddingSidecar?.apiToken ??
         DEFAULTS.embeddingSidecar.apiToken ??
         '',
       dimensions:
-        envConfig.embeddingSidecar?.dimensions ?? fileConfig.embeddingSidecar?.dimensions ??
+        envConfig.embeddingSidecar?.dimensions ??
+        fileConfig.embeddingSidecar?.dimensions ??
         DEFAULTS.embeddingSidecar.dimensions,
       codeModel:
-        envConfig.embeddingSidecar?.codeModel ?? fileConfig.embeddingSidecar?.codeModel ??
+        envConfig.embeddingSidecar?.codeModel ??
+        fileConfig.embeddingSidecar?.codeModel ??
         DEFAULTS.embeddingSidecar.codeModel,
     },
     semanticCrawl: {
       defaultMaxBytes:
-        envConfig.semanticCrawl?.defaultMaxBytes ?? fileConfig.semanticCrawl?.defaultMaxBytes ??
+        envConfig.semanticCrawl?.defaultMaxBytes ??
+        fileConfig.semanticCrawl?.defaultMaxBytes ??
         DEFAULTS.semanticCrawl.defaultMaxBytes,
       maxMaxBytes:
-        envConfig.semanticCrawl?.maxMaxBytes ?? fileConfig.semanticCrawl?.maxMaxBytes ??
+        envConfig.semanticCrawl?.maxMaxBytes ??
+        fileConfig.semanticCrawl?.maxMaxBytes ??
         DEFAULTS.semanticCrawl.maxMaxBytes,
     },
     domainTrust: {
       enabled:
-        envConfig.domainTrust?.enabled ?? fileConfig.domainTrust?.enabled ??
+        envConfig.domainTrust?.enabled ??
+        fileConfig.domainTrust?.enabled ??
         DEFAULTS.domainTrust.enabled,
       trustedDomains:
-        envConfig.domainTrust?.trustedDomains ?? fileConfig.domainTrust?.trustedDomains ??
+        envConfig.domainTrust?.trustedDomains ??
+        fileConfig.domainTrust?.trustedDomains ??
         DEFAULTS.domainTrust.trustedDomains,
       blockedDomains:
-        envConfig.domainTrust?.blockedDomains ?? fileConfig.domainTrust?.blockedDomains ??
+        envConfig.domainTrust?.blockedDomains ??
+        fileConfig.domainTrust?.blockedDomains ??
         DEFAULTS.domainTrust.blockedDomains,
     },
     scrubContent: envConfig.scrubContent ?? fileConfig.scrubContent ?? DEFAULTS.scrubContent,
@@ -1001,154 +1013,196 @@ export function loadConfig(): SearchConfig {
       cacheEnabled:
         envConfig.raga?.cacheEnabled ?? fileConfig.raga?.cacheEnabled ?? DEFAULTS.raga.cacheEnabled,
       defaultParser:
-        envConfig.raga?.defaultParser ?? fileConfig.raga?.defaultParser ??
+        envConfig.raga?.defaultParser ??
+        fileConfig.raga?.defaultParser ??
         DEFAULTS.raga.defaultParser,
     },
     duckduckgo: {
       region:
         envConfig.duckduckgo?.region ?? fileConfig.duckduckgo?.region ?? DEFAULTS.duckduckgo.region,
       safeSearch:
-        envConfig.duckduckgo?.safeSearch ?? fileConfig.duckduckgo?.safeSearch ??
+        envConfig.duckduckgo?.safeSearch ??
+        fileConfig.duckduckgo?.safeSearch ??
         DEFAULTS.duckduckgo.safeSearch,
     },
     ollamaSearch: {
       baseUrl:
-        envConfig.ollamaSearch?.baseUrl ?? fileConfig.ollamaSearch?.baseUrl ??
+        envConfig.ollamaSearch?.baseUrl ??
+        fileConfig.ollamaSearch?.baseUrl ??
         DEFAULTS.ollamaSearch.baseUrl,
       apiKey:
-        envConfig.ollamaSearch?.apiKey ?? fileConfig.ollamaSearch?.apiKey ??
+        envConfig.ollamaSearch?.apiKey ??
+        fileConfig.ollamaSearch?.apiKey ??
         DEFAULTS.ollamaSearch.apiKey ??
         '',
     },
     challengeLatencyThreshold:
-      envConfig.challengeLatencyThreshold ?? fileConfig.challengeLatencyThreshold ??
+      envConfig.challengeLatencyThreshold ??
+      fileConfig.challengeLatencyThreshold ??
       DEFAULTS.challengeLatencyThreshold,
     browser: {
       enabled:
         envConfig.browser?.enabled ?? fileConfig.browser?.enabled ?? DEFAULTS.browser.enabled,
       executablePath:
-        envConfig.browser?.executablePath ?? fileConfig.browser?.executablePath ??
+        envConfig.browser?.executablePath ??
+        fileConfig.browser?.executablePath ??
         DEFAULTS.browser.executablePath,
       headless:
         envConfig.browser?.headless ?? fileConfig.browser?.headless ?? DEFAULTS.browser.headless,
       viewport: {
         width:
-          envConfig.browser?.viewport?.width ?? fileConfig.browser?.viewport?.width ??
+          envConfig.browser?.viewport?.width ??
+          fileConfig.browser?.viewport?.width ??
           DEFAULTS.browser.viewport.width,
         height:
-          envConfig.browser?.viewport?.height ?? fileConfig.browser?.viewport?.height ??
+          envConfig.browser?.viewport?.height ??
+          fileConfig.browser?.viewport?.height ??
           DEFAULTS.browser.viewport.height,
       },
       userAgent:
         envConfig.browser?.userAgent ?? fileConfig.browser?.userAgent ?? DEFAULTS.browser.userAgent,
       proxyServer:
-        envConfig.browser?.proxyServer ?? fileConfig.browser?.proxyServer ??
+        envConfig.browser?.proxyServer ??
+        fileConfig.browser?.proxyServer ??
         DEFAULTS.browser.proxyServer,
       cdpEndpoint:
-        envConfig.browser?.cdpEndpoint ?? fileConfig.browser?.cdpEndpoint ??
+        envConfig.browser?.cdpEndpoint ??
+        fileConfig.browser?.cdpEndpoint ??
         DEFAULTS.browser.cdpEndpoint,
       profileDir:
-        envConfig.browser?.profileDir ?? fileConfig.browser?.profileDir ??
+        envConfig.browser?.profileDir ??
+        fileConfig.browser?.profileDir ??
         DEFAULTS.browser.profileDir,
       maxSessionTimeMs:
-        envConfig.browser?.maxSessionTimeMs ?? fileConfig.browser?.maxSessionTimeMs ??
+        envConfig.browser?.maxSessionTimeMs ??
+        fileConfig.browser?.maxSessionTimeMs ??
         DEFAULTS.browser.maxSessionTimeMs,
       stealthEnabled:
-        envConfig.browser?.stealthEnabled ?? fileConfig.browser?.stealthEnabled ??
+        envConfig.browser?.stealthEnabled ??
+        fileConfig.browser?.stealthEnabled ??
         DEFAULTS.browser.stealthEnabled,
       rebrowser:
         envConfig.browser?.rebrowser ?? fileConfig.browser?.rebrowser ?? DEFAULTS.browser.rebrowser,
       bypassCSP:
         envConfig.browser?.bypassCSP ?? fileConfig.browser?.bypassCSP ?? DEFAULTS.browser.bypassCSP,
       browserEngine:
-        envConfig.browser?.browserEngine ?? fileConfig.browser?.browserEngine ??
+        envConfig.browser?.browserEngine ??
+        fileConfig.browser?.browserEngine ??
         DEFAULTS.browser.browserEngine,
       cloakHumanize:
-        envConfig.browser?.cloakHumanize ?? fileConfig.browser?.cloakHumanize ??
+        envConfig.browser?.cloakHumanize ??
+        fileConfig.browser?.cloakHumanize ??
         DEFAULTS.browser.cloakHumanize,
       cloakHumanPreset:
-        envConfig.browser?.cloakHumanPreset ?? fileConfig.browser?.cloakHumanPreset ??
+        envConfig.browser?.cloakHumanPreset ??
+        fileConfig.browser?.cloakHumanPreset ??
         DEFAULTS.browser.cloakHumanPreset,
       cloakLocale:
-        envConfig.browser?.cloakLocale ?? fileConfig.browser?.cloakLocale ??
+        envConfig.browser?.cloakLocale ??
+        fileConfig.browser?.cloakLocale ??
         DEFAULTS.browser.cloakLocale,
       cloakTimezone:
-        envConfig.browser?.cloakTimezone ?? fileConfig.browser?.cloakTimezone ??
+        envConfig.browser?.cloakTimezone ??
+        fileConfig.browser?.cloakTimezone ??
         DEFAULTS.browser.cloakTimezone,
       cloakGeoip:
-        envConfig.browser?.cloakGeoip ?? fileConfig.browser?.cloakGeoip ??
+        envConfig.browser?.cloakGeoip ??
+        fileConfig.browser?.cloakGeoip ??
         DEFAULTS.browser.cloakGeoip,
       cloakStealthArgs:
-        envConfig.browser?.cloakStealthArgs ?? fileConfig.browser?.cloakStealthArgs ??
+        envConfig.browser?.cloakStealthArgs ??
+        fileConfig.browser?.cloakStealthArgs ??
         DEFAULTS.browser.cloakStealthArgs,
       credentials:
-        envConfig.browser?.credentials ?? fileConfig.browser?.credentials ??
+        envConfig.browser?.credentials ??
+        fileConfig.browser?.credentials ??
         DEFAULTS.browser.credentials,
       mode: envConfig.browser?.mode ?? fileConfig.browser?.mode ?? DEFAULTS.browser.mode,
       browserPort:
-        envConfig.browser?.browserPort ?? fileConfig.browser?.browserPort ??
+        envConfig.browser?.browserPort ??
+        fileConfig.browser?.browserPort ??
         DEFAULTS.browser.browserPort,
       autoConnect:
-        envConfig.browser?.autoConnect ?? fileConfig.browser?.autoConnect ??
+        envConfig.browser?.autoConnect ??
+        fileConfig.browser?.autoConnect ??
         DEFAULTS.browser.autoConnect,
     },
     deepResearch: {
       enabled:
-        envConfig.deepResearch?.enabled ?? fileConfig.deepResearch?.enabled ??
+        envConfig.deepResearch?.enabled ??
+        fileConfig.deepResearch?.enabled ??
         DEFAULTS.deepResearch.enabled,
       defaultDepth:
-        envConfig.deepResearch?.defaultDepth ?? fileConfig.deepResearch?.defaultDepth ??
+        envConfig.deepResearch?.defaultDepth ??
+        fileConfig.deepResearch?.defaultDepth ??
         DEFAULTS.deepResearch.defaultDepth,
       maxDepth:
-        envConfig.deepResearch?.maxDepth ?? fileConfig.deepResearch?.maxDepth ??
+        envConfig.deepResearch?.maxDepth ??
+        fileConfig.deepResearch?.maxDepth ??
         DEFAULTS.deepResearch.maxDepth,
       maxToolCalls:
-        envConfig.deepResearch?.maxToolCalls ?? fileConfig.deepResearch?.maxToolCalls ??
+        envConfig.deepResearch?.maxToolCalls ??
+        fileConfig.deepResearch?.maxToolCalls ??
         DEFAULTS.deepResearch.maxToolCalls,
       maxTokens:
-        envConfig.deepResearch?.maxTokens ?? fileConfig.deepResearch?.maxTokens ??
+        envConfig.deepResearch?.maxTokens ??
+        fileConfig.deepResearch?.maxTokens ??
         DEFAULTS.deepResearch.maxTokens,
       maxTimeMs:
-        envConfig.deepResearch?.maxTimeMs ?? fileConfig.deepResearch?.maxTimeMs ??
+        envConfig.deepResearch?.maxTimeMs ??
+        fileConfig.deepResearch?.maxTimeMs ??
         DEFAULTS.deepResearch.maxTimeMs,
       baseUrl:
-        envConfig.deepResearch?.baseUrl ?? fileConfig.deepResearch?.baseUrl ??
+        envConfig.deepResearch?.baseUrl ??
+        fileConfig.deepResearch?.baseUrl ??
         DEFAULTS.deepResearch.baseUrl,
       workerBaseUrl:
-        envConfig.deepResearch?.workerBaseUrl ?? fileConfig.deepResearch?.workerBaseUrl ??
+        envConfig.deepResearch?.workerBaseUrl ??
+        fileConfig.deepResearch?.workerBaseUrl ??
         DEFAULTS.deepResearch.workerBaseUrl,
       model:
-        envConfig.deepResearch?.model ?? fileConfig.deepResearch?.model ??
+        envConfig.deepResearch?.model ??
+        fileConfig.deepResearch?.model ??
         DEFAULTS.deepResearch.model,
       workerModel:
-        envConfig.deepResearch?.workerModel ?? fileConfig.deepResearch?.workerModel ??
+        envConfig.deepResearch?.workerModel ??
+        fileConfig.deepResearch?.workerModel ??
         DEFAULTS.deepResearch.workerModel,
       apiToken:
-        envConfig.deepResearch?.apiToken ?? fileConfig.deepResearch?.apiToken ??
+        envConfig.deepResearch?.apiToken ??
+        fileConfig.deepResearch?.apiToken ??
         DEFAULTS.deepResearch.apiToken,
       treeBreadth:
-        envConfig.deepResearch?.treeBreadth ?? fileConfig.deepResearch?.treeBreadth ??
+        envConfig.deepResearch?.treeBreadth ??
+        fileConfig.deepResearch?.treeBreadth ??
         DEFAULTS.deepResearch.treeBreadth,
       treeDepth:
-        envConfig.deepResearch?.treeDepth ?? fileConfig.deepResearch?.treeDepth ??
+        envConfig.deepResearch?.treeDepth ??
+        fileConfig.deepResearch?.treeDepth ??
         DEFAULTS.deepResearch.treeDepth,
       treeConcurrency:
-        envConfig.deepResearch?.treeConcurrency ?? fileConfig.deepResearch?.treeConcurrency ??
+        envConfig.deepResearch?.treeConcurrency ??
+        fileConfig.deepResearch?.treeConcurrency ??
         DEFAULTS.deepResearch.treeConcurrency,
       treeContextWordLimit:
-        envConfig.deepResearch?.treeContextWordLimit ?? fileConfig.deepResearch?.treeContextWordLimit ??
+        envConfig.deepResearch?.treeContextWordLimit ??
+        fileConfig.deepResearch?.treeContextWordLimit ??
         DEFAULTS.deepResearch.treeContextWordLimit,
       agentMaxIterations:
-        envConfig.deepResearch?.agentMaxIterations ?? fileConfig.deepResearch?.agentMaxIterations ??
+        envConfig.deepResearch?.agentMaxIterations ??
+        fileConfig.deepResearch?.agentMaxIterations ??
         DEFAULTS.deepResearch.agentMaxIterations,
       agentMaxSubIterations:
-        envConfig.deepResearch?.agentMaxSubIterations ?? fileConfig.deepResearch?.agentMaxSubIterations ??
+        envConfig.deepResearch?.agentMaxSubIterations ??
+        fileConfig.deepResearch?.agentMaxSubIterations ??
         DEFAULTS.deepResearch.agentMaxSubIterations,
       agentDefaultFetchMode:
-        envConfig.deepResearch?.agentDefaultFetchMode ?? fileConfig.deepResearch?.agentDefaultFetchMode ??
+        envConfig.deepResearch?.agentDefaultFetchMode ??
+        fileConfig.deepResearch?.agentDefaultFetchMode ??
         DEFAULTS.deepResearch.agentDefaultFetchMode,
       autoSave:
-        envConfig.deepResearch?.autoSave ?? fileConfig.deepResearch?.autoSave ??
+        envConfig.deepResearch?.autoSave ??
+        fileConfig.deepResearch?.autoSave ??
         DEFAULTS.deepResearch.autoSave,
     },
     knowledgeGraph: {
@@ -1180,21 +1234,20 @@ export function loadConfig(): SearchConfig {
     mcpApiKey: (fileConfig as Partial<SearchConfig>).mcpApiKey ?? '',
     apiKeyClaimed: (fileConfig as Partial<SearchConfig>).apiKeyClaimed ?? DEFAULTS.apiKeyClaimed,
     access: {
-      provider:
-        ((fileConfig as Partial<SearchConfig>).access?.provider) ??
-        DEFAULTS.access.provider,
+      provider: (fileConfig as Partial<SearchConfig>).access?.provider ?? DEFAULTS.access.provider,
       exposeDashboardExternally:
-        ((fileConfig as Partial<SearchConfig>).access?.exposeDashboardExternally) ??
+        (fileConfig as Partial<SearchConfig>).access?.exposeDashboardExternally ??
         DEFAULTS.access.exposeDashboardExternally,
       tailscale: {
         serveConfigured:
-          ((fileConfig as { access?: { tailscale?: Partial<AccessConfig['tailscale']> } }).access?.tailscale?.serveConfigured) ??
-          DEFAULTS.access.tailscale.serveConfigured,
+          (fileConfig as { access?: { tailscale?: Partial<AccessConfig['tailscale']> } }).access
+            ?.tailscale?.serveConfigured ?? DEFAULTS.access.tailscale.serveConfigured,
         funnelConfigured:
-          ((fileConfig as { access?: { tailscale?: Partial<AccessConfig['tailscale']> } }).access?.tailscale?.funnelConfigured) ??
-          DEFAULTS.access.tailscale.funnelConfigured,
+          (fileConfig as { access?: { tailscale?: Partial<AccessConfig['tailscale']> } }).access
+            ?.tailscale?.funnelConfigured ?? DEFAULTS.access.tailscale.funnelConfigured,
         allowDashboardOverFunnel:
-          ((fileConfig as { access?: { tailscale?: Partial<AccessConfig['tailscale']> } }).access?.tailscale?.allowDashboardOverFunnel) ??
+          (fileConfig as { access?: { tailscale?: Partial<AccessConfig['tailscale']> } }).access
+            ?.tailscale?.allowDashboardOverFunnel ??
           DEFAULTS.access.tailscale.allowDashboardOverFunnel,
       },
     },

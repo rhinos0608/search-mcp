@@ -26,7 +26,12 @@ export class HttpTransportManager {
   private pruneTimer: ReturnType<typeof setInterval>;
 
   constructor(private readonly runtime: SearchMcpRuntime) {
-    this.pruneTimer = setInterval(() => { this.pruneIdle(); }, 30 * 60 * 1000);
+    this.pruneTimer = setInterval(
+      () => {
+        this.pruneIdle();
+      },
+      30 * 60 * 1000,
+    );
     this.pruneTimer.unref();
   }
 

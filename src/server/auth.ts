@@ -11,7 +11,12 @@ export class SessionStore {
   private timer: ReturnType<typeof setInterval>;
 
   constructor(private readonly ttlMs: number) {
-    this.timer = setInterval(() => { this.pruneExpired(); }, 5 * 60 * 1000);
+    this.timer = setInterval(
+      () => {
+        this.pruneExpired();
+      },
+      5 * 60 * 1000,
+    );
     this.timer.unref();
   }
 
@@ -25,23 +30,38 @@ export class SessionStore {
   validate(id: string): boolean {
     const s = this.sessions.get(id);
     if (!s) return false;
-    if (Date.now() > s.expiresAt) { this.sessions.delete(id); return false; }
+    if (Date.now() > s.expiresAt) {
+      this.sessions.delete(id);
+      return false;
+    }
     return true;
   }
 
-  revoke(id: string): void { this.sessions.delete(id); }
-  revokeAll(): void { this.sessions.clear(); }
-  get size(): number { return this.sessions.size; }
+  revoke(id: string): void {
+    this.sessions.delete(id);
+  }
+  revokeAll(): void {
+    this.sessions.clear();
+  }
+  get size(): number {
+    return this.sessions.size;
+  }
 
   pruneExpired(): void {
     const now = Date.now();
     for (const [id, s] of this.sessions) if (now > s.expiresAt) this.sessions.delete(id);
   }
 
-  destroy(): void { clearInterval(this.timer); this.sessions.clear(); }
+  destroy(): void {
+    clearInterval(this.timer);
+    this.sessions.clear();
+  }
 }
 
-interface RateLimitEntry { failures: number; lockedUntil?: number }
+interface RateLimitEntry {
+  failures: number;
+  lockedUntil?: number;
+}
 
 export class LoginRateLimiter {
   private entries = new Map<string, RateLimitEntry>();
@@ -68,7 +88,9 @@ export class LoginRateLimiter {
     this.entries.set(ip, e);
   }
 
-  recordSuccess(ip: string): void { this.entries.delete(ip); }
+  recordSuccess(ip: string): void {
+    this.entries.delete(ip);
+  }
 }
 
 export function getCookieName(https: boolean): string {

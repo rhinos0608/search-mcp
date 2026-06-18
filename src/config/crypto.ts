@@ -1,7 +1,4 @@
-import {
-  createCipheriv, createDecipheriv,
-  pbkdf2Sync, scryptSync, randomBytes,
-} from 'node:crypto';
+import { createCipheriv, createDecipheriv, pbkdf2Sync, scryptSync, randomBytes } from 'node:crypto';
 
 const MAGIC = Buffer.from([0x53, 0x4d]); // 'SM'
 const VERSION = 0x01;
@@ -32,10 +29,7 @@ export function encryptConfig(data: unknown, password: string): Buffer {
   const nonce = randomBytes(NONCE_LEN);
   const key = deriveKeyScrypt(password, salt);
   const cipher = createCipheriv('aes-256-gcm', key, nonce);
-  const ciphertext = Buffer.concat([
-    cipher.update(JSON.stringify(data), 'utf8'),
-    cipher.final(),
-  ]);
+  const ciphertext = Buffer.concat([cipher.update(JSON.stringify(data), 'utf8'), cipher.final()]);
   const authTag = cipher.getAuthTag();
   return Buffer.concat([MAGIC, Buffer.from([VERSION]), salt, nonce, authTag, ciphertext]);
 }
@@ -45,8 +39,14 @@ export function decryptConfig(buf: Buffer, password: string): unknown {
   const byte1 = buf[1];
   const magic0 = MAGIC[0];
   const magic1 = MAGIC[1];
-  if (byte0 !== undefined && byte1 !== undefined && magic0 !== undefined && magic1 !== undefined
-    && byte0 === magic0 && byte1 === magic1) {
+  if (
+    byte0 !== undefined &&
+    byte1 !== undefined &&
+    magic0 !== undefined &&
+    magic1 !== undefined &&
+    byte0 === magic0 &&
+    byte1 === magic1
+  ) {
     return decryptNew(buf, password);
   }
   return decryptLegacy(buf, password);
