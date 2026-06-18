@@ -68,7 +68,9 @@ export interface HybridRetrievalOptions {
 function cosineSimilarity(a: number[], b: number[]): number {
   if (a.length === 0 || b.length === 0) return 0;
   if (a.length !== b.length) {
-    throw new RangeError(`cosineSimilarity length mismatch: a=${String(a.length)}, b=${String(b.length)}`);
+    throw new RangeError(
+      `cosineSimilarity length mismatch: a=${String(a.length)}, b=${String(b.length)}`,
+    );
   }
   let dot = 0;
   let normA = 0;
@@ -198,7 +200,11 @@ function buildBestScoreMap(
       const item = ranking[rank];
       if (!item) continue;
       const current = map.get(item.id);
-      if (!current || item.score > current.score || (item.score === current.score && rank < current.rank)) {
+      if (
+        !current ||
+        item.score > current.score ||
+        (item.score === current.score && rank < current.rank)
+      ) {
         map.set(item.id, { score: item.score, rank });
       }
     }

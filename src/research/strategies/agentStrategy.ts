@@ -418,10 +418,7 @@ export class AgentStrategy implements ResearchStrategy {
 
   // ── Private ─────────────────────────────────────────────────────────
 
-  private buildSystemPrompt(
-    route?: DomainRoute,
-    entities?: ExtractedEntities,
-  ): string {
+  private buildSystemPrompt(route?: DomainRoute, entities?: ExtractedEntities): string {
     const today = new Date().toISOString().slice(0, 10);
     const toolDesc = describeTools(this.tools);
 
@@ -516,7 +513,7 @@ Search strategy tips:
       { role: 'system', content: systemPrompt },
     ];
 
-    // Add recent history (last 16 entries)
+    // Add recent history (last 8 entries)
     const recentHistory = this.history.slice(-8);
     for (const entry of recentHistory) {
       if (entry.role === 'assistant') {

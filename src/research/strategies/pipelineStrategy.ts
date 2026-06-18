@@ -264,7 +264,9 @@ export class PipelineStrategy implements ResearchStrategy {
         const hallucinated = urlResults.filter((r) => r.status === 'LIKELY_HALLUCINATED');
         const dead = urlResults.filter((r) => r.status === 'DEAD');
         if (hallucinated.length > 0) {
-          report.openQuestions.push(`${String(hallucinated.length)} cited URL(s) may be hallucinated.`);
+          report.openQuestions.push(
+            `${String(hallucinated.length)} cited URL(s) may be hallucinated.`,
+          );
         }
         if (dead.length > 0) {
           report.sourceNotes.push(`${String(dead.length)} cited URL(s) appear to be dead.`);

@@ -375,14 +375,22 @@ function createRedditSearchTool(
       'Search Reddit for community discussions and opinions. Best for user experiences, reviews, and community knowledge. Requires a subreddit.',
     parameters: {
       query: { type: 'string', description: 'The search query', required: true },
-      subreddit: { type: 'string', description: 'Subreddit to search (without r/ prefix). Required.', required: true },
+      subreddit: {
+        type: 'string',
+        description: 'Subreddit to search (without r/ prefix). Required.',
+        required: true,
+      },
       limit: { type: 'number', description: 'Max results (1-20, default 10)' },
     },
     execute: async (args) => {
       const query = typeof args.query === 'string' ? args.query : '';
       if (!query) return { content: 'Error: query is required', error: 'missing query' };
       const subreddit = typeof args.subreddit === 'string' ? args.subreddit : '';
-      if (!subreddit) return { content: 'Error: subreddit is required for Reddit search', error: 'missing subreddit' };
+      if (!subreddit)
+        return {
+          content: 'Error: subreddit is required for Reddit search',
+          error: 'missing subreddit',
+        };
       const limit = Math.min(Number(args.limit) || 10, 20);
 
       try {

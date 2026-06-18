@@ -19,6 +19,7 @@ import type {
   ContentQualityAssessment,
   SubQuestionCoverage,
 } from './types.js';
+import { logger } from '../logger.js';
 import { ResearchStateEngine, BudgetTracker } from './state.js';
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -535,11 +536,31 @@ export class GapFiller {
     // sub-question, it's safe to stop (prevents infinite looping on niche topics).
     // BUT don't stop if high-priority gaps (priority <= 2) are still open.
     const hasHighPriorityGaps = openGaps.some((g) => g.priority <= 2);
-    if (!hasHighPriorityGaps && wellCoveredRatio > 0.5 && currentLoops >= state.subQuestions.length) return false;
+    if (
+      !hasHighPriorityGaps &&
+      wellCoveredRatio > 0.5 &&
+      currentLoops >= state.subQuestions.length
+    ) {
+      logger.info(
+        { wellCoveredRatio, currentLoops, subQCount: state.subQuestions.length },
+        'gap: escape valve 1 — early termination (high coverage)',
+      );
+      return false;
+    }
 
     // Niche-topic escape: only after the configured minimum sanity passes.
     // Also skips if any high-priority gaps remain.
-    if (!hasHighPriorityGaps && currentLoops >= Math.max(2, minGapLoops) && wellCoveredRatio >= 0.3) return false;
+    if (
+      !hasHighPriorityGaps &&
+      currentLoops >= Math.max(2, minGapLoops) &&
+      wellCoveredRatio >= 0.3
+    ) {
+      logger.info(
+        { wellCoveredRatio, currentLoops, minGapLoops },
+        'gap: escape valve 2 — niche topic early termination',
+      );
+      return false;
+    }
 
     return true;
   }

@@ -17,7 +17,12 @@ import {
   groundSynthesisClaims,
 } from '../provenance.js';
 import { buildFindingLinkageWithEmbeddings, clusterIdByFindingId } from '../findingLinkage.js';
-import { applyClusterMerge, applyClusterSplit, applyClusterKeep, validateClusterDecisions } from '../clusterRevision.js';
+import {
+  applyClusterMerge,
+  applyClusterSplit,
+  applyClusterKeep,
+  validateClusterDecisions,
+} from '../clusterRevision.js';
 import type {
   ResearchState,
   ResearchReport,
@@ -119,7 +124,7 @@ export class LlmSynthesizer {
     const linkage = await buildFindingLinkageWithEmbeddings(semanticallyAligned);
 
     // Revise LLM-flagged clusters before final assignment
-    const needsLlmReview = linkage.clusters.some(c => c.mergeStatus === 'needs_llm_review');
+    const needsLlmReview = linkage.clusters.some((c) => c.mergeStatus === 'needs_llm_review');
     let finalClusters = linkage.clusters;
     if (needsLlmReview) {
       try {
@@ -149,7 +154,7 @@ export class LlmSynthesizer {
     clusters: FindingCluster[],
     edges: FindingClusterEdge[],
   ): Promise<{ clusters: FindingCluster[]; decisions: ClusterRevisionDecision[] }> {
-    const needsReview = clusters.filter(c => c.mergeStatus === 'needs_llm_review');
+    const needsReview = clusters.filter((c) => c.mergeStatus === 'needs_llm_review');
     if (needsReview.length === 0) return { clusters, decisions: [] };
 
     // Sort by confidence descending for most-confident-first batching
@@ -163,28 +168,28 @@ export class LlmSynthesizer {
 
       // Build the prompt payload for this batch
       // Cross-cluster edges: edges whose endpoints span different clusters within the batch
-      const crossClusterEdges = edges.filter(e => {
-        const leftCluster = batch.find(c => c.findingIds.includes(e.leftFindingId));
-        const rightCluster = batch.find(c => c.findingIds.includes(e.rightFindingId));
+      const crossClusterEdges = edges.filter((e) => {
+        const leftCluster = batch.find((c) => c.findingIds.includes(e.leftFindingId));
+        const rightCluster = batch.find((c) => c.findingIds.includes(e.rightFindingId));
         if (!leftCluster || !rightCluster) return false;
         return leftCluster.id !== rightCluster.id;
       });
 
-      const clusterDetails = batch.map(cluster => ({
+      const clusterDetails = batch.map((cluster) => ({
         clusterId: cluster.id,
         representativeClaim: cluster.representativeClaim,
         mergeStatus: cluster.mergeStatus,
         findingCount: cluster.findingIds.length,
         confidence: cluster.confidence,
-        findings: cluster.findingIds.map(fid => ({
+        findings: cluster.findingIds.map((fid) => ({
           findingId: fid,
           edgeCount: cluster.edges.filter(
-            e => e.leftFindingId === fid || e.rightFindingId === fid,
+            (e) => e.leftFindingId === fid || e.rightFindingId === fid,
           ).length,
         })),
       }));
 
-      const crossClusterEdgeInfo = crossClusterEdges.map(e => ({
+      const crossClusterEdgeInfo = crossClusterEdges.map((e) => ({
         left: e.leftFindingId,
         right: e.rightFindingId,
         score: e.score,
@@ -311,9 +316,7 @@ export class LlmSynthesizer {
     data.themes ??= [];
     data.uncertainties ??= [];
 
-    if (!data.executiveSummary) {
-      data.executiveSummary = 'Research complete. See sections for findings.';
-    }
+    data.executiveSummary ??= 'Research complete. See sections for findings.';
 
     // Ensure narrativeMarkdown is populated — if LLM returned empty, build from themes
     if (!data.narrativeMarkdown || data.narrativeMarkdown.trim().length === 0) {

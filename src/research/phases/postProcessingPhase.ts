@@ -75,8 +75,7 @@ export class PostProcessingPhase extends BasePhase {
       );
 
       if (llmResult.contradictions.length > 0) {
-        const { mergeContradictions: mergeC } = await import('../contradictionGenerator.js');
-        const merged = mergeC(
+        const merged = mergeContradictions(
           ctx.state.getState().contradictions,
           llmResult.contradictions,
         );

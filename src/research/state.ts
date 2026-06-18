@@ -450,7 +450,10 @@ export class ResearchStateEngine {
   // ── Sources ────────────────────────────────────────────────────────────
 
   addSource(entry: SourceEntry): string {
-    if (this.state.sources.length + this.state.findings.length + this.state.gaps.length >= this.budget.profile.maxStateEntries) {
+    if (
+      this.state.sources.length + this.state.findings.length + this.state.gaps.length >=
+      this.budget.profile.maxStateEntries
+    ) {
       return '';
     }
     this.budget.incrementStateEntries(1);
@@ -491,7 +494,10 @@ export class ResearchStateEngine {
 
   addFinding(finding: Omit<Finding, 'id' | 'createdAt'>): string {
     const id = makeId();
-    if (this.state.sources.length + this.state.findings.length + this.state.gaps.length >= this.budget.profile.maxStateEntries) {
+    if (
+      this.state.sources.length + this.state.findings.length + this.state.gaps.length >=
+      this.budget.profile.maxStateEntries
+    ) {
       return '';
     }
     this.budget.incrementStateEntries(1);
@@ -919,7 +925,10 @@ export class ResearchStateEngine {
   // ── Gaps ───────────────────────────────────────────────────────────────
 
   addGap(gap: GapRecord): string {
-    if (this.state.sources.length + this.state.findings.length + this.state.gaps.length >= this.budget.profile.maxStateEntries) {
+    if (
+      this.state.sources.length + this.state.findings.length + this.state.gaps.length >=
+      this.budget.profile.maxStateEntries
+    ) {
       return '';
     }
     this.budget.incrementStateEntries(1);

@@ -17,15 +17,8 @@
 import { logger } from '../logger.js';
 import type { DeepResearchLlmClient, LlmCallOptions } from './llm/chat.js';
 import { WORKER_EXTRACT_STRUCTURED } from './llm/prompts.js';
-import {
-  StructuredExtractionResultSchema,
-  type StructuredClaimResult,
-} from './llm/schemas.js';
-import type {
-  Finding,
-  NormalizedClaimKey,
-  CanonicalQuantifier,
-} from './types.js';
+import { StructuredExtractionResultSchema, type StructuredClaimResult } from './llm/schemas.js';
+import type { Finding, NormalizedClaimKey, CanonicalQuantifier } from './types.js';
 import { extractSentence } from './extractSentence.js';
 import type { RankedChunk } from './hybridRetrieval.js';
 
@@ -79,16 +72,21 @@ interface RegexPreFilterHints {
 
 const PATTERNS = {
   percentage: /\b(\d+(?:\.\d+)?)\s*%\b/g,
-  numericValue: /\b(\d+(?:,\d{3})*(?:\.\d+)?)\s*(ms|seconds?|minutes?|hours?|days?|weeks?|months?|years?|GB|MB|KB|TB|dollars?|USD|EUR|tokens?|parameters?|users?|requests?)\b/gi,
+  numericValue:
+    /\b(\d+(?:,\d{3})*(?:\.\d+)?)\s*(ms|seconds?|minutes?|hours?|days?|weeks?|months?|years?|GB|MB|KB|TB|dollars?|USD|EUR|tokens?|parameters?|users?|requests?)\b/gi,
   isoDate: /\b(\d{4}-\d{2}-\d{2})\b/g,
-  comparison: /\b(better|worse|faster|slower|higher|lower|larger|smaller|more|less|increased?|decreased?|reduced?|improved?|outperform(?:s|ed)?)\b/gi,
-  entityPattern: /\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+){1,4}|GPT-\d|BERT|LLaMA|Claude|Gemini|Mistral|Falcon|PaLM|Chinchilla|Gopher|OPT|BLOOM)\b/g,
+  comparison:
+    /\b(better|worse|faster|slower|higher|lower|larger|smaller|more|less|increased?|decreased?|reduced?|improved?|outperform(?:s|ed)?)\b/gi,
+  entityPattern:
+    /\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+){1,4}|GPT-\d|BERT|LLaMA|Claude|Gemini|Mistral|Falcon|PaLM|Chinchilla|Gopher|OPT|BLOOM)\b/g,
 };
 
 function extractRegexHints(text: string): RegexPreFilterHints {
   const getContext = (match: RegExpExecArray): string => {
     const sentence = extractSentence(text, match.index);
-    return sentence ?? text.slice(Math.max(0, match.index - 80), match.index + match[0].length + 80);
+    return (
+      sentence ?? text.slice(Math.max(0, match.index - 80), match.index + match[0].length + 80)
+    );
   };
 
   const numbers: RegexPreFilterHints['numbers'] = [];
@@ -145,11 +143,9 @@ export function structuredClaimToFinding(
   retrievalScore?: number,
   retrievalScoreMatched?: boolean,
 ): Omit<Finding, 'id' | 'createdAt'> {
-  const claimText = [
-    claim.subject,
-    claim.predicate,
-    ...(claim.object ? [claim.object] : []),
-  ].join(' ');
+  const claimText = [claim.subject, claim.predicate, ...(claim.object ? [claim.object] : [])].join(
+    ' ',
+  );
 
   const normalizedClaim = claimText.toLowerCase().replace(/\s+/g, ' ').trim();
 
@@ -234,8 +230,7 @@ function formatChunksForPrompt(
 
   for (const [index, ranked] of chunks.slice(0, maxChunks).entries()) {
     const chunk = ranked.chunk;
-    const truncatedText =
-      chunk.text.length > 3000 ? chunk.text.slice(0, 3000) + '…' : chunk.text;
+    const truncatedText = chunk.text.length > 3000 ? chunk.text.slice(0, 3000) + '…' : chunk.text;
 
     if (totalChars + truncatedText.length > maxChars) break;
 
@@ -317,14 +312,10 @@ async function callExtractionLlm(
   if (hints) {
     const hintParts: string[] = [];
     if (hints.percentages.length > 0) {
-      hintParts.push(
-        `Detected percentages: ${hints.percentages.map((p) => p.value).join(', ')}`,
-      );
+      hintParts.push(`Detected percentages: ${hints.percentages.map((p) => p.value).join(', ')}`);
     }
     if (hints.numbers.length > 0) {
-      hintParts.push(
-        `Detected measurements: ${hints.numbers.map((n) => n.value).join(', ')}`,
-      );
+      hintParts.push(`Detected measurements: ${hints.numbers.map((n) => n.value).join(', ')}`);
     }
     if (hints.dates.length > 0) {
       hintParts.push(`Detected dates: ${hints.dates.map((d) => d.value).join(', ')}`);
@@ -403,10 +394,7 @@ export class LlmClaimExtractor {
    * @param input  Extraction input containing query, chunks, and source info.
    * @returns       Findings plus the raw structured claims.
    */
-  async extract(
-    llm: DeepResearchLlmClient,
-    input: ExtractionInput,
-  ): Promise<ExtractionResult> {
+  async extract(llm: DeepResearchLlmClient, input: ExtractionInput): Promise<ExtractionResult> {
     const { query, chunks, sourceId, subQuestionIds } = input;
 
     if (chunks.length === 0) {
@@ -507,10 +495,7 @@ export class LlmClaimExtractor {
         const { findings } = await this.extract(llm, input);
         results.set(input.sourceId, findings);
       } catch (err) {
-        logger.error(
-          { err, sourceId: input.sourceId },
-          'LLM extraction failed for source',
-        );
+        logger.error({ err, sourceId: input.sourceId }, 'LLM extraction failed for source');
         results.set(input.sourceId, []);
       }
     }

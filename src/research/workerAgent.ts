@@ -346,7 +346,9 @@ export class WorkerAgent {
               queries,
               sourceTypes,
               reasoning:
-                typeof data.reasoning === 'string' ? data.reasoning : 'LLM generated a search plan.',
+                typeof data.reasoning === 'string'
+                  ? data.reasoning
+                  : 'LLM generated a search plan.',
               tokensUsed: result.response.tokensUsed,
             };
           }

@@ -11,17 +11,9 @@
  */
 
 import { randomUUID } from 'node:crypto';
-import type {
-  Finding,
-  Contradiction,
-  ContradictionType,
-  SourceEntry,
-} from './types.js';
+import type { Finding, Contradiction, ContradictionType, SourceEntry } from './types.js';
 import type { DeepResearchLlmClient } from './llm/chat.js';
-import {
-  ORCHESTRATOR_CONTRADICTION_SCAN,
-  ORCHESTRATOR_OPEN_QUESTIONS,
-} from './llm/prompts.js';
+import { ORCHESTRATOR_CONTRADICTION_SCAN, ORCHESTRATOR_OPEN_QUESTIONS } from './llm/prompts.js';
 import { logger } from '../logger.js';
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -166,7 +158,11 @@ export class ContradictionDetector {
 
       if (newContradictions.length > 0) {
         logger.info(
-          { scanned: batched.length, found: result.data.contradictions.length, added: newContradictions.length },
+          {
+            scanned: batched.length,
+            found: result.data.contradictions.length,
+            added: newContradictions.length,
+          },
           'LLM contradiction detector: new contradictions detected',
         );
       }

@@ -443,10 +443,7 @@ export const ClaimClusterSchema = z.object({
   consensus: z
     .enum(['strong_agreement', 'moderate_agreement', 'mixed', 'contradictory', 'single_source'])
     .describe('Consensus level within the cluster'),
-  contradiction: z
-    .string()
-    .nullable()
-    .describe('Description of contradiction if present'),
+  contradiction: z.string().nullable().describe('Description of contradiction if present'),
 });
 
 export const ClaimClusteringResultSchema = z.object({
@@ -458,11 +455,7 @@ export type ClaimClusteringResult = z.infer<typeof ClaimClusteringResultSchema>;
 // ── V5.0.0 Query Expansion ──────────────────────────────────────────────────
 
 export const QueryExpansionResultSchema = z.object({
-  variations: z
-    .array(z.string())
-    .min(1)
-    .max(6)
-    .describe('Query paraphrase variations'),
+  variations: z.array(z.string()).min(1).max(6).describe('Query paraphrase variations'),
 });
 
 export type QueryExpansionResult = z.infer<typeof QueryExpansionResultSchema>;

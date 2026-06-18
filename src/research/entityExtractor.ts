@@ -190,11 +190,9 @@ const STOP_WORDS = new Set([
 
 const TEMPORAL_PATTERN = /\b((?:19|20)\d{2}(?:\s*(?:-|–|to)\s*(?:19|20)\d{2})?)\b/g;
 
-const NUMERICAL_ATTACHED_PATTERN =
-  /\b\d+(?:\.\d+)?\s*(?:km\/h|km|mph|ms|MB|KB|GB|TB|%)(?!\w)/g;
+const NUMERICAL_ATTACHED_PATTERN = /\b\d+(?:\.\d+)?\s*(?:km\/h|km|mph|ms|MB|KB|GB|TB|%)(?!\w)/g;
 
-const NUMERICAL_SCALE_PATTERN =
-  /\b\d+(?:\.\d+)?\s+(?:million|billion|thousand)\b/g;
+const NUMERICAL_SCALE_PATTERN = /\b\d+(?:\.\d+)?\s+(?:million|billion|thousand)\b/g;
 
 function extractNames(query: string): string[] {
   const names = new Set<string>();
@@ -239,12 +237,7 @@ function extractNames(query: string): string[] {
     for (let len = 2; len <= 4 && start + len <= tokens.length; len++) {
       const slice = tokens.slice(start, start + len);
       if (slice.length !== len) continue;
-      if (
-        slice.every(
-          (w) =>
-            /^[A-Z][a-zA-Z]*$/.test(w) && !STOP_WORDS.has(w.toLowerCase()),
-        )
-      ) {
+      if (slice.every((w) => /^[A-Z][a-zA-Z]*$/.test(w) && !STOP_WORDS.has(w.toLowerCase()))) {
         names.add(slice.join(' '));
       }
     }

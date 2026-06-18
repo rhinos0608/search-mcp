@@ -68,9 +68,7 @@ function clamp(value: number, min: number, max: number): number {
 
 function parseList(input: unknown): string[] {
   if (Array.isArray(input)) {
-    return input
-      .map((v) => String(v).trim())
-      .filter(Boolean);
+    return input.map((v) => String(v).trim()).filter(Boolean);
   }
   if (typeof input === 'string') {
     return input
@@ -147,8 +145,7 @@ export function normalizeResearchPolicy(raw?: RawResearchPolicy): NormalizedRese
   }
 
   // Custom instruction — prefer 'customInstruction', fall back to 'instructions' or 'instruction'
-  const rawInstruction =
-    r.customInstruction ?? r.instructions ?? r.instruction ?? null;
+  const rawInstruction = r.customInstruction ?? r.instructions ?? r.instruction ?? null;
   const customInstruction =
     typeof rawInstruction === 'string' && rawInstruction.trim().length > 0
       ? rawInstruction.trim()
@@ -201,7 +198,9 @@ export function buildResearchPrompt(
   const today = new Date().toISOString().slice(0, 10);
   const lines: string[] = [];
 
-  lines.push(`You are an exhaustive deep research agent conducting thorough multi-source investigation.`);
+  lines.push(
+    `You are an exhaustive deep research agent conducting thorough multi-source investigation.`,
+  );
   lines.push(`Today: ${today}`);
   lines.push(``);
   lines.push(`Research question: ${query}`);
@@ -210,7 +209,9 @@ export function buildResearchPrompt(
   // Output format — mode-dependent
   if (policy.mode === 'deep') {
     lines.push(`OUTPUT FORMAT:`);
-    lines.push(`Structure your answer with clear headings, sections for each major sub-topic, and a list of sources at the end.`);
+    lines.push(
+      `Structure your answer with clear headings, sections for each major sub-topic, and a list of sources at the end.`,
+    );
     lines.push(`Each claim should be traceable to a specific source.`);
   } else {
     lines.push(`OUTPUT FORMAT:`);
@@ -240,7 +241,9 @@ export function buildResearchPrompt(
     lines.push(``);
   }
   if (policy.preferredDomains.length > 0) {
-    lines.push(`PREFERRED DOMAINS: ${policy.preferredDomains.join(', ')} (search here first when relevant)`);
+    lines.push(
+      `PREFERRED DOMAINS: ${policy.preferredDomains.join(', ')} (search here first when relevant)`,
+    );
     lines.push(``);
   }
 
@@ -257,19 +260,25 @@ export function buildResearchPrompt(
   switch (policy.mode) {
     case 'code':
       lines.push(`WORKFLOW:`);
-      lines.push(`Prioritise GitHub repositories, documentation sites, Stack Overflow, and package registries.`);
+      lines.push(
+        `Prioritise GitHub repositories, documentation sites, Stack Overflow, and package registries.`,
+      );
       lines.push(`Look for code examples, API references, version histories, and changelogs.`);
       lines.push(``);
       break;
     case 'company':
       lines.push(`WORKFLOW:`);
-      lines.push(`Prioritise official company blogs, press releases, Crunchbase, LinkedIn, and financial filings.`);
+      lines.push(
+        `Prioritise official company blogs, press releases, Crunchbase, LinkedIn, and financial filings.`,
+      );
       lines.push(`Cross-reference claims across independent sources.`);
       lines.push(``);
       break;
     case 'similar':
       lines.push(`WORKFLOW:`);
-      lines.push(`Start from the provided seed URLs and discover related content by following in-links,`);
+      lines.push(
+        `Start from the provided seed URLs and discover related content by following in-links,`,
+      );
       lines.push(`related-article suggestions, and similar-domain recommendations.`);
       lines.push(``);
       break;
@@ -278,7 +287,9 @@ export function buildResearchPrompt(
     default:
       lines.push(`WORKFLOW:`);
       lines.push(`1. Decompose the question into distinct sub-topics.`);
-      lines.push(`2. Search across multiple source types (academic, web, community, documentation).`);
+      lines.push(
+        `2. Search across multiple source types (academic, web, community, documentation).`,
+      );
       lines.push(`3. Read at least one high-quality source per sub-topic in depth.`);
       lines.push(`4. Cross-reference important claims across different sources.`);
       lines.push(`5. Synthesise findings into a coherent, well-structured answer.`);
@@ -294,7 +305,9 @@ export function buildResearchPrompt(
   }
 
   // Citation grounding rule
-  lines.push(`CITATION RULE: Cite only URLs you actually browsed. Do not cite search results you did not read.`);
+  lines.push(
+    `CITATION RULE: Cite only URLs you actually browsed. Do not cite search results you did not read.`,
+  );
 
   return lines.join('\n');
 }

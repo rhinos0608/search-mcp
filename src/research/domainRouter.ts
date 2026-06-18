@@ -237,10 +237,7 @@ function normalizeQuery(query: string): string {
 export function hasKeywordMatch(normalized: string, keyword: string): boolean {
   const lowerKeyword = keyword.toLowerCase();
   const escaped = lowerKeyword.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  const regex = new RegExp(
-    `(?:^|[^a-z0-9])${escaped}(?:[^a-z0-9]|$)`,
-    'i',
-  );
+  const regex = new RegExp(`(?:^|[^a-z0-9])${escaped}(?:[^a-z0-9]|$)`, 'i');
   return regex.test(normalized);
 }
 
@@ -273,16 +270,12 @@ function hasPrefixMatch(normalized: string, keyword: string): boolean {
  * If the highest confidence is below 0.5, falls back to the general category.
  * LLM-based classification can be added as an optional fallback for v2.
  */
-export function routeQuery(
-  query: string,
-  entities?: ExtractedEntities,
-): DomainRoute {
+export function routeQuery(query: string, entities?: ExtractedEntities): DomainRoute {
   const normalized = normalizeQuery(query);
 
   let bestCategory: DomainCategory = 'general';
   let bestConfidence = 0;
-  let bestReasoning =
-    'No matching keywords found; falling back to general search.';
+  let bestReasoning = 'No matching keywords found; falling back to general search.';
   let bestPrimary: SourceType[] = ['web'];
   let bestSecondary: SourceType[] = ['academic', 'wikipedia'];
 
@@ -300,11 +293,7 @@ export function routeQuery(
       }
     }
 
-    if (
-      domain.category === 'current-events' &&
-      entities &&
-      entities.temporal.length > 0
-    ) {
+    if (domain.category === 'current-events' && entities && entities.temporal.length > 0) {
       confidence += TEMPORAL_BOOST_SCORE;
     }
 
@@ -325,11 +314,7 @@ export function routeQuery(
       bestSecondary = [...domain.secondaryBackends];
       if (matchedKeywords.length > 0) {
         bestReasoning = `Matched keywords: ${matchedKeywords.join(', ')}. Confidence: ${confidence.toFixed(2)}.`;
-      } else if (
-        domain.category === 'current-events' &&
-        entities &&
-        entities.temporal.length > 0
-      ) {
+      } else if (domain.category === 'current-events' && entities && entities.temporal.length > 0) {
         bestReasoning = `Temporal entity boost for current-events. Confidence: ${confidence.toFixed(2)}.`;
       } else if (
         (domain.category === 'technical' || domain.category === 'code') &&

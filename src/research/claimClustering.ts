@@ -11,11 +11,7 @@
  */
 
 import { logger } from '../logger.js';
-import type {
-  Finding,
-  NormalizedClaimKey,
-  ClaimPolarity,
-} from './types.js';
+import type { Finding, NormalizedClaimKey, ClaimPolarity } from './types.js';
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -41,11 +37,11 @@ export interface ClaimCluster {
 }
 
 export type ClaimConsensus =
-  | 'strong_agreement'    // 3+ sources agree
-  | 'moderate_agreement'  // 2 sources agree
-  | 'mixed'               // Some agreement, some disagreement
-  | 'contradictory'       // Directly contradicting claims
-  | 'single_source';      // Only one source
+  | 'strong_agreement' // 3+ sources agree
+  | 'moderate_agreement' // 2 sources agree
+  | 'mixed' // Some agreement, some disagreement
+  | 'contradictory' // Directly contradicting claims
+  | 'single_source'; // Only one source
 
 export interface ContradictionDescription {
   /** The conflicting claim text. */
@@ -85,26 +81,28 @@ function normalizeSubject(subject: string): string {
  * Lowercase, strip punctuation, stem common verbs.
  */
 function normalizePredicate(predicate: string): string {
-  return predicate
-    .toLowerCase()
-    .replace(/[^\w\s-]/g, ' ')
-    .replace(/\s+/g, ' ')
-    // Stem common verb forms: "reduces", "reduced", "reducing" → "reduce"
-    .replace(/\b(reduces|reduced|reducing)\b/g, 'reduce')
-    .replace(/\b(increases|increased|increasing)\b/g, 'increase')
-    .replace(/\b(improves|improved|improving)\b/g, 'improve')
-    .replace(/\b(achieves|achieved|achieving)\b/g, 'achieve')
-    .replace(/\b(outperforms|outperformed|outperforming)\b/g, 'outperform')
-    .replace(/\b(surpasses|surpassed|surpassing)\b/g, 'surpass')
-    .replace(/\b(shows|showed|showing)\b/g, 'show')
-    .replace(/\b(indicates|indicated|indicating)\b/g, 'indicate')
-    .replace(/\b(suggests|suggested|suggesting)\b/g, 'suggest')
-    .replace(/\b(provides|provided|providing)\b/g, 'provide')
-    .replace(/\b(enables|enabled|enabling)\b/g, 'enable')
-    .replace(/\b(requires|required|requiring)\b/g, 'require')
-    .replace(/\b(uses|used|using)\b/g, 'use')
-    .replace(/\b(employs|employed|employing)\b/g, 'employ')
-    .trim();
+  return (
+    predicate
+      .toLowerCase()
+      .replace(/[^\w\s-]/g, ' ')
+      .replace(/\s+/g, ' ')
+      // Stem common verb forms: "reduces", "reduced", "reducing" → "reduce"
+      .replace(/\b(reduces|reduced|reducing)\b/g, 'reduce')
+      .replace(/\b(increases|increased|increasing)\b/g, 'increase')
+      .replace(/\b(improves|improved|improving)\b/g, 'improve')
+      .replace(/\b(achieves|achieved|achieving)\b/g, 'achieve')
+      .replace(/\b(outperforms|outperformed|outperforming)\b/g, 'outperform')
+      .replace(/\b(surpasses|surpassed|surpassing)\b/g, 'surpass')
+      .replace(/\b(shows|showed|showing)\b/g, 'show')
+      .replace(/\b(indicates|indicated|indicating)\b/g, 'indicate')
+      .replace(/\b(suggests|suggested|suggesting)\b/g, 'suggest')
+      .replace(/\b(provides|provided|providing)\b/g, 'provide')
+      .replace(/\b(enables|enabled|enabling)\b/g, 'enable')
+      .replace(/\b(requires|required|requiring)\b/g, 'require')
+      .replace(/\b(uses|used|using)\b/g, 'use')
+      .replace(/\b(employs|employed|employing)\b/g, 'employ')
+      .trim()
+  );
 }
 
 /**
@@ -119,8 +117,11 @@ function buildClusterKey(finding: Finding): string {
 
   // Fallback: use normalizedClaim
   const claim = finding.normalizedClaim;
-  // Extract subject-like portion (first 3 content words)
-  const words = claim.split(/\s+/).filter((w) => w.length > 3).slice(0, 5);
+  // Extract subject-like portion (first 5 content words)
+  const words = claim
+    .split(/\s+/)
+    .filter((w) => w.length > 3)
+    .slice(0, 5);
   return words.join('_');
 }
 
@@ -165,10 +166,7 @@ function fuzzyMatchKeys(keyA: string, keyB: string): boolean {
 
 // ── Consensus determination ─────────────────────────────────────────────────
 
-function determineConsensus(
-  findings: Finding[],
-  distinctSources: Set<string>,
-): ClaimConsensus {
+function determineConsensus(findings: Finding[], distinctSources: Set<string>): ClaimConsensus {
   const polarities = new Set(findings.map((f) => f.polarity));
   const hasAsserted = polarities.has('asserted');
   const hasNegated = polarities.has('negated');
@@ -360,10 +358,7 @@ export function clusterFindings(findings: Finding[]): ClusteringResult {
  * Convert clusters back into enriched findings (for synthesis consumption).
  * Each cluster gets a clusterId and cross-source consensus metadata.
  */
-export function applyClustersToFindings(
-  findings: Finding[],
-  result: ClusteringResult,
-): Finding[] {
+export function applyClustersToFindings(findings: Finding[], result: ClusteringResult): Finding[] {
   const clusterMap = new Map<string, string>(); // findingId → clusterId
 
   for (const cluster of result.clusters) {

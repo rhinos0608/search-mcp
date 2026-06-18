@@ -1391,9 +1391,7 @@ export class QueryDecomposer {
       }
     }
 
-    const entityBlock = entities && entities.length > 0
-      ? JSON.stringify(entities, null, 2)
-      : '[]';
+    const entityBlock = entities && entities.length > 0 ? JSON.stringify(entities, null, 2) : '[]';
 
     const prompt = ORCHESTRATOR_DECOMPOSE_V2.replace('{{entities}}', entityBlock);
 

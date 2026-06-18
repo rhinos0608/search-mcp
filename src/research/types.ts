@@ -246,7 +246,13 @@ export interface FindingCluster {
   relationCounts: Partial<Record<FindingClusterRelation, number>>;
   confidenceCapReason?: string;
   /** Whether this cluster needs LLM review for merge decisions. */
-  mergeStatus?: 'auto_merged' | 'needs_llm_review' | 'split' | 'llm_merged' | 'llm_split' | 'llm_kept';
+  mergeStatus?:
+    | 'auto_merged'
+    | 'needs_llm_review'
+    | 'split'
+    | 'llm_merged'
+    | 'llm_split'
+    | 'llm_kept';
 }
 
 export interface ClusterRevisionDecision {

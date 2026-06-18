@@ -137,7 +137,8 @@ export class ResearchSynthesizer {
     // Extract citations from SOURCES blocks in the narrative
     const extractedCitations = this.extractCitationsFromReport(report, evidenceSources);
     report.extractedCitations = extractedCitations;
-    report.noSourcesExplicit = extractedCitations.length === 0 && report.narrativeMarkdown.includes('SOURCES');
+    report.noSourcesExplicit =
+      extractedCitations.length === 0 && report.narrativeMarkdown.includes('SOURCES');
 
     return applyReportValidation(report, sources, findings);
   }
@@ -156,9 +157,7 @@ export class ResearchSynthesizer {
     if (urls.length === 0) return [];
 
     // Collect URLs already in evidenceSources
-    const existingUrls = new Set(
-      evidenceSources.map((s) => normalizeUrlForCitation(s.url)),
-    );
+    const existingUrls = new Set(evidenceSources.map((s) => normalizeUrlForCitation(s.url)));
 
     // Add any new URLs not already present
     const newUrls: string[] = [];

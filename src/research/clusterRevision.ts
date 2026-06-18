@@ -1,9 +1,5 @@
 import { logger } from '../logger.js';
-import type {
-  FindingCluster,
-  FindingClusterRelation,
-  ClusterRevisionDecision,
-} from './types.js';
+import type { FindingCluster, FindingClusterRelation, ClusterRevisionDecision } from './types.js';
 
 /**
  * Validate and de-duplicate cluster revision decisions.
@@ -18,7 +14,7 @@ export function validateClusterDecisions(
 
   for (const decision of decisions) {
     // Check if any cluster ID is already consumed
-    const hasConsumed = decision.clusterIds.some(id => consumed.has(id));
+    const hasConsumed = decision.clusterIds.some((id) => consumed.has(id));
     if (hasConsumed) {
       logger.warn(
         { action: decision.action, clusterIds: decision.clusterIds },
@@ -53,8 +49,8 @@ export function applyClusterMerge(
     return clusters;
   }
 
-  const leftCluster = clusters.find(c => c.id === leftId);
-  const rightCluster = clusters.find(c => c.id === rightId);
+  const leftCluster = clusters.find((c) => c.id === leftId);
+  const rightCluster = clusters.find((c) => c.id === rightId);
   if (!leftCluster || !rightCluster) {
     logger.warn({ leftId, rightId }, 'Merge decision references non-existent clusters');
     return clusters;
@@ -64,13 +60,16 @@ export function applyClusterMerge(
   const mergedFindingIds = [...new Set([...leftCluster.findingIds, ...rightCluster.findingIds])];
 
   // Filter edges connecting two findings within the merged set
-  const mergedEdges = leftCluster.edges.concat(rightCluster.edges).filter(e =>
-    mergedFindingIds.includes(e.leftFindingId) && mergedFindingIds.includes(e.rightFindingId),
-  );
+  const mergedEdges = leftCluster.edges
+    .concat(rightCluster.edges)
+    .filter(
+      (e) =>
+        mergedFindingIds.includes(e.leftFindingId) && mergedFindingIds.includes(e.rightFindingId),
+    );
 
-  const strongEdges = mergedEdges.filter(e => e.strength === 'strong');
-  const weakEdges = mergedEdges.filter(e => e.strength === 'weak');
-  const bridgeEdges = mergedEdges.filter(e => e.bridge);
+  const strongEdges = mergedEdges.filter((e) => e.strength === 'strong');
+  const weakEdges = mergedEdges.filter((e) => e.strength === 'weak');
+  const bridgeEdges = mergedEdges.filter((e) => e.bridge);
 
   // Pick the representative claim from the higher-confidence cluster
   const representativeClaim =
@@ -100,9 +99,7 @@ export function applyClusterMerge(
   };
 
   // Replace the two clusters with the merged one
-  return clusters
-    .filter(c => c.id !== leftId && c.id !== rightId)
-    .concat(mergedCluster);
+  return clusters.filter((c) => c.id !== leftId && c.id !== rightId).concat(mergedCluster);
 }
 
 /**
@@ -118,11 +115,14 @@ export function applyClusterSplit(
   // split requires exactly 1 cluster ID and splitGroupIndices
   const [targetId] = decision.clusterIds;
   if (!targetId || !decision.splitGroupIndices) {
-    logger.warn({ clusterIds: decision.clusterIds }, 'Split decision missing cluster ID or group indices');
+    logger.warn(
+      { clusterIds: decision.clusterIds },
+      'Split decision missing cluster ID or group indices',
+    );
     return clusters;
   }
 
-  const targetCluster = clusters.find(c => c.id === targetId);
+  const targetCluster = clusters.find((c) => c.id === targetId);
   if (!targetCluster) {
     logger.warn({ targetId }, 'Split decision references non-existent cluster');
     return clusters;
@@ -130,13 +130,16 @@ export function applyClusterSplit(
 
   // Defensive filter: only include finding IDs that belong to the target cluster
   const validFindingIds = new Set(targetCluster.findingIds);
-  const filteredSplitEntries = Object.entries(decision.splitGroupIndices).filter(
-    ([findingId]) => validFindingIds.has(findingId),
+  const filteredSplitEntries = Object.entries(decision.splitGroupIndices).filter(([findingId]) =>
+    validFindingIds.has(findingId),
   );
 
   if (filteredSplitEntries.length < Object.keys(decision.splitGroupIndices).length) {
     logger.warn(
-      { targetId, skipped: Object.keys(decision.splitGroupIndices).length - filteredSplitEntries.length },
+      {
+        targetId,
+        skipped: Object.keys(decision.splitGroupIndices).length - filteredSplitEntries.length,
+      },
       'Split decision contained non-member finding IDs; filtered out',
     );
   }
@@ -150,7 +153,10 @@ export function applyClusterSplit(
   }
 
   if (groups.size < 2) {
-    logger.warn({ targetId, groups: groups.size }, 'Split decision produced fewer than 2 groups; skipping');
+    logger.warn(
+      { targetId, groups: groups.size },
+      'Split decision produced fewer than 2 groups; skipping',
+    );
     return clusters;
   }
 
@@ -158,12 +164,12 @@ export function applyClusterSplit(
   const subClusters: FindingCluster[] = [];
   let groupOrd = 0;
   for (const [, findingIds] of groups) {
-    const subEdges = targetCluster.edges.filter(e =>
-      findingIds.includes(e.leftFindingId) && findingIds.includes(e.rightFindingId),
+    const subEdges = targetCluster.edges.filter(
+      (e) => findingIds.includes(e.leftFindingId) && findingIds.includes(e.rightFindingId),
     );
-    const strongEdges = subEdges.filter(e => e.strength === 'strong');
-    const weakEdges = subEdges.filter(e => e.strength === 'weak');
-    const bridgeEdges = subEdges.filter(e => e.bridge);
+    const strongEdges = subEdges.filter((e) => e.strength === 'strong');
+    const weakEdges = subEdges.filter((e) => e.strength === 'weak');
+    const bridgeEdges = subEdges.filter((e) => e.bridge);
 
     // Representative comes from the parent cluster
     const relationCounts: Partial<Record<FindingClusterRelation, number>> = {};
@@ -193,9 +199,7 @@ export function applyClusterSplit(
   }
 
   // Replace the original cluster with the sub-clusters
-  return clusters
-    .filter(c => c.id !== targetId)
-    .concat(subClusters);
+  return clusters.filter((c) => c.id !== targetId).concat(subClusters);
 }
 
 /**
@@ -212,7 +216,5 @@ export function applyClusterKeep(
     return clusters;
   }
 
-  return clusters.map(c =>
-    c.id === targetId ? { ...c, mergeStatus: 'llm_kept' as const } : c,
-  );
+  return clusters.map((c) => (c.id === targetId ? { ...c, mergeStatus: 'llm_kept' as const } : c));
 }
