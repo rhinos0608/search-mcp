@@ -18,8 +18,8 @@ import { registerSemanticCrawl } from './tools/standalone/semanticCrawl.js';
 import { registerSemanticCrawlListCorpora } from './tools/standalone/semanticCrawlListCorpora.js';
 import { registerSemanticCrawlInspectCorpus } from './tools/standalone/semanticCrawlInspectCorpus.js';
 import { registerSemanticJobs } from './tools/standalone/semanticJobs.js';
-import { registerFetchFocus } from './tools/standalone/fetchFocus.js';
 import { registerHealthCheck } from './tools/standalone/healthCheck.js';
+import { registerFetchFocus } from './tools/standalone/fetchFocus.js';
 
 // Family tools
 import { registerYoutubeTool } from './tools/families/youtube.js';
@@ -99,8 +99,11 @@ export function createServer(
   registerAgenticBrowseTool(server, cfg, kgHook ?? undefined);
 
   // Conditional / gated tools
-  registerFetchFocus(server, cfg);
   registerHealthCheck(server, cfg);
+
+  // Deprecated compatibility alias — use agentic_browse.focus instead.
+  // Will be removed in the next major release.
+  registerFetchFocus(server, cfg);
 
   // Knowledge graph family (conditional on KG enabled)
   if (cfg.knowledgeGraph.enabled) {

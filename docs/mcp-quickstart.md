@@ -78,7 +78,7 @@ If you already have other servers in the file, add `search-mcp` inside the exist
 
 **4. Restart Claude Desktop.** The tools will appear in Claude's tool list automatically.
 
-To verify: ask Claude "what tools do you have?" and you should see `web_search`, `web_read`, `github_repo`, `github_trending`, `youtube_transcript`, `reddit_search`, and `reddit_comments`.
+To verify: ask Claude "what tools do you have?" and you should see `web_search`, `agentic_browse`, `github_repo`, `github_trending`, `youtube_transcript`, `reddit_search`, and `reddit_comments`.
 
 ---
 
@@ -166,15 +166,15 @@ http://localhost:8050/mcp?key=smcp_xxxxxxxxxxxx
 
 ## Available tools
 
-| Tool                 | What it does                                                     |
-| -------------------- | ---------------------------------------------------------------- |
-| `web_search`         | Web search (Brave / SearXNG), returns titles + URLs + snippets   |
-| `web_read`           | Fetch a URL and extract clean article text (Mozilla Readability) |
-| `github_repo`        | Stars, forks, license, topics, latest release, optional README   |
-| `github_trending`    | Today's / this week's / this month's trending repos              |
-| `youtube_transcript` | Full transcript from any YouTube video (by ID or URL)            |
-| `reddit_search`      | Search posts across all of Reddit or within a subreddit          |
-| `reddit_comments`    | Fetch a Reddit post plus its normalized comment tree             |
+| Tool                  | What it does                                                     |
+| --------------------- | ---------------------------------------------------------------- |
+| `web_search`          | Web search (Brave / SearXNG), returns titles + URLs + snippets   |
+| `agentic_browse.read` | Fetch a URL and extract clean article text (Mozilla Readability) |
+| `github_repo`         | Stars, forks, license, topics, latest release, optional README   |
+| `github_trending`     | Today's / this week's / this month's trending repos              |
+| `youtube_transcript`  | Full transcript from any YouTube video (by ID or URL)            |
+| `reddit_search`       | Search posts across all of Reddit or within a subreddit          |
+| `reddit_comments`     | Fetch a Reddit post plus its normalized comment tree             |
 
 Full parameter details: see `docs/tools.md`.
 

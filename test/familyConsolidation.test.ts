@@ -21,19 +21,10 @@ interface RegisteredToolEntry {
 }
 
 /** All expected tool names. Families are single-entry, per-action tools are gone. */
-const STANDALONE_TOOLS = new Set([
-  'web_search',
-  'health_check',
-]);
+const STANDALONE_TOOLS = new Set(['web_search', 'health_check']);
 
 /** Tools that require specific config and may not be registered in default env. */
-const GATED_STANDALONE_TOOLS = new Set([
-  'web_crawl',
-  'semantic_crawl',
-  'semantic_jobs',
-  'deep_research',
-  'fetch_focus',
-]);
+const GATED_STANDALONE_TOOLS = new Set(['semantic_crawl', 'semantic_jobs', 'deep_research']);
 
 const FAMILY_TOOLS = new Map<string, string[]>([
   ['github', ['repo', 'file', 'tree', 'search', 'trending', 'code_search']],
@@ -41,28 +32,39 @@ const FAMILY_TOOLS = new Map<string, string[]>([
   ['reddit', ['search', 'comments', 'semantic']],
   ['research', ['academic', 'arxiv', 'hackernews', 'stackoverflow', 'pubmed', 'wikipedia']],
   ['packages', ['npm', 'pypi']],
-  ['browser', ['navigate', 'snapshot', 'click', 'type', 'evaluate', 'screenshot', 'extract', 'act', 'wait', 'pdf', 'storage', 'network', 'tabs', 'session']],
+  ['agentic_browse', ['browse', 'present', 'read', 'focus']],
 ]);
 
 /** Families that require specific config and may not be registered in default env. */
 const GATED_FAMILIES = new Map<string, string[]>([
-  ['knowledge_graph', ['ingest', 'query', 'entity_lookup_batch', 'status', 'rebuild', 'family_list', 'family_get', 'family_merge', 'run_list', 'run_rollback']],
+  [
+    'knowledge_graph',
+    [
+      'ingest',
+      'query',
+      'entity_lookup_batch',
+      'status',
+      'rebuild',
+      'family_list',
+      'family_get',
+      'family_merge',
+      'run_list',
+      'run_rollback',
+    ],
+  ],
 ]);
 
 type McpServerInstance = ReturnType<typeof createServer>['server'];
 
-function getAllRegisteredTools(
-  server: McpServerInstance,
-): Record<string, RegisteredToolEntry> {
-  return (server as unknown as {
-    _registeredTools: Record<string, RegisteredToolEntry>;
-  })._registeredTools;
+function getAllRegisteredTools(server: McpServerInstance): Record<string, RegisteredToolEntry> {
+  return (
+    server as unknown as {
+      _registeredTools: Record<string, RegisteredToolEntry>;
+    }
+  )._registeredTools;
 }
 
-function getRegisteredTool(
-  server: McpServerInstance,
-  name: string,
-): RegisteredToolEntry {
+function getRegisteredTool(server: McpServerInstance, name: string): RegisteredToolEntry {
   const tools = getAllRegisteredTools(server);
   const entry = tools[name];
   assert.ok(entry !== undefined, `tool "${name}" should be registered`);
@@ -143,7 +145,7 @@ for (const [familyName, actions] of FAMILY_TOOLS) {
 
     // Each known action should parse successfully
     for (const action of actions) {
-    // Build minimal valid params for this action
+      // Build minimal valid params for this action
       const params: Record<string, unknown> = { action };
       // Add required fields for actions that need them
       if (
@@ -182,8 +184,20 @@ for (const [familyName, actions] of FAMILY_TOOLS) {
       if (action === 'comments') {
         params.post = { type: 'url', url: 'https://www.reddit.com/r/test/comments/abc/' };
       }
-      if (action === 'navigate' || action === 'extract') {
+      if (
+        action === 'navigate' ||
+        action === 'extract' ||
+        action === 'browse' ||
+        action === 'read' ||
+        action === 'focus'
+      ) {
         params.url = 'https://example.com';
+      }
+      if (action === 'focus') {
+        params.focus = 'test extraction query';
+      }
+      if (action === 'present') {
+        params.documentId = 'test-doc-id';
       }
       if (action === 'code_search') {
         params.repo = 'owner/repo';
@@ -201,7 +215,12 @@ for (const [familyName, actions] of FAMILY_TOOLS) {
       if (action === 'act') {
         params.instruction = 'click the login button';
       }
-      if (action === 'storage' || action === 'network' || action === 'tabs' || action === 'session') {
+      if (
+        action === 'storage' ||
+        action === 'network' ||
+        action === 'tabs' ||
+        action === 'session'
+      ) {
         if (action === 'storage') params.op = 'list-cookies';
         else if (action === 'network') params.op = 'list-requests';
         else if (action === 'tabs') params.op = 'list';
@@ -229,10 +248,7 @@ for (const toolName of STANDALONE_TOOLS) {
   test(`standalone tool "${toolName}" is registered (unchanged)`, () => {
     const server = createServer(loadConfig()).server;
     const tools = getAllRegisteredTools(server);
-    assert.ok(
-      toolName in tools,
-      `Standalone tool "${toolName}" should still be registered`,
-    );
+    assert.ok(toolName in tools, `Standalone tool "${toolName}" should still be registered`);
   });
 }
 
@@ -298,9 +314,7 @@ for (const [familyName, actions] of GATED_FAMILIES) {
       const params: Record<string, unknown> = { action };
 
       // Add required fields for actions that need them
-      if (
-        action === 'ingest'
-      ) {
+      if (action === 'ingest') {
         params.content = { type: 'text', value: 'test content' };
       }
       if (action === 'query' || action === 'entity_lookup_batch') {
@@ -394,11 +408,43 @@ interface CallToolResult {
 }
 
 interface RegisteredToolWithHandler {
-  handler?: (args: Record<string, unknown>, extra?: unknown) => CallToolResult | Promise<CallToolResult>;
+  handler?: (
+    args: Record<string, unknown>,
+    extra?: unknown,
+  ) => CallToolResult | Promise<CallToolResult>;
 }
 
 /** Default extra object matching SDK's extra shape for tests. */
 const DEFAULT_EXTRA = {};
+
+test('fetch_focus is registered as deprecated alias alongside agentic_browse.focus', () => {
+  const server = createServer(loadConfig()).server;
+  const tools = getAllRegisteredTools(server);
+
+  assert.ok('fetch_focus' in tools, 'fetch_focus should be registered as deprecated alias');
+  assert.ok(tools.agentic_browse, 'agentic_browse should be registered');
+});
+
+test('agentic_browse.focus returns config error when focus dependencies are missing', async () => {
+  const server = createServer(loadConfig()).server;
+  const tools = server as unknown as {
+    _registeredTools: Record<string, RegisteredToolWithHandler>;
+  };
+  const entry = tools._registeredTools.agentic_browse;
+  assert.ok(entry?.handler, 'agentic_browse handler should exist');
+
+  const result = await entry.handler(
+    { action: 'focus', url: 'https://example.com', focus: 'target fact' },
+    DEFAULT_EXTRA,
+  );
+
+  assert.ok(result.isError === true, 'should be an error response');
+  const text = result.content?.[0]?.text ?? '';
+  assert.ok(
+    text.includes('agentic_browse.focus unavailable'),
+    `expected focus config error, got: ${text.slice(0, 200)}`,
+  );
+});
 
 test('reddit.semantic rejects missing query field (per-action validation)', async () => {
   const server = createServer(loadConfig()).server;
@@ -437,7 +483,8 @@ test('youtube.transcript rejects missing videoId (per-action validation)', async
   assert.ok(result.isError === true, 'should be an error response');
   const text = result.content?.[0]?.text ?? '';
   assert.ok(
-    text.toLowerCase().includes('validation error') || text.toLowerCase().includes('missing video identifier'),
+    text.toLowerCase().includes('validation error') ||
+      text.toLowerCase().includes('missing video identifier'),
     `expected validation error, got: ${text.slice(0, 200)}`,
   );
 });

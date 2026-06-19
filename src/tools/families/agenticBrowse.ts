@@ -5,9 +5,10 @@
  * with document storage between calls.
  *
  * Actions:
- *   browse           — Fetch a web page and store its content for later retrieval
- *   present          — Extract-readable content from a previously browsed page
- *   browse_and_present — Convenience: fetch, store, and present in one call
+ *   browse   — Fetch a web page and store its content for later retrieval
+ *   present  — Extract-readable content from a previously browsed page
+ *   read     — Fetch a web page and extract its readable content
+ *   focus    — Fetch a web page and extract only the spans relevant to a question
  */
 
 import { randomUUID } from 'node:crypto';
@@ -17,6 +18,7 @@ import type { SearchConfig } from '../../config.js';
 import type { KnowledgeGraphHook } from '../../knowledge/hook.js';
 import { assertSafeUrl, safeResponseText } from '../../httpGuards.js';
 import { registerFamily, type FamilyDefinition } from '../registry.js';
+import { fetchFocus } from '../fetchFocus.js';
 
 // ── In-memory document store ────────────────────────────────────────────────
 
@@ -94,10 +96,10 @@ function stripHtml(html: string): string {
       .replace(/<[^>]+>/g, ' ')
       // Decode common HTML entities
       .replace(/&nbsp;/g, ' ')
-      .replace(/</g, '<')
-      .replace(/>/g, '>')
-      .replace(/"/g, '"')
-      .replace(/&#39;/g, "'")
+      .replace(/&lt;/g, '<')
+      .replace(/&gt;/g, '>')
+      .replace(/&quot;/g, '"')
+      .replace(/&#39;|&apos;/g, "'")
       // &amp; last so entities like &amp;lt; are not double-decoded
       .replace(/&amp;/g, '&')
       // Collapse whitespace
@@ -126,8 +128,8 @@ const presentSchema = z.object({
     .describe('Maximum characters to return (1–50000, default 12000)'),
 });
 
-const browseAndPresentSchema = z.object({
-  action: z.literal('browse_and_present').describe('Fetch and extract content in one call'),
+const readSchema = z.object({
+  action: z.literal('read').describe('Fetch a web page and extract its readable content'),
   url: z.string().describe('The URL to fetch'),
   maxChars: z
     .number()
@@ -139,6 +141,14 @@ const browseAndPresentSchema = z.object({
     .describe('Maximum characters to return (1–50000, default 12000)'),
 });
 
+const focusSchema = z.object({
+  action: z
+    .literal('focus')
+    .describe('Fetch a web page and extract only the spans relevant to a specific question'),
+  url: z.string().describe('The URL to fetch'),
+  focus: z.string().min(1).describe('The specific information to extract from the page'),
+});
+
 // ── Family definition ──────────────────────────────────────────────────────
 
 const agenticBrowseFamily: FamilyDefinition = {
@@ -146,7 +156,8 @@ const agenticBrowseFamily: FamilyDefinition = {
   description:
     'Browse web pages and extract their readable content. ' +
     'Use `browse` to fetch and store a page, `present` to retrieve readable content from a stored document, ' +
-    'or `browse_and_present` for a combined convenience call.',
+    '`read` for a one-shot page read, ' +
+    'or `focus` to extract only parts relevant to a specific question (requires Crawl4AI + LLM).',
   actions: [
     {
       name: 'browse',
@@ -198,10 +209,11 @@ const agenticBrowseFamily: FamilyDefinition = {
         };
       },
     },
+    // ── read ────────────────────────────────────────────────────────────
     {
-      name: 'browse_and_present',
+      name: 'read',
       description: 'Fetch a web page and extract its readable content in one call',
-      schema: browseAndPresentSchema,
+      schema: readSchema,
       handler: async (args) => {
         const { url, maxChars } = args as { url: string; maxChars: number };
         const { content } = await fetchPage(url);
@@ -223,6 +235,34 @@ const agenticBrowseFamily: FamilyDefinition = {
           wordCount,
           truncated,
         };
+      },
+    },
+    // ── focus ───────────────────────────────────────────────────────────
+    {
+      name: 'focus',
+      description:
+        'Fetch a web page and extract ONLY the spans relevant to a specific question. ' +
+        'Requires Crawl4AI and deep research LLM config.',
+      schema: focusSchema,
+      handler: async (args, cfg) => {
+        const { url, focus: focusQuery } = args as { url: string; focus: string };
+        const result = await fetchFocus(url, focusQuery, cfg);
+        return {
+          url: result.url,
+          title: result.title,
+          focus: result.focus,
+          extractedText: result.extractedText,
+          usedFallback: result.usedFallback,
+        };
+      },
+      configIssue: (cfg) => {
+        if (cfg.crawl4ai.baseUrl.length === 0) {
+          return 'Set CRAWL4AI_BASE_URL to use agentic_browse.focus.';
+        }
+        if (!cfg.deepResearch.baseUrl || !cfg.deepResearch.model) {
+          return 'Set DEEP_RESEARCH_BASE_URL and DEEP_RESEARCH_MODEL to use agentic_browse.focus.';
+        }
+        return null;
       },
     },
   ],

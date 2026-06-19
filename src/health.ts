@@ -70,14 +70,6 @@ const GATED_TOOLS: Record<string, GateRule> = {
     check: (cfg) => cfg.deepResearch.enabled,
     remediation: 'Set DEEP_RESEARCH_ENABLED=true to enable the deep research orchestration engine.',
   },
-  fetch_focus: {
-    check: (cfg) =>
-      cfg.crawl4ai.baseUrl.length > 0 &&
-      cfg.deepResearch.baseUrl.length > 0 &&
-      cfg.deepResearch.model.length > 0,
-    remediation:
-      'Set CRAWL4AI_BASE_URL plus DEEP_RESEARCH_BASE_URL and DEEP_RESEARCH_MODEL to enable fetch_focus.',
-  },
   browser: {
     check: (cfg) => cfg.browser.enabled,
     remediation:
@@ -293,7 +285,7 @@ function redditOAuthHealth(cfg: SearchConfig): ToolHealth {
   }
 
   return {
-    status: 'degraded',
+    status: 'healthy',
     message:
       'Reddit OAuth not configured (using public Reddit JSON API which Reddit may block from cloud/datacenter IPs).',
     remediation:

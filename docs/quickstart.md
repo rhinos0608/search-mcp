@@ -290,7 +290,7 @@ docker compose up -d
 | Tool                   | Example                                 |
 | ---------------------- | --------------------------------------- |
 | `web_search`           | Search the web with Exa/Brave/SearXNG   |
-| `web_read`             | Extract article content from a URL      |
+| `agentic_browse.read`  | Extract article content from a URL      |
 | `web_crawl`            | Deep-crawl a site with Crawl4AI         |
 | `semantic_crawl`       | Crawl + chunk + embed + RAG-rank a site |
 | `semantic_github_code` | AST-aware code search in a repo         |

@@ -1,8 +1,9 @@
 /**
- * Standalone fetch_focus tool registration.
+ * Deprecated fetch_focus compatibility alias.
  *
- * Fetch a web page and extract only the spans relevant to a specific question.
- * Gated on crawl4ai + deepResearch LLM config.
+ * Delegates to the same fetchFocus() implementation used by agentic_browse.focus.
+ * Kept for one release to avoid breaking existing MCP clients.
+ * Migrate to agentic_browse.focus. Will be removed in next major release.
  */
 
 import { z } from 'zod/v4';
@@ -13,20 +14,11 @@ import { fetchFocus } from '../fetchFocus.js';
 import { makeResult, errorResponse, successResponse } from '../response.js';
 
 export function registerFetchFocus(server: McpServer, cfg: SearchConfig): void {
-  // Only register if required config is present
-  if (
-    cfg.crawl4ai.baseUrl.length === 0 ||
-    cfg.deepResearch.baseUrl.length === 0 ||
-    cfg.deepResearch.model.length === 0
-  ) {
-    return;
-  }
-
   server.registerTool(
     'fetch_focus',
     {
       description:
-        'Fetch a web page and extract only the spans relevant to a specific question. Requires Crawl4AI and the deep research LLM config.',
+        '[DEPRECATED] Use agentic_browse.focus instead. Fetch a web page and extract only the spans relevant to a specific question. Requires Crawl4AI and the deep research LLM config.',
       inputSchema: {
         url: z.url().describe('The URL to fetch'),
         focus: z.string().min(1).describe('The specific information to extract from the page'),

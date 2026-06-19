@@ -8,7 +8,7 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { SearchConfig } from '../../config.js';
 import { logger } from '../../logger.js';
 import { runHealthProbes } from '../../health.js';
-import { makeResult, errorResponse, successResponse } from '../response.js';
+import { makeResult, errorResponse } from '../response.js';
 import { z } from 'zod/v4';
 
 export function registerHealthCheck(server: McpServer, cfg: SearchConfig): void {
@@ -47,13 +47,18 @@ export function registerHealthCheck(server: McpServer, cfg: SearchConfig): void 
           .optional(),
       }),
     },
-    async () => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    async (): Promise<any> => {
       logger.info({ tool: 'health_check' }, 'Tool invoked');
       const start = Date.now();
       try {
         const report = await runHealthProbes(cfg);
         const result = makeResult('health_check', report, Date.now() - start);
-        return successResponse(result);
+        const formatted = JSON.stringify(result, null, 2);
+        return {
+          content: [{ type: 'text' as const, text: formatted }],
+          structuredContent: report,
+        };
       } catch (err: unknown) {
         logger.error({ err, tool: 'health_check' }, 'Tool failed');
         return errorResponse(err, 'health_check');

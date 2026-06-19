@@ -275,15 +275,15 @@ Swallowing errors silently would make it impossible for the AI client to recover
 
 ## Dependencies
 
-| Package                     | Purpose                                                                                                                                                                             |
-| --------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `@modelcontextprotocol/sdk` | Official TypeScript SDK for MCP. Handles the JSON-RPC framing, tool registration, schema validation, and stdio transport so the server only needs to implement handler logic.       |
-| `zod`                       | Runtime schema validation and TypeScript type inference for tool input parameters. Used by `@modelcontextprotocol/sdk` to validate incoming arguments before the handler is called. |
-| `pino`                      | High-performance structured logger. Writes to stderr only. Low overhead compared to alternatives; native JSON output makes log aggregation straightforward.                         |
-| `@mozilla/readability`      | Port of Firefox Reader View. Strips navigation, ads, and boilerplate from a fetched HTML page and returns the main article content. Used by `web_read`.                             |
-| `jsdom`                     | Parses raw HTML into a DOM tree that `@mozilla/readability` can traverse. Used alongside `@mozilla/readability` in `web_read`.                                                      |
-| `cheerio`                   | Fast server-side jQuery-style HTML parsing. Used by `github_trending` to scrape the GitHub trending page, which has no official API.                                                |
-| `youtube-transcript`        | Fetches the auto-generated or manual caption transcript for a YouTube video. Used by `youtube_transcript`.                                                                          |
-| `better-sqlite3`            | Synchronous SQLite bindings. Used by `src/utils/corpusCache.ts` to persist prepared corpora across server restarts.                                                                 |
-| `web-tree-sitter`           | WebAssembly port of the tree-sitter parsing library. Used by the code adapter for AST-aware symbol extraction. Grammars load lazily on first use per language.                      |
-| `tree-sitter-wasms`         | Pre-compiled WASM grammar bundles for TypeScript, JavaScript, Python, Go, Rust, and others. Required by `web-tree-sitter` at runtime; not imported at startup.                      |
+| Package                     | Purpose                                                                                                                                                                                                   |
+| --------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `@modelcontextprotocol/sdk` | Official TypeScript SDK for MCP. Handles the JSON-RPC framing, tool registration, schema validation, and stdio transport so the server only needs to implement handler logic.                             |
+| `zod`                       | Runtime schema validation and TypeScript type inference for tool input parameters. Used by `@modelcontextprotocol/sdk` to validate incoming arguments before the handler is called.                       |
+| `pino`                      | High-performance structured logger. Writes to stderr only. Low overhead compared to alternatives; native JSON output makes log aggregation straightforward.                                               |
+| `@mozilla/readability`      | Port of Firefox Reader View. Strips navigation, ads, and boilerplate from a fetched HTML page and returns the main article content. Used by `agentic_browse.read` and `web_crawl` (Readability fallback). |
+| `jsdom`                     | Parses raw HTML into a DOM tree that `@mozilla/readability` can traverse. Used alongside `@mozilla/readability` in `agentic_browse.read` and `web_crawl`.                                                 |
+| `cheerio`                   | Fast server-side jQuery-style HTML parsing. Used by `github_trending` to scrape the GitHub trending page, which has no official API.                                                                      |
+| `youtube-transcript`        | Fetches the auto-generated or manual caption transcript for a YouTube video. Used by `youtube_transcript`.                                                                                                |
+| `better-sqlite3`            | Synchronous SQLite bindings. Used by `src/utils/corpusCache.ts` to persist prepared corpora across server restarts.                                                                                       |
+| `web-tree-sitter`           | WebAssembly port of the tree-sitter parsing library. Used by the code adapter for AST-aware symbol extraction. Grammars load lazily on first use per language.                                            |
+| `tree-sitter-wasms`         | Pre-compiled WASM grammar bundles for TypeScript, JavaScript, Python, Go, Rust, and others. Required by `web-tree-sitter` at runtime; not imported at startup.                                            |
