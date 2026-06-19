@@ -1005,6 +1005,10 @@ export function invalidateCorpus(
     return true;
   });
   if (opts?.source !== undefined) {
-    pendingBuilds.delete(stableStringify(normalizeSource(opts.source)));
+    const baseKey = stableStringify(normalizeSource(opts.source));
+    pendingBuilds.delete(baseKey);
+    for (const key of pendingBuilds.keys()) {
+      if (key.startsWith(baseKey + '|')) pendingBuilds.delete(key);
+    }
   }
 }
