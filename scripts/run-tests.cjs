@@ -22,6 +22,22 @@ function mapTestTarget(arg, outDir) {
   return path.join(outDir, arg).replace(/\.ts$/u, '.js');
 }
 
+/** Recursively collect .test.js files under dir. */
+function findTestFiles(dir) {
+  if (!fs.existsSync(dir)) return [];
+  const results = [];
+  const entries = fs.readdirSync(dir, { withFileTypes: true });
+  for (const entry of entries) {
+    const full = path.join(dir, entry.name);
+    if (entry.isDirectory()) {
+      results.push(...findTestFiles(full));
+    } else if (entry.name.endsWith('.test.js')) {
+      results.push(full);
+    }
+  }
+  return results;
+}
+
 function buildNodeTestArgs(args, outDir) {
   const forwarded = [
     '--import',
@@ -48,7 +64,14 @@ function buildNodeTestArgs(args, outDir) {
   }
 
   if (!hasExplicitTarget) {
-    forwarded.push(path.join(outDir, 'test', '**', '*.test.js'));
+    // Resolve test files explicitly — avoids relying on Node's --test glob
+    // expansion which varies across versions.
+    const testDir = path.join(outDir, 'test');
+    const testFiles = findTestFiles(testDir).sort();
+    if (testFiles.length === 0) {
+      console.error('ERROR: No .test.js files found in', testDir);
+    }
+    forwarded.push(...testFiles);
   }
 
   return forwarded;
