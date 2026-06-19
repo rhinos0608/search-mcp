@@ -38,6 +38,8 @@ npm run config:decrypt   # config.enc -> config.json
 
 ## Main Tools (17 tools, 73 actions)
 
+> **Config-gated tools**: Some tools are only registered when their required config/env vars are set. If the config is missing, the tool does not appear in the tool list at all — it is not silently registered with a broken handler. Gated tools: `web_crawl` (Crawl4AI URL), `semantic_crawl` + `semantic_crawl_list_corpora` + `semantic_crawl_inspect_corpus` (Crawl4AI URL + embedding sidecar), `semantic_jobs` (embedding sidecar + search backend), `deep_research` (`DEEP_RESEARCH_ENABLED=true`), `browser` (`BROWSER_ENABLED=true`), `knowledge_graph` (`KG_ENABLED=true`). Individual family actions may also be gated (e.g. `github.code_search` requires `GITHUB_TOKEN` + embedding sidecar; `youtube.search` requires `YOUTUBE_API_KEY`). Unavailable actions return actionable errors at runtime.
+
 ### Search/Read/Crawl
 
 - `web_search`: Exa, Brave, or SearXNG with fallback chain, optional query expansion and cross-backend merging.

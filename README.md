@@ -5,22 +5,24 @@
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.8-blue)](https://www.typescriptlang.org/)
 [![MCP Compatible](https://img.shields.io/badge/MCP-Compatible-green)](https://modelcontextprotocol.io)
 
-> **25 MCP tools** (15 core + 10 knowledge graph) for web search, semantic RAG, code analysis, knowledge graph, job search, academic research, social media, and browser automation — all in one MCP server.
+> **17 MCP tools** (73 actions) for web search, semantic RAG, code analysis, knowledge graph, job search, academic research, social media, browser automation, agentic browsing, and deep research — all in one MCP server.
 
 ## Features at a Glance
 
-| Category            | Tools                                                                                                                                                                                                                                                                                      |
-| ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| **Web**             | `web_search` (Exa/Brave/SearXNG/DuckDuckGo/Tavily/Ollama Search), `web_crawl`, `agentic_browse` family (`browse`/`present`/`read`/`focus`)                                                                                                                                                 |
-| **Semantic RAG**    | `semantic_crawl` (URL/sitemap/search/github/cached sources, BM25+embedding+RRF)                                                                                                                                                                                                            |
-| **GitHub**          | `github` family: `repo`, `file`, `tree`, `search`, `trending`, `code_search`                                                                                                                                                                                                               |
-| **Video/Social**    | `youtube` family (search/transcript/semantic), `reddit` family (search/comments/semantic)                                                                                                                                                                                                  |
-| **Research**        | `research` family (academic/arxiv/hackernews/stackoverflow/pubmed/wikipedia), `deep_research` (agent/pipeline/tree via job-poll protocol)                                                                                                                                                  |
-| **Packages**        | `packages` family (npm/pypi)                                                                                                                                                                                                                                                               |
-| **Jobs**            | `semantic_jobs` — structured extraction from 20+ boards (SEEK, Indeed, LinkedIn, etc.) with constraint filtering and weighted ranking                                                                                                                                                      |
-| **Browser**         | `browser` family (navigate/snapshot/click/type/evaluate/screenshot/extract/act/wait/pdf/storage/network/tabs/session/wait_for/dialog_handle/iframe_context/scroll_to_load/paginate/download/table_extract/network_intercept/resource_timing/diff) with CDP stealth or CloakBrowser backend |
-| **Knowledge Graph** | `graph_ingest`, `graph_query`, `entity_lookup_batch`, `graph_status`, `graph_rebuild`, `family_list`, `family_get`, `family_merge`, `run_list`, `run_rollback` — entity extraction, querying, and family management (opt-in via `KG_ENABLED`)                                              |
-| **System**          | `health_check` — live probe of all backends                                                                                                                                                                                                                                                |
+| Category            | Tools                                                                                                                                                                                                                                                                                         |
+| ------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Web**             | `web_search` (Exa/Brave/SearXNG/DuckDuckGo/Tavily/Ollama Search), `web_crawl` ⚙️, `agentic_browse` family (`browse`/`present`/`read`/`focus`)                                                                                                                                                 |
+| **Semantic RAG**    | `semantic_crawl` ⚙️ (URL/sitemap/search/github/cached sources, BM25+embedding+RRF), `semantic_crawl_list_corpora` ⚙️, `semantic_crawl_inspect_corpus` ⚙️                                                                                                                                      |
+| **GitHub**          | `github` family: `repo`, `file`, `list_dir`, `tree`, `search`, `trending`, `code_search`                                                                                                                                                                                                      |
+| **Video/Social**    | `youtube` family (search/transcript/semantic), `reddit` family (search/comments/semantic)                                                                                                                                                                                                     |
+| **Research**        | `research` family (academic/arxiv/hackernews/stackoverflow/pubmed/wikipedia/openalex/crossref/datacite/ror/semantic_scholar/gdelt/wikidata/auto), `deep_research` ⚙️ (start/run/poll/list/cancel/save via job-poll protocol)                                                                  |
+| **Packages**        | `packages` family (npm/pypi)                                                                                                                                                                                                                                                                  |
+| **Jobs**            | `semantic_jobs` ⚙️ — structured extraction from 20+ boards (SEEK, Indeed, LinkedIn, etc.) with constraint filtering and weighted ranking                                                                                                                                                      |
+| **Browser**         | `browser` ⚙️ family (navigate/snapshot/click/type/evaluate/screenshot/extract/act/wait/pdf/storage/network/tabs/session/wait_for/dialog_handle/iframe_context/scroll_to_load/paginate/download/table_extract/network_intercept/resource_timing/diff) with CDP stealth or CloakBrowser backend |
+| **Knowledge Graph** | `knowledge_graph` ⚙️ family: `ingest`, `query`, `entity_lookup_batch`, `status`, `rebuild`, `family_list`, `family_get`, `family_merge`, `run_list`, `run_rollback` — entity extraction, querying, and family management                                                                      |
+| **System**          | `health_check` — live probe of all backends                                                                                                                                                                                                                                                   |
+
+> ⚙️ = **config-gated**: tool is only registered when its required env vars are set. If config is missing, the tool does not appear at all — no silent failures, no broken handlers. See [Configuration](#configuration) for required vars per tool.
 
 ## Quick Start
 
@@ -61,10 +63,10 @@ Copy [`config.example.json`](config.example.json) to `config.json` and fill in y
 
 ### Crawl
 
-| Variable             | Description                                                                     |
-| -------------------- | ------------------------------------------------------------------------------- |
-| `CRAWL4AI_BASE_URL`  | Crawl4AI browser service URL (required for web_crawl, web_read, semantic_crawl) |
-| `CRAWL4AI_API_TOKEN` | Crawl4AI API token (optional)                                                   |
+| Variable             | Description                                                           |
+| -------------------- | --------------------------------------------------------------------- |
+| `CRAWL4AI_BASE_URL`  | Crawl4AI browser service URL (required for web_crawl, semantic_crawl) |
+| `CRAWL4AI_API_TOKEN` | Crawl4AI API token (optional)                                         |
 
 ### Embedding (choose one provider)
 
@@ -82,7 +84,7 @@ Copy [`config.example.json`](config.example.json) to `config.json` and fill in y
 | `EMBEDDING_OPENAI_MODEL`       | `text-embedding-3-small`    | OpenAI embedding model                              |
 | `EMBEDDING_OPENAI_API_KEY`     | —                           | OpenAI API key                                      |
 
-### LLM (for contextual embeddings & `agentic_browse.focus`)
+### LLM (for contextual embeddings, browser.act, deep research & `agentic_browse.focus`)
 
 | Variable        | Description                                                         |
 | --------------- | ------------------------------------------------------------------- |
