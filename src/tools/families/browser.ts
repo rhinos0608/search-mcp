@@ -810,6 +810,7 @@ const browserFamily: FamilyDefinition = {
             try {
               switch (actionName) {
                 case 'navigate': {
+                  assertSafeUrl(target);
                   await page.goto(target, { waitUntil: 'domcontentloaded', timeout: 15_000 });
                   results.push({
                     action: 'navigate',
@@ -1140,7 +1141,10 @@ const browserFamily: FamilyDefinition = {
           case 'new': {
             const newPage = await session.context.newPage();
             session.pages.push(newPage);
-            if (url) await newPage.goto(url);
+            if (url) {
+              assertSafeUrl(url);
+              await newPage.goto(url);
+            }
             return { index: session.pages.length - 1, url: newPage.url() };
           }
           case 'close': {
@@ -1447,6 +1451,7 @@ const browserFamily: FamilyDefinition = {
                   if (trigger.action === 'click' && trigger.target) {
                     await page.locator(trigger.target).click();
                   } else if (trigger.action === 'navigate' && trigger.url) {
+                    assertSafeUrl(trigger.url);
                     await page.goto(trigger.url);
                   }
                 },
