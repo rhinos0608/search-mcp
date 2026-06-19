@@ -29,7 +29,11 @@ const SECRET_LEAF_PATHS = new Set([
   'embeddingSidecar.apiToken',
   'llm.apiToken',
   'raga.apiToken',
+  'deepResearch.apiToken',
 ]);
+
+/** Key-name suffixes that indicate a credential value to redact under browser.credentials. */
+const CREDENTIAL_KEY_PATTERN = /^(password|totpSecret|totp)$/i;
 
 /**
  * Deep merge two config objects.
@@ -79,8 +83,15 @@ function deepMergePreferNonEmpty<T extends object>(defaults: T, raw: Partial<T>)
 }
 
 function redactValue(path: string, value: unknown): unknown {
-  if (typeof value === 'string' && value.length > 0 && SECRET_LEAF_PATHS.has(path)) {
-    return '•••';
+  if (typeof value === 'string' && value.length > 0) {
+    if (SECRET_LEAF_PATHS.has(path)) return '•••';
+    // Redact credential keys under browser.credentials (password, totpSecret, totp)
+    if (
+      path.includes('.credentials.') &&
+      CREDENTIAL_KEY_PATTERN.test(path.split('.').pop() ?? '')
+    ) {
+      return '•••';
+    }
   }
   if (value !== null && typeof value === 'object' && !Array.isArray(value)) {
     return Object.fromEntries(
