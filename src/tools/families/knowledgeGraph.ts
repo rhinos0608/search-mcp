@@ -23,7 +23,7 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { SearchConfig } from '../../config.js';
 import type { KnowledgeGraphHook } from '../../knowledge/hook.js';
 import { logger } from '../../logger.js';
-import { assertSafeUrl } from '../../httpGuards.js';
+import { assertSafeUrl, safeResponseText } from '../../httpGuards.js';
 import { makeResult, errorResponse, successResponse } from '../response.js';
 import { registerFamily, type FamilyDefinition } from '../registry.js';
 import { KnowledgeGraphExtractor } from '../../knowledge/extractor/index.js';
@@ -280,8 +280,17 @@ async function buildNormInput(
     const resp = await fetch(content.value, { signal: controller.signal });
     clearTimeout(timer);
     if (!resp.ok) throw new Error(`HTTP ${String(resp.status)}`);
+    const contentType = resp.headers.get('content-type') ?? '';
+    if (
+      contentType.length > 0 &&
+      !contentType.includes('text/html') &&
+      !contentType.includes('text/plain') &&
+      !contentType.includes('application/json')
+    ) {
+      throw new Error(`Unsupported content type "${contentType}" for KG ingest URL`);
+    }
     return {
-      text: await resp.text(),
+      text: await safeResponseText(resp, content.value, 5 * 1024 * 1024),
       url: content.value,
       title: topic,
       sourceKind: 'documentation' as const,
