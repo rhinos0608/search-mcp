@@ -892,7 +892,6 @@ export type SemanticCrawlSeedsOptions = Pick<
 > & { sourceType?: 'url' | 'sitemap' | 'search' | 'github' | 'cached' };
 
 /** Crawl a list of seed URLs with per-seed budget division and sequential budget tracking. */
-/** Crawl a list of seed URLs with per-seed budget division and sequential budget tracking. */
 export async function crawlSeeds(
   seedUrls: string[],
   crawl4aiCfg: Crawl4aiConfig,

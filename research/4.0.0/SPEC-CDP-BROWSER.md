@@ -13,22 +13,22 @@ Competitors (Firecrawl MCP, Playwright MCP, Browserbase MCP) have moved beyond r
 
 ## Competitive Analysis
 
-| Feature | Firecrawl MCP | Playwright MCP (MS) | Browserbase MCP | **search-mcp target** |
-|---|---|---|---|---|
-| Engine | Chrome CDP (cloud) | Playwright (local) | Stagehand+CDP (cloud) | Playwright (local) + CDP endpoint |
-| Transport | cloud HTTP | STDIO / SSE | SHTTP (hosted) | STDIO (existing) + optional SSE |
-| Session model | TTL 30-3600s | Persistent profile | Session lifecycle | Isolated + persistent profiles |
-| Element targeting | NL prompts | Accessibility tree refs | NL commands | Accessibility tree refs (Playwright) |
-| Auth handling | Manual action chain | Manual + storage state | Manual | Manual + storage state save/restore |
-| Stealth | Proxy + anti-bot | Launch flags + init scripts | Advanced stealth (Scale) | 3-layer: flags + init-script patches + rebrowser (CDP leak fix) |
-| Pricing | 2 credits/min | Free (OSS) | Free tier → Scale | Free (OSS, self-hosted) |
-| Screenshots | Yes | Yes | Yes | Yes |
-| JS execution | Yes | Yes | Via act | Yes (evaluate) |
-| Network interception | No | Yes (route) | No | Yes (route) |
-| Tab management | No | Yes | No | Yes |
-| Form filling | NL | Structured + NL | NL | Structured (primary) + NL (optional) |
-| PDF generation | Yes | Yes (opt-in) | No | Yes |
-| Deep research aware | No | No | No | **Yes — key differentiator** |
+| Feature              | Firecrawl MCP       | Playwright MCP (MS)         | Browserbase MCP          | **search-mcp target**                                           |
+| -------------------- | ------------------- | --------------------------- | ------------------------ | --------------------------------------------------------------- |
+| Engine               | Chrome CDP (cloud)  | Playwright (local)          | Stagehand+CDP (cloud)    | Playwright (local) + CDP endpoint                               |
+| Transport            | cloud HTTP          | STDIO / SSE                 | SHTTP (hosted)           | STDIO (existing) + optional SSE                                 |
+| Session model        | TTL 30-3600s        | Persistent profile          | Session lifecycle        | Isolated + persistent profiles                                  |
+| Element targeting    | NL prompts          | Accessibility tree refs     | NL commands              | Accessibility tree refs (Playwright)                            |
+| Auth handling        | Manual action chain | Manual + storage state      | Manual                   | Manual + storage state save/restore                             |
+| Stealth              | Proxy + anti-bot    | Launch flags + init scripts | Advanced stealth (Scale) | 3-layer: flags + init-script patches + rebrowser (CDP leak fix) |
+| Pricing              | 2 credits/min       | Free (OSS)                  | Free tier → Scale        | Free (OSS, self-hosted)                                         |
+| Screenshots          | Yes                 | Yes                         | Yes                      | Yes                                                             |
+| JS execution         | Yes                 | Yes                         | Via act                  | Yes (evaluate)                                                  |
+| Network interception | No                  | Yes (route)                 | No                       | Yes (route)                                                     |
+| Tab management       | No                  | Yes                         | No                       | Yes                                                             |
+| Form filling         | NL                  | Structured + NL             | NL                       | Structured (primary) + NL (optional)                            |
+| PDF generation       | Yes                 | Yes (opt-in)                | No                       | Yes                                                             |
+| Deep research aware  | No                  | No                          | No                       | **Yes — key differentiator**                                    |
 
 **Key insight**: Playwright MCP is the dominant OSS solution (32k stars). Our differentiator: deep integration with the deep research orchestrator so interactive browser sessions become first-class research primitives — not just standalone automation.
 
@@ -86,6 +86,7 @@ MCP Client
 ### Actions Detail
 
 #### `navigate`
+
 Navigate to a URL. Supports waitUntil states (load, domcontentloaded, networkidle).
 
 ```ts
@@ -98,6 +99,7 @@ Navigate to a URL. Supports waitUntil states (load, domcontentloaded, networkidl
 ```
 
 #### `snapshot`
+
 Capture accessibility tree snapshot of current page. Returns structured element tree with stable refs for subsequent actions. This is the primary "observation" primitive.
 
 ```ts
@@ -111,6 +113,7 @@ Capture accessibility tree snapshot of current page. Returns structured element 
 ```
 
 #### `click`
+
 Click an element by accessibility ref, CSS selector, or text.
 
 ```ts
@@ -124,6 +127,7 @@ Click an element by accessibility ref, CSS selector, or text.
 ```
 
 #### `type`
+
 Type text into an editable element.
 
 ```ts
@@ -137,6 +141,7 @@ Type text into an editable element.
 ```
 
 #### `evaluate`
+
 Execute arbitrary JavaScript in the page context. Returns JSON-serializable result.
 
 ```ts
@@ -148,6 +153,7 @@ Execute arbitrary JavaScript in the page context. Returns JSON-serializable resu
 ```
 
 #### `screenshot`
+
 Capture a screenshot of the page or element.
 
 ```ts
@@ -162,6 +168,7 @@ Capture a screenshot of the page or element.
 ```
 
 #### `extract`
+
 Extract structured data using a schema or natural language instruction. Uses the existing `extractionConfig` infrastructure.
 
 ```ts
@@ -174,6 +181,7 @@ Extract structured data using a schema or natural language instruction. Uses the
 ```
 
 #### `act`
+
 Composite action: perform a natural-language instruction by chaining primitive actions. Uses LLM to decompose instruction if LLM is configured; otherwise falls back to structured-only.
 
 ```ts
@@ -185,6 +193,7 @@ Composite action: perform a natural-language instruction by chaining primitive a
 ```
 
 #### `wait`
+
 Wait for a condition: time, text to appear/disappear, or selector.
 
 ```ts
@@ -198,6 +207,7 @@ Wait for a condition: time, text to appear/disappear, or selector.
 ```
 
 #### `pdf`
+
 Save current page as PDF.
 
 ```ts
@@ -210,6 +220,7 @@ Save current page as PDF.
 ```
 
 #### `storage`
+
 Manage browser storage: save/restore state, list/clear cookies, localStorage, sessionStorage.
 
 ```ts
@@ -224,6 +235,7 @@ Manage browser storage: save/restore state, list/clear cookies, localStorage, se
 ```
 
 #### `network`
+
 Network interception and monitoring.
 
 ```ts
@@ -238,6 +250,7 @@ Network interception and monitoring.
 ```
 
 #### `tabs`
+
 Tab management: list, create, close, select.
 
 ```ts
@@ -250,6 +263,7 @@ Tab management: list, create, close, select.
 ```
 
 #### `session`
+
 Browser lifecycle management.
 
 ```ts
@@ -283,6 +297,7 @@ Inspired by Playwright MCP's model:
 Modern bot-detection systems (Cloudflare, DataDome, PerimeterX) detect automation through multiple vectors. Our stealth strategy layers three defenses:
 
 **Layer 1: Launch flags** (always applied when `stealthEnabled: true`)
+
 ```
 --disable-blink-features=AutomationControlled
 --no-sandbox (configurable, off by default)
@@ -291,6 +306,7 @@ Modern bot-detection systems (Cloudflare, DataDome, PerimeterX) detect automatio
 
 **Layer 2: Init-script patches** (inject before page scripts execute)
 31+ fingerprint masking patches adapted from ManagedCode Playwright Stealth research:
+
 - `navigator.webdriver` → false
 - `navigator.plugins` → realistic array
 - `navigator.languages` → configured locale
@@ -303,15 +319,15 @@ Modern bot-detection systems (Cloudflare, DataDome, PerimeterX) detect automatio
 
 **Layer 3: CDP leak prevention** (critical)
 Bot detectors monitor for `Runtime.enable` CDP commands — these are a dead giveaway that a debugger/protocol client is attached. Two mitigation paths:
+
 - **Option A: rebrowser-playwright** — drop-in replacement for `playwright-core` that patches Runtime.enable detection (rebrowser-patches project). Preferred for sensitive sites. Requires `BROWSER_REBROWSER=true`. Drop-in: `import { chromium } from 'rebrowser-playwright'`.
 - **Option B: Raw CDP manual control** — use Playwright's `page.context().newCDPSession(page)` to manage CDP commands carefully, avoiding `Runtime.enable` unless explicitly needed for `evaluate` actions.
 
 **Additional stealth configuration:**
+
 - Realistic user-agent strings (Chrome stable-channel UA, OS-appropriate)
 - Viewport dimensions matching real devices
 - Locale, timezone, geolocation spoofing
 - Proxy rotation support for IP diversity
 
 ---
-
-

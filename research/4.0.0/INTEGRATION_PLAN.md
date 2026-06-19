@@ -9,6 +9,7 @@ Integration of key patterns from upstream gpt-researcher into our deep research 
 `DeepTreeResearchEngine` (`src/research/treeEngine.ts`) implements gpt-researcher's breadth×depth recursive tree search. Wired into the orchestrator as an alternative path when depth profile is `tree`. The `tree` depth is available in the `deep_research` tool schema.
 
 Key files:
+
 - `src/research/treeEngine.ts` — `DeepTreeResearchEngine`
 - `src/research/types.ts` — `ResearchDepth` includes `'tree'`; `TreeProfile` with `treeBreadth`, `treeDepth`, `treeConcurrency`, `treeContextWordLimit`
 - `src/research/llm/prompts.ts` — `TREE_GENERATE_QUERIES` and `TREE_PROCESS_RESULTS` prompts
@@ -28,13 +29,13 @@ Key files:
 
 ## File Change Summary (historical)
 
-| File | Change |
-|------|--------|
-| `src/research/types.ts` | Added `tree` depth, TreeProfile, StepCost type |
-| `src/research/state.ts` | Added stepCosts tracking, tree profile budget |
-| `src/research/treeEngine.ts` | NEW — DeepTreeResearchEngine |
-| `src/research/decomposer.ts` | Added LLM-based decompose option |
-| `src/research/orchestrator.ts` | Wired tree engine, fallback chain, cost tracking |
-| `src/research/llm/chat.ts` | Added callWithFallback() |
-| `src/research/llm/prompts.ts` | Added tree generation/processing prompts, decompose prompt |
-| `src/tools/families/research.ts` | Exposed `tree` depth option |
+| File                             | Change                                                     |
+| -------------------------------- | ---------------------------------------------------------- |
+| `src/research/types.ts`          | Added `tree` depth, TreeProfile, StepCost type             |
+| `src/research/state.ts`          | Added stepCosts tracking, tree profile budget              |
+| `src/research/treeEngine.ts`     | NEW — DeepTreeResearchEngine                               |
+| `src/research/decomposer.ts`     | Added LLM-based decompose option                           |
+| `src/research/orchestrator.ts`   | Wired tree engine, fallback chain, cost tracking           |
+| `src/research/llm/chat.ts`       | Added callWithFallback()                                   |
+| `src/research/llm/prompts.ts`    | Added tree generation/processing prompts, decompose prompt |
+| `src/tools/families/research.ts` | Exposed `tree` depth option                                |
