@@ -107,6 +107,19 @@ export function assertSafeUrl(url: string, allowInternal = false): void {
         if (isPrivateIPv4(ipv4)) {
           throw new Error(`Blocked request to private IPv6 address "${hostname}"`);
         }
+        // Handle compressed IPv4-mapped form: ::ffff:hhhh:hhhh
+        // WHATWG URL normalizes [::ffff:127.0.0.1] to [::ffff:7f00:1]
+        const colonIdx = ipv4.indexOf(':');
+        if (colonIdx !== -1) {
+          const hi = parseInt(ipv4.slice(0, colonIdx), 16);
+          const lo = parseInt(ipv4.slice(colonIdx + 1), 16);
+          if (!isNaN(hi) && !isNaN(lo)) {
+            const octets = [(hi >> 8) & 0xff, hi & 0xff, (lo >> 8) & 0xff, lo & 0xff];
+            if (isPrivateIPv4(octets.join('.'))) {
+              throw new Error(`Blocked request to private IPv6 address "${hostname}"`);
+            }
+          }
+        }
       }
     }
     return;
@@ -143,6 +156,18 @@ export function assertSafeUrl(url: string, allowInternal = false): void {
       const ipv4 = inner.slice(7);
       if (isPrivateIPv4(ipv4)) {
         throw new Error(`Blocked request to private IPv6 address "${hostname}"`);
+      }
+      // Handle compressed IPv4-mapped form: ::ffff:hhhh:hhhh
+      const colonIdx = ipv4.indexOf(':');
+      if (colonIdx !== -1) {
+        const hi = parseInt(ipv4.slice(0, colonIdx), 16);
+        const lo = parseInt(ipv4.slice(colonIdx + 1), 16);
+        if (!isNaN(hi) && !isNaN(lo)) {
+          const octets = [(hi >> 8) & 0xff, hi & 0xff, (lo >> 8) & 0xff, lo & 0xff];
+          if (isPrivateIPv4(octets.join('.'))) {
+            throw new Error(`Blocked request to private IPv6 address "${hostname}"`);
+          }
+        }
       }
     }
   }
