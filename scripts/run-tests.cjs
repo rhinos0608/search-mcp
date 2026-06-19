@@ -90,15 +90,21 @@ function main(args) {
       'tsconfig.test.json',
       '--outDir',
       outDir,
-      '--pretty',
-      'false',
     ]);
 
     if (compileResult.status !== 0) {
       exitCode = compileResult.status ?? 1;
     } else {
-      const testResult = run(process.execPath, buildNodeTestArgs(args, outDir));
-      exitCode = testResult.status ?? 1;
+      // Verify compiled test files exist before running tests
+      const testDir = path.join(outDir, 'test');
+      if (!fs.existsSync(testDir)) {
+        console.error('ERROR: TypeScript compilation produced no test/ directory.');
+        console.error('  Compiled output directory:', outDir);
+        exitCode = 1;
+      } else {
+        const testResult = run(process.execPath, buildNodeTestArgs(args, outDir));
+        exitCode = testResult.status ?? 1;
+      }
     }
   } finally {
     fs.rmSync(tempRoot, { recursive: true, force: true });
