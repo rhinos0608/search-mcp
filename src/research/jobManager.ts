@@ -576,8 +576,10 @@ export class ResearchJobManager {
   }
 
   private disarmJob(job: InternalJob): void {
-    // No separate runtime timer to clear — it's handled by the
-    // AbortController's timeout. Just null references for GC.
+    if (job.runtimeTimeout) {
+      clearTimeout(job.runtimeTimeout);
+      job.runtimeTimeout = undefined;
+    }
     job.abortController = undefined;
   }
 
@@ -612,7 +614,7 @@ export class ResearchJobManager {
       if (
         (job.status === 'running' || job.status === 'cancelling') &&
         job.startedAt !== undefined &&
-        now - job.startedAt > Math.max(this.ttlMs, job.maxTimeMs * 2)
+        now - job.startedAt > Math.max(this.ttlMs, job.originalMaxTimeMs * 2)
       ) {
         logger.warn({ jobId: id, status: job.status }, 'Stale research job force-expired');
         job.status = 'expired';

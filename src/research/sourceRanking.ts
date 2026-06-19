@@ -99,6 +99,7 @@ function freshnessScore(source: SourceEntry): number {
   if (!source.publishedDate) return 0.5;
   const age = Date.now() - new Date(source.publishedDate).getTime();
   const days = age / 86_400_000;
+  if (days < 0) return 0.1; // future-dated — likely a parser/clock issue
   if (days < 30) return 1.0;
   if (days < 90) return 0.9;
   if (days < 365) return 0.7;
