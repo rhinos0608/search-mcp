@@ -1,12 +1,12 @@
 # CLAUDE.md
 
-> **Version: 6.0.0** — HTTP/HTTPS transport with React browser dashboard (provider config, API key management, Tailscale access), session-gated dashboard API, dual-mode startup (stdio-only or HTTP+stdio), ConfigManager with AES-256-GCM encrypted config, and all V3.x features (semantic RAG, multi-provider embeddings, RAG-Anything, extraction resilience).
+> **Version: 7.0.0** — Family-based tool architecture (17 tools, 73 actions), HTTP/HTTPS transport with React browser dashboard (provider config, API key management, Tailscale access), session-gated dashboard API, dual-mode startup (stdio-only or HTTP+stdio), ConfigManager with AES-256-GCM encrypted config, deep research engine, knowledge graph, browser automation, agentic browsing, and all V3.x features (semantic RAG, multi-provider embeddings, RAG-Anything, extraction resilience).
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
 ## What This Is
 
-An MCP (Model Context Protocol) server that exposes web search, web reading, deep crawling, **semantic RAG search**, GitHub (repo, file, tree, search, corpus), YouTube, Reddit, Twitter/X, Product Hunt, patent, podcast, academic research, Hacker News, Stack Overflow, npm, PyPI, and news tools over stdio JSON-RPC. Clients like Claude Desktop or the Claude CLI connect via stdin/stdout; all logging goes to stderr.
+An MCP (Model Context Protocol) server exposing **17 tools with 73 actions** over stdio JSON-RPC: web search/extract/crawl, semantic RAG, GitHub, YouTube, Reddit, academic research (14 backends), Hacker News, Stack Overflow, npm, PyPI, jobs, browser automation, agentic browsing, knowledge graph, and deep research. Clients like Claude Desktop or the Claude CLI connect via stdin/stdout; all logging goes to stderr.
 
 **V6.0.0** adds opt-in HTTP transport with a React browser dashboard: set `HTTP_PORT` to enable. The dashboard serves at `/dashboard`, the MCP endpoint at `/mcp` (Bearer token auth). A `ConfigManager` manages AES-256-GCM encrypted config (`config.enc`); on first run it generates an `mcpApiKey` printed once to stderr. Startup is dual-mode: `HTTP_PORT` absent → original `loadConfig()` stdio-only path; `HTTP_PORT` set → `ConfigManager` + `startHttpServer`.
 
@@ -33,84 +33,67 @@ npm run build:all          # npm run build && npm run build:dashboard
 Append `--json` (via `dev:json` / `start:json`) for structured JSON logging instead of pino-pretty.
 
 **HTTP mode startup (enables dashboard):**
+
 ```bash
 HTTP_PORT=8050 SEARCH_MCP_CONFIG_KEY="your-passphrase" npm start
 ```
+
 On first run this prints the generated `mcpApiKey` to stderr — that key is the dashboard login password and MCP Bearer token. Subsequent runs read from `config.enc`.
 
 ## Architecture
 
 **Transport**: Dual-mode. When `HTTP_PORT` is unset, stdio only — stdout is exclusively for JSON-RPC frames; never write anything else to stdout. When `HTTP_PORT` is set, the server binds an HTTP server on that port (MCP at `/mcp`, dashboard at `/dashboard`) **and** also connects the stdio transport. All logging uses pino routed to stderr via `src/logger.ts`.
 
-**Tool registration**: `src/server.ts` creates the `McpServer` and registers all tools inline with Zod input schemas. Each tool delegates to a function in `src/tools/`.
+**Tool registration**: `src/server.ts` is the composition root. Tools are registered in two patterns:
 
-**Tools** (one file each in `src/tools/`):
+- **Family tools** (8): defined in `src/tools/families/`, registered via `registerFamily()` from `src/tools/registry.ts`. Each family is a single MCP tool with a discriminated-union `action` field. Unavailable actions return actionable errors at runtime.
+- **Standalone tools** (9): defined in `src/tools/standalone/`, call `server.registerTool()` directly.
 
-_Search & Read_
+Some tools are conditionally gated by config: `web_crawl` (Crawl4AI), `semantic_crawl` (Crawl4AI + embedding), `semantic_jobs` (embedding + search), `deep_research` (DEEP_RESEARCH_ENABLED), `browser` (BROWSER_ENABLED), `knowledge_graph` (KG_ENABLED).
 
-- `web_search` — Multi-backend search with fallback chain: primary backend (configured) → remaining backend. Supports Exa, Brave, and SearXNG. Optional `expandQuery` generates rule-based query variations (concept, question, scope, opposition) for broader coverage. Optional `mergeSearchBackends` queries all configured backends in parallel and merges/deduplicates results with composite scoring (engine agreement 40%, domain authority 30%, position 30%).
-- `web_read` — Fetches a URL and extracts article content via Mozilla Readability + jsdom.
-- `web_crawl` — Deep multi-page crawl via Crawl4AI (JS rendering). Returns markdown + HTML per page. Timeout scales with `maxPages` (30s + 15s × pages, cap 5 min). Requires `CRAWL4AI_BASE_URL`. When Crawl4AI returns placeholder/empty content, attempts external recovery via Wayback Machine CDX API and Google Cache (tagged as `recoverySource` in page metadata).
-- `semantic_crawl` — Full RAG pipeline over a crawled corpus. Source types: `url`, `sitemap`, `search` (search-then-crawl), `github` (code-aware), `cached` (re-use corpus by ID). Returns top-K semantically ranked chunks with bi-encoder, BM25, and RRF scores. Requires `CRAWL4AI_BASE_URL` + `EMBEDDING_SIDECAR_BASE_URL`. Supports optional `useContextualEmbeddings` for LLM-enriched chunk context before embedding. Content scrubbing (opt-in via config) redacts injection/exfiltration patterns before chunking. Domain trust evaluation (opt-in) blocks known typosquats and suspicious domains. Extraction stats track per-domain success rates and can short-circuit known-failing domains.
-- `semantic_youtube` — YouTube video search + transcript fetch + RAG pipeline. Returns top-K semantically ranked transcript passages. Requires `YOUTUBE_API_KEY` + `EMBEDDING_SIDECAR_BASE_URL`.
-- `semantic_reddit` — Reddit post search + comment thread fetch + RAG pipeline. Deleted/removed comments auto-filtered. Returns top-K semantically ranked comment passages. Requires `EMBEDDING_SIDECAR_BASE_URL`.
-- `semantic_jobs` — Job listing search across job boards (SEEK, Indeed, Jora) via web search + crawl. Extracts structured fields from HTML (title, company, location, salary, work mode) using Cheerio and JSON-LD; requires Crawl4AI v0.8.x for HTML delivery. Deduplicates across sources, applies constraint filters, and ranks with weighted composite scoring (semantic 0.45, location 0.20, workMode 0.15, recency 0.10, completeness 0.10). Returns structured `JobListingMvp` objects with confidence scores and verification status. `corpusStatus` includes full extraction funnel (requested, fetched, failed, extracted, deduplicated, filtered). Requires `EMBEDDING_SIDECAR_BASE_URL` + a search backend (`BRAVE_API_KEY` or `SEARXNG_BASE_URL`).
+**Standalone tools** (in `src/tools/standalone/`):
 
-_GitHub_
+- `web_search` — Multi-backend search with fallback chain (Exa, Brave, SearXNG). Optional `expandQuery` for rule-based query variations. Optional `mergeSearchBackends` for parallel cross-backend merging.
+- `web_crawl` — Deep multi-page crawl via Crawl4AI. Timeout = 30s + 15s × maxPages (cap 5 min). External recovery via Wayback Machine / Google Cache when Crawl4AI fails. Requires `CRAWL4AI_BASE_URL`.
+- `semantic_crawl` — Full RAG pipeline over crawled corpus. Sources: `url`, `sitemap`, `search`, `github`, `cached`. Returns top-K semantically ranked chunks. Requires `CRAWL4AI_BASE_URL` + `EMBEDDING_SIDECAR_BASE_URL`.
+- `semantic_crawl_list_corpora` — List cached corpora.
+- `semantic_crawl_inspect_corpus` — Inspect a specific cached corpus.
+- `semantic_jobs` — Job search across SEEK, Indeed, Jora. Structured extraction, dedup, constraint filtering, weighted ranking. Requires `EMBEDDING_SIDECAR_BASE_URL` + search backend.
+- `health_check` — Server status, config health, backend connectivity.
+- `deep_research` — Async deep multi-source research via job/poll protocol. Actions: `start`, `run`, `poll`, `list`, `cancel`, `save`. Phases: decomposition → discovery → extraction → gap analysis → audit → synthesis. Requires `DEEP_RESEARCH_ENABLED=true`.
+- `fetch_focus` ⚠️ deprecated — use `agentic_browse.focus` instead.
 
-- `github_repo` — GitHub API (unauthenticated) for repo metadata, latest release, optional README.
-- `github_repo_file` — Fetch raw content of a specific file from a GitHub repo via the API.
-- `github_repo_search` — Search GitHub repos by query string; returns ranked repo list with metadata.
-- `github_repo_tree` — Browse the directory tree of a GitHub repo at a given ref/path.
-- `github_trending` — Scrapes github.com/trending with cheerio (no API).
-- `semantic_github_code` — AST-aware code search over a GitHub repository. Chunks by function/class/method boundaries via lazy-loaded tree-sitter WASM grammars (TS, JS, Python, Go, Rust). Returns ranked code chunks with path, language, line range, symbol metadata, and RAG scores. Defaults to `lexical-heavy` profile. Requires `EMBEDDING_SIDECAR_BASE_URL`; `EMBEDDING_CODE_MODEL` is optional but recommended for conceptual queries.
+**Family tools** (in `src/tools/families/`, registered via `registerFamily()`):
 
-_Video & Social_
-
-- `youtube_search` — YouTube Data API v3 for video discovery. Returns video IDs + metadata. Requires `YOUTUBE_API_KEY`. Pairs with `youtube_transcript`.
-- `youtube_transcript` — Fetches video captions via youtube-transcript library.
-- `reddit_search` — Reddit search via shared Reddit transport (`src/tools/redditClient.ts`): public JSON API by default, OAuth (`oauth.reddit.com`) when `REDDIT_CLIENT_ID` and `REDDIT_CLIENT_SECRET` are both set.
-- `reddit_comments` — Fetches a Reddit post plus a normalized comment tree via the same shared transport. Supports `url` / `permalink` / `subreddit`+`article` locators, focused subthreads via `comment`+`context`, and `sort` / `depth` / `limit` / `showMore` controls.
-- `twitter_search` — Searches Twitter/X via a configurable Nitter instance (cheerio scraping). Requires `NITTER_BASE_URL`.
-
-_Research & Discovery_
-
-- `academic_search` — ArXiv API + Semantic Scholar API for academic paper search (free, no auth). Supports searching either or both with merged/deduplicated results.
-- `arxiv_search` — Fast direct ArXiv-only search with full date range filtering via `submittedDate`. Supports category filtering. Faster than `academic_search` for ArXiv-only queries.
-- `hackernews_search` — HN Algolia API for searching stories/comments (free, no auth). Supports type filtering, sort by relevance/date, and date range.
-- `stackoverflow_search` — Stack Exchange API for searching questions. Supports tag filtering and accepted-answer filtering. Optional `STACKEXCHANGE_API_KEY` for higher rate limits.
-
-_Packages & Products_
-
-- `npm_search` — npm registry search API (free, no auth). Returns packages with metadata, scores, and repository links.
-- `pypi_search` — PyPI search via HTML scraping (cheerio) with top-result enrichment from PyPI JSON API (free, no auth).
-- `producthunt_search` — Product Hunt search via GraphQL API (with `PRODUCTHUNT_API_TOKEN`) or public leaderboard scraping fallback.
-
-_Specialist_
-
-- `patent_search` — USPTO PatentsView API for US patent search. Requires `PATENTSVIEW_API_KEY` (free registration).
-- `podcast_search` — ListenNotes API for podcast episode search. Requires `LISTENNOTES_API_KEY`.
+- `github` — Actions: `repo`, `file`, `list_dir`, `tree`, `search`, `trending`, `code_search` (AST-aware via tree-sitter).
+- `youtube` — Actions: `search` (API), `transcript` (free), `semantic` (search + transcript + RAG).
+- `reddit` — Actions: `search` (free API), `comments` (nested tree), `semantic` (search + comments + RAG).
+- `research` — 14 actions: `academic`, `pubmed`, `wikipedia`, `arxiv`, `hackernews`, `stackoverflow`, `openalex`, `crossref`, `datacite`, `ror`, `semantic_scholar`, `gdelt`, `wikidata`, `auto` (rule-based router).
+- `packages` — Actions: `npm`, `pypi`.
+- `browser` — 24 actions: `navigate`, `snapshot`, `click`, `type`, `evaluate`, `screenshot`, `extract`, `act`, `wait`, `wait_for`, `dialog_handle`, `iframe_context`, `scroll_to_load`, `paginate`, `download`, `table_extract`, `network_intercept`, `resource_timing`, `diff`, `pdf`, `storage`, `network`, `tabs`, `session`. Backends: Playwright + CDP, optional CloakBrowser. Gated by `BROWSER_ENABLED`.
+- `agentic_browse` — Actions: `browse`, `present`, `read`, `focus`. In-memory document store with optional deep research.
+- `knowledge_graph` — 10 actions: `ingest`, `query`, `entity_lookup_batch`, `status`, `rebuild`, `family_list`, `family_get`, `family_merge`, `run_list`, `run_rollback`. Gated by `KG_ENABLED`.
 
 **Config resolution** (`src/config.ts`): encrypted file (`config.enc` + `SEARCH_MCP_CONFIG_KEY` env var) → individual env vars → defaults. Config is cached after first load.
 
 Key env vars:
 
-- Search: `EXA_API_KEY`, `BRAVE_API_KEY`, `SEARXNG_BASE_URL`, `SEARCH_BACKEND`
-- Social: `NITTER_BASE_URL`, `REDDIT_CLIENT_ID`, `REDDIT_CLIENT_SECRET`, `REDDIT_USER_AGENT`
-- Specialist: `LISTENNOTES_API_KEY`, `PRODUCTHUNT_API_TOKEN`, `PATENTSVIEW_API_KEY`, `YOUTUBE_API_KEY`, `STACKEXCHANGE_API_KEY`, `GITHUB_TOKEN`
+- Search: `EXA_API_KEY`, `BRAVE_API_KEY`, `SEARXNG_BASE_URL`, `SEARCH_BACKEND` (brave|searxng|exa|tavily), `TAVILY_API_KEY`
+- Social: `NITTER_BASE_URL`, `REDDIT_CLIENT_ID`, `REDDIT_CLIENT_SECRET`, `REDDIT_USER_AGENT`, `YOUTUBE_API_KEY`
+- Research: `STACKEXCHANGE_API_KEY`, `GITHUB_TOKEN`
 - Crawl: `CRAWL4AI_BASE_URL`, `CRAWL4AI_API_TOKEN`
-- Embedding: `EMBEDDING_PROVIDER` (sidecar|ollama|transformers|openai, default sidecar), `EMBEDDING_SIDECAR_BASE_URL`, `EMBEDDING_SIDECAR_API_TOKEN`, `EMBEDDING_DIMENSIONS` (default 768), `EMBEDDING_CODE_MODEL` (optional), `EMBEDDING_OLLAMA_BASE_URL` (default http://localhost:11434), `EMBEDDING_OLLAMA_MODEL` (default nomic-embed-text), `EMBEDDING_TRANSFORMERS_MODEL` (default Xenova/all-MiniLM-L6-v2), `EMBEDDING_OPENAI_BASE_URL`, `EMBEDDING_OPENAI_MODEL` (default text-embedding-3-small), `EMBEDDING_OPENAI_API_KEY`
+- Embedding: `EMBEDDING_PROVIDER` (sidecar|ollama|transformers|openai, default sidecar), `EMBEDDING_SIDECAR_BASE_URL`, `EMBEDDING_SIDECAR_API_TOKEN`, `EMBEDDING_DIMENSIONS` (default 768), `EMBEDDING_CODE_MODEL` (optional), `EMBEDDING_OLLAMA_BASE_URL` (default http://localhost:11434), `EMBEDDING_OPENAI_API_KEY`
+- LLM (contextual embeddings, browser.act, deep research): `LLM_PROVIDER` (model name), `LLM_API_TOKEN` (optional), `LLM_BASE_URL` (required)
 - RAG-Anything: `RAGA_ENABLED`, `RAGA_BRIDGE_URL` (default http://localhost:8000), `RAGA_DEFAULT_PARSER`, `RAGA_TIMEOUT_MS` (default 30000)
+- Browser: `BROWSER_ENABLED`, `BROWSER_ENGINE` (playwright|cloak), `BROWSER_MODE` (stealth|user|profile), `BROWSER_PROFILE_DIR`, `CLOAKBROWSER_*`
+- Deep Research: `DEEP_RESEARCH_ENABLED`, `DEEP_RESEARCH_BASE_URL`, `DEEP_RESEARCH_MODEL`, `DEEP_RESEARCH_WORKER_MODEL`, `DEEP_RESEARCH_DEFAULT_DEPTH`
+- Knowledge Graph: `KG_ENABLED`
+- Security (opt-in): `DOMAIN_TRUST_ENABLED`, `TRUSTED_DOMAINS`, `BLOCKED_DOMAINS`, `SCRUB_CONTENT`
 - Persistence: `DATABASE_PATH` (SQLite corpus cache path; defaults under `~/.cache/search-mcp/semantic-crawl/`)
 
 Reddit OAuth is optional: both `REDDIT_CLIENT_ID` and `REDDIT_CLIENT_SECRET` must be set together; setting exactly one is treated as invalid configuration (server starts, health reports degraded, Reddit tools throw `VALIDATION_ERROR` at first use).
 
-**V3.3.0 env vars (all opt-in, off by default):**
-
-- Security: `DOMAIN_TRUST_ENABLED` (true/false), `TRUSTED_DOMAINS`, `BLOCKED_DOMAINS` (comma-separated), `SCRUB_CONTENT` (true/false)
-- LLM (contextual embeddings): `LLM_PROVIDER` (model name), `LLM_API_TOKEN` (optional), `LLM_BASE_URL` (required)
-
-**RAG core** (`src/rag/`): shared pipeline used by `semantic_crawl`, `semantic_youtube`, `semantic_reddit`, `semantic_jobs`, and `semantic_github_code`.
+**RAG core** (`src/rag/`): shared pipeline used by `semantic_crawl`, `youtube.semantic`, `reddit.semantic`, `semantic_jobs`, and `github.code_search`.
 
 - `types.ts` — `RagChunk`, `PreparedCorpus`, `RetrievalResponse`, `RetrievalProfileName`, etc.
 - `pipeline.ts` — `prepareCorpus()`, `retrieveCorpus()`, `prepareAndRetrieve()` (embedding → BM25 → RRF → top-K); `corpusIdFor()` includes chunking parameters for cache compatibility
@@ -153,6 +136,7 @@ GitHub corpus (`src/utils/githubCorpus.ts`): fetches repo files via GitHub API, 
 
 - `sidecar/embedding/` — Python FastAPI server running a local embedding model (nomic-embed-text or similar). Exposes `POST /embed` accepting `{ texts, mode, dimensions }`.
 - `sidecar/openai-embedding-proxy/` — OpenAI-compatible proxy that routes `/v1/embeddings` to the sidecar.
+- `sidecar/jobspy/` — Python sidecar for job scraping via JobSpy.
 
 **HTTP safety** (`src/httpGuards.ts`): SSRF protection (blocks private IPs, localhost, cloud metadata endpoints) and 10MB response size limits. All outbound HTTP in tools should use `assertSafeUrl` and `safeResponseText`/`safeResponseJson`. Exception: sidecar URLs come from operator config and bypass SSRF guards.
 
@@ -166,10 +150,9 @@ GitHub corpus (`src/utils/githubCorpus.ts`): fetches repo files via GitHub API, 
 - `metrics.ts` — Counters, histograms, gauges with label support for observability
 - `instrumentation.ts` — Tracing spans, run tracking, pipeline wrappers (`spanSync`, `spanAsync`, `InstrumentedPipeline`)
 - `corpusCache.ts` — SQLite-backed corpus store (chunks + embeddings + BM25 index); `normalizeSource()` sorts URL arrays and GitHub extensions for stable identity; `CachedCorpus` is a clean type (no phantom fields)
-- `crawlBudget.ts` — Response-size budget utilities: `SAFE_BYTES`, `DEFAULT_AVG_PAGE_BYTES`, `JS_HEAVY_AVG_PAGE_BYTES`, `isLikelyJsHeavySite()`; uses canonical `SemanticCrawlSourceType` from `src/types.ts`
+- `crawlBudget.ts` — Response-size budget utilities: `SAFE_BYTES`, `DEFAULT_AVG_PAGE_BYTES`, `JS_HEAVY_AVG_PAGE_BYTES`, `isLikelyJsHeavySite()`, `estimateSerializedBytes()`
 - `lexicalConstraint.ts` — IDF-weighted soft token coverage constraint
 - `githubCorpus.ts` — GitHub API → document corpus converter
-- `crawlBudget.ts` — Response-size budget utilities: `SAFE_BYTES`, `DEFAULT_AVG_PAGE_BYTES`, `JS_HEAVY_AVG_PAGE_BYTES`, `isLikelyJsHeavySite()`, `estimateSerializedBytes()`
 - `extractionConfig.ts` — Structured data extraction config schema for Crawl4AI
 - `elementHelpers.ts`, `elementTruncation.ts`, `htmlElements.ts`, `markdownElements.ts` — Structured content element types and truncation logic
 - `sitemap.ts` — XML sitemap parser + sitemap-index detection
@@ -192,7 +175,7 @@ GitHub corpus (`src/utils/githubCorpus.ts`): fetches repo files via GitHub API, 
 - `rerank.ts` and `githubCorpus.ts` are dynamically imported (`await import(...)`) to keep startup fast when those features are unused
 - Embedding sidecar and RAGA bridge URLs bypass SSRF guards — they come from operator config, not user input
 - Corpus cache is persistent via SQLite; the `cached` source type works across server restarts
-- `AdapterType` includes `job` (for `semantic_jobs`), `code` (for `semantic_github_code`), `text`, `transcript`, `conversation`, `github`, `url`, `sitemap`, `search`, `cached`
+- `AdapterType` includes `job`, `code`, `text`, `transcript`, `conversation`, `academic`, `qa`
 
 **RAG-Anything integration** (`services/rag-anything-bridge/`):
 
@@ -217,6 +200,7 @@ GitHub corpus (`src/utils/githubCorpus.ts`): fetches repo files via GitHub API, 
 **Docker Compose deployment** (`docker-compose.yml`):
 
 Full-stack deployment with four services:
+
 - `search-mcp` — The MCP server (port 8050, stdio HTTP proxy)
 - `search-mcp-crawl4ai` — Crawl4AI browser service (port 8051)
 - `search-mcp-embedding` — Embedding sidecar (port 8001)

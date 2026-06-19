@@ -320,11 +320,6 @@ export function calculateFreshnessScore(postedRaw: string | undefined): number {
   return scoreByAge(ageInDays);
 }
 
-/** @deprecated Use calculateFreshnessScore instead */
-export function calculateRecencyScore(postedRaw: string | undefined): number {
-  return calculateFreshnessScore(postedRaw);
-}
-
 export function calculateSourceReliability(source: JobSource): number {
   // Reliability is based on structured data quality and locale coverage.
   // SEEK is the dominant Australian job board with high-quality structured data.
