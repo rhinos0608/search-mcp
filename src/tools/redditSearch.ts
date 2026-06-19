@@ -167,7 +167,7 @@ export async function redditSearch(
   const results = parseRedditSearchListing(json);
   const cfg = loadConfig();
 
-  if (cfg.embeddingSidecar.baseUrl && results.length > 0) {
+  if (sort === 'relevance' && cfg.embeddingSidecar.baseUrl && results.length > 0) {
     logger.info({ query, resultCount: results.length }, 'Using semantic ranking for Reddit search');
     const ranked = await semanticMatch({
       query,
