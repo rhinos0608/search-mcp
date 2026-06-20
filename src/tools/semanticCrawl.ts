@@ -1,4 +1,5 @@
 import { logger } from '../logger.js';
+import { unavailableError } from '../errors.js';
 import { assertSafeUrl } from '../httpGuards.js';
 import { webCrawl, type WebCrawlOptions } from './webCrawl.js';
 import { webSearch } from './webSearch.js';
@@ -914,6 +915,12 @@ export async function crawlSeeds(
       structuredWarnings: [],
       omittedPages: [],
     };
+  }
+
+  if (!crawl4aiCfg.baseUrl) {
+    throw unavailableError(
+      'crawl4ai sidecar is not configured. Set CRAWL4AI_BASE_URL to enable semantic_crawl.',
+    );
   }
 
   const allPages: CrawlPageResult[] = [];
