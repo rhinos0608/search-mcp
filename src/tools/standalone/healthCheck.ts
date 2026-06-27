@@ -32,7 +32,23 @@ export function registerHealthCheck(server: McpServer, cfg: SearchConfig): void 
         ),
         timestamp: z.string(),
         outputBudget: z
-          .object({ totalBytes: z.number(), toolBytes: z.record(z.string(), z.number()) })
+          .object({
+            totalCalls: z.number(),
+            totalBytesReturned: z.number(),
+            totalBytesSandboxed: z.number(),
+            cacheHits: z.number(),
+            cacheBytesSaved: z.number(),
+            sessionStart: z.number(),
+            savingsRatio: z.number(),
+            byTool: z.record(
+              z.string(),
+              z.object({
+                calls: z.number(),
+                bytesReturned: z.number(),
+                avgBytesPerCall: z.number(),
+              }),
+            ),
+          })
           .optional(),
         toolStats: z
           .array(

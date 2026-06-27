@@ -22,6 +22,8 @@ import { agenticBrowseCapabilities } from './tools/families/agenticBrowse.js';
 import { knowledgeGraphCapabilities } from './tools/families/knowledgeGraph.js';
 import { outputBudget } from './utils/outputBudget.js';
 import type { OutputBudgetStats } from './utils/outputBudget.js';
+import { toolStats } from './tools/stats.js';
+import type { ToolStatEntry } from './tools/stats.js';
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -37,6 +39,7 @@ export interface HealthReport {
   tools: Record<string, ToolHealth>;
   timestamp: string;
   outputBudget?: OutputBudgetStats | undefined;
+  toolStats?: ToolStatEntry[] | undefined;
 }
 
 // ── Gating rules (required config) ──────────────────────────────────────────
@@ -764,6 +767,7 @@ export async function runHealthProbes(cfg: SearchConfig): Promise<HealthReport> 
     tools,
     timestamp: new Date().toISOString(),
     outputBudget: outputBudget.getStats(),
+    toolStats: toolStats.getAll(),
   };
 }
 
