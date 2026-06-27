@@ -103,7 +103,9 @@ const arxivAction = z.object({
     .enum(['relevance', 'lastUpdatedDate', 'submittedDate'])
     .optional()
     .default('relevance')
-    .describe('Sort order'),
+    .describe(
+      'Sort order. "relevance" ranks by query match. "submittedDate" and "lastUpdatedDate" first fetch relevance-ranked results then re-sort by date — you get the most relevant recent papers, not just the newest.',
+    ),
   dateFrom: z.string().optional().describe('Start date (YYYY-MM-DD). Filters by submission date.'),
   dateTo: z.string().optional().describe('End date (YYYY-MM-DD). Filters by submission date.'),
   limit: z

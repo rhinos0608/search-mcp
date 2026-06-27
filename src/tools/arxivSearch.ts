@@ -99,11 +99,19 @@ export async function arxivSearch(
     searchQuery += ` AND submittedDate:[${from} TO ${to}]`;
   }
 
+  // When the caller wants date-sorted results, the ArXiv API discards relevance
+  // ranking entirely — it returns the newest matching papers regardless of how
+  // well they match the query.  Work around this by fetching a larger pool
+  // ranked by relevance, then re-sorting client-side by the requested date field.
+  const needsClientSort = sortBy !== 'relevance';
+  const apiSortBy = needsClientSort ? 'relevance' : sortBy;
+  const apiMaxResults = needsClientSort ? Math.min(limit * 3, 50) : Math.min(limit, 50);
+
   const params = new URLSearchParams({
     search_query: searchQuery,
     start: '0',
-    max_results: String(Math.min(limit, 50)),
-    sortBy,
+    max_results: String(apiMaxResults),
+    sortBy: apiSortBy,
     sortOrder: 'descending',
   });
 
@@ -210,6 +218,17 @@ export async function arxivSearch(
 
   cache.set(key, papers);
   logger.debug({ resultCount: papers.length }, 'ArXiv direct search complete');
+
+  // Client-side re-sort when the caller asked for a date-based ordering.
+  if (needsClientSort) {
+    const dateField = sortBy === 'submittedDate' ? 'publishedDate' : 'updatedDate';
+    papers.sort((a, b) => {
+      const da = a[dateField] ?? '';
+      const db = b[dateField] ?? '';
+      return db.localeCompare(da); // descending
+    });
+    return papers.slice(0, limit);
+  }
 
   return papers;
 }
