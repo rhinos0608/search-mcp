@@ -78,6 +78,11 @@ export function buildAgentTools(ctx: StrategyContext, collector: CitationCollect
     tools.push(createRedditSearchTool(getTools, collector));
   }
 
+  // YouTube — needs an API key
+  if ((cfg.youtube.apiKey ?? '').length > 0) {
+    tools.push(createYouTubeSearchTool(getTools, collector));
+  }
+
   // Fetch page — needs Crawl4AI
   if (cfg.crawl4ai.baseUrl.length > 0) {
     tools.push(createFetchPageTool(getTools, collector));
@@ -372,25 +377,24 @@ function createRedditSearchTool(
   return {
     name: 'search_reddit',
     description:
-      'Search Reddit for community discussions and opinions. Best for user experiences, reviews, and community knowledge. Requires a subreddit.',
+      'Search Reddit for community discussions, opinions, and real user experiences. Searches all of Reddit by default; pass a subreddit to narrow the search.',
     parameters: {
       query: { type: 'string', description: 'The search query', required: true },
       subreddit: {
         type: 'string',
-        description: 'Subreddit to search (without r/ prefix). Required.',
-        required: true,
+        description:
+          'Optional subreddit to narrow the search (without r/ prefix). Omit to search all of Reddit.',
       },
       limit: { type: 'number', description: 'Max results (1-20, default 10)' },
     },
     execute: async (args) => {
       const query = typeof args.query === 'string' ? args.query : '';
       if (!query) return { content: 'Error: query is required', error: 'missing query' };
-      const subreddit = typeof args.subreddit === 'string' ? args.subreddit : '';
-      if (!subreddit)
-        return {
-          content: 'Error: subreddit is required for Reddit search',
-          error: 'missing subreddit',
-        };
+      // Default to r/all so the agent can search across all of Reddit without guessing a subreddit.
+      const subreddit =
+        typeof args.subreddit === 'string' && args.subreddit.trim().length > 0
+          ? args.subreddit.trim()
+          : 'all';
       const limit = Math.min(Number(args.limit) || 10, 20);
 
       try {
@@ -412,6 +416,50 @@ function createRedditSearchTool(
       } catch (err) {
         return {
           content: `Reddit search failed: ${err instanceof Error ? err.message : String(err)}`,
+          error: 'search failed',
+        };
+      }
+    },
+  };
+}
+
+function createYouTubeSearchTool(
+  getTools: () => Promise<ResearchTools>,
+  collector: CitationCollector,
+): AgentTool {
+  return {
+    name: 'search_youtube',
+    description:
+      'Search YouTube for videos. Best for tutorials, talks, demos, interviews, and first-hand walkthroughs. Pair with fetch_focus on a video URL to pull transcript-grounded detail.',
+    parameters: {
+      query: { type: 'string', description: 'The search query', required: true },
+      limit: { type: 'number', description: 'Max results (1-20, default 10)' },
+    },
+    execute: async (args) => {
+      const query = typeof args.query === 'string' ? args.query : '';
+      if (!query) return { content: 'Error: query is required', error: 'missing query' };
+      const limit = Math.min(Number(args.limit) || 10, 20);
+
+      try {
+        const results = await (await getTools()).youtubeSearch(query, limit);
+        const startIdx = collector.addResults(
+          results.map((r) => ({
+            title: r.title,
+            link: r.url,
+            snippet: `${r.channelTitle}${r.publishedAt ? ` — ${r.publishedAt.slice(0, 10)}` : ''}`,
+          })),
+          'youtube',
+        );
+        const text = results
+          .map(
+            (r, i) =>
+              `[${String(startIdx + i)}] ${r.title}\n${r.url}\n${r.channelTitle}${r.publishedAt ? ` (${r.publishedAt.slice(0, 10)})` : ''}`,
+          )
+          .join('\n\n');
+        return { content: text || 'No YouTube results found.' };
+      } catch (err) {
+        return {
+          content: `YouTube search failed: ${err instanceof Error ? err.message : String(err)}`,
           error: 'search failed',
         };
       }

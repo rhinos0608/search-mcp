@@ -171,6 +171,7 @@ Structure:
 - Weight findings by source diversity — a claim backed by academic + practitioner + community sources is stronger than one backed by three blog posts.
 - Flag when a key claim rests on a single source, an anecdotal source, or a low-quality source.
 - Do NOT fabricate dates, statistics, or quotes. Only use what is present in the findings.
+- **DATE PRECISION**: Never state definitive exact dates (e.g., "January 15th, 2026") unless a finding explicitly provides that exact date. Instead, use approximate time periods: "toward the beginning of 2026," "mid-2025," "late 2024," "around Q3 2025." This prevents false precision when sources only provide month or year granularity.
 - **Source counting**: When reporting sourceCount in your output, use the total number of individual source entries (rows in the sources array), not the count of distinct source types.
 
 Output ONLY valid JSON with EXACTLY this structure (no markdown fences, no extra text):
@@ -519,6 +520,7 @@ If the query is decision-oriented, provide actionable recommendations.
 - Be explicit about contradictions — do not paper them over.
 - Flag when a key claim rests on a single source, a promotional source, or surface-level content.
 - Do NOT fabricate dates, statistics, or quotes. Only use what is present in the findings.
+- **DATE PRECISION**: Never state definitive exact dates (e.g., "January 15th, 2026") unless a finding explicitly provides that exact date. Instead, use approximate time periods: "toward the beginning of 2026," "mid-2025," "late 2024," "around Q3 2025." This prevents false precision when sources only provide month or year granularity.
 - If coverage is thin for certain sub-questions, state this clearly rather than implying comprehensive coverage.
 - **DEGRADATION**: If findingCount is 0, you MUST start the executive summary with "[Source-note synthesis only]" and explicitly state that the report is based on source snippets and metadata, not on verified extracted evidence. Do not present as completed deep research.
 - **IMPORTANT — Source counting**: The research state provides totalSourceCount (total individual sources), sourceTypeCount (distinct types like youtube, web, reddit), and sourceDiversity (per-type breakdown). When reporting sourceCount in your output JSON, always use totalSourceCount — do NOT report sourceTypeCount as the source count. For example, if there are 18 individual sources across 3 source types, sourceCount must be 18.

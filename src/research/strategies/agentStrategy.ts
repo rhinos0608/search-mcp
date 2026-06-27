@@ -8,7 +8,6 @@ import { buildAgentTools, describeTools } from './agentTools.js';
 import { CitationCollector } from '../citationCollector.js';
 import type { ResearchResult, ResearchReport, ResearchProgress, SourceType } from '../types.js';
 import { curateEvidenceSources } from '../sourceQuality.js';
-import { ResearchStateEngine } from '../state.js';
 import { logger } from '../../logger.js';
 import { randomUUID } from 'node:crypto';
 import type { DomainRoute } from '../domainRouter.js';
@@ -16,6 +15,11 @@ import type { ExtractedEntities } from '../entityExtractor.js';
 import { extractEntities, generateEntityBasedQueries } from '../entityExtractor.js';
 import { routeQuery } from '../domainRouter.js';
 import { extractJsonCandidates } from '../../utils/jsonFromText.js';
+import {
+  extractFindingsFromAnswerLlm,
+  extractFindingsFromAnswerRuleBased,
+  type AnswerFindingInput,
+} from './answerFindings.js';
 
 // ── Constants ────────────────────────────────────────────────────────────
 
@@ -354,7 +358,7 @@ export class AgentStrategy implements ResearchStrategy {
     }
 
     // Extract findings from final answer and populate state
-    this.extractFindingsFromAnswer(finalAnswer, ctx.state, sourceMap, defaultSqId);
+    await this.extractFindingsFromAnswer(finalAnswer, ctx, sourceMap, defaultSqId);
 
     const sourceTypeCounts = new Map<string, number>();
     for (const citation of citations) {
@@ -436,11 +440,12 @@ export class AgentStrategy implements ResearchStrategy {
 CRITICAL RULES:
 1. You MUST search for information before answering. Do NOT answer from memory.
 2. DECOMPOSE the question into distinct sub-topics and research each one.
-3. Use AT LEAST 5 DIFFERENT TOOL TYPES — never rely on search_web alone. You have access to academic, GitHub, Hacker News, Reddit, Stack Exchange, Wikipedia, Semantic Scholar, PubMed and more. A web-only answer is INCOMPLETE.
+3. Use AT LEAST 5 DIFFERENT TOOL TYPES — never rely on search_web alone. You have access to dedicated connectors: search_arxiv, search_reddit, search_youtube, search_github, search_hackernews, search_stackexchange, search_semantic_scholar, search_pubmed, search_wikipedia, search_academic and more. A web-only answer is INCOMPLETE — actively pull from community (Reddit), video (YouTube), and primary literature (arXiv/academic) sources, not just generic web pages.
 4. Search each sub-topic across MULTIPLE source categories (e.g., academic papers, community discussions, code repositories, documentation).
 5. Use the research_subtopic tool for large questions with multiple facets.
 6. Keep researching until you have broad coverage across source types and sub-topics. Do NOT stop after finding a few web results.
 7. When you have 15+ quality sources spanning at least 4 different source types, you may synthesize your final answer.
+8. **DATE PRECISION**: Never state definitive exact dates (e.g., "January 15th, 2026") unless a source explicitly provides that exact date. Use approximate time periods instead: "toward the beginning of 2026," "mid-2025," "late 2024," "around Q3 2025." This prevents false precision when sources only provide month or year granularity.
 
 RESPONSE FORMAT:
 To use a tool:
@@ -458,47 +463,44 @@ ${toolDesc}
 Search strategy tips:
 - For each sub-topic, query at least 3 different source backends
 - Prefer search_academic for broad literature coverage over individual backend tools
-- Use search_hackernews and search_reddit for community perspective
+- Use search_hackernews and search_reddit for community perspective and real user experience
+- Use search_youtube for talks, tutorials, and first-hand walkthroughs
+- Use search_arxiv and search_academic for primary literature and preprints
 - Use search_github for implementation examples and repositories
 - Use fetch_page or fetch_focus to read key sources in depth
 - Cross-reference claims: verify important facts across different source types`;
   }
 
-  private extractFindingsFromAnswer(
+  /**
+   * Turn the agent's cited answer into atomic, source-grounded findings.
+   * Prefers LLM-based atomic decomposition; falls back to a deterministic
+   * splitter that drops the references list and strips citation markers so
+   * reference-list fragments never leak into the findings array.
+   */
+  private async extractFindingsFromAnswer(
     answer: string,
-    state: ResearchStateEngine,
+    ctx: StrategyContext,
     sourceMap: Map<number, string>,
     defaultSqId?: string,
-  ): void {
-    // Simple sentence splitter that looks for citations [N]
-    // We regex for sentences containing [N]
-    const citationRegex = /\[(\d+)\]/g;
-    const sentences = answer.split(/(?<=[.!?])\s+/);
+  ): Promise<void> {
+    const input: AnswerFindingInput = {
+      answer,
+      sourceMap,
+      subQuestionIds: defaultSqId ? [defaultSqId] : [],
+    };
 
-    for (const sentence of sentences) {
-      const trimmed = sentence.trim();
-      if (!trimmed) continue;
+    let drafts;
+    try {
+      drafts = ctx.llm
+        ? await extractFindingsFromAnswerLlm(ctx.llm, input)
+        : extractFindingsFromAnswerRuleBased(input);
+    } catch (err) {
+      logger.warn({ err }, 'Agent finding extraction failed, using rule-based fallback');
+      drafts = extractFindingsFromAnswerRuleBased(input);
+    }
 
-      const matches = [...trimmed.matchAll(citationRegex)];
-      if (matches.length === 0) continue;
-
-      const sourceIds = matches
-        .map((m) => sourceMap.get(parseInt(m[1] ?? '0', 10)))
-        .filter((id): id is string => !!id);
-
-      if (sourceIds.length === 0) continue;
-
-      state.addFinding({
-        claim: trimmed,
-        normalizedClaim: trimmed.toLowerCase(),
-        sourceIds,
-        subQuestionIds: defaultSqId ? [defaultSqId] : [],
-        evidenceSummary: trimmed,
-        evidenceDirectness: 'direct' as const,
-        freshnessSensitive: false,
-        lastUpdated: new Date().toISOString(),
-        claimType: 'primary' as const,
-      });
+    for (const draft of drafts) {
+      ctx.state.addFinding(draft);
     }
   }
 
