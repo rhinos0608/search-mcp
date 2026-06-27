@@ -39,6 +39,7 @@ import { assertSafeUrl } from '../../httpGuards.js';
 import { registerFamily, type FamilyDefinition } from '../registry.js';
 import { logger } from '../../logger.js';
 import { callOpenAiChatCompletion } from '../../utils/llmChat.js';
+import type { Cookie } from 'playwright-core';
 
 // ── Action schemas (discriminated on "action") ──────────────────────────────
 
@@ -66,20 +67,41 @@ const snapshotSchema = z.object({
   includeHidden: z.boolean().optional().default(false).describe('Include hidden elements in tree'),
 });
 
-const clickSchema = z.object({
-  action: z.literal('click').describe('Click an element'),
-  target: z.string().describe('Element ref (from snapshot), CSS selector, or visible text'),
-  button: z.enum(['left', 'right', 'middle']).optional().default('left'),
-  doubleClick: z.boolean().optional().default(false),
-});
+const clickSchema = z
+  .object({
+    action: z.literal('click').describe('Click an element'),
+    target: z
+      .string()
+      .optional()
+      .describe('Element ref (from snapshot), CSS selector, or visible text'),
+    selector: z
+      .string()
+      .optional()
+      .describe('Alias for target — use this if unsure which field to use'),
+    button: z.enum(['left', 'right', 'middle']).optional().default('left'),
+    doubleClick: z.boolean().optional().default(false),
+  })
+  .refine((v) => !!(v.target ?? v.selector), {
+    message: 'target is required (or pass selector as alias)',
+    path: ['target'],
+  });
 
-const typeSchema = z.object({
-  action: z.literal('type').describe('Type text into an editable element'),
-  target: z.string().describe('Element ref (from snapshot) or CSS selector'),
-  text: z.string().describe('Text to type'),
-  submit: z.boolean().optional().default(false).describe('Press Enter after typing'),
-  slowly: z.boolean().optional().default(false).describe('Type character-by-character'),
-});
+const typeSchema = z
+  .object({
+    action: z.literal('type').describe('Type text into an editable element'),
+    target: z.string().optional().describe('Element ref (from snapshot) or CSS selector'),
+    selector: z
+      .string()
+      .optional()
+      .describe('Alias for target — use this if unsure which field to use'),
+    text: z.string().describe('Text to type'),
+    submit: z.boolean().optional().default(false).describe('Press Enter after typing'),
+    slowly: z.boolean().optional().default(false).describe('Type character-by-character'),
+  })
+  .refine((v) => !!(v.target ?? v.selector), {
+    message: 'target is required (or pass selector as alias)',
+    path: ['target'],
+  });
 
 const evaluateSchema = z.object({
   action: z.literal('evaluate').describe('Execute JavaScript in the page context'),
@@ -233,7 +255,9 @@ const dialogSchema = z.object({
 
 const iframeSchema = z.object({
   action: z.literal('iframe_context').describe('List frames or switch into an iframe'),
-  op: z.enum(['list', 'switch']).describe('Iframe operation'),
+  op: z
+    .enum(['list', 'switch', 'main'])
+    .describe('Iframe operation: list, switch (to named frame), or main (back to main frame)'),
   by: z
     .enum(['name', 'url', 'index', 'selector'])
     .optional()
@@ -562,6 +586,10 @@ const browserFamily: FamilyDefinition = {
         assertSafeUrl(url);
         return withSession(cfg, async (page) => {
           await page.goto(url, { waitUntil, timeout });
+          // Invalidate snapshot refs after navigation
+          const { browserManager } = await import('../../browser/browserManager.js');
+          const session = browserManager.getActiveSession();
+          if (session) session.lastSnapshotRoot = null;
           return { url: page.url(), title: await page.title() };
         });
       },
@@ -578,7 +606,12 @@ const browserFamily: FamilyDefinition = {
           const { captureSnapshot } = await import('../../browser/snapshot.js');
           const opts: { includeHidden?: boolean; selector?: string } = { includeHidden };
           if (selector !== undefined) opts.selector = selector;
-          return captureSnapshot(page, opts);
+          const result = await captureSnapshot(page, opts);
+          // Store snapshot root on session for ref-based click/type targeting
+          const { browserManager } = await import('../../browser/browserManager.js');
+          const activeSession = browserManager.getActiveSession();
+          if (activeSession) activeSession.lastSnapshotRoot = result.root;
+          return result;
         });
       },
       configIssue: browserDisabledIssue,
@@ -589,17 +622,51 @@ const browserFamily: FamilyDefinition = {
       description: 'Click an element by ref, CSS selector, or visible text',
       schema: clickSchema,
       handler: async (args, cfg) => {
-        const { target, button, doubleClick } = args as {
-          target: string;
+        const rawArgs = args;
+        const target =
+          typeof rawArgs.target === 'string' && rawArgs.target
+            ? rawArgs.target
+            : typeof rawArgs.selector === 'string' && rawArgs.selector
+              ? rawArgs.selector
+              : '';
+        const { button, doubleClick } = rawArgs as {
           button: 'left' | 'right' | 'middle';
           doubleClick: boolean;
         };
         return withSession(cfg, async (page) => {
-          const { click } = await import('../../browser/actions.js');
-          // Support snapshot ref targeting via 'ref:' prefix
-          if (target.startsWith('ref:')) {
-            return click(page, { type: 'ref', ref: target.slice(4) }, { button, doubleClick });
+          const { click, resolveRefTarget } = await import('../../browser/actions.js');
+          // Detect ref targets: "ref:e20" prefix or bare "e20" pattern
+          const refId = target.startsWith('ref:')
+            ? target.slice(4)
+            : /^e\d+$/.test(target)
+              ? target
+              : null;
+          if (refId) {
+            try {
+              const { browserManager } = await import('../../browser/browserManager.js');
+              const session = browserManager.getActiveSession();
+              const snapshotRoot = session?.lastSnapshotRoot;
+              if (!snapshotRoot) {
+                return {
+                  success: false,
+                  message: `Cannot resolve ref "${refId}" — no snapshot captured yet. Use the snapshot action first, then retry click with this ref.`,
+                };
+              }
+              const locator = resolveRefTarget(page, snapshotRoot, refId);
+              if (doubleClick) {
+                await locator.dblclick({ button });
+              } else {
+                await locator.click({ button });
+              }
+              return { success: true, message: `Click on ref "${refId}" succeeded` };
+            } catch (err) {
+              return {
+                success: false,
+                message: `Click on ref "${refId}" failed: ${err instanceof Error ? err.message : String(err)}`,
+              };
+            }
           }
+          // Existing CSS/text targeting
           const targetObj =
             target.startsWith('#') || target.startsWith('.') || target.startsWith('[')
               ? { type: 'selector' as const, selector: target }
@@ -615,19 +682,57 @@ const browserFamily: FamilyDefinition = {
       description: 'Type text into an editable element',
       schema: typeSchema,
       handler: async (args, cfg) => {
-        const { target, text, submit, slowly } = args as {
-          target: string;
+        const rawArgs = args;
+        const target =
+          typeof rawArgs.target === 'string' && rawArgs.target
+            ? rawArgs.target
+            : typeof rawArgs.selector === 'string' && rawArgs.selector
+              ? rawArgs.selector
+              : '';
+        const { text, submit, slowly } = rawArgs as {
           text: string;
           submit: boolean;
           slowly: boolean;
         };
         return withSession(cfg, async (page) => {
-          const { typeText } = await import('../../browser/actions.js');
-          // Support snapshot ref targeting via 'ref:' prefix
-          if (target.startsWith('ref:')) {
-            return typeText(page, { type: 'ref', ref: target.slice(4) }, text, { submit, slowly });
+          const { typeText, resolveRefTarget } = await import('../../browser/actions.js');
+          // Detect ref targets: "ref:e20" prefix or bare "e20" pattern
+          const refId = target.startsWith('ref:')
+            ? target.slice(4)
+            : /^e\d+$/.test(target)
+              ? target
+              : null;
+          if (refId) {
+            try {
+              const { browserManager } = await import('../../browser/browserManager.js');
+              const session = browserManager.getActiveSession();
+              const snapshotRoot = session?.lastSnapshotRoot;
+              if (!snapshotRoot) {
+                return {
+                  success: false,
+                  message: `Cannot resolve ref "${refId}" — no snapshot captured yet. Use the snapshot action first, then retry type with this ref.`,
+                };
+              }
+              const locator = resolveRefTarget(page, snapshotRoot, refId);
+              if (slowly) {
+                await locator.pressSequentially(text);
+              } else {
+                await locator.fill(text);
+              }
+              if (submit) await page.keyboard.press('Enter');
+              return { success: true, message: `Type on ref "${refId}" succeeded` };
+            } catch (err) {
+              return {
+                success: false,
+                message: `Type on ref "${refId}" failed: ${err instanceof Error ? err.message : String(err)}`,
+              };
+            }
           }
-          const targetObj = { type: 'selector' as const, selector: target };
+          // Existing CSS/text targeting
+          const targetObj =
+            target.startsWith('#') || target.startsWith('.') || target.startsWith('[')
+              ? { type: 'selector' as const, selector: target }
+              : { type: 'text' as const, text: target };
           return typeText(page, targetObj, text, { submit, slowly });
         });
       },
@@ -666,7 +771,14 @@ const browserFamily: FamilyDefinition = {
             type,
           };
           if (quality !== undefined) opts.quality = quality;
-          return takeScreenshot(page, opts);
+          const result = await takeScreenshot(page, opts);
+          const response: Record<string, unknown> = { ...result };
+          if (quality !== undefined && type !== 'jpeg') {
+            response.warnings = [
+              'quality parameter only applies to jpeg screenshots; ignored for png',
+            ];
+          }
+          return response;
         });
       },
       configIssue: browserDisabledIssue,
@@ -863,7 +975,8 @@ const browserFamily: FamilyDefinition = {
                   break;
                 }
                 case 'wait': {
-                  const seconds = parseFloat(value || '1');
+                  const parsedSec = parseFloat(value || '1');
+                  const seconds = Number.isNaN(parsedSec) ? 1 : parsedSec;
                   await page.waitForTimeout(Math.min(seconds, 30) * 1000);
                   results.push({
                     action: 'wait',
@@ -873,7 +986,8 @@ const browserFamily: FamilyDefinition = {
                   break;
                 }
                 case 'scroll': {
-                  const pixels = parseInt(value || '300', 10);
+                  const parsedPx = parseInt(value || '300', 10);
+                  const pixels = Number.isNaN(parsedPx) ? 300 : parsedPx;
                   await page.mouse.wheel(0, pixels);
                   results.push({
                     action: 'scroll',
@@ -924,9 +1038,15 @@ const browserFamily: FamilyDefinition = {
                     .split(',')
                     .map((v: string) => v.trim())
                     .filter(Boolean);
-                  if (values.length > 0) {
-                    await page.locator(target).selectOption(values);
+                  if (values.length === 0) {
+                    results.push({
+                      action: 'select',
+                      success: false,
+                      message: `Select requires a value for ${target}`,
+                    });
+                    break;
                   }
+                  await page.locator(target).selectOption(values);
                   results.push({
                     action: 'select',
                     success: true,
@@ -1043,9 +1163,7 @@ const browserFamily: FamilyDefinition = {
             case 'restore': {
               const state = filename ? await sessionStore.loadProfile(filename) : null;
               if (state) {
-                await page
-                  .context()
-                  .addCookies((state as { cookies: Record<string, unknown>[] }).cookies as never[]);
+                await page.context().addCookies((state as { cookies: Cookie[] }).cookies);
               }
               return { restored: state !== null };
             }
@@ -1091,7 +1209,14 @@ const browserFamily: FamilyDefinition = {
           } = await import('../../browser/network.js');
           switch (op) {
             case 'list-requests': {
-              const filter = pattern ? new RegExp(pattern) : undefined;
+              let filter: RegExp | undefined;
+              if (pattern) {
+                try {
+                  filter = new RegExp(pattern);
+                } catch {
+                  throw new Error(`Invalid regex pattern: ${pattern}`);
+                }
+              }
               return { requests: listRequests(page, filter) };
             }
             case 'get-request': {
@@ -1109,6 +1234,10 @@ const browserFamily: FamilyDefinition = {
             }
             case 'unroute': {
               await removeRoute(page, pattern);
+              const { stopRequestTracking: stopTracking } =
+                await import('../../browser/network.js');
+              stopTracking(page);
+              trackingPages.delete(page);
               return { unrouted: true };
             }
             case 'set-state': {
@@ -1133,10 +1262,17 @@ const browserFamily: FamilyDefinition = {
         const { browserManager } = await import('../../browser/browserManager.js');
         const session = browserManager.getActiveSession();
         if (!session) throw new Error('No active browser session');
+        browserManager.touchSession(session, _cfg.browser.maxSessionTimeMs);
         switch (op) {
           case 'list': {
-            const tabs = session.pages.map((p, i) => ({ index: i, url: p.url(), title: '' }));
-            return { tabs };
+            // Re-derive pages from context to avoid stale references
+            session.pages = session.context.pages();
+            const tabs = session.pages.map((p, i) => ({
+              index: i,
+              url: p.url(),
+              isActive: p === session.page,
+            }));
+            return { tabs, activeIndex: session.pages.indexOf(session.page) };
           }
           case 'new': {
             const newPage = await session.context.newPage();
@@ -1149,19 +1285,29 @@ const browserFamily: FamilyDefinition = {
           }
           case 'close': {
             if (index === undefined) throw new Error('index is required for tabs.close');
+            session.pages = session.context.pages();
             const page = session.pages[index];
             if (!page) throw new Error(`No tab at index ${String(index)}`);
             await page.close();
             session.pages.splice(index, 1);
-            return { closed: true };
+            // If we closed the active tab, switch to nearest
+            if (page === session.page) {
+              session.page =
+                session.pages[Math.min(index, session.pages.length - 1)] ??
+                (await session.context.newPage());
+              session.lastSnapshotRoot = null;
+            }
+            return { closed: index, activeIndex: session.pages.indexOf(session.page) };
           }
           case 'select': {
             if (index === undefined) throw new Error('index is required for tabs.select');
+            session.pages = session.context.pages();
             const page = session.pages[index];
             if (!page) throw new Error(`No tab at index ${String(index)}`);
             await page.bringToFront();
             session.page = page;
-            return { selected: index, url: page.url() };
+            session.lastSnapshotRoot = null;
+            return { selected: index, url: session.page.url() };
           }
           default:
             throw new Error(`Unknown tabs op: ${op}`);
@@ -1343,6 +1489,16 @@ const browserFamily: FamilyDefinition = {
             case 'list': {
               const frames = listFrames(page);
               return { frames, totalFrames: frames.length };
+            }
+            case 'main': {
+              const { getActiveFrame, activeFrameByPage } =
+                await import('../../browser/iframeContext.js');
+              const current = getActiveFrame(page);
+              if (!current) {
+                return { success: true, message: 'Already on main frame' };
+              }
+              activeFrameByPage.delete(page);
+              return { success: true, message: 'Switched back to main frame' };
             }
             case 'switch': {
               if (!by || value === undefined) {

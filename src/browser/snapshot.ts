@@ -3,12 +3,10 @@ import type { Page, Locator } from 'playwright-core';
 import type { SnapshotNode, SnapshotResult } from './types.js';
 import { BrowserError } from './types.js';
 
-let nextRefId = 1;
-
-function assignRefs(node: SnapshotNode): SnapshotNode {
-  node.ref = `e${nextRefId++}`;
+function assignRefs(node: SnapshotNode, counter: { value: number }): SnapshotNode {
+  node.ref = `e${counter.value++}`;
   for (const child of node.children) {
-    assignRefs(child);
+    assignRefs(child, counter);
   }
   return node;
 }
@@ -44,7 +42,6 @@ export async function captureSnapshot(
   page: Page,
   options?: { selector?: string; depth?: number; includeHidden?: boolean },
 ): Promise<SnapshotResult> {
-  nextRefId = 1;
   try {
     const depth = options?.depth ?? 20;
     const includeHidden = options?.includeHidden ?? false;
@@ -153,7 +150,11 @@ export async function captureSnapshot(
           if (depth <= 0 || el.nodeType !== 1) return null;
           if (!ih) {
             const s = window.getComputedStyle(el);
-            if (s.display === 'none' || s.visibility === 'hidden') return null;
+            if (s.display === 'none' || s.visibility === 'hidden' || s.visibility === 'collapse')
+              return null;
+            if (s.opacity === '0') return null;
+            if (el.hasAttribute('hidden')) return null;
+            if (el.getAttribute('aria-hidden') === 'true') return null;
           }
           const role = computeRole(el);
           if (
@@ -204,7 +205,8 @@ export async function captureSnapshot(
     }
 
     const root = toSnapshotNode(rawRoot);
-    assignRefs(root);
+    const refCounter = { value: 1 };
+    assignRefs(root, refCounter);
 
     return {
       url: page.url(),
@@ -237,8 +239,8 @@ export function refToLocator(page: Page, node: SnapshotNode): Locator {
     const escaped = node.name.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
     const locator = page.locator('[aria-label="' + escaped + '"]');
     try {
-      // eslint-disable-next-line @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-explicit-any
-      return locator.or(page.getByRole(node.role as any, { name: node.name }));
+      const role = node.role;
+      return locator.or(page.getByRole(role as never, { name: node.name }));
     } catch {
       return locator;
     }

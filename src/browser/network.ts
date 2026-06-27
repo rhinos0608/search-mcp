@@ -70,6 +70,14 @@ export function startRequestTracking(page: Page): void {
 }
 
 /**
+ * Stop tracking network requests on a page.
+ * Clears all tracked request data.
+ */
+export function stopRequestTracking(page: Page): void {
+  trackedPages.delete(page);
+}
+
+/**
  * List tracked requests, optionally filtered by URL regex.
  */
 export function listRequests(page: Page, filter?: RegExp): NetworkRequest[] {

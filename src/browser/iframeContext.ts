@@ -2,6 +2,17 @@ import type { Page, Frame } from 'playwright-core';
 import type { FrameInfo, FrameSwitchResult } from './types.js';
 
 /**
+ * Active iframe context per page — set by switchToFrame, cleared on switch back to main.
+ * Consumed by browser.ts handler for context-aware operations.
+ */
+export const activeFrameByPage = new WeakMap<Page, Frame>();
+
+/** Get active iframe for a page (null = main frame). */
+export function getActiveFrame(page: Page): Frame | null {
+  return activeFrameByPage.get(page) ?? null;
+}
+
+/**
  * List all frames in the current page, including nested ones.
  * Returns flattened list with depth information.
  */
@@ -131,6 +142,13 @@ export async function switchToFrame(
 
   if (!frame) {
     return { success: false, availableFrames };
+  }
+
+  // Track active frame for subsequent context-aware operations
+  if (frame === page.mainFrame()) {
+    activeFrameByPage.delete(page);
+  } else {
+    activeFrameByPage.set(page, frame);
   }
 
   // Store frame reference for context-aware operations

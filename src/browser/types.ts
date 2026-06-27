@@ -33,6 +33,8 @@ export interface BrowserSession {
   source: 'launch' | 'cdp' | 'user' | 'profile';
   /** Browser backend used to launch the session. */
   browserEngine: BrowserEngine;
+  /** Last captured accessibility snapshot tree root (for ref-based targeting). */
+  lastSnapshotRoot: SnapshotNode | null;
 }
 
 /** Configuration for browser session launch or connect. */
@@ -438,6 +440,8 @@ export interface DownloadResult {
   savedPath?: string;
   /** Download URL. */
   url: string;
+  /** Whether the download was truncated due to size limit. */
+  truncated?: boolean;
 }
 
 // ───────────────────────────────────────────────────────────────────────────
@@ -472,6 +476,8 @@ export interface TableData {
   columnCount: number;
   /** CSS selector used to locate this table. */
   selector: string;
+  /** Table orientation: 'horizontal' (header+rows) or 'vertical' (key→value pairs). */
+  orientation?: 'horizontal' | 'vertical';
 }
 
 /** Result of extracting tables from a page. */

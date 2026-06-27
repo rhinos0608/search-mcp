@@ -103,11 +103,11 @@ export async function handleCurrentDialog(
 
         if (dialog.type() === 'prompt' && accept) {
           result.promptText = promptText ?? '';
-          void dialog.accept(promptText ?? '');
+          void dialog.accept(promptText ?? '').catch(() => undefined);
         } else if (accept) {
-          void dialog.accept();
+          void dialog.accept().catch(() => undefined);
         } else {
-          void dialog.dismiss();
+          void dialog.dismiss().catch(() => undefined);
         }
 
         const history = dialogHistoryByPage.get(page) ?? [];

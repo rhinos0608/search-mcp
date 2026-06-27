@@ -157,6 +157,7 @@ export class BrowserManager {
       timeoutHandle: null,
       source: 'launch',
       browserEngine: config.browserEngine,
+      lastSnapshotRoot: null,
     };
 
     // Set up session timeout
@@ -259,6 +260,7 @@ export class BrowserManager {
       timeoutHandle: null,
       source: 'cdp',
       browserEngine: synthConfig.browserEngine,
+      lastSnapshotRoot: null,
     };
 
     this.activeSession = session;
@@ -399,6 +401,7 @@ export class BrowserManager {
       timeoutHandle: null,
       source: 'user',
       browserEngine: synthConfig.browserEngine,
+      lastSnapshotRoot: null,
     };
 
     this.activeSession = session;
@@ -498,6 +501,7 @@ export class BrowserManager {
       timeoutHandle: null,
       source: 'profile',
       browserEngine: config.browserEngine,
+      lastSnapshotRoot: null,
     };
 
     if (config.maxSessionTimeMs > 0) {
