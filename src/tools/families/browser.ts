@@ -586,10 +586,15 @@ const browserFamily: FamilyDefinition = {
         assertSafeUrl(url);
         return withSession(cfg, async (page) => {
           await page.goto(url, { waitUntil, timeout });
-          // Invalidate snapshot refs after navigation
+          // Invalidate snapshot refs and iframe context after navigation
           const { browserManager } = await import('../../browser/browserManager.js');
           const session = browserManager.getActiveSession();
-          if (session) session.lastSnapshotRoot = null;
+          if (session) {
+            session.lastSnapshotRoot = null;
+            // Clear stale iframe reference — new page means detached frames
+            const { activeFrameByPage } = await import('../../browser/iframeContext.js');
+            activeFrameByPage.delete(page);
+          }
           return { url: page.url(), title: await page.title() };
         });
       },
@@ -623,18 +628,26 @@ const browserFamily: FamilyDefinition = {
       schema: clickSchema,
       handler: async (args, cfg) => {
         const rawArgs = args;
+        const explicitSelector =
+          typeof rawArgs.selector === 'string' && rawArgs.selector ? rawArgs.selector : undefined;
         const target =
           typeof rawArgs.target === 'string' && rawArgs.target
             ? rawArgs.target
-            : typeof rawArgs.selector === 'string' && rawArgs.selector
-              ? rawArgs.selector
-              : '';
+            : (explicitSelector ?? '');
         const { button, doubleClick } = rawArgs as {
           button: 'left' | 'right' | 'middle';
           doubleClick: boolean;
         };
         return withSession(cfg, async (page) => {
           const { click, resolveRefTarget } = await import('../../browser/actions.js');
+          // When selector was explicitly provided, treat it as CSS selector directly
+          if (explicitSelector !== undefined) {
+            return click(
+              page,
+              { type: 'selector', selector: explicitSelector },
+              { button, doubleClick },
+            );
+          }
           // Detect ref targets: "ref:e20" prefix or bare "e20" pattern
           const refId = target.startsWith('ref:')
             ? target.slice(4)
@@ -683,12 +696,12 @@ const browserFamily: FamilyDefinition = {
       schema: typeSchema,
       handler: async (args, cfg) => {
         const rawArgs = args;
+        const explicitSelector =
+          typeof rawArgs.selector === 'string' && rawArgs.selector ? rawArgs.selector : undefined;
         const target =
           typeof rawArgs.target === 'string' && rawArgs.target
             ? rawArgs.target
-            : typeof rawArgs.selector === 'string' && rawArgs.selector
-              ? rawArgs.selector
-              : '';
+            : (explicitSelector ?? '');
         const { text, submit, slowly } = rawArgs as {
           text: string;
           submit: boolean;
@@ -696,6 +709,13 @@ const browserFamily: FamilyDefinition = {
         };
         return withSession(cfg, async (page) => {
           const { typeText, resolveRefTarget } = await import('../../browser/actions.js');
+          // When selector was explicitly provided, treat it as CSS selector directly
+          if (explicitSelector !== undefined) {
+            return typeText(page, { type: 'selector', selector: explicitSelector }, text, {
+              submit,
+              slowly,
+            });
+          }
           // Detect ref targets: "ref:e20" prefix or bare "e20" pattern
           const refId = target.startsWith('ref:')
             ? target.slice(4)
@@ -1292,9 +1312,14 @@ const browserFamily: FamilyDefinition = {
             session.pages.splice(index, 1);
             // If we closed the active tab, switch to nearest
             if (page === session.page) {
-              session.page =
+              const replacement =
                 session.pages[Math.min(index, session.pages.length - 1)] ??
                 (await session.context.newPage());
+              // Add new pages created by context.newPage() to session.pages
+              if (!session.pages.includes(replacement)) {
+                session.pages.push(replacement);
+              }
+              session.page = replacement;
               session.lastSnapshotRoot = null;
             }
             return { closed: index, activeIndex: session.pages.indexOf(session.page) };

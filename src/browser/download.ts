@@ -94,13 +94,14 @@ export async function interceptDownload(
   // Trigger the download with listener cleanup
   try {
     await trigger();
-    return await downloadPromise;
   } catch {
     return null;
   } finally {
     clearTimeout(timeout);
     page.off('download', onDownload);
   }
+
+  return await downloadPromise;
 }
 
 /**

@@ -440,7 +440,7 @@ export class AgentStrategy implements ResearchStrategy {
 CRITICAL RULES:
 1. You MUST search for information before answering. Do NOT answer from memory.
 2. DECOMPOSE the question into distinct sub-topics and research each one.
-3. Use AT LEAST 5 DIFFERENT TOOL TYPES — never rely on search_web alone. You have access to dedicated connectors: search_arxiv, search_reddit, search_youtube, search_github, search_hackernews, search_stackexchange, search_semantic_scholar, search_pubmed, search_wikipedia, search_academic and more. A web-only answer is INCOMPLETE — actively pull from community (Reddit), video (YouTube), and primary literature (arXiv/academic) sources, not just generic web pages.
+3. Use AT LEAST 5 DIFFERENT TOOL TYPES — never rely on search_web alone. You have access to dedicated connectors: search_arxiv, search_hackernews, search_stackexchange, search_semantic_scholar, search_pubmed, search_wikipedia, search_academic and more. A web-only answer is INCOMPLETE — actively pull from community, video, and primary literature sources, not just generic web pages.
 4. Search each sub-topic across MULTIPLE source categories (e.g., academic papers, community discussions, code repositories, documentation).
 5. Use the research_subtopic tool for large questions with multiple facets.
 6. Keep researching until you have broad coverage across source types and sub-topics. Do NOT stop after finding a few web results.
@@ -463,11 +463,6 @@ ${toolDesc}
 Search strategy tips:
 - For each sub-topic, query at least 3 different source backends
 - Prefer search_academic for broad literature coverage over individual backend tools
-- Use search_hackernews and search_reddit for community perspective and real user experience
-- Use search_youtube for talks, tutorials, and first-hand walkthroughs
-- Use search_arxiv and search_academic for primary literature and preprints
-- Use search_github for implementation examples and repositories
-- Use fetch_page or fetch_focus to read key sources in depth
 - Cross-reference claims: verify important facts across different source types`;
   }
 

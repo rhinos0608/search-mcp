@@ -147,7 +147,19 @@ export function extractFindingsFromAnswerRuleBased(input: AnswerFindingInput): F
     if (!isSubstantiveClaim(claim)) continue;
 
     const key = claim.toLowerCase().replace(/\s+/g, ' ').trim().slice(0, 140);
-    if (seen.has(key)) continue;
+    if (seen.has(key)) {
+      // Merge sourceIds into existing draft instead of skipping
+      const existing = out.find(
+        (d) => d.claim.toLowerCase().replace(/\s+/g, ' ').trim().slice(0, 140) === key,
+      );
+      if (existing) {
+        const existingIds = new Set(existing.sourceIds);
+        for (const id of sourceIds) {
+          if (!existingIds.has(id)) existing.sourceIds.push(id);
+        }
+      }
+      continue;
+    }
     seen.add(key);
 
     out.push(toDraft(claim, sourceIds, subQuestionIds));
@@ -207,7 +219,19 @@ export async function extractFindingsFromAnswerLlm(
     if (sourceIds.length === 0) continue;
 
     const key = claim.toLowerCase().replace(/\s+/g, ' ').trim().slice(0, 140);
-    if (seen.has(key)) continue;
+    if (seen.has(key)) {
+      // Merge sourceIds into existing draft instead of skipping
+      const existing = out.find(
+        (d) => d.claim.toLowerCase().replace(/\s+/g, ' ').trim().slice(0, 140) === key,
+      );
+      if (existing) {
+        const existingIds = new Set(existing.sourceIds);
+        for (const id of sourceIds) {
+          if (!existingIds.has(id)) existing.sourceIds.push(id);
+        }
+      }
+      continue;
+    }
     seen.add(key);
 
     out.push(toDraft(claim, sourceIds, input.subQuestionIds));

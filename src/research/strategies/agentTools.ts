@@ -130,7 +130,7 @@ function createWebSearchTool(
     execute: async (args) => {
       const query = typeof args.query === 'string' ? args.query : '';
       if (!query) return { content: 'Error: query is required', error: 'missing query' };
-      const limit = Math.min(Number(args.limit) || 10, 20);
+      const limit = Math.max(1, Math.min(Number(args.limit) || 10, 20));
 
       try {
         const results = await (await getTools()).webSearch(query, limit);
@@ -164,7 +164,7 @@ function createArxivSearchTool(collector: CitationCollector): AgentTool {
     execute: async (args) => {
       const query = typeof args.query === 'string' ? args.query : '';
       if (!query) return { content: 'Error: query is required', error: 'missing query' };
-      const limit = Math.min(Number(args.limit) || 10, 20);
+      const limit = Math.max(1, Math.min(Number(args.limit) || 10, 20));
 
       try {
         const { arxivSearch } = await import('../../tools/arxivSearch.js');
@@ -202,7 +202,7 @@ function createSemanticScholarTool(collector: CitationCollector): AgentTool {
     execute: async (args) => {
       const query = typeof args.query === 'string' ? args.query : '';
       if (!query) return { content: 'Error: query is required', error: 'missing query' };
-      const limit = Math.min(Number(args.limit) || 10, 20);
+      const limit = Math.max(1, Math.min(Number(args.limit) || 10, 20));
 
       try {
         const { academicSearch } = await import('../../tools/academicSearch.js');
@@ -243,7 +243,7 @@ function createHackerNewsTool(
     execute: async (args) => {
       const query = typeof args.query === 'string' ? args.query : '';
       if (!query) return { content: 'Error: query is required', error: 'missing query' };
-      const limit = Math.min(Number(args.limit) || 10, 20);
+      const limit = Math.max(1, Math.min(Number(args.limit) || 10, 20));
 
       try {
         const results = await (await getTools()).hackernewsSearch(query, limit);
@@ -280,7 +280,7 @@ function createGitHubSearchTool(
     execute: async (args) => {
       const query = typeof args.query === 'string' ? args.query : '';
       if (!query) return { content: 'Error: query is required', error: 'missing query' };
-      const limit = Math.min(Number(args.limit) || 10, 20);
+      const limit = Math.max(1, Math.min(Number(args.limit) || 10, 20));
 
       try {
         const results = await (await getTools()).githubSearch(query, limit);
@@ -314,7 +314,7 @@ function createStackExchangeTool(collector: CitationCollector): AgentTool {
     execute: async (args) => {
       const query = typeof args.query === 'string' ? args.query : '';
       if (!query) return { content: 'Error: query is required', error: 'missing query' };
-      const limit = Math.min(Number(args.limit) || 10, 20);
+      const limit = Math.max(1, Math.min(Number(args.limit) || 10, 20));
 
       try {
         // Stackoverflow search is available via the research family but not directly
@@ -395,7 +395,7 @@ function createRedditSearchTool(
         typeof args.subreddit === 'string' && args.subreddit.trim().length > 0
           ? args.subreddit.trim()
           : 'all';
-      const limit = Math.min(Number(args.limit) || 10, 20);
+      const limit = Math.max(1, Math.min(Number(args.limit) || 10, 20));
 
       try {
         // ResearchTools.redditSearch takes (query, limit, subreddit) to match the ResearchTools interface;
@@ -438,7 +438,7 @@ function createYouTubeSearchTool(
     execute: async (args) => {
       const query = typeof args.query === 'string' ? args.query : '';
       if (!query) return { content: 'Error: query is required', error: 'missing query' };
-      const limit = Math.min(Number(args.limit) || 10, 20);
+      const limit = Math.max(1, Math.min(Number(args.limit) || 10, 20));
 
       try {
         const results = await (await getTools()).youtubeSearch(query, limit);
@@ -591,7 +591,7 @@ function createPubMedSearchTool(collector: CitationCollector): AgentTool {
     execute: async (args) => {
       const query = typeof args.query === 'string' ? args.query : '';
       if (!query) return { content: 'Error: query is required', error: 'missing query' };
-      const limit = Math.min(Number(args.limit) || 10, 20);
+      const limit = Math.max(1, Math.min(Number(args.limit) || 10, 20));
 
       try {
         const { searchPubMed } = await import('../../tools/pubmedSearch.js');
@@ -661,7 +661,7 @@ function createAcademicSearchTool(collector: CitationCollector): AgentTool {
     execute: async (args) => {
       const query = typeof args.query === 'string' ? args.query : '';
       if (!query) return { content: 'Error: query is required', error: 'missing query' };
-      const limit = Math.min(Number(args.limit) || 10, 20);
+      const limit = Math.max(1, Math.min(Number(args.limit) || 10, 20));
 
       try {
         const { academicSearch } = await import('../../tools/academicSearch.js');
@@ -701,7 +701,7 @@ function createOpenAlexSearchTool(collector: CitationCollector): AgentTool {
     execute: async (args) => {
       const query = typeof args.query === 'string' ? args.query : '';
       if (!query) return { content: 'Error: query is required', error: 'missing query' };
-      const limit = Math.min(Number(args.limit) || 10, 20);
+      const limit = Math.max(1, Math.min(Number(args.limit) || 10, 20));
 
       try {
         const { searchOpenAlex } = await import('../../tools/openalexSearch.js');
@@ -736,7 +736,7 @@ function createCrossrefSearchTool(collector: CitationCollector): AgentTool {
     execute: async (args) => {
       const query = typeof args.query === 'string' ? args.query : '';
       if (!query) return { content: 'Error: query is required', error: 'missing query' };
-      const limit = Math.min(Number(args.limit) || 10, 20);
+      const limit = Math.max(1, Math.min(Number(args.limit) || 10, 20));
 
       try {
         const { searchCrossref } = await import('../../tools/crossrefSearch.js');
@@ -770,7 +770,7 @@ function createDataCiteSearchTool(collector: CitationCollector): AgentTool {
     execute: async (args) => {
       const query = typeof args.query === 'string' ? args.query : '';
       if (!query) return { content: 'Error: query is required', error: 'missing query' };
-      const limit = Math.min(Number(args.limit) || 10, 20);
+      const limit = Math.max(1, Math.min(Number(args.limit) || 10, 20));
 
       try {
         const { searchDataCite } = await import('../../tools/dataciteSearch.js');
@@ -804,7 +804,7 @@ function createRorSearchTool(collector: CitationCollector): AgentTool {
     execute: async (args) => {
       const query = typeof args.query === 'string' ? args.query : '';
       if (!query) return { content: 'Error: query is required', error: 'missing query' };
-      const limit = Math.min(Number(args.limit) || 10, 20);
+      const limit = Math.max(1, Math.min(Number(args.limit) || 10, 20));
 
       try {
         const { searchRor } = await import('../../tools/rorSearch.js');
@@ -838,7 +838,7 @@ function createGdeltSearchTool(collector: CitationCollector): AgentTool {
     execute: async (args) => {
       const query = typeof args.query === 'string' ? args.query : '';
       if (!query) return { content: 'Error: query is required', error: 'missing query' };
-      const limit = Math.min(Number(args.limit) || 10, 20);
+      const limit = Math.max(1, Math.min(Number(args.limit) || 10, 20));
 
       try {
         const { searchGdelt } = await import('../../tools/gdeltSearch.js');
@@ -873,7 +873,7 @@ function createWikidataSearchTool(collector: CitationCollector): AgentTool {
     execute: async (args) => {
       const query = typeof args.query === 'string' ? args.query : '';
       if (!query) return { content: 'Error: query is required', error: 'missing query' };
-      const limit = Math.min(Number(args.limit) || 10, 20);
+      const limit = Math.max(1, Math.min(Number(args.limit) || 10, 20));
 
       try {
         const { searchWikidata } = await import('../../tools/wikidataSearch.js');

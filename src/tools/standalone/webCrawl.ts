@@ -172,16 +172,21 @@ export function registerWebCrawl(
         // derived from markdown and double/triple payload size with zero
         // information gain for LLM consumers. Internal callers (semanticCrawl,
         // jobPipeline, extraction) call webCrawl() directly and retain them.
-        for (const page of data.pages) {
-          const p = page as unknown as Record<string, unknown>;
-          delete p.html;
-          delete p.elements;
-          delete p.truncatedElements;
-          delete p.originalElementCount;
-          delete p.omittedElementCount;
-        }
+        // Clone pages so the original data (for kgHook) stays intact.
+        const responseData = {
+          ...data,
+          pages: data.pages.map((p: unknown) => {
+            const cleaned = { ...(p as Record<string, unknown>) };
+            delete cleaned.html;
+            delete cleaned.elements;
+            delete cleaned.truncatedElements;
+            delete cleaned.originalElementCount;
+            delete cleaned.omittedElementCount;
+            return cleaned;
+          }),
+        };
 
-        const result = makeResult('web_crawl', data, Date.now() - start, {
+        const result = makeResult('web_crawl', responseData, Date.now() - start, {
           warnings,
         });
 

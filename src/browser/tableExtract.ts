@@ -57,7 +57,7 @@ export async function extractTables(
           return text.replace(/\s+/g, ' ').trim();
         }
 
-        function buildPath(el: Element, idx: number): string {
+        function buildPath(el: Element): string {
           const tag = el.tagName.toLowerCase();
           const id = el.id ? `#${el.id}` : '';
           const cls =
@@ -66,7 +66,12 @@ export async function extractTables(
               : '';
           if (id) return `${tag}${id}`;
           if (cls) return `${tag}${cls}`;
-          return `${tag}:nth-of-type(${String(idx + 1)})`;
+          const parent = el.parentElement;
+          const siblings = parent
+            ? Array.from(parent.children).filter((s) => s.tagName === el.tagName)
+            : [el];
+          const pos = siblings.indexOf(el) + 1;
+          return `${tag}:nth-of-type(${String(pos)})`;
         }
 
         // -- Filtering --
@@ -117,7 +122,7 @@ export async function extractTables(
           }
 
           // Build a selector for this table
-          const selector = buildPath(table, tableIdx);
+          const selector = buildPath(table);
 
           // Detect infobox: vertical key→value layout (2-column, labels in first col)
           const tableCls = (table.className || '').toLowerCase();
@@ -125,7 +130,7 @@ export async function extractTables(
           const isInfobox = tableCls.includes('infobox') || tableCls.includes('vcard');
 
           if (isInfobox) {
-            const kvPairs: Record<string, string> = {};
+            const kvPairs: { key: string; value: string }[] = [];
             let hasPairs = false;
 
             for (const row of allRows) {
@@ -137,7 +142,7 @@ export async function extractTables(
                 const key = cleanText(getCellText(keyCell));
                 const value = cleanText(getCellText(valCell));
                 if (key && value) {
-                  kvPairs[key] = value;
+                  kvPairs.push({ key, value });
                   hasPairs = true;
                 }
               } else if (cells.length === 1) {
@@ -145,16 +150,16 @@ export async function extractTables(
                 if (!cell) continue;
                 const text = cleanText(getCellText(cell));
                 if (text && text.length < 100) {
-                  kvPairs[text] = '';
+                  kvPairs.push({ key: text, value: '' });
                 }
               }
             }
 
             if (hasPairs) {
               const headers = ['Key', 'Value'];
-              const dataRows = Object.entries(kvPairs).map(([k, v]) => ({
-                Key: k,
-                Value: v,
+              const dataRows = kvPairs.map(({ key, value }) => ({
+                Key: key,
+                Value: value,
               }));
               tables.push({
                 index: tableIdx,
@@ -209,9 +214,18 @@ export async function extractTables(
               }
             }
 
-            headers = (grid[0] ?? []).map((h) => h || '');
-            if (headers.length === 0 || headers.every((h) => !h)) return;
-            dataGrid = grid.slice(1);
+            // Detect whether first row has real header cells
+            const firstRowEl = trRows[0];
+            const hasHeaderCells =
+              firstRowEl !== undefined && Array.from(firstRowEl.querySelectorAll('th')).length > 0;
+            if (hasHeaderCells) {
+              headers = (grid[0] ?? []).map((h) => h || '');
+              if (headers.length === 0 || headers.every((h) => !h)) return;
+              dataGrid = grid.slice(1);
+            } else {
+              headers = [];
+              dataGrid = (grid[0] ?? []).length > 0 ? grid : [];
+            }
           } else {
             // No flatten — simple positional extraction (original behavior)
             const firstRow = trRows[0];

@@ -187,6 +187,8 @@ test('github.commits accepts repository URL and ref alias', () => {
   });
 
   assert.equal(result.success, true);
+  const parsed = result.data as Record<string, unknown>;
+  assert.equal(parsed.ref, 'abc123def456');
 });
 
 test('github.refs accepts tag filters', () => {
@@ -204,6 +206,9 @@ test('github.refs accepts tag filters', () => {
   });
 
   assert.equal(result.success, true);
+  const parsed = result.data as Record<string, unknown>;
+  assert.equal(parsed.type, 'tags');
+  assert.equal(parsed.filter, 'v1');
 });
 
 test('github.file accepts ref alias for commit-specific reads', () => {
@@ -211,7 +216,7 @@ test('github.file accepts ref alias for commit-specific reads', () => {
   const entry = getRegisteredTool(server, 'github');
 
   const result = (
-    entry.inputSchema as { safeParse: (v: unknown) => { success: boolean } }
+    entry.inputSchema as { safeParse: (v: unknown) => { success: boolean; data?: unknown } }
   ).safeParse({
     action: 'file',
     repository: 'owner/repo',
@@ -220,6 +225,8 @@ test('github.file accepts ref alias for commit-specific reads', () => {
   });
 
   assert.equal(result.success, true);
+  const parsed = result.data as Record<string, unknown>;
+  assert.equal(parsed.ref, 'abc123def456');
 });
 
 test('github.file accepts lineOffset and lineLimit aliases', () => {
@@ -237,6 +244,9 @@ test('github.file accepts lineOffset and lineLimit aliases', () => {
   });
 
   assert.equal(result.success, true);
+  const parsed = result.data as Record<string, unknown>;
+  assert.equal(parsed.lineOffset, 1450);
+  assert.equal(parsed.lineLimit, 110);
 });
 
 test('github.file rejects conflicting line range aliases', () => {

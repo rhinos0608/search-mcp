@@ -18,8 +18,13 @@ interface TrackedRequest {
   responseBody: string | undefined;
 }
 
-/** Map of Page → tracked requests (GC-friendly). */
-const trackedPages = new WeakMap<Page, TrackedRequest[]>();
+interface TrackedPageState {
+  requests: TrackedRequest[];
+  handler: (request: import('playwright-core').Request) => void;
+}
+
+/** Map of Page → tracked requests + handler reference (GC-friendly). */
+const trackedPages = new WeakMap<Page, TrackedPageState>();
 
 // ─────────────────────────────────────────────────────────────────────────────
 // § Request tracking
@@ -31,9 +36,7 @@ const trackedPages = new WeakMap<Page, TrackedRequest[]>();
  */
 export function startRequestTracking(page: Page): void {
   const requests: TrackedRequest[] = [];
-  trackedPages.set(page, requests);
-
-  page.on('request', (request) => {
+  const handler = (request: import('playwright-core').Request): void => {
     const startTime = Date.now();
 
     request
@@ -66,7 +69,10 @@ export function startRequestTracking(page: Page): void {
       .catch(() => {
         // Request may never get a response (aborted, failed)
       });
-  });
+  };
+
+  trackedPages.set(page, { requests, handler });
+  page.on('request', handler);
 }
 
 /**
@@ -81,7 +87,7 @@ export function stopRequestTracking(page: Page): void {
  * List tracked requests, optionally filtered by URL regex.
  */
 export function listRequests(page: Page, filter?: RegExp): NetworkRequest[] {
-  const requests = trackedPages.get(page) ?? [];
+  const requests = trackedPages.get(page)?.requests ?? [];
   const filtered = filter ? requests.filter((r) => filter.test(r.url)) : requests;
   return filtered.map((r) => ({
     index: r.index,
@@ -96,7 +102,7 @@ export function listRequests(page: Page, filter?: RegExp): NetworkRequest[] {
  * Get full details for a tracked request by 1-based index.
  */
 export function getRequestDetails(page: Page, index: number): NetworkRequestDetail | null {
-  const requests = trackedPages.get(page) ?? [];
+  const requests = trackedPages.get(page)?.requests ?? [];
   const req = requests.find((r) => r.index === index);
   if (!req) return null;
 

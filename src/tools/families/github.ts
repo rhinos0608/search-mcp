@@ -667,6 +667,7 @@ const githubFamily: FamilyDefinition = {
               query,
               repo: repoSpec,
               ...(language !== undefined ? { language } : {}),
+              ...(path !== undefined ? { fileFilter: [path] } : {}),
               maxFiles: limit,
               topK: Math.min(limit, 50),
               preFilterByContent: true,

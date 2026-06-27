@@ -436,7 +436,8 @@ function normalizeCommitResult(raw: Record<string, unknown>): GitHubCommitSearch
     htmlUrl: getString(raw, 'html_url'),
     repoFullName: repoUrl,
     authorName: author ? getString(author, 'name') : '',
-    authorLogin: author && typeof author.login === 'string' ? author.login : null,
+    authorLogin:
+      isRecord(raw.author) && typeof raw.author.login === 'string' ? raw.author.login : null,
     authoredAt: author ? getString(author, 'date') : '',
   };
 }
@@ -472,7 +473,7 @@ export async function getGitHubMultiSearch(
   }
 
   // Issue search: default to issues only (not PRs) unless query already has type:pr
-  if (type === 'issues' && !/\btype:\s*(pr|issue)\b/i.test(query)) {
+  if (type === 'issues' && !/\b(?:type|is):\s*(pr|issue)\b/i.test(query)) {
     parts.push('is:issue');
   }
 

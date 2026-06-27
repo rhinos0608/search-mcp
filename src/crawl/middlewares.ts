@@ -362,7 +362,7 @@ export class Crawl4aiClientMiddleware implements CrawlMiddleware {
       crawlerConfigParams.delay_before_return_html = req.opts.delayBeforeReturnHtml;
     }
     if (req.opts.pageTimeout !== undefined) {
-      crawlerConfigParams.page_timeout = req.opts.pageTimeout;
+      crawlerConfigParams.page_timeout = Math.min(req.opts.pageTimeout, 300_000);
     }
     if (req.opts.jsCodeBeforeWait !== undefined && req.opts.jsCodeBeforeWait.length > 0) {
       crawlerConfigParams.js_code_before_wait = req.opts.jsCodeBeforeWait;

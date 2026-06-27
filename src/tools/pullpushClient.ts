@@ -63,6 +63,7 @@ export async function pullpushSearch(
   params.set('sort_type', sortType);
 
   let posts: unknown[] = [];
+  let anySuccess = false;
 
   for (const attempt of attempts) {
     if (attempt.query !== undefined) {
@@ -101,8 +102,16 @@ export async function pullpushSearch(
     const json: unknown = await safeResponseJson(response, url);
     const data = (json as Record<string, unknown>).data;
     posts = Array.isArray(data) ? data : [];
+    anySuccess = true;
 
     if (posts.length > 0) break;
+  }
+
+  // All attempts failed — surface outage rather than returning empty Listing
+  if (!anySuccess) {
+    logger.error({ subreddit, limit, sort }, 'All PullPush search attempts failed');
+    // Return undefined so caller can distinguish genuine empty from outage
+    return undefined;
   }
 
   // Wrap in Reddit-native Listing format

@@ -220,14 +220,16 @@ export async function arxivSearch(
   logger.debug({ resultCount: papers.length }, 'ArXiv direct search complete');
 
   // Client-side re-sort when the caller asked for a date-based ordering.
+  // Sort+slice before setting cache to avoid mutating cached data.
   if (needsClientSort) {
     const dateField = sortBy === 'submittedDate' ? 'publishedDate' : 'updatedDate';
-    papers.sort((a, b) => {
+    const sorted = [...papers].sort((a, b) => {
       const da = a[dateField] ?? '';
       const db = b[dateField] ?? '';
       return db.localeCompare(da); // descending
     });
-    return papers.slice(0, limit);
+    cache.set(key, sorted.slice(0, limit));
+    return sorted.slice(0, limit);
   }
 
   return papers;

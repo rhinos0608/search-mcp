@@ -109,6 +109,18 @@ describe('extractFindingsFromAnswerRuleBased', () => {
     assert.deepStrictEqual(findings[0]?.sourceIds, ['src-a', 'src-b']);
   });
 
+  it('merges duplicate sentences with separate citations into one finding with both sourceIds', () => {
+    const answer =
+      'Vector databases enable semantic retrieval at scale [1]. Vector databases enable semantic retrieval at scale [2].';
+    const findings = extractFindingsFromAnswerRuleBased({
+      answer,
+      sourceMap,
+      subQuestionIds: [],
+    });
+    assert.strictEqual(findings.length, 1);
+    assert.deepStrictEqual(findings[0]?.sourceIds, ['src-a', 'src-b']);
+  });
+
   it('drops fragments that are too short to be real claims', () => {
     const answer = 'Yes [1]. The retrieval pipeline reranks candidates with a cross-encoder [2].';
     const findings = extractFindingsFromAnswerRuleBased({

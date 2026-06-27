@@ -10,6 +10,7 @@
  */
 
 import { logger } from '../logger.js';
+import { ToolError } from '../errors.js';
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -169,13 +170,20 @@ async function searxngSearchReddit(
         { status: response.status, tool: 'searxng_reddit_search' },
         'SearXNG search returned non-OK status',
       );
-      return [];
+      throw new ToolError(
+        `SearXNG returned HTTP ${String(response.status)} for Reddit search query`,
+        { code: 'UNAVAILABLE', retryable: true, backend: 'searxng' },
+      );
     }
 
     const body = (await response.json()) as SearxResponse;
     const results = body.results ?? [];
 
     // Filter to only Reddit comment pages matching the target subreddit
+    const subTokens = subreddit
+      .split('+')
+      .map((s) => s.trim().toLowerCase())
+      .filter(Boolean);
     return results
       .filter((r) => {
         if (!r.url) return false;
@@ -185,7 +193,9 @@ async function searxngSearchReddit(
             (parsed.hostname === 'www.reddit.com' ||
               parsed.hostname === 'reddit.com' ||
               parsed.hostname === 'old.reddit.com') &&
-            parsed.pathname.startsWith(`/r/${subreddit}/comments/`)
+            subTokens.some((token) =>
+              parsed.pathname.toLowerCase().startsWith(`/r/${token}/comments/`),
+            )
           );
         } catch {
           return false;
@@ -194,7 +204,15 @@ async function searxngSearchReddit(
       .slice(0, limit);
   } catch (err) {
     logger.warn({ err, tool: 'searxng_reddit_search' }, 'SearXNG search failed');
-    return [];
+    throw new ToolError(
+      `SearXNG search failed: ${err instanceof Error ? err.message : String(err)}`,
+      {
+        code: 'UNAVAILABLE',
+        retryable: true,
+        backend: 'searxng',
+        cause: err instanceof Error ? err : undefined,
+      },
+    );
   }
 }
 

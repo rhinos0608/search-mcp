@@ -50,7 +50,9 @@ async function githubFetch(url: string): Promise<GitHubFetchResult> {
 
         getTracker('github').update(response.headers);
 
-        const body: unknown = response.ok ? await safeResponseJson(response, url) : null;
+        const body: unknown = response.ok
+          ? await safeResponseJson(response, url)
+          : await safeResponseJson(response, url).catch(() => null);
         return { response, body };
       } catch (err) {
         const error = err instanceof Error ? err : new Error(String(err));
@@ -72,7 +74,12 @@ async function githubFetch(url: string): Promise<GitHubFetchResult> {
   );
 }
 
-function handleGitHubError(status: number, statusText: string, context: string): never {
+function handleGitHubError(
+  status: number,
+  statusText: string,
+  context: string,
+  body?: unknown,
+): never {
   if (status === 404) {
     throw notFoundError(`GitHub resource "${context}" not found`, {
       statusCode: 404,
@@ -80,8 +87,20 @@ function handleGitHubError(status: number, statusText: string, context: string):
     });
   }
   if (status === 403 || status === 429) {
-    getTracker('github').recordLimitHit();
-    throw rateLimitError('GitHub API rate limit exceeded. Try again later.', {
+    // Check if this is actually a rate limit vs auth/permission error
+    const msg =
+      body && typeof body === 'object' && 'message' in body
+        ? String((body as Record<string, unknown>).message)
+        : statusText;
+    const isRateLimit = /rate limit/i.test(msg) || /too many requests/i.test(msg) || status === 429;
+    if (isRateLimit) {
+      getTracker('github').recordLimitHit();
+      throw rateLimitError('GitHub API rate limit exceeded. Try again later.', {
+        statusCode: status,
+        backend: 'github',
+      });
+    }
+    throw unavailableError(`GitHub API error ${String(status)}: ${msg} for "${context}"`, {
       statusCode: status,
       backend: 'github',
     });
@@ -158,7 +177,7 @@ async function fetchRefPrefix(
   const { response, body } = await githubFetch(url);
 
   if (!response.ok) {
-    handleGitHubError(response.status, response.statusText, `${owner}/${repo} refs`);
+    handleGitHubError(response.status, response.statusText, `${owner}/${repo} refs`, body);
   }
   if (!Array.isArray(body)) {
     throw unavailableError(`Unexpected GitHub refs API response shape for ${owner}/${repo}`, {
@@ -172,6 +191,9 @@ async function fetchRefPrefix(
 function refPrefixes(type: GitHubRefType, filter: string | undefined): string[] {
   const normalizedFilter = filter ? trimRefPrefix(filter) : '';
   if (type === 'all' && normalizedFilter.length === 0) return ['heads', 'tags'];
+  if (type === 'all' && normalizedFilter.length > 0) {
+    return [`heads/${normalizedFilter}`, `tags/${normalizedFilter}`];
+  }
 
   const namespace = namespaceFor(type);
   const prefix = [namespace, normalizedFilter].filter((part) => part.length > 0).join('/');
