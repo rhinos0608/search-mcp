@@ -27,7 +27,10 @@ const STANDALONE_TOOLS = new Set(['web_search', 'health_check']);
 const GATED_STANDALONE_TOOLS = new Set(['semantic_crawl', 'semantic_jobs', 'deep_research']);
 
 const FAMILY_TOOLS = new Map<string, string[]>([
-  ['github', ['repo', 'file', 'tree', 'search', 'trending', 'code_search']],
+  [
+    'github',
+    ['repo', 'file', 'list_dir', 'tree', 'search', 'commits', 'refs', 'trending', 'code_search'],
+  ],
   ['youtube', ['search', 'transcript', 'semantic']],
   ['reddit', ['search', 'comments', 'semantic']],
   ['research', ['academic', 'arxiv', 'hackernews', 'stackoverflow', 'pubmed', 'wikipedia']],
