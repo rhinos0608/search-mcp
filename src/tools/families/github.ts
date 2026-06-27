@@ -12,6 +12,8 @@
  *   list_dir    — List immediate contents of a directory (non-recursive)
  *   tree        — List directory contents (supports recursive / monorepo)
  *   search      — Code search via GitHub Search API
+ *   commits     — Commit history for a repository/ref/path
+ *   refs        — Branch/tag refs and target SHAs
  *   trending    — Trending repositories on GitHub
  *   code_search — AST-aware semantic code search (RAG)
  *
@@ -27,8 +29,10 @@ import type { KnowledgeGraphHook } from '../../knowledge/hook.js';
 import { getGitHubRepo } from '../githubRepo.js';
 import { getGitHubRepoFile } from '../githubRepoFile.js';
 import { getGitHubRepoTree } from '../githubRepoTree.js';
-import { getGitHubRepoSearch } from '../githubRepoSearch.js';
+import { getGitHubRepoSearch, getGitHubMultiSearch } from '../githubRepoSearch.js';
 import { getGitHubTrending } from '../githubTrending.js';
+import { getGitHubCommitHistory } from '../githubCommits.js';
+import { getGitHubRefs } from '../githubRefs.js';
 import { semanticGitHubCode } from '../semanticGitHubCode.js';
 import { DEFAULT_GITHUB_MAX_FILE_BYTES } from '../../utils/githubCorpus.js';
 import { wrapResponse } from '../response.js';
@@ -80,6 +84,7 @@ const fileAction = z
       .describe('Repository as "owner/repo" or GitHub URL (alternative to owner+repo fields)'),
     path: z.string().describe('File path within the repo'),
     branch: z.string().optional().describe('Git ref (branch, tag, or commit SHA)'),
+    ref: z.string().optional().describe('Git ref, branch, tag, or commit SHA. Overrides branch.'),
     raw: z.boolean().optional().default(true).describe('true = decoded UTF-8 text; false = base64'),
     offset: z
       .number()
@@ -93,6 +98,18 @@ const fileAction = z
       .min(1)
       .optional()
       .describe('Maximum lines to return. Requires raw=true.'),
+    lineOffset: z
+      .number()
+      .int()
+      .min(0)
+      .optional()
+      .describe('Alias for offset: 0-based line offset. Requires raw=true.'),
+    lineLimit: z
+      .number()
+      .int()
+      .min(1)
+      .optional()
+      .describe('Alias for limit: maximum lines to return. Requires raw=true.'),
     byteOffset: z
       .number()
       .int()
@@ -110,13 +127,37 @@ const fileAction = z
     const hasOffsetRelated =
       params.offset !== undefined ||
       params.limit !== undefined ||
+      params.lineOffset !== undefined ||
+      params.lineLimit !== undefined ||
       params.byteOffset !== undefined ||
       params.byteLimit !== undefined;
     if (hasOffsetRelated && !params.raw) {
       ctx.addIssue({
         code: 'custom',
-        message: 'offset/limit/byteOffset/byteLimit require raw=true',
+        message: 'offset/limit/lineOffset/lineLimit/byteOffset/byteLimit require raw=true',
         path: ['raw'],
+      });
+    }
+    if (
+      params.offset !== undefined &&
+      params.lineOffset !== undefined &&
+      params.offset !== params.lineOffset
+    ) {
+      ctx.addIssue({
+        code: 'custom',
+        message: 'offset and lineOffset must match when both are provided',
+        path: ['lineOffset'],
+      });
+    }
+    if (
+      params.limit !== undefined &&
+      params.lineLimit !== undefined &&
+      params.limit !== params.lineLimit
+    ) {
+      ctx.addIssue({
+        code: 'custom',
+        message: 'limit and lineLimit must match when both are provided',
+        path: ['lineLimit'],
       });
     }
   });
@@ -139,6 +180,7 @@ const treeAction = z.object({
     .describe('Repository as "owner/repo" or GitHub URL (alternative to owner+repo fields)'),
   path: z.string().optional().default('').describe('Directory path within the repo'),
   branch: z.string().optional().describe('Git ref (branch, tag, or commit SHA)'),
+  ref: z.string().optional().describe('Git ref, branch, tag, or commit SHA. Overrides branch.'),
   recursive: z.boolean().optional().default(false).describe('Return full recursive tree'),
   limit: z
     .number()
@@ -171,6 +213,7 @@ const listDirAction = z.object({
     .describe('Repository as "owner/repo" or GitHub URL (alternative to owner+repo fields)'),
   path: z.string().optional().default('').describe('Directory path within the repo'),
   branch: z.string().optional().describe('Git ref (branch, tag, or commit SHA)'),
+  ref: z.string().optional().describe('Git ref, branch, tag, or commit SHA. Overrides branch.'),
   limit: z
     .number()
     .int()
@@ -180,14 +223,99 @@ const listDirAction = z.object({
     .describe('Max items (1–10000, omit for unlimited)'),
 });
 
+// Regex detecting qualifiers that only work on /search/repositories
+const REPO_ONLY_QUALIFIERS = /\bin:(readme|name|description|topics)\b/i;
+
 const searchAction = z.object({
-  action: z.literal('search').describe('Search code across GitHub repositories'),
-  query: z.string().describe('Search term (GitHub code-search syntax)'),
+  action: z
+    .literal('search')
+    .describe('Search GitHub: code, repositories, issues, commits, or users'),
+  query: z
+    .string()
+    .describe(
+      'Search term (GitHub search syntax). ' +
+        'Use qualifiers like in:readme, in:name, in:description, in:topics (repo search only), ' +
+        'org:, repo:, language:, is:issue, is:pr, type:pr, etc.',
+    ),
+  type: z
+    .enum(['code', 'repositories', 'issues', 'commits', 'users'])
+    .optional()
+    .default('code')
+    .describe(
+      'What to search. Defaults to code, but auto-switches to repositories ' +
+        'when query contains in:readme, in:name, in:description, or in:topics.',
+    ),
   owner: z.string().optional().describe('Narrow to a specific user or org'),
   repo: z.string().optional().describe('Narrow to a specific repo (requires owner)'),
   language: z.string().optional().describe('Filter by language (e.g. "typescript")'),
-  path: z.string().optional().describe('Filter to files under this path'),
+  path: z.string().optional().describe('Filter to files under this path (code type only)'),
+  sort: z
+    .string()
+    .optional()
+    .describe(
+      'Sort order. Varies by type: repos → stars, forks, updated; ' +
+        'issues → comments, reactions, created, updated; ' +
+        'commits → author-date, committer-date; users → followers, repositories, joined',
+    ),
+  order: z.enum(['asc', 'desc']).optional().describe('Sort direction: asc or desc'),
   limit: z.number().int().min(1).max(1000).optional().default(30).describe('Max results (1–1000)'),
+});
+
+const commitsAction = z.object({
+  action: z.literal('commits').describe('List repository commit history'),
+  owner: z
+    .string()
+    .regex(/^[a-zA-Z0-9](?:[a-zA-Z0-9._-]*[a-zA-Z0-9])?$/)
+    .optional()
+    .describe('GitHub username or organisation'),
+  repo: z
+    .string()
+    .regex(/^[a-zA-Z0-9._-]{1,100}$/)
+    .optional()
+    .describe('Repository name'),
+  repository: z
+    .string()
+    .optional()
+    .describe('Repository as "owner/repo" or GitHub URL (alternative to owner+repo fields)'),
+  sha: z.string().optional().describe('Branch, tag, or commit SHA to start listing from'),
+  ref: z.string().optional().describe('Alias for sha: branch, tag, or commit SHA'),
+  path: z.string().optional().describe('Only commits affecting this path'),
+  author: z.string().optional().describe('GitHub username or email author filter'),
+  since: z.iso
+    .datetime({ offset: true })
+    .optional()
+    .describe('Only commits after this ISO timestamp'),
+  until: z.iso
+    .datetime({ offset: true })
+    .optional()
+    .describe('Only commits before this ISO timestamp'),
+  page: z.number().int().min(1).optional().default(1).describe('Result page to fetch'),
+  limit: z.number().int().min(1).max(100).optional().default(30).describe('Commits per page'),
+});
+
+const refsAction = z.object({
+  action: z.literal('refs').describe('List branch/tag refs and target commit SHAs'),
+  owner: z
+    .string()
+    .regex(/^[a-zA-Z0-9](?:[a-zA-Z0-9._-]*[a-zA-Z0-9])?$/)
+    .optional()
+    .describe('GitHub username or organisation'),
+  repo: z
+    .string()
+    .regex(/^[a-zA-Z0-9._-]{1,100}$/)
+    .optional()
+    .describe('Repository name'),
+  repository: z
+    .string()
+    .optional()
+    .describe('Repository as "owner/repo" or GitHub URL (alternative to owner+repo fields)'),
+  type: z
+    .enum(['branches', 'tags', 'all'])
+    .optional()
+    .default('branches')
+    .describe('Which refs to pull: branches, tags, or all refs'),
+  filter: z.string().optional().describe('Optional ref prefix/name filter, e.g. main or v1'),
+  limit: z.number().int().min(1).max(1000).optional().default(100).describe('Max refs to return'),
 });
 
 const trendingAction = z.object({
@@ -288,10 +416,11 @@ const githubFamily: FamilyDefinition = {
   description:
     'Work with GitHub repositories, files, directory trees, code search, trending repos, ' +
     'and semantic code search. Choose the `action` field to select what to do: ' +
-    '`repo` for metadata, `file` for reading a known file, `list_dir` for listing a ' +
+    '`repo` for metadata + README, `file` for reading a known file, `list_dir` for listing a ' +
     'directory, `tree` for full tree listing, ' +
-    '`search` for GitHub code search, `trending` for trending repos (no auth needed), ' +
-    'and `code_search` for AST-aware semantic code retrieval.',
+    '`search` for GitHub code search (default), repos, issues, commits, or users, ' +
+    '`commits` for commit history, `refs` for branch/tag SHA tracking, ' +
+    '`trending` for trending repos (no auth needed), and `code_search` for AST-aware semantic code retrieval.',
   actions: [
     {
       name: 'repo',
@@ -346,19 +475,35 @@ const githubFamily: FamilyDefinition = {
       schema: fileAction,
       handler: async (args, _cfg) => {
         void _cfg;
-        const { owner, repo, repository, path, branch, raw, offset, limit, byteOffset, byteLimit } =
-          args as {
-            owner?: string;
-            repo?: string;
-            repository?: string;
-            path: string;
-            branch?: string;
-            raw: boolean;
-            offset?: number;
-            limit?: number;
-            byteOffset?: number;
-            byteLimit?: number;
-          };
+        const {
+          owner,
+          repo,
+          repository,
+          path,
+          branch,
+          ref,
+          raw,
+          offset,
+          limit,
+          lineOffset,
+          lineLimit,
+          byteOffset,
+          byteLimit,
+        } = args as {
+          owner?: string;
+          repo?: string;
+          repository?: string;
+          path: string;
+          branch?: string;
+          ref?: string;
+          raw: boolean;
+          offset?: number;
+          limit?: number;
+          lineOffset?: number;
+          lineLimit?: number;
+          byteOffset?: number;
+          byteLimit?: number;
+        };
 
         // Resolve owner+repo from repository if needed
         let resolvedOwner = owner;
@@ -380,10 +525,10 @@ const githubFamily: FamilyDefinition = {
           resolvedOwner,
           resolvedRepo,
           path,
-          branch,
+          ref ?? branch,
           raw,
-          offset,
-          limit,
+          offset ?? lineOffset,
+          limit ?? lineLimit,
           byteOffset,
           byteLimit,
         );
@@ -396,13 +541,14 @@ const githubFamily: FamilyDefinition = {
       schema: treeAction,
       handler: async (args, _cfg) => {
         void _cfg;
-        const { owner, repo, repository, path, branch, recursive, limit, includeMonorepo } =
+        const { owner, repo, repository, path, branch, ref, recursive, limit, includeMonorepo } =
           args as {
             owner?: string;
             repo?: string;
             repository?: string;
             path: string;
             branch?: string;
+            ref?: string;
             recursive: boolean;
             limit: number;
             includeMonorepo?: boolean;
@@ -428,7 +574,7 @@ const githubFamily: FamilyDefinition = {
           resolvedOwner,
           resolvedRepo,
           path,
-          branch,
+          ref ?? branch,
           recursive,
           limit,
           includeMonorepo,
@@ -442,12 +588,13 @@ const githubFamily: FamilyDefinition = {
       schema: listDirAction,
       handler: async (args, _cfg) => {
         void _cfg;
-        const { owner, repo, repository, path, branch, limit } = args as {
+        const { owner, repo, repository, path, branch, ref, limit } = args as {
           owner?: string;
           repo?: string;
           repository?: string;
           path: string;
           branch?: string;
+          ref?: string;
           limit?: number;
         };
 
@@ -470,7 +617,7 @@ const githubFamily: FamilyDefinition = {
           resolvedOwner,
           resolvedRepo,
           path,
-          branch,
+          ref ?? branch,
           false,
           limit,
         );
@@ -480,52 +627,85 @@ const githubFamily: FamilyDefinition = {
     {
       name: 'search',
       description:
-        'Search code across GitHub using the GitHub Search API or AST-aware semantic code search',
+        'Search across GitHub: code, repositories, issues, commits, or users via the GitHub Search API',
       schema: searchAction,
       handler: async (args, cfg) => {
         void cfg;
-        const { query, owner, repo, language, path, limit } = args as {
+        const {
+          query,
+          type: rawType,
+          owner,
+          repo,
+          language,
+          path,
+          limit,
+          sort,
+          order,
+        } = args as {
           query: string;
+          type: 'code' | 'repositories' | 'issues' | 'commits' | 'users';
           owner?: string;
           repo?: string;
           language?: string;
           path?: string;
           limit: number;
+          sort?: string;
+          order?: 'asc' | 'desc';
         };
 
-        // Route to AST-aware semantic code search by default (requires a repo)
-        const repoSpec = owner && repo ? `${owner}/${repo}` : undefined;
-        if (repoSpec) {
-          const data = await semanticGitHubCode({
-            query,
-            repo: repoSpec,
-            ...(language !== undefined ? { language } : {}),
-            maxFiles: limit,
-            topK: Math.min(limit, 50),
-            preFilterByContent: true,
-          });
+        // Auto-detect repository-only qualifiers: if query contains in:readme,
+        // in:name, in:description, or in:topics and type is the default 'code',
+        // switch to repositories automatically.
+        const detectedType: 'code' | 'repositories' | 'issues' | 'commits' | 'users' =
+          rawType === 'code' && REPO_ONLY_QUALIFIERS.test(query) ? 'repositories' : rawType;
 
-          // Fall back to basic search if no results
-          if (data.topKDelivered === 0) {
-            const basicResults = await getGitHubRepoSearch(
+        // Code search with repo: route to AST-aware semantic search, fall back to basic
+        if (detectedType === 'code') {
+          const repoSpec = owner && repo ? `${owner}/${repo}` : undefined;
+          if (repoSpec) {
+            const data = await semanticGitHubCode({
               query,
-              owner,
-              repo,
-              language,
-              path,
-              limit,
-            );
-            return wrapResponse(basicResults, [
-              'code_search returned no results, fell back to basic GitHub search',
-            ]);
+              repo: repoSpec,
+              ...(language !== undefined ? { language } : {}),
+              maxFiles: limit,
+              topK: Math.min(limit, 50),
+              preFilterByContent: true,
+            });
+
+            if (data.topKDelivered === 0) {
+              const basicResults = await getGitHubRepoSearch(
+                query,
+                owner,
+                repo,
+                language,
+                path,
+                limit,
+              );
+              return wrapResponse(basicResults, [
+                'code_search returned no results, fell back to basic GitHub search',
+              ]);
+            }
+
+            return wrapResponse(data, data.warnings);
           }
 
-          const warnings = data.warnings;
-          return wrapResponse(data, warnings);
+          const data = await getGitHubRepoSearch(query, owner, repo, language, path, limit);
+          return data;
         }
 
-        const data = await getGitHubRepoSearch(query, owner, repo, language, path, limit);
-        return data;
+        // Non-code search types: use multi-type search endpoint
+        // Build options with exactOptionalPropertyTypes compliance
+        const multiOpts: Parameters<typeof getGitHubMultiSearch>[0] = {
+          query,
+          type: detectedType,
+          limit,
+        };
+        if (owner !== undefined) multiOpts.owner = owner;
+        if (repo !== undefined) multiOpts.repo = repo;
+        if (language !== undefined) multiOpts.language = language;
+        if (sort !== undefined) multiOpts.sort = sort;
+        if (order !== undefined) multiOpts.order = order;
+        return getGitHubMultiSearch(multiOpts);
       },
       configIssue: (cfg) => {
         if (!cfg.github.token) {
@@ -534,6 +714,93 @@ const githubFamily: FamilyDefinition = {
         return null;
       },
     },
+
+    {
+      name: 'commits',
+      description: 'List repository commits with optional ref, path, author, and time filters',
+      schema: commitsAction,
+      handler: async (args, _cfg) => {
+        void _cfg;
+        const { owner, repo, repository, sha, ref, path, author, since, until, page, limit } =
+          args as {
+            owner?: string;
+            repo?: string;
+            repository?: string;
+            sha?: string;
+            ref?: string;
+            path?: string;
+            author?: string;
+            since?: string;
+            until?: string;
+            page: number;
+            limit: number;
+          };
+
+        let resolvedOwner = owner;
+        let resolvedRepo = repo;
+        if ((!resolvedOwner || !resolvedRepo) && repository) {
+          const loc = resolveGitHubRepoLocator(repository);
+          if (loc) {
+            resolvedOwner = loc.owner;
+            resolvedRepo = loc.repo;
+          }
+        }
+        if (!resolvedOwner || !resolvedRepo) {
+          throw new Error(
+            'Missing repository: provide `owner` + `repo` or `repository` (owner/repo or GitHub URL)',
+          );
+        }
+
+        return getGitHubCommitHistory(resolvedOwner, resolvedRepo, {
+          ...(sha !== undefined || ref !== undefined ? { sha: sha ?? ref } : {}),
+          ...(path !== undefined ? { path } : {}),
+          ...(author !== undefined ? { author } : {}),
+          ...(since !== undefined ? { since } : {}),
+          ...(until !== undefined ? { until } : {}),
+          page,
+          limit,
+        });
+      },
+    },
+
+    {
+      name: 'refs',
+      description: 'Pull current branch/tag refs and target SHAs for commit tracking',
+      schema: refsAction,
+      handler: async (args, _cfg) => {
+        void _cfg;
+        const { owner, repo, repository, type, filter, limit } = args as {
+          owner?: string;
+          repo?: string;
+          repository?: string;
+          type: 'branches' | 'tags' | 'all';
+          filter?: string;
+          limit: number;
+        };
+
+        let resolvedOwner = owner;
+        let resolvedRepo = repo;
+        if ((!resolvedOwner || !resolvedRepo) && repository) {
+          const loc = resolveGitHubRepoLocator(repository);
+          if (loc) {
+            resolvedOwner = loc.owner;
+            resolvedRepo = loc.repo;
+          }
+        }
+        if (!resolvedOwner || !resolvedRepo) {
+          throw new Error(
+            'Missing repository: provide `owner` + `repo` or `repository` (owner/repo or GitHub URL)',
+          );
+        }
+
+        return getGitHubRefs(resolvedOwner, resolvedRepo, {
+          type,
+          ...(filter !== undefined ? { filter } : {}),
+          limit,
+        });
+      },
+    },
+
     {
       name: 'trending',
       description: 'Scrape GitHub Trending page for currently trending repositories',

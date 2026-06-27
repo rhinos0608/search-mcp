@@ -18,7 +18,17 @@ import { assertSafeUrl, safeResponseJson } from '../httpGuards.js';
 import { retryWithBackoff } from '../retry.js';
 import { assertRateLimitOk, getTracker } from '../rateLimit.js';
 import { rateLimitError, notFoundError, unavailableError, timeoutError } from '../errors.js';
-import type { GitHubCodeResult, GitHubCodeSearchResult } from '../types.js';
+import type {
+  GitHubCodeResult,
+  GitHubCodeSearchResult,
+  GitHubSearchType,
+  GitHubSearchItem,
+  GitHubRepoSearchItem,
+  GitHubIssueSearchItem,
+  GitHubUserSearchItem,
+  GitHubCommitSearchItem,
+  GitHubMultiSearchResult,
+} from '../types.js';
 import { getUserAgent } from '../version.js';
 
 const GITHUB_API = 'https://api.github.com';
@@ -310,6 +320,222 @@ export async function getGitHubRepoSearch(
   return {
     // globalTotalCount is the total number of results GitHub found for the query
     // (capped at 1000 by GitHub, even if actual matches are higher)
+    totalCount: globalTotalCount > 0 ? globalTotalCount : results.length,
+    results,
+  };
+}
+
+// ── Multi-type search ───────────────────────────────────────────────────────
+
+/** Qualifier params shared across search types */
+export interface GitHubMultiSearchOptions {
+  query: string;
+  type: GitHubSearchType;
+  owner?: string;
+  repo?: string;
+  language?: string;
+  limit?: number;
+  sort?: string;
+  order?: 'asc' | 'desc';
+}
+
+/** Map search type to GitHub REST endpoint path */
+function searchTypeToPath(type: GitHubSearchType): string {
+  switch (type) {
+    case 'repositories':
+      return '/search/repositories';
+    case 'issues':
+      return '/search/issues';
+    case 'commits':
+      return '/search/commits';
+    case 'users':
+      return '/search/users';
+    case 'code':
+    default:
+      return '/search/code';
+  }
+}
+
+/** Normalize raw GitHub API item into typed search result */
+function normalizeSearchItem(
+  type: GitHubSearchType,
+  raw: Record<string, unknown>,
+): GitHubSearchItem | null {
+  try {
+    switch (type) {
+      case 'code':
+        return normalizeCodeResult(raw);
+      case 'repositories':
+        return normalizeRepoResult(raw);
+      case 'issues':
+        return normalizeIssueResult(raw);
+      case 'users':
+        return normalizeUserResult(raw);
+      case 'commits':
+        return normalizeCommitResult(raw);
+      default:
+        return null;
+    }
+  } catch {
+    return null;
+  }
+}
+
+function normalizeRepoResult(raw: Record<string, unknown>): GitHubRepoSearchItem {
+  return {
+    fullName: getString(raw, 'full_name'),
+    htmlUrl: getString(raw, 'html_url'),
+    description: getString(raw, 'description'),
+    stars: getNumber(raw, 'stargazers_count'),
+    forks: getNumber(raw, 'forks_count'),
+    language: typeof raw.language === 'string' ? raw.language : null,
+    topics: Array.isArray(raw.topics)
+      ? raw.topics.filter((t): t is string => typeof t === 'string')
+      : [],
+    updatedAt: getString(raw, 'updated_at'),
+  };
+}
+
+function normalizeIssueResult(raw: Record<string, unknown>): GitHubIssueSearchItem {
+  const repoUrl = getString(raw, 'repository_url');
+  const repoParts = repoUrl.replace('https://api.github.com/repos/', '').replace(/\/$/, '');
+  return {
+    number: getNumber(raw, 'number'),
+    title: getString(raw, 'title'),
+    htmlUrl: getString(raw, 'html_url'),
+    state: getString(raw, 'state'),
+    repoFullName: repoParts,
+    userLogin: isRecord(raw.user) ? getString(raw.user, 'login') : '',
+    labels: Array.isArray(raw.labels)
+      ? raw.labels
+          .filter(isRecord)
+          .map((l) => getString(l, 'name'))
+          .filter(Boolean)
+      : [],
+    createdAt: getString(raw, 'created_at'),
+    updatedAt: getString(raw, 'updated_at'),
+    commentsCount: getNumber(raw, 'comments'),
+  };
+}
+
+function normalizeUserResult(raw: Record<string, unknown>): GitHubUserSearchItem {
+  return {
+    login: getString(raw, 'login'),
+    htmlUrl: getString(raw, 'html_url'),
+    type: getString(raw, 'type'),
+  };
+}
+
+function normalizeCommitResult(raw: Record<string, unknown>): GitHubCommitSearchItem {
+  const repoUrl = isRecord(raw.repository) ? getString(raw.repository, 'full_name') : '';
+  const commit = isRecord(raw.commit) ? raw.commit : null;
+  const author = commit && isRecord(commit.author) ? commit.author : null;
+  return {
+    sha: getString(raw, 'sha'),
+    message: commit ? getString(commit, 'message') : '',
+    htmlUrl: getString(raw, 'html_url'),
+    repoFullName: repoUrl,
+    authorName: author ? getString(author, 'name') : '',
+    authorLogin: author && typeof author.login === 'string' ? author.login : null,
+    authoredAt: author ? getString(author, 'date') : '',
+  };
+}
+
+/**
+ * Multi-type GitHub search. Routes to the correct /search/* endpoint based on `type`.
+ *
+ * Supported types: code, repositories, issues, commits, users
+ *
+ * For `issues`, appends @type=issue qualifier; use `type:pr` in query for pull requests.
+ * For `commits`, uses the commits preview accept header.
+ */
+export async function getGitHubMultiSearch(
+  opts: GitHubMultiSearchOptions,
+): Promise<GitHubMultiSearchResult> {
+  const { query, type, owner, repo, language, limit = 30, sort, order } = opts;
+
+  logger.info({ query, type, owner, repo, language, limit }, 'getGitHubMultiSearch');
+
+  // Build qualifier parts
+  const parts: string[] = [query.trim()];
+
+  if (owner && repo) {
+    parts.push(`repo:${owner}/${repo}`);
+  } else if (owner) {
+    if (type === 'issues') {
+      parts.push(`user:${owner}`);
+    } else if (type === 'code' || type === 'repositories') {
+      parts.push(`user:${owner}`);
+    } else {
+      parts.push(`org:${owner}`);
+    }
+  }
+
+  // Issue search: default to issues only (not PRs) unless query already has type:pr
+  if (type === 'issues' && !/\btype:\s*(pr|issue)\b/i.test(query)) {
+    parts.push('is:issue');
+  }
+
+  if (language) {
+    parts.push(`language:${language}`);
+  }
+
+  const searchQuery = parts.join(' ');
+  const encodedQuery = encodeURIComponent(searchQuery);
+  const path = searchTypeToPath(type);
+
+  const clampedLimit = Math.min(limit, 1000);
+  const results: GitHubSearchItem[] = [];
+  const pagesNeeded = Math.ceil(clampedLimit / 100);
+  let globalTotalCount = 0;
+
+  for (let page = 1; page <= pagesNeeded && results.length < clampedLimit; page++) {
+    await assertRateLimitOk('github_search');
+
+    const pageSize = Math.min(100, clampedLimit - results.length);
+    let searchUrl = `${GITHUB_API}${path}?q=${encodedQuery}&per_page=${String(pageSize)}&page=${String(page)}`;
+    if (sort !== undefined) searchUrl += `&sort=${encodeURIComponent(sort)}`;
+    if (order !== undefined) searchUrl += `&order=${order}`;
+
+    logger.debug({ searchUrl, type }, 'Fetching multi-type search page');
+
+    const { response, body } = await githubSearchFetch(searchUrl);
+
+    if (!response.ok) {
+      handleGitHubSearchError(response.status, response.statusText, searchQuery);
+    }
+
+    if (!isRecord(body)) {
+      throw unavailableError(
+        `Unexpected GitHub ${type} search API response shape for query "${searchQuery}"`,
+        { backend: 'github_search' },
+      );
+    }
+
+    const rawItems = body.items;
+    if (!Array.isArray(rawItems)) {
+      throw unavailableError(
+        `GitHub ${type} search API missing "items" array for query "${searchQuery}"`,
+        { backend: 'github_search' },
+      );
+    }
+
+    if (page === 1 && typeof body.total_count === 'number') {
+      globalTotalCount = body.total_count;
+    }
+
+    const normalized = rawItems
+      .map((item) => (isRecord(item) ? normalizeSearchItem(type, item) : null))
+      .filter((r): r is GitHubSearchItem => r !== null);
+
+    results.push(...normalized);
+
+    if (rawItems.length < pageSize) break;
+    if (results.length >= clampedLimit) break;
+  }
+
+  return {
+    searchType: type,
     totalCount: globalTotalCount > 0 ? globalTotalCount : results.length,
     results,
   };

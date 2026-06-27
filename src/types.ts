@@ -514,6 +514,126 @@ export interface GitHubCodeSearchResult {
   results: GitHubCodeResult[];
 }
 
+// ── Multi-type GitHub search ─────────────────────────────────────────────────
+
+export type GitHubSearchType = 'code' | 'repositories' | 'issues' | 'commits' | 'users';
+
+/** Normalized repository search result from /search/repositories */
+export interface GitHubRepoSearchItem {
+  fullName: string;
+  htmlUrl: string;
+  description: string;
+  stars: number;
+  forks: number;
+  language: string | null;
+  topics: string[];
+  updatedAt: string;
+}
+
+/** Normalized issue/PR search result from /search/issues */
+export interface GitHubIssueSearchItem {
+  number: number;
+  title: string;
+  htmlUrl: string;
+  state: string;
+  repoFullName: string;
+  userLogin: string;
+  labels: string[];
+  createdAt: string;
+  updatedAt: string;
+  commentsCount: number;
+}
+
+/** Normalized user search result from /search/users */
+export interface GitHubUserSearchItem {
+  login: string;
+  htmlUrl: string;
+  type: string;
+}
+
+/** Normalized commit search result from /search/commits */
+export interface GitHubCommitSearchItem {
+  sha: string;
+  message: string;
+  htmlUrl: string;
+  repoFullName: string;
+  authorName: string;
+  authorLogin: string | null;
+  authoredAt: string;
+}
+
+export type GitHubSearchItem =
+  | GitHubCodeResult
+  | GitHubRepoSearchItem
+  | GitHubIssueSearchItem
+  | GitHubUserSearchItem
+  | GitHubCommitSearchItem;
+
+export interface GitHubMultiSearchResult {
+  searchType: GitHubSearchType;
+  totalCount: number;
+  results: GitHubSearchItem[];
+}
+
+export interface GitHubCommitParent {
+  sha: string;
+  url: string;
+  htmlUrl: string;
+}
+
+export interface GitHubCommit {
+  sha: string;
+  message: string;
+  authorName: string | null;
+  authorEmail: string | null;
+  authoredAt: string | null;
+  committerName: string | null;
+  committerEmail: string | null;
+  committedAt: string | null;
+  authorLogin: string | null;
+  committerLogin: string | null;
+  htmlUrl: string;
+  apiUrl: string;
+  commentsUrl: string;
+  parents: GitHubCommitParent[];
+}
+
+export interface GitHubCommitHistoryResult {
+  repository: string;
+  ref: string | null;
+  path: string | null;
+  author: string | null;
+  since: string | null;
+  until: string | null;
+  page: number;
+  limit: number;
+  hasNextPage: boolean;
+  commits: GitHubCommit[];
+}
+
+export interface GitHubRefObject {
+  sha: string;
+  type: string;
+  url: string;
+}
+
+export interface GitHubRef {
+  ref: string;
+  name: string;
+  nodeId: string;
+  url: string;
+  htmlUrl: string;
+  object: GitHubRefObject;
+}
+
+export interface GitHubRefsResult {
+  repository: string;
+  type: 'branches' | 'tags' | 'all';
+  filter: string | null;
+  refs: GitHubRef[];
+  truncated: boolean;
+}
+
 // ── Crawl4AI ───────────────────────────────────────────────────────────────
 
 export interface CrawlPageResult extends StructuredContent {

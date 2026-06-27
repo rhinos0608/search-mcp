@@ -1,7 +1,7 @@
 import test, { afterEach, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { getGitHubRepoSearch } from '../src/tools/githubRepoSearch.js';
+import { getGitHubRepoSearch, getGitHubMultiSearch } from '../src/tools/githubRepoSearch.js';
 import { resetTrackers } from '../src/rateLimit.js';
 
 // ── Test isolation ─────────────────────────────────────────────────────────
@@ -19,7 +19,10 @@ afterEach(() => {
 /**
  * Build a mock Response-like object for fetch.
  */
-function buildMockResponse(body: unknown, init?: { status?: number; statusText?: string; headers?: Record<string, string> }): Response {
+function buildMockResponse(
+  body: unknown,
+  init?: { status?: number; statusText?: string; headers?: Record<string, string> },
+): Response {
   return new Response(JSON.stringify(body), {
     status: init?.status ?? 200,
     statusText: init?.statusText ?? 'OK',
@@ -49,9 +52,7 @@ test('getGitHubRepoSearch returns normalized results', async () => {
         text_matches: [
           {
             fragment: 'export function hello() {}',
-            matches: [
-              { text: 'hello', indices: [[7, 12]] },
-            ],
+            matches: [{ text: 'hello', indices: [[7, 12]] }],
           },
         ],
       },
@@ -92,8 +93,7 @@ test('getGitHubRepoSearch returns normalized results', async () => {
 });
 
 test('getGitHubRepoSearch returns empty results when none found', async () => {
-  globalThis.fetch = async () =>
-    buildMockResponse({ total_count: 0, items: [] });
+  globalThis.fetch = async () => buildMockResponse({ total_count: 0, items: [] });
 
   const result = await getGitHubRepoSearch('nothing', 'owner', 'repo');
 
@@ -121,10 +121,7 @@ test('getGitHubRepoSearch constructs query with owner and repo (repo: qualifier)
     queryPart.includes('repo%3Amyowner%2Fmyrepo') || queryPart.includes('repo:myowner/myrepo'),
     `Expected repo:myowner/myrepo in query, got: ${queryPart}`,
   );
-  assert.ok(
-    queryPart.includes('foo'),
-    `Expected base query "foo" in URL, got: ${queryPart}`,
-  );
+  assert.ok(queryPart.includes('foo'), `Expected base query "foo" in URL, got: ${queryPart}`);
 });
 
 test('getGitHubRepoSearch constructs query with owner only (user: qualifier)', async () => {
@@ -207,10 +204,7 @@ test('getGitHubRepoSearch constructs query with all qualifiers combined', async 
     queryPart.includes('path%3Alib') || queryPart.includes('path:lib'),
     `Expected path: qualifier, got: ${queryPart}`,
   );
-  assert.ok(
-    queryPart.includes('export'),
-    `Expected base query "export", got: ${queryPart}`,
-  );
+  assert.ok(queryPart.includes('export'), `Expected base query "export", got: ${queryPart}`);
 });
 
 // ── Pagination ───────────────────────────────────────────────────────────────
@@ -365,7 +359,10 @@ test('getGitHubRepoSearch throws notFoundError on 404', async () => {
 
 test('getGitHubRepoSearch throws rateLimitError on 429', async () => {
   globalThis.fetch = async () =>
-    buildMockResponse({ message: 'Too Many Requests' }, { status: 429, statusText: 'Too Many Requests' });
+    buildMockResponse(
+      { message: 'Too Many Requests' },
+      { status: 429, statusText: 'Too Many Requests' },
+    );
 
   await assert.rejects(
     async () => getGitHubRepoSearch('query', 'owner', 'repo'),
@@ -467,8 +464,7 @@ test('getGitHubRepoSearch omits textMatches field when array is empty after filt
 // ── Missing optional parameters ──────────────────────────────────────────────
 
 test('getGitHubRepoSearch works with only the base query (no owner, no repo)', async () => {
-  globalThis.fetch = async () =>
-    buildMockResponse({ total_count: 0, items: [] });
+  globalThis.fetch = async () => buildMockResponse({ total_count: 0, items: [] });
 
   const result = await getGitHubRepoSearch('somekeyword');
 
@@ -497,4 +493,235 @@ test('getGitHubRepoSearch works with owner and language (no repo)', async () => 
     queryPart.includes('language%3Apython') || queryPart.includes('language:python'),
     `Expected language:python qualifier, got: ${queryPart}`,
   );
+});
+
+// ── Multi-type search tests ─────────────────────────────────────────────────
+
+/** Mock response for repositories search */
+const mockReposResponse = {
+  total_count: 2,
+  items: [
+    {
+      full_name: 'someuser/repo-a',
+      html_url: 'https://github.com/someuser/repo-a',
+      description: 'A test repo',
+      stargazers_count: 42,
+      forks_count: 5,
+      language: 'TypeScript',
+      topics: ['testing', 'mcp'],
+      updated_at: '2024-01-15T00:00:00Z',
+    },
+    {
+      full_name: 'someuser/repo-b',
+      html_url: 'https://github.com/someuser/repo-b',
+      description: '',
+      stargazers_count: 0,
+      forks_count: 0,
+      language: null,
+      topics: [],
+      updated_at: '2024-02-20T00:00:00Z',
+    },
+  ],
+};
+
+/** Mock response for issues search */
+const mockIssuesResponse = {
+  total_count: 1,
+  items: [
+    {
+      number: 99,
+      title: 'Fix memory leak',
+      html_url: 'https://github.com/someuser/repo-a/issues/99',
+      state: 'open',
+      repository_url: 'https://api.github.com/repos/someuser/repo-a',
+      user: { login: 'dev1' },
+      labels: [{ name: 'bug' }, { name: 'high-priority' }],
+      created_at: '2024-03-01T00:00:00Z',
+      updated_at: '2024-03-10T00:00:00Z',
+      comments: 3,
+    },
+  ],
+};
+
+/** Mock response for users search */
+const mockUsersResponse = {
+  total_count: 1,
+  items: [
+    {
+      login: 'someuser',
+      html_url: 'https://github.com/someuser',
+      type: 'User',
+    },
+  ],
+};
+
+/** Mock response for commits search */
+const mockCommitsResponse = {
+  total_count: 1,
+  items: [
+    {
+      sha: 'abc123def456',
+      html_url: 'https://github.com/someuser/repo-a/commit/abc123def456',
+      repository: { full_name: 'someuser/repo-a' },
+      commit: {
+        message: 'Fix memory leak',
+        author: { name: 'Dev One', login: 'dev1', date: '2024-03-05T00:00:00Z' },
+      },
+    },
+  ],
+};
+
+test('getGitHubMultiSearch type=repositories uses /search/repositories', async () => {
+  let capturedUrl = '';
+  globalThis.fetch = async (url: string | URL | Request) => {
+    capturedUrl = url.toString();
+    return buildMockResponse(mockReposResponse);
+  };
+
+  const result = await getGitHubMultiSearch({ query: 'testing', type: 'repositories' });
+
+  assert.equal(result.searchType, 'repositories');
+  assert.equal(result.totalCount, 2);
+  assert.equal(result.results.length, 2);
+  assert.ok(capturedUrl.includes('/search/repositories'));
+
+  const repoResult = result.results[0] as import('../src/types.js').GitHubRepoSearchItem;
+  assert.equal(repoResult.fullName, 'someuser/repo-a');
+  assert.equal(repoResult.stars, 42);
+  assert.equal(repoResult.language, 'TypeScript');
+  assert.deepEqual(repoResult.topics, ['testing', 'mcp']);
+});
+
+test('getGitHubMultiSearch type=issues appends is:issue qualifier', async () => {
+  let capturedUrl = '';
+  globalThis.fetch = async (url: string | URL | Request) => {
+    capturedUrl = url.toString();
+    return buildMockResponse(mockIssuesResponse);
+  };
+
+  const result = await getGitHubMultiSearch({ query: 'memory leak', type: 'issues' });
+
+  assert.equal(result.searchType, 'issues');
+  assert.equal(result.totalCount, 1);
+  assert.ok(capturedUrl.includes('/search/issues'));
+  assert.ok(
+    capturedUrl.includes('is%3Aissue') || capturedUrl.includes('is%3Aissue'),
+    'should add is:issue qualifier',
+  );
+
+  const issueResult = result.results[0] as import('../src/types.js').GitHubIssueSearchItem;
+  assert.equal(issueResult.number, 99);
+  assert.equal(issueResult.title, 'Fix memory leak');
+  assert.equal(issueResult.repoFullName, 'someuser/repo-a');
+  assert.deepEqual(issueResult.labels, ['bug', 'high-priority']);
+});
+
+test('getGitHubMultiSearch type=issues with type:pr in query skips is:issue', async () => {
+  let capturedUrl = '';
+  globalThis.fetch = async (url: string | URL | Request) => {
+    capturedUrl = url.toString();
+    return buildMockResponse(mockIssuesResponse);
+  };
+
+  await getGitHubMultiSearch({ query: 'fix type:pr', type: 'issues' });
+
+  assert.ok(!capturedUrl.includes('is%3Aissue'), 'should not add is:issue when type:pr in query');
+});
+
+test('getGitHubMultiSearch type=users routes to /search/users', async () => {
+  let capturedUrl = '';
+  globalThis.fetch = async (url: string | URL | Request) => {
+    capturedUrl = url.toString();
+    return buildMockResponse(mockUsersResponse);
+  };
+
+  const result = await getGitHubMultiSearch({ query: 'someuser', type: 'users' });
+
+  assert.equal(result.searchType, 'users');
+  assert.ok(capturedUrl.includes('/search/users'));
+
+  const userResult = result.results[0] as import('../src/types.js').GitHubUserSearchItem;
+  assert.equal(userResult.login, 'someuser');
+  assert.equal(userResult.type, 'User');
+});
+
+test('getGitHubMultiSearch type=commits routes to /search/commits', async () => {
+  let capturedUrl = '';
+  globalThis.fetch = async (url: string | URL | Request) => {
+    capturedUrl = url.toString();
+    return buildMockResponse(mockCommitsResponse);
+  };
+
+  const result = await getGitHubMultiSearch({ query: 'memory leak', type: 'commits' });
+
+  assert.equal(result.searchType, 'commits');
+  assert.ok(capturedUrl.includes('/search/commits'));
+
+  const commitResult = result.results[0] as import('../src/types.js').GitHubCommitSearchItem;
+  assert.equal(commitResult.sha, 'abc123def456');
+  assert.equal(commitResult.authorName, 'Dev One');
+  assert.equal(commitResult.repoFullName, 'someuser/repo-a');
+});
+
+test('getGitHubMultiSearch with owner+repo builds repo: qualifier', async () => {
+  let capturedUrl = '';
+  globalThis.fetch = async (url: string | URL | Request) => {
+    capturedUrl = url.toString();
+    return buildMockResponse(mockReposResponse);
+  };
+
+  await getGitHubMultiSearch({
+    query: 'testing',
+    type: 'repositories',
+    owner: 'someuser',
+    repo: 'repo-a',
+  });
+
+  assert.ok(
+    capturedUrl.includes('repo%3Asomeuser%2Frepo-a') ||
+      capturedUrl.includes('repo:someuser%2Frepo-a'),
+    'should include repo: qualifier',
+  );
+});
+
+test('getGitHubMultiSearch returns empty results for empty API response', async () => {
+  globalThis.fetch = async () => buildMockResponse({ total_count: 0, items: [] });
+
+  for (const type of ['repositories', 'issues', 'users', 'commits'] as const) {
+    const result = await getGitHubMultiSearch({ query: 'nonexistent', type });
+    assert.equal(result.searchType, type);
+    assert.equal(result.totalCount, 0);
+    assert.equal(result.results.length, 0);
+  }
+});
+
+test('getGitHubMultiSearch passes sort and order to URL', async () => {
+  let capturedUrl = '';
+  globalThis.fetch = async (url: string | URL | Request) => {
+    capturedUrl = url.toString();
+    return buildMockResponse(mockReposResponse);
+  };
+
+  await getGitHubMultiSearch({
+    query: 'testing',
+    type: 'repositories',
+    sort: 'stars',
+    order: 'desc',
+  });
+
+  assert.ok(capturedUrl.includes('sort=stars'));
+  assert.ok(capturedUrl.includes('order=desc'));
+});
+
+test('getGitHubMultiSearch does not add sort/order when omitted', async () => {
+  let capturedUrl = '';
+  globalThis.fetch = async (url: string | URL | Request) => {
+    capturedUrl = url.toString();
+    return buildMockResponse(mockReposResponse);
+  };
+
+  await getGitHubMultiSearch({ query: 'testing', type: 'repositories' });
+
+  assert.ok(!capturedUrl.includes('sort='));
+  assert.ok(!capturedUrl.includes('order='));
 });
