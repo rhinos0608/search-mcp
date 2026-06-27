@@ -1,5 +1,6 @@
 import { safeResponseJson } from '../httpGuards.js';
 import { logger } from '../logger.js';
+import { extractKeywords } from './redditQueryUtils.js';
 
 const ARCTIC_SHIFT_BASE_URL = 'https://arctic-shift.photon-reddit.com/api';
 const ARCTIC_SHIFT_TIMEOUT_MS = 15_000;
@@ -170,6 +171,7 @@ export async function arcticShiftSearch(
   if (arcticSort) params.set('sort', arcticSort);
 
   let posts: unknown[] = [];
+  let anyOk = false;
 
   for (const attempt of attempts) {
     if (attempt.query !== undefined) {
@@ -198,14 +200,26 @@ export async function arcticShiftSearch(
 
     const response = await fetchWithTimeout(url);
     if (!response.ok) {
-      throw new Error(`Arctic Shift API returned ${String(response.status)} for search`);
+      logger.warn(
+        { status: response.status, attempt: attempt.label },
+        'Arctic Shift search attempt failed, trying next cascade step',
+      );
+      continue;
     }
 
     const json: unknown = await safeResponseJson(response, url);
     const data = (json as Record<string, unknown>).data;
     posts = Array.isArray(data) ? data : [];
 
-    if (posts.length > 0) break;
+    if (posts.length > 0) {
+      anyOk = true;
+      break;
+    }
+  }
+
+  // If no cascade attempt returned a 2xx, throw so outer fallback can proceed
+  if (!anyOk && posts.length === 0) {
+    throw new Error('Arctic Shift API unavailable — all cascade attempts returned non-2xx');
   }
 
   // Wrap in Reddit-native Listing format
@@ -215,99 +229,6 @@ export async function arcticShiftSearch(
       children: posts.map((p: unknown) => ({ kind: 't3', data: p })),
     },
   };
-}
-
-const QUERY_STOP_WORDS = new Set([
-  'the',
-  'and',
-  'for',
-  'are',
-  'but',
-  'not',
-  'you',
-  'all',
-  'can',
-  'had',
-  'her',
-  'was',
-  'one',
-  'our',
-  'out',
-  'has',
-  'have',
-  'from',
-  'they',
-  'that',
-  'with',
-  'this',
-  'what',
-  'when',
-  'your',
-  'which',
-  'their',
-  'them',
-  'about',
-  'into',
-  'than',
-  'then',
-  'also',
-  'after',
-  'over',
-  'very',
-  'just',
-  'does',
-  'did',
-  'most',
-  'much',
-  'some',
-  'such',
-  'only',
-  'other',
-  'more',
-  'been',
-  'being',
-  'will',
-  'would',
-  'could',
-  'should',
-  'best',
-  'good',
-  'like',
-  'make',
-  'need',
-  'want',
-  'looking',
-  'help',
-  'know',
-  'find',
-  'alternative',
-  'alternatives',
-  'compare',
-  'comparison',
-  'versus',
-  'better',
-  'lighter',
-  'heavier',
-  'faster',
-  'slower',
-  'lightweight',
-  'heavyweight',
-  'recommend',
-  'recommendation',
-  'anyone',
-  'anybody',
-  'someone',
-  'something',
-  'everyone',
-  'everything',
-]);
-
-/** Extract significant keywords from a query, in original order. */
-function extractKeywords(query: string): string[] {
-  return query
-    .toLowerCase()
-    .split(/\s+/)
-    .filter((w) => w.length > 2 && !/^\d+$/.test(w) && !QUERY_STOP_WORDS.has(w));
 }
 
 async function fetchWithTimeout(url: string, options: RequestInit = {}): Promise<Response> {

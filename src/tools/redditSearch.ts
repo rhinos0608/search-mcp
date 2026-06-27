@@ -11,6 +11,8 @@ import {
   type RedditClientOptions,
 } from './redditClient.js';
 import { arcticShiftSearch } from './arcticShiftClient.js';
+import { pullpushSearch } from './pullpushClient.js';
+import { searxngRedditSearch } from './searxngRedditSearch.js';
 import { parseRedditSearchListing } from './redditSearchParser.js';
 import { rrfMerge } from '../utils/fusion.js';
 import { multiSignalRescore, extractRedditSignals } from '../utils/rescore.js';
@@ -31,9 +33,9 @@ export async function redditSearch(
   limit = 25,
   clientOptions: RedditClientOptions = {},
 ): Promise<RedditPost[]> {
-  if (!/^[A-Za-z0-9_]{1,21}$/.test(subreddit)) {
+  if (!/^[A-Za-z0-9_]{1,21}(?:\+[A-Za-z0-9_]{1,21})*$/.test(subreddit)) {
     throw new Error(
-      `Invalid subreddit name: "${subreddit}". Must be 1–21 alphanumeric/underscore characters.`,
+      `Invalid subreddit name: "${subreddit}". Must be 1–21 alphanumeric/underscore characters per subreddit. Use + to search multiple (e.g. "webdev+learnprogramming").`,
     );
   }
 
@@ -45,7 +47,10 @@ export async function redditSearch(
   }
 
   const client = createRedditClient(mergeRedditClientOptions(clientOptions));
-  const path = `/r/${encodeURIComponent(subreddit)}/search`;
+  const path = `/r/${subreddit
+    .split('+')
+    .map((s) => encodeURIComponent(s))
+    .join('+')}/search`;
   const queryParams = {
     q: query,
     restrict_sr: 1,
@@ -111,12 +116,50 @@ export async function redditSearch(
               );
               return { __fallback: true as const, json: fallbackJson };
             } catch (fallbackErr) {
-              logger.error({ err: fallbackErr }, 'Arctic Shift fallback also failed');
-              throw new ToolError('Both Reddit API and Arctic Shift fallback are unavailable', {
-                code: 'UNAVAILABLE',
-                retryable: false as const,
-                backend: 'reddit',
-              });
+              logger.warn({ err: fallbackErr }, 'Arctic Shift fallback failed, trying PullPush');
+              try {
+                const pullpushJson = await pullpushSearch(query, subreddit, sort, limit, timeframe);
+                return { __fallback: true as const, json: pullpushJson };
+              } catch (pullpushErr) {
+                logger.error({ err: pullpushErr }, 'PullPush fallback also failed');
+                const fallbackCfg = loadConfig();
+                if (
+                  fallbackCfg.searxng.baseUrl.length > 0 &&
+                  fallbackCfg.crawl4ai.baseUrl.length > 0
+                ) {
+                  try {
+                    const searxngJson = await searxngRedditSearch(
+                      query,
+                      subreddit,
+                      sort,
+                      limit,
+                      timeframe,
+                      fallbackCfg.searxng.baseUrl,
+                      fallbackCfg.crawl4ai.baseUrl,
+                      fallbackCfg.crawl4ai.apiToken,
+                    );
+                    return { __fallback: true as const, json: searxngJson };
+                  } catch (searxngErr) {
+                    logger.error({ err: searxngErr }, 'SearXNG fallback also failed');
+                    throw new ToolError(
+                      'Reddit API, Arctic Shift, PullPush, and SearXNG fallbacks are all unavailable',
+                      {
+                        code: 'UNAVAILABLE',
+                        retryable: false as const,
+                        backend: 'reddit',
+                      },
+                    );
+                  }
+                }
+                throw new ToolError(
+                  'Reddit API, Arctic Shift, and PullPush fallbacks are all unavailable',
+                  {
+                    code: 'UNAVAILABLE',
+                    retryable: false as const,
+                    backend: 'reddit',
+                  },
+                );
+              }
             }
           }
           throw new ToolError(

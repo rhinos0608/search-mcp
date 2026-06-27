@@ -135,8 +135,9 @@ const searchSchema = z.object({
   query: z.string().describe('The search query string'),
   subreddit: z
     .string()
+    .regex(/^[A-Za-z0-9_]{1,21}(?:\+[A-Za-z0-9_]{1,21})*$/)
     .describe(
-      'Subreddit to search (without r/ prefix). Required — Reddit search is always subreddit-scoped.',
+      'Subreddit to search (without r/ prefix). Use + to search multiple (e.g. "webdev+learnprogramming"). Required — Reddit search is always subreddit-scoped.',
     ),
   sort: SORT_SEARCH.optional().default('relevance').describe('Sort order'),
   timeframe: TIMEFRAME.optional().default('year').describe('Time window'),
@@ -198,8 +199,9 @@ const semanticSchema = z.object({
   query: z.string().describe('The semantic search query — what are you looking for in comments?'),
   subreddit: z
     .string()
+    .regex(/^[A-Za-z0-9_]{1,21}(?:\+[A-Za-z0-9_]{1,21})*$/)
     .describe(
-      'Subreddit to search (without r/ prefix). Required — Reddit search is always subreddit-scoped.',
+      'Subreddit to search (without r/ prefix). Use + to search multiple (e.g. "webdev+learnprogramming"). Required — Reddit search is always subreddit-scoped.',
     ),
   sort: SORT_SEMANTIC.optional().default('relevance').describe('Sort order for post search'),
   timeframe: TIMEFRAME.optional().default('year').describe('Time window for post search'),
