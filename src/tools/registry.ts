@@ -128,6 +128,8 @@ export interface FamilyDefinition {
   name: string;
   /** Top-level tool description. */
   description: string;
+  /** Action used when clients omit `action`. */
+  defaultAction?: string;
   /** All actions in this family. */
   actions: FamilyAction<z.ZodType>[];
   /** Top-level MCP tool annotations — applied to the family-level tool registration. */
@@ -142,6 +144,35 @@ export interface FamilyDefinition {
  * a z.enum(); other fields made optional. Passes the SDK's
  * normalizeObjectSchema check (which rejects non-object schemas).
  */
+function applyDefaultAction(
+  family: FamilyDefinition,
+  value: Record<string, unknown>,
+): Record<string, unknown> {
+  if (
+    !family.defaultAction ||
+    (value.action !== undefined && value.action !== null && value.action !== '')
+  ) {
+    return value;
+  }
+
+  return { ...value, action: family.defaultAction };
+}
+
+function buildActionSchema(family: FamilyDefinition, names: [string, ...string[]]): z.ZodType {
+  const actionSchema = z.enum(names).describe(family.name + ' action: ' + names.join(', '));
+  if (!family.defaultAction) return actionSchema;
+  if (!names.includes(family.defaultAction)) {
+    throw new Error(
+      `${family.name}: defaultAction "${family.defaultAction}" is not a registered action`,
+    );
+  }
+
+  return z.preprocess(
+    (value) => (value === null || value === '' ? undefined : value),
+    actionSchema.optional().default(family.defaultAction),
+  );
+}
+
 function buildMergedSchema(family: FamilyDefinition): z.ZodObject<z.ZodRawShape> {
   const allFields = new Map<string, unknown>();
   for (const action of family.actions) {
@@ -164,19 +195,20 @@ function buildMergedSchema(family: FamilyDefinition): z.ZodObject<z.ZodRawShape>
   }
   const names = family.actions.map((a) => a.name) as [string, ...string[]];
   const merged: Record<string, unknown> = {
-    action: z.enum(names).describe(family.name + ' action: ' + names.join(', ')),
+    action: buildActionSchema(family, names),
   };
   for (const [key, fieldType] of allFields) {
     if (key === 'action') continue;
     merged[key] = nullTolerantMergedField(fieldType as z.ZodType);
   }
   return z.object(merged).superRefine((value, ctx) => {
-    const actionName = typeof value.action === 'string' ? value.action : '';
+    const valueWithDefault = applyDefaultAction(family, value);
+    const actionName = typeof valueWithDefault.action === 'string' ? valueWithDefault.action : '';
     const action = family.actions.find((a) => a.name === actionName);
     if (!action) return;
 
     const parsed = (action.schema as z.ZodObject<z.ZodRawShape>).safeParse(
-      omitTopLevelNullish(value),
+      omitTopLevelNullish(valueWithDefault),
     );
     if (parsed.success) return;
 
@@ -215,7 +247,11 @@ export function registerFamily(
       ...(family.annotations ? { annotations: family.annotations } : {}),
     },
     async (rawArgs: unknown, extra: unknown) => {
-      const args = rawArgs as Record<string, string>;
+      const normalizedRawArgs = applyDefaultAction(
+        family,
+        coerceArgs(rawArgs as Record<string, unknown>),
+      );
+      const args = normalizedRawArgs as Record<string, string>;
       const actionName: string = args.action ?? '';
 
       // Find the matching action
@@ -237,7 +273,7 @@ export function registerFamily(
       // Also coerce numeric strings to numbers in case the client
       // sends them as strings.
       const parsed = (action.schema as z.ZodObject<z.ZodRawShape>).safeParse(
-        omitTopLevelNullish(coerceArgs(rawArgs as Record<string, unknown>)),
+        omitTopLevelNullish(normalizedRawArgs),
       );
       if (!parsed.success) {
         const issues = parsed.error.issues.map(

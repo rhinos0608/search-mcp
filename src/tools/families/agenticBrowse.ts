@@ -153,6 +153,7 @@ const focusSchema = z.object({
 
 const agenticBrowseFamily: FamilyDefinition = {
   name: 'agentic_browse',
+  defaultAction: 'browse',
   description:
     'Browse web pages and extract their readable content. ' +
     'Use `browse` to fetch and store a page, `present` to retrieve readable content from a stored document, ' +
