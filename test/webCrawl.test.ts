@@ -266,6 +266,8 @@ test('webCrawl sends deep_crawl_strategy in request body', async () => {
 
 test('webCrawl passes waitFor, delayBeforeReturnHtml, pageTimeout, and jsCode to crawl4ai', async () => {
   let capturedBody: unknown = null;
+  let capturedTimeoutMs: number | undefined;
+  const originalTimeout = AbortSignal.timeout;
 
   globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
     const req = new Request(input, init);
@@ -275,15 +277,31 @@ test('webCrawl passes waitFor, delayBeforeReturnHtml, pageTimeout, and jsCode to
     });
   };
 
-  await webCrawl('https://example.com', 'https://crawl4ai.example.com', '', {
-    ...defaultOpts,
-    waitFor: 'css:.dynamic-content',
-    delayBeforeReturnHtml: 2.5,
-    pageTimeout: 120000,
-    jsCode: 'window.scrollTo(0, document.body.scrollHeight);',
+  Object.defineProperty(AbortSignal, 'timeout', {
+    configurable: true,
+    value: (ms: number) => {
+      capturedTimeoutMs = ms;
+      return originalTimeout(ms);
+    },
   });
 
+  try {
+    await webCrawl('https://example.com', 'https://crawl4ai.example.com', '', {
+      ...defaultOpts,
+      waitFor: 'css:.dynamic-content',
+      delayBeforeReturnHtml: 2.5,
+      pageTimeout: 240000,
+      jsCode: 'window.scrollTo(0, document.body.scrollHeight);',
+    });
+  } finally {
+    Object.defineProperty(AbortSignal, 'timeout', {
+      configurable: true,
+      value: originalTimeout,
+    });
+  }
+
   assert.ok(capturedBody);
+  assert.equal(capturedTimeoutMs, 255_000);
   const body = capturedBody as {
     crawler_config: {
       type: string;
@@ -298,8 +316,11 @@ test('webCrawl passes waitFor, delayBeforeReturnHtml, pageTimeout, and jsCode to
   assert.equal(body.crawler_config.type, 'CrawlerRunConfig');
   assert.equal(body.crawler_config.params.wait_for, 'css:.dynamic-content');
   assert.equal(body.crawler_config.params.delay_before_return_html, 2.5);
-  assert.equal(body.crawler_config.params.page_timeout, 120000);
-  assert.equal(body.crawler_config.params.js_code, 'window.scrollTo(0, document.body.scrollHeight);');
+  assert.equal(body.crawler_config.params.page_timeout, 240000);
+  assert.equal(
+    body.crawler_config.params.js_code,
+    'window.scrollTo(0, document.body.scrollHeight);',
+  );
 });
 
 // ── HTML field threading ──────────────────────────────────────────────────────
@@ -317,7 +338,12 @@ test('webCrawl sets html from fit_html when all three HTML fields present', asyn
       },
     });
 
-  const result = await webCrawl('https://example.com', 'https://crawl4ai.example.com', '', defaultOpts);
+  const result = await webCrawl(
+    'https://example.com',
+    'https://crawl4ai.example.com',
+    '',
+    defaultOpts,
+  );
   assert.ok(result.pages[0]);
   assert.equal(result.pages[0].html, '<html><body><h1>Fit</h1></body></html>');
 });
@@ -334,7 +360,12 @@ test('webCrawl falls back to cleaned_html when fit_html absent', async () => {
       },
     });
 
-  const result = await webCrawl('https://example.com', 'https://crawl4ai.example.com', '', defaultOpts);
+  const result = await webCrawl(
+    'https://example.com',
+    'https://crawl4ai.example.com',
+    '',
+    defaultOpts,
+  );
   assert.ok(result.pages[0]);
   assert.equal(result.pages[0].html, '<html><body><h1>Cleaned</h1></body></html>');
 });
@@ -350,7 +381,12 @@ test('webCrawl falls back to html when cleaned_html absent', async () => {
       },
     });
 
-  const result = await webCrawl('https://example.com', 'https://crawl4ai.example.com', '', defaultOpts);
+  const result = await webCrawl(
+    'https://example.com',
+    'https://crawl4ai.example.com',
+    '',
+    defaultOpts,
+  );
   assert.ok(result.pages[0]);
   assert.equal(result.pages[0].html, '<html><body><h1>Raw</h1></body></html>');
 });
@@ -365,7 +401,12 @@ test('webCrawl sets html to undefined when no HTML fields present', async () => 
       },
     });
 
-  const result = await webCrawl('https://example.com', 'https://crawl4ai.example.com', '', defaultOpts);
+  const result = await webCrawl(
+    'https://example.com',
+    'https://crawl4ai.example.com',
+    '',
+    defaultOpts,
+  );
   assert.ok(result.pages[0]);
   assert.equal(result.pages[0].html, undefined);
 });
@@ -439,7 +480,12 @@ test('webCrawl filters multiple challenge pages in a single crawl', async () => 
     buildMockResponse({
       results: [
         { url: 'https://a.com', success: true, markdown: '# Real page' },
-        { url: 'https://cf.com', success: true, title: 'Attention Required', markdown: 'Cloudflare' },
+        {
+          url: 'https://cf.com',
+          success: true,
+          title: 'Attention Required',
+          markdown: 'Cloudflare',
+        },
         { url: 'https://b.com', success: true, markdown: '# Real page 2' },
         { url: 'https://captcha.com', success: true, markdown: 'CAPTCHA verify you are human' },
       ],
@@ -467,7 +513,12 @@ test('webCrawl handles pages with null title in challenge detection', async () =
       ],
     });
 
-  const result = await webCrawl('https://real.com', 'https://crawl4ai.example.com', '', defaultOpts);
+  const result = await webCrawl(
+    'https://real.com',
+    'https://crawl4ai.example.com',
+    '',
+    defaultOpts,
+  );
 
   assert.equal(result.pages.length, 1);
   assert.ok(result.pages[0]);

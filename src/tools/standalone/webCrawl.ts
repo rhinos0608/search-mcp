@@ -167,6 +167,20 @@ export function registerWebCrawl(
           ...(llmFallback ? { llmFallback } : {}),
         });
         warnings.push(...extractionWarnings(data), ...(data.warnings ?? []));
+
+        // Strip html and structured elements from MCP response — both are
+        // derived from markdown and double/triple payload size with zero
+        // information gain for LLM consumers. Internal callers (semanticCrawl,
+        // jobPipeline, extraction) call webCrawl() directly and retain them.
+        for (const page of data.pages) {
+          const p = page as unknown as Record<string, unknown>;
+          delete p.html;
+          delete p.elements;
+          delete p.truncatedElements;
+          delete p.originalElementCount;
+          delete p.omittedElementCount;
+        }
+
         const result = makeResult('web_crawl', data, Date.now() - start, {
           warnings,
         });

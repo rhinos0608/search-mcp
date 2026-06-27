@@ -28,3 +28,13 @@ test('computeCrawlTimeout: zero pages', () => {
   const result = computeCrawlTimeout(0);
   assert.equal(result, 30_000);
 });
+
+test('computeCrawlTimeout: honors configured page timeout', () => {
+  const result = computeCrawlTimeout(1, { pageTimeoutMs: 60_000 });
+  assert.equal(result, 75_000);
+});
+
+test('computeCrawlTimeout: ignores invalid configured page timeout', () => {
+  const result = computeCrawlTimeout(1, { pageTimeoutMs: Number.NaN });
+  assert.equal(result, 45_000);
+});

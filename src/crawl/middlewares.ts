@@ -300,7 +300,9 @@ export class Crawl4aiClientMiddleware implements CrawlMiddleware {
           method: 'POST',
           headers,
           body: JSON.stringify(this.buildRequestBody(req)),
-          signal: AbortSignal.timeout(computeCrawlTimeout(req.opts.maxPages)),
+          signal: AbortSignal.timeout(
+            computeCrawlTimeout(req.opts.maxPages, { pageTimeoutMs: req.opts.pageTimeout }),
+          ),
         });
 
         if (!response.ok) {
