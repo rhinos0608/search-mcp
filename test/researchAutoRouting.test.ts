@@ -14,11 +14,30 @@ import type { z } from 'zod/v4';
 async function getModule() {
   return import('../src/tools/families/research.js') as Promise<{
     autoAction: z.ZodObject<z.ZodRawShape>;
-    autoRouteQuery: (query: string, limit: number) => {
-      selected: { actionName: string; hint: string; invoke: (q: string, l: number) => Promise<unknown> };
-      candidates: { actionName: string; hint: string; invoke: (q: string, l: number) => Promise<unknown> }[];
+    autoRouteQuery: (
+      query: string,
+      limit: number,
+    ) => {
+      selected: {
+        actionName: string;
+        hint: string;
+        invoke: (q: string, l: number) => Promise<unknown>;
+      };
+      candidates: {
+        actionName: string;
+        hint: string;
+        invoke: (q: string, l: number) => Promise<unknown>;
+      }[];
     };
-    researchFamily: { name: string; actions: { name: string; description: string; handler: (...args: unknown[]) => unknown; schema: z.ZodType }[] };
+    researchFamily: {
+      name: string;
+      actions: {
+        name: string;
+        description: string;
+        handler: (...args: unknown[]) => unknown;
+        schema: z.ZodType;
+      }[];
+    };
   }>;
 }
 
@@ -242,9 +261,7 @@ void test('DOI takes priority over other hints', async () => {
 void test('auto action is registered in the research family actions list', async () => {
   const { researchFamily } = await getModule();
 
-  const autoActionEntry = researchFamily.actions.find(
-    (a) => a.name === 'auto'
-  );
+  const autoActionEntry = researchFamily.actions.find((a) => a.name === 'auto');
   assert.ok(autoActionEntry, 'auto action must be registered');
   assert.equal(autoActionEntry.name, 'auto');
   assert.equal(typeof autoActionEntry.handler, 'function');
@@ -255,9 +272,7 @@ void test('auto action is registered in the research family actions list', async
 void test('auto action description mentions routing', async () => {
   const { researchFamily } = await getModule();
 
-  const autoActionEntry = researchFamily.actions.find(
-    (a) => a.name === 'auto'
-  );
+  const autoActionEntry = researchFamily.actions.find((a) => a.name === 'auto');
   assert.ok(autoActionEntry);
   const desc: string = autoActionEntry.description;
   assert.ok(desc.toLowerCase().includes('auto') || desc.includes('route'));
@@ -267,14 +282,23 @@ void test('all existing research actions remain unchanged', async () => {
   const { researchFamily } = await getModule();
 
   const expectedActions = [
-    'academic', 'arxiv', 'hackernews', 'stackoverflow',
-    'pubmed', 'wikipedia', 'openalex', 'crossref',
-    'datacite', 'ror', 'semantic_scholar', 'gdelt',
-    'wikidata', 'auto',
+    'academic',
+    'arxiv',
+    'hackernews',
+    'stackoverflow',
+    'pubmed',
+    'wikipedia',
+    'openalex',
+    'crossref',
+    'datacite',
+    'ror',
+    'semantic_scholar',
+    'gdelt',
+    'wikidata',
+    'v2ex',
+    'auto',
   ];
 
-  const registeredNames = researchFamily.actions.map(
-    (a) => a.name
-  );
+  const registeredNames = researchFamily.actions.map((a) => a.name);
   assert.deepEqual(registeredNames.sort(), expectedActions.sort());
 });

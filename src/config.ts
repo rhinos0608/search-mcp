@@ -274,6 +274,85 @@ export interface SearchConfig {
   knowledgeGraph: KnowledgeGraphConfig;
 }
 
+export interface FeatureRequirement {
+  required: string[];
+  isConfigured: (cfg: SearchConfig) => boolean;
+}
+
+export interface FeatureConfiguration {
+  configured: boolean;
+  required: string[];
+  missing: string[];
+}
+
+export const FEATURE_REQUIREMENTS: Record<string, FeatureRequirement> = {
+  web_search_keyed_backends: {
+    required: ['EXA_API_KEY or BRAVE_API_KEY or SEARXNG_BASE_URL or TAVILY_API_KEY'],
+    isConfigured: (cfg) =>
+      (cfg.exa.apiKey ?? '').length > 0 ||
+      (cfg.brave.apiKey ?? '').length > 0 ||
+      cfg.searxng.baseUrl.length > 0 ||
+      (cfg.tavily.apiKey ?? '').length > 0,
+  },
+  web_crawl: {
+    required: ['CRAWL4AI_BASE_URL'],
+    isConfigured: (cfg) => cfg.crawl4ai.baseUrl.length > 0,
+  },
+  semantic_crawl: {
+    required: ['CRAWL4AI_BASE_URL', 'EMBEDDING_SIDECAR_BASE_URL'],
+    isConfigured: (cfg) =>
+      cfg.crawl4ai.baseUrl.length > 0 && cfg.embeddingSidecar.baseUrl.length > 0,
+  },
+  semantic_jobs: {
+    required: ['EMBEDDING_SIDECAR_BASE_URL', 'EXA_API_KEY or BRAVE_API_KEY or SEARXNG_BASE_URL'],
+    isConfigured: (cfg) =>
+      cfg.embeddingSidecar.baseUrl.length > 0 &&
+      ((cfg.exa.apiKey ?? '').length > 0 ||
+        (cfg.brave.apiKey ?? '').length > 0 ||
+        cfg.searxng.baseUrl.length > 0),
+  },
+  deep_research: {
+    required: ['DEEP_RESEARCH_ENABLED=true'],
+    isConfigured: (cfg) => cfg.deepResearch.enabled,
+  },
+  browser: {
+    required: ['BROWSER_ENABLED=true'],
+    isConfigured: (cfg) => cfg.browser.enabled,
+  },
+  reddit_oauth: {
+    required: ['REDDIT_CLIENT_ID', 'REDDIT_CLIENT_SECRET'],
+    isConfigured: (cfg) => cfg.reddit.oauthConfigValid && cfg.reddit.oauthEnabled,
+  },
+  github_token: {
+    required: ['GITHUB_TOKEN'],
+    isConfigured: (cfg) => (cfg.github.token ?? '').length > 0,
+  },
+  youtube_api: {
+    required: ['YOUTUBE_API_KEY'],
+    isConfigured: (cfg) => (cfg.youtube.apiKey ?? '').length > 0,
+  },
+  stackexchange_api: {
+    required: ['STACKEXCHANGE_API_KEY'],
+    isConfigured: (cfg) => (cfg.stackexchange.apiKey ?? '').length > 0,
+  },
+};
+
+export function getFeatureConfiguration(
+  cfg: SearchConfig,
+  feature: keyof typeof FEATURE_REQUIREMENTS,
+): FeatureConfiguration {
+  const requirement = FEATURE_REQUIREMENTS[feature];
+  if (requirement === undefined) {
+    return { configured: false, required: [feature], missing: [feature] };
+  }
+  const configured = requirement.isConfigured(cfg);
+  return {
+    configured,
+    required: requirement.required,
+    missing: configured ? [] : requirement.required,
+  };
+}
+
 const DEFAULTS: Omit<SearchConfig, 'rescoreWeights'> = {
   searchBackend: 'searxng',
   brave: { apiKey: '' },

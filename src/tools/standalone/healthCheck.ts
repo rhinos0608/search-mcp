@@ -28,7 +28,20 @@ export function registerHealthCheck(server: McpServer, cfg: SearchConfig): void 
             message: z.string(),
             remediation: z.string().optional(),
             latencyMs: z.number().optional(),
+            tier: z.enum(['free', 'core', 'gated', 'optional', 'family']).optional(),
+            activeBackend: z.string().optional(),
+            configuration: z
+              .object({
+                configured: z.boolean(),
+                required: z.array(z.string()),
+                missing: z.array(z.string()),
+              })
+              .optional(),
           }),
+        ),
+        tiers: z.record(
+          z.enum(['free', 'core', 'gated', 'optional', 'family']),
+          z.array(z.string()),
         ),
         timestamp: z.string(),
         outputBudget: z

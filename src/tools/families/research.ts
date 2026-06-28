@@ -18,6 +18,7 @@
  *   semantic_scholar — Direct Semantic Scholar paper search (free, no key)
  *   gdelt          — Search GDELT global news/events (free, no key)
  *   wikidata       — Search Wikidata structured entities (free, no key)
+ *   v2ex           — Search V2EX tech community topics (free, no key)
  *
  * Most actions are free and work without API keys (Stack Overflow benefits
  * from STACKEXCHANGE_API_KEY for higher rate limits).
@@ -40,6 +41,7 @@ import { searchRor } from '../rorSearch.js';
 import { searchSemanticScholar } from '../semanticScholarSearch.js';
 import { searchGdelt } from '../gdeltSearch.js';
 import { searchWikidata } from '../wikidataSearch.js';
+import { v2exSearch } from '../v2exSearch.js';
 import { wrapResponse } from '../response.js';
 import { registerFamily, type FamilyDefinition } from '../registry.js';
 
@@ -293,6 +295,28 @@ const wikidataAction = z.object({
     .describe('Maximum results (1–50, default 20)'),
 });
 
+const v2exAction = z.object({
+  action: z.literal('v2ex').describe('Search V2EX community topics'),
+  query: z
+    .string()
+    .optional()
+    .describe('Keyword filter applied to title, content, node, and author'),
+  mode: z
+    .enum(['hot', 'latest', 'node'])
+    .optional()
+    .default('hot')
+    .describe('Topic feed to read: hot, latest, or node'),
+  node: z.string().optional().describe('V2EX node name, e.g. python, programming, ai'),
+  limit: z
+    .number()
+    .int()
+    .min(1)
+    .max(50)
+    .optional()
+    .default(20)
+    .describe('Maximum topics (1–50, default 20)'),
+});
+
 // ── Auto-action schema ────────────────────────────────────────────────────────
 
 const autoAction = z.object({
@@ -462,7 +486,7 @@ function autoRouteQuery(
 const researchFamily: FamilyDefinition = {
   name: 'research',
   description:
-    'Search academic, news, and public-data sources: ArXiv, Semantic Scholar, OpenAlex, Crossref, DataCite, ROR, GDELT, Wikidata, PubMed, Wikipedia, Hacker News, and Stack Overflow. ' +
+    'Search academic, news, community, and public-data sources: ArXiv, Semantic Scholar, OpenAlex, Crossref, DataCite, ROR, GDELT, Wikidata, V2EX, PubMed, Wikipedia, Hacker News, and Stack Overflow. ' +
     'Choose the `action` field to select the source.',
   actions: [
     {
@@ -667,6 +691,21 @@ const researchFamily: FamilyDefinition = {
           limit: number;
         };
         return searchWikidata(query, language, limit);
+      },
+    },
+    {
+      name: 'v2ex',
+      description: 'Search V2EX tech community topics (hot, latest, or by node)',
+      schema: v2exAction,
+      handler: async (args, _cfg) => {
+        void _cfg;
+        const { query, mode, node, limit } = args as {
+          query?: string;
+          mode: 'hot' | 'latest' | 'node';
+          node?: string;
+          limit: number;
+        };
+        return v2exSearch(query, mode, node, limit);
       },
     },
     {

@@ -6,7 +6,12 @@
  *   runHealthProbes(cfg) — async, on demand: config + rate limits + selective network pings
  */
 
-import type { SearchConfig } from './config.js';
+import {
+  getFeatureConfiguration,
+  type SearchBackend,
+  type SearchConfig,
+  type FeatureConfiguration,
+} from './config.js';
 import { getTracker, type RateLimitedBackend } from './rateLimit.js';
 import { safeResponseText, safeResponseJson } from './httpGuards.js';
 import { logger } from './logger.js';
@@ -24,19 +29,32 @@ import { outputBudget } from './utils/outputBudget.js';
 import type { OutputBudgetStats } from './utils/outputBudget.js';
 import { toolStats } from './tools/stats.js';
 import type { ToolStatEntry } from './tools/stats.js';
+import { exaSearch } from './tools/exaSearch.js';
+import { braveSearch } from './tools/braveSearch.js';
+import { searxngSearch } from './tools/searxngSearch.js';
+import { tavilySearch } from './tools/tavilySearch.js';
+import { duckduckgoSearch } from './tools/duckduckgoSearch.js';
 
 // ── Types ────────────────────────────────────────────────────────────────────
+
+export type ToolTier = 'free' | 'core' | 'gated' | 'optional' | 'family';
 
 export interface ToolHealth {
   status: 'healthy' | 'degraded' | 'unconfigured' | 'rate_limited' | 'unreachable';
   message: string;
   remediation?: string | undefined;
   latencyMs?: number | undefined;
+  /** Tool tier: free (no config), core (always available), gated (needs config), optional (enhanced with config), family (per-action). */
+  tier?: ToolTier | undefined;
+  /** Active backend for multi-backend tools (e.g. 'exa', 'brave', 'searxng'). */
+  activeBackend?: string | undefined;
+  configuration?: FeatureConfiguration | undefined;
 }
 
 export interface HealthReport {
   overall: 'healthy' | 'degraded' | 'unhealthy';
   tools: Record<string, ToolHealth>;
+  tiers: Record<ToolTier, string[]>;
   timestamp: string;
   outputBudget?: OutputBudgetStats | undefined;
   toolStats?: ToolStatEntry[] | undefined;
@@ -95,9 +113,10 @@ const OPTIONAL_CONFIG: Record<string, OptionalRule> = {
       (cfg.brave.apiKey ?? '').length > 0 ||
       cfg.searxng.baseUrl.length > 0 ||
       (cfg.tavily.apiKey ?? '').length > 0,
-    degradedMessage: 'No search backend configured — web_search calls will fail.',
+    degradedMessage:
+      'No key-backed search backend configured; DuckDuckGo fallback remains available.',
     remediation:
-      'Set EXA_API_KEY, BRAVE_API_KEY, SEARXNG_BASE_URL, or TAVILY_API_KEY environment variable.',
+      'Set EXA_API_KEY, BRAVE_API_KEY, SEARXNG_BASE_URL, or TAVILY_API_KEY for higher-quality web search.',
   },
 };
 
@@ -107,7 +126,151 @@ const OPTIONAL_CONFIG: Record<string, OptionalRule> = {
 // These tools operate entirely locally (e.g. Readability extraction).
 // If a tool gains a new dependency (sidecar, API key), move it out of
 // FREE_TOOLS into GATED_TOOLS or OPTIONAL_CONFIG accordingly.
-export const FREE_TOOLS = [] as const;
+export const FREE_TOOLS = ['rss'] as const;
+
+function withTier(health: ToolHealth, tier: ToolTier): ToolHealth {
+  return { ...health, tier };
+}
+
+function withConfiguration(health: ToolHealth, configuration: FeatureConfiguration): ToolHealth {
+  return { ...health, configuration };
+}
+
+function buildTierIndex(tools: Record<string, ToolHealth>): Record<ToolTier, string[]> {
+  return {
+    free: Object.entries(tools)
+      .filter(([, health]) => health.tier === 'free')
+      .map(([name]) => name),
+    core: Object.entries(tools)
+      .filter(([, health]) => health.tier === 'core')
+      .map(([name]) => name),
+    gated: Object.entries(tools)
+      .filter(([, health]) => health.tier === 'gated')
+      .map(([name]) => name),
+    optional: Object.entries(tools)
+      .filter(([, health]) => health.tier === 'optional')
+      .map(([name]) => name),
+    family: Object.entries(tools)
+      .filter(([, health]) => health.tier === 'family')
+      .map(([name]) => name),
+  };
+}
+
+function searchBackendConfigured(cfg: SearchConfig, backend: SearchBackend): boolean {
+  switch (backend) {
+    case 'exa':
+      return (cfg.exa.apiKey ?? '').length > 0;
+    case 'brave':
+      return (cfg.brave.apiKey ?? '').length > 0;
+    case 'searxng':
+      return cfg.searxng.baseUrl.length > 0;
+    case 'tavily':
+      return (cfg.tavily.apiKey ?? '').length > 0;
+    case 'ollama-search':
+      return cfg.ollamaSearch.baseUrl.length > 0;
+    case 'duckduckgo':
+      return true;
+  }
+}
+
+function orderedSearchBackends(cfg: SearchConfig): SearchBackend[] {
+  const fallbackOrder: SearchBackend[] = ['exa', 'brave', 'searxng', 'tavily', 'duckduckgo'];
+  return [cfg.searchBackend, ...fallbackOrder.filter((backend) => backend !== cfg.searchBackend)];
+}
+
+async function probeSearchBackend(cfg: SearchConfig, backend: SearchBackend): Promise<ToolHealth> {
+  const start = Date.now();
+  if (!searchBackendConfigured(cfg, backend)) {
+    return {
+      status: 'unconfigured',
+      message: `${backend} backend is not configured.`,
+      remediation: webSearchBackendRemediation(backend),
+      tier: 'optional',
+    };
+  }
+
+  try {
+    switch (backend) {
+      case 'exa':
+        await exaSearch('health check', cfg.exa.apiKey ?? '', 1, 'moderate');
+        break;
+      case 'brave':
+        await braveSearch('health check', cfg.brave.apiKey ?? '', 1, 'moderate');
+        break;
+      case 'searxng':
+        await searxngSearch('health check', cfg.searxng.baseUrl, 1, 'moderate');
+        break;
+      case 'tavily':
+        await tavilySearch('health check', cfg.tavily.apiKey ?? '', 1, 'moderate');
+        break;
+      case 'duckduckgo':
+        await duckduckgoSearch('health check', 1, 'moderate', cfg.duckduckgo);
+        break;
+      case 'ollama-search':
+        return {
+          status: 'degraded',
+          message: 'ollama-search health probing is config-only for now.',
+          latencyMs: Date.now() - start,
+          tier: 'optional',
+        };
+    }
+    return {
+      status: 'healthy',
+      message: `${backend} backend returned search results successfully.`,
+      latencyMs: Date.now() - start,
+      tier: backend === 'duckduckgo' ? 'free' : 'optional',
+    };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    return {
+      status: 'unreachable',
+      message: `${backend} backend probe failed: ${message}`,
+      remediation: webSearchBackendRemediation(backend),
+      latencyMs: Date.now() - start,
+      tier: backend === 'duckduckgo' ? 'free' : 'optional',
+    };
+  }
+}
+
+function webSearchBackendRemediation(backend: SearchBackend): string {
+  switch (backend) {
+    case 'exa':
+      return 'Set EXA_API_KEY or select another SEARCH_BACKEND.';
+    case 'brave':
+      return 'Set BRAVE_API_KEY or select another SEARCH_BACKEND.';
+    case 'searxng':
+      return 'Set SEARXNG_BASE_URL to a reachable SearXNG instance or select another SEARCH_BACKEND.';
+    case 'tavily':
+      return 'Set TAVILY_API_KEY or select another SEARCH_BACKEND.';
+    case 'ollama-search':
+      return 'Set OLLAMA_SEARCH_BASE_URL to a reachable Ollama-compatible search service.';
+    case 'duckduckgo':
+      return 'Check outbound network access to DuckDuckGo Lite.';
+  }
+}
+
+const FEATURE_BY_TOOL: Record<string, keyof typeof import('./config.js').FEATURE_REQUIREMENTS> = {
+  web_crawl: 'web_crawl',
+  semantic_crawl: 'semantic_crawl',
+  semantic_jobs: 'semantic_jobs',
+  deep_research: 'deep_research',
+  browser: 'browser',
+  web_search: 'web_search_keyed_backends',
+  reddit_oauth: 'reddit_oauth',
+};
+
+function toolHealth(
+  cfg: SearchConfig,
+  name: string,
+  health: ToolHealth,
+  tier: ToolTier,
+): ToolHealth {
+  const tiered = withTier(health, tier);
+  const feature = FEATURE_BY_TOOL[name];
+  return feature === undefined
+    ? tiered
+    : withConfiguration(tiered, getFeatureConfiguration(cfg, feature));
+}
 
 // ── configHealth (sync, startup) ────────────────────────────────────────────
 
@@ -121,31 +284,46 @@ export function configHealth(cfg: SearchConfig): Record<string, ToolHealth> {
   // Gated tools: healthy or unconfigured
   for (const [tool, rule] of Object.entries(GATED_TOOLS)) {
     report[tool] = rule.check(cfg)
-      ? { status: 'healthy', message: 'Configured.' }
-      : {
-          status: 'unconfigured',
-          message: 'Missing required configuration.',
-          remediation: rule.remediation,
-        };
+      ? toolHealth(cfg, tool, { status: 'healthy', message: 'Configured.' }, 'gated')
+      : toolHealth(
+          cfg,
+          tool,
+          {
+            status: 'unconfigured',
+            message: 'Missing required configuration.',
+            remediation: rule.remediation,
+          },
+          'gated',
+        );
   }
 
   // Optional-config tools: healthy or degraded
   for (const [tool, rule] of Object.entries(OPTIONAL_CONFIG)) {
     report[tool] = rule.check(cfg)
-      ? { status: 'healthy', message: 'Configured.' }
-      : {
-          status: 'degraded',
-          message: rule.degradedMessage,
-          remediation: rule.remediation,
-        };
+      ? toolHealth(cfg, tool, { status: 'healthy', message: 'Configured.' }, 'optional')
+      : toolHealth(
+          cfg,
+          tool,
+          {
+            status: 'degraded',
+            message: rule.degradedMessage,
+            remediation: rule.remediation,
+          },
+          'optional',
+        );
   }
 
   // Free tools: always healthy at config level
   for (const tool of FREE_TOOLS) {
-    report[tool] = {
-      status: 'healthy',
-      message: 'Free API, no configuration required.',
-    };
+    report[tool] = toolHealth(
+      cfg,
+      tool,
+      {
+        status: 'healthy',
+        message: 'Free API, no configuration required.',
+      },
+      'free',
+    );
   }
 
   // Synthesized Reddit OAuth config-layer indicator.
@@ -240,7 +418,14 @@ export function configHealth(cfg: SearchConfig): Record<string, ToolHealth> {
   report.output_budget = {
     status: 'healthy' as const,
     message: 'Output budget tracking active.',
+    tier: 'core',
   };
+
+  for (const [name, health] of Object.entries(report)) {
+    if (health.tier === undefined) {
+      report[name] = { ...health, tier: name.includes('.') ? 'family' : 'core' };
+    }
+  }
 
   return report;
 }
@@ -612,6 +797,11 @@ export function getNetworkProbes(cfg: SearchConfig): NetworkProbe[] {
       url: 'https://www.wikidata.org/w/api.php?action=wbsearchentities&search=test&language=en&format=json',
       tools: ['research.wikidata'],
     },
+    {
+      label: 'v2ex',
+      url: 'https://www.v2ex.com/api/topics/hot.json',
+      tools: ['research.v2ex'],
+    },
   ];
 
   if (cfg.searxng.baseUrl.length > 0) {
@@ -659,6 +849,38 @@ export const RATE_LIMIT_TOOL_MAP: [string, RateLimitedBackend][] = [
 
 export async function runHealthProbes(cfg: SearchConfig): Promise<HealthReport> {
   const tools = configHealth(cfg);
+
+  const webBackendOrder = orderedSearchBackends(cfg);
+  const webBackendResults = await Promise.all(
+    webBackendOrder.map(async (backend) => ({
+      backend,
+      health: await probeSearchBackend(cfg, backend),
+    })),
+  );
+  for (const { backend, health } of webBackendResults) {
+    tools[`web_search.${backend}`] = health;
+  }
+  const activeWebBackend = webBackendResults.find(({ health }) => health.status === 'healthy');
+  const keyedConfig = getFeatureConfiguration(cfg, 'web_search_keyed_backends');
+  const existingWebSearch = tools.web_search;
+  if (existingWebSearch !== undefined && activeWebBackend !== undefined) {
+    tools.web_search = {
+      ...existingWebSearch,
+      status: 'healthy',
+      message: `Active backend: ${activeWebBackend.backend}. ${keyedConfig.configured ? 'Key-backed backend configured.' : 'DuckDuckGo fallback remains available without API keys.'}`,
+      activeBackend: activeWebBackend.backend,
+      latencyMs: activeWebBackend.health.latencyMs,
+      configuration: keyedConfig,
+    };
+  } else if (existingWebSearch !== undefined) {
+    tools.web_search = {
+      ...existingWebSearch,
+      status: 'unreachable',
+      message: 'No configured web search backend passed live probing.',
+      remediation: 'Check network connectivity and configured search backend credentials.',
+      configuration: keyedConfig,
+    };
+  }
 
   // Layer 2: rate limit tracker state (no network)
   for (const [tool, backend] of RATE_LIMIT_TOOL_MAP) {
@@ -765,6 +987,7 @@ export async function runHealthProbes(cfg: SearchConfig): Promise<HealthReport> 
   return {
     overall,
     tools,
+    tiers: buildTierIndex(tools),
     timestamp: new Date().toISOString(),
     outputBudget: outputBudget.getStats(),
     toolStats: toolStats.getAll(),

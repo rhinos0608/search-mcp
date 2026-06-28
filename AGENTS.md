@@ -2,7 +2,7 @@
 
 > **Max 300 lines.** Keep this file concise. Details belong in source or dedicated docs.
 
-MCP server over stdio/HTTP exposing 17 tools (73 actions): web search/crawl, semantic RAG, GitHub, YouTube, Reddit, academic research (14 backends), HN, Stack Overflow, npm, PyPI, jobs, browser automation, agentic browsing, knowledge graph, deep research.
+MCP server over stdio/HTTP exposing 18 tools (77 actions): web search/crawl, RSS/Atom, semantic RAG, GitHub, YouTube, Reddit, academic/community research (15 backends), HN, Stack Overflow, npm, PyPI, jobs, browser automation, agentic browsing, knowledge graph, deep research.
 
 ## Commands
 
@@ -42,7 +42,8 @@ Config-gated: `web_crawl` (Crawl4AI), `semantic_crawl*` (Crawl4AI + embedding), 
 
 | Tool                            | Description                                                                                                                                               |
 | ------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `web_search`                    | Exa/Brave/SearXNG fallback chain, query expansion, cross-backend merging                                                                                  |
+| `web_search`                    | Exa/Brave/SearXNG/DuckDuckGo/Tavily fallback chain, query expansion, cross-backend merging                                                                |
+| `rss`                           | RSS/Atom parse, search, and multi-feed monitor (free, no key)                                                                                             |
 | `web_crawl`                     | Crawl4AI multi-page crawl (timeout 30s+15s×maxPages, cap 5min). Wayback/Google Cache recovery                                                             |
 | `semantic_crawl`                | RAG pipeline over crawled corpus. Sources: url, sitemap, search, github, cached                                                                           |
 | `semantic_crawl_list_corpora`   | List cached corpora                                                                                                                                       |
@@ -59,7 +60,7 @@ Config-gated: `web_crawl` (Crawl4AI), `semantic_crawl*` (Crawl4AI + embedding), 
 | `github`          | repo, file, list_dir, tree, search, trending, code_search (AST-aware)                                                                                                                                                                                                                                  |
 | `youtube`         | search (API), transcript (free), semantic (search+transcript+RAG)                                                                                                                                                                                                                                      |
 | `reddit`          | search (free), comments (nested tree), semantic (search+comments+RAG)                                                                                                                                                                                                                                  |
-| `research`        | academic, pubmed, wikipedia, arxiv, hackernews, stackoverflow, openalex, crossref, datacite, ror, semantic_scholar, gdelt, wikidata, auto                                                                                                                                                              |
+| `research`        | academic, pubmed, wikipedia, arxiv, hackernews, stackoverflow, openalex, crossref, datacite, ror, semantic_scholar, gdelt, wikidata, v2ex, auto                                                                                                                                                        |
 | `packages`        | npm, pypi                                                                                                                                                                                                                                                                                              |
 | `browser`         | navigate, snapshot, click, type, evaluate, screenshot, extract, act, wait, wait_for, dialog_handle, iframe_context, scroll_to_load, paginate, download, table_extract, network_intercept, resource_timing, diff, pdf, storage, network, tabs, session. Backends: Playwright+CDP, optional CloakBrowser |
 | `agentic_browse`  | browse, present, read, focus (in-memory doc store + optional deep research)                                                                                                                                                                                                                            |

@@ -22,6 +22,7 @@ const DOMAIN_AUTHORITY: Record<string, number> = {
   'reddit.com': 0.4,
   'youtube.com': 0.3,
   'twitter.com': 0.3,
+  'x.com': 0.3,
   'substack.com': 0.45,
   'dev.to': 0.4,
 };
@@ -45,14 +46,18 @@ export function normalizeUrlForDedup(url: string): string {
   }
 }
 
-function getDomainAuthority(domain: string): number {
+function getDomainAuthority(domain: string, category?: string): number {
   const bare = domain.replace(/^www\./, '').toLowerCase();
+  if (category === 'tweet' && (bare === 'x.com' || bare === 'twitter.com')) {
+    return 0.95;
+  }
   return DOMAIN_AUTHORITY[bare] ?? 0.3;
 }
 
 export function mergeSearchResults(
   backendResults: Map<string, SearchResult[]>,
   limit = 10,
+  options: { category?: string | undefined } = {},
 ): MergedSearchResult[] {
   if (backendResults.size === 0) return [];
 
@@ -93,7 +98,7 @@ export function mergeSearchResults(
         hostname = '';
       }
     }
-    const domainAuthority = getDomainAuthority(hostname);
+    const domainAuthority = getDomainAuthority(hostname, options.category);
     const positionPenalty = 1 / Math.log(entry.bestPosition + Math.E);
 
     // Composite score: engine agreement * 0.4 + domain authority * 0.3 + position * 0.3

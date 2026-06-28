@@ -185,6 +185,7 @@ export async function searchWithBackends(
   expandQueryOpt = true,
   mergeBackends = true,
   provenanceResult?: { current: ProvenanceResult | null },
+  category?: string,
 ): Promise<SearchResult[]> {
   const cfg = loadConfig();
 
@@ -250,7 +251,7 @@ export async function searchWithBackends(
     }
 
     if (useMerge) {
-      const merged = mergeSearchResults(validResults, limit);
+      const merged = mergeSearchResults(validResults, limit, { category });
       return { results: merged, strategy: qv.strategy };
     }
 
@@ -369,6 +370,7 @@ export async function webSearch(
     expandQueryOpt,
     mergeBackends,
     provenanceResult,
+    category,
   );
 
   return results;

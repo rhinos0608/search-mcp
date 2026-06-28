@@ -42,7 +42,7 @@ export const SEARCH_CATEGORIES: Record<string, CategoryProfile> = {
     queryHint: 'github repository',
   },
   tweet: {
-    queryHint: 'x twitter thread',
+    queryHint: 'site:x.com OR site:twitter.com x twitter tweet thread',
   },
   'personal site': {
     queryHint: 'personal blog portfolio',

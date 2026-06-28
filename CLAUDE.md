@@ -35,7 +35,7 @@ HTTP mode: `HTTP_PORT=8050 SEARCH_MCP_CONFIG_KEY="passphrase" npm start`. First 
 - **Transport**: `HTTP_PORT` unset → stdio only (stdout = JSON-RPC exclusively). `HTTP_PORT` set → HTTP on that port (`/mcp` Bearer auth, `/dashboard`) **plus** stdio. Logging → stderr via pino.
 - **Composition root**: `src/server.ts` — loads config, registers tools, starts server.
 - **Family tools** (8): `src/tools/families/`, registered via `registerFamily()`. Discriminated-union `action` field per family.
-- **Standalone tools** (9): `src/tools/standalone/`, direct `server.registerTool()`.
+- **Standalone tools** (10): `src/tools/standalone/`, direct `server.registerTool()`.
 - **Config**: encrypted config (`config.enc` + `SEARCH_MCP_CONFIG_KEY`) → env vars → defaults. Cached after load.
 - **Responses**: `ToolResult<T>` as JSON text. Errors: `isError: true`, sanitized (no stack traces).
 - **HTTP safety**: `src/httpGuards.ts` — SSRF guard, 10MB response limit. Sidecar/RAGA URLs bypass SSRF.
@@ -44,9 +44,9 @@ HTTP mode: `HTTP_PORT=8050 SEARCH_MCP_CONFIG_KEY="passphrase" npm start`. First 
 
 See AGENTS.md for full action lists. Config-gated tools: `web_crawl`, `semantic_crawl*`, `semantic_jobs`, `deep_research`, `browser`, `knowledge_graph`.
 
-**Standalone**: web_search, web_crawl, semantic_crawl, semantic_crawl_list_corpora, semantic_crawl_inspect_corpus, semantic_jobs, health_check, deep_research, fetch_focus (deprecated).
+**Standalone**: web_search, rss, web_crawl, semantic_crawl, semantic_crawl_list_corpora, semantic_crawl_inspect_corpus, semantic_jobs, health_check, deep_research, fetch_focus (deprecated).
 
-**Families**: github (7 actions), youtube (3), reddit (3), research (14), packages (2), browser (24), agentic_browse (4), knowledge_graph (10).
+**Families**: github (7 actions), youtube (3), reddit (3), research (15), packages (2), browser (24), agentic_browse (4), knowledge_graph (10).
 
 ## RAG Pipeline (`src/rag/`)
 

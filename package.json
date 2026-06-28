@@ -46,6 +46,7 @@
     "jsdom": "^29.0.1",
     "onnxruntime-node": "^1.24.3",
     "pino": "^9.0.0",
+    "rss-parser": "^3.13.0",
     "safe-regex2": "^5.1.1",
     "tree-sitter-wasms": "^0.1.13",
     "web-tree-sitter": "^0.20.8",

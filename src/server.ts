@@ -20,6 +20,7 @@ import { registerSemanticCrawlInspectCorpus } from './tools/standalone/semanticC
 import { registerSemanticJobs } from './tools/standalone/semanticJobs.js';
 import { registerHealthCheck } from './tools/standalone/healthCheck.js';
 import { registerFetchFocus } from './tools/standalone/fetchFocus.js';
+import { registerRssTool } from './tools/standalone/rss.js';
 
 // Family tools
 import { registerYoutubeTool } from './tools/families/youtube.js';
@@ -76,6 +77,7 @@ export function createServer(
   // Standalone tools (pass kgHook for passive capture)
   registerWebSearch(server, cfg, kgHook ?? undefined);
   registerWebCrawl(server, cfg, kgHook ?? undefined);
+  registerRssTool(server);
 
   // Gated standalone tools
   if (!gated.has('semantic_jobs')) registerSemanticJobs(server, cfg);
