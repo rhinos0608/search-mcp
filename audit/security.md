@@ -34,7 +34,7 @@ Scope: `/Users/rhinesharar/search-mcp`. Current dirty diff reviewed. No files mo
 
 ## 4. High — Dashboard redaction omits deep-research token and browser credentials
 
-**Evidence:** Redacted dashboard config only hides fixed paths: `mcpApiKey`, provider keys, `llm.apiToken`, `raga.apiToken`, etc. (`src/config/manager.ts:17-32`). It does not include `deepResearch.apiToken` or nested `browser.credentials.*.password/totpSecret`. Config loads both (`src/config.ts:1116-1119`, `src/config.ts:1171-1174`). Authenticated dashboard `/dashboard/api/config/status` returns `configManager.getRedacted()` (`src/server/dashboard-router.ts:328-330`).
+**Evidence:** Redacted dashboard config only hides fixed paths: `mcpApiKey`, provider keys, `llm.apiToken`, etc. (`src/config/manager.ts:17-32`). It does not include `deepResearch.apiToken` or nested `browser.credentials.*.password/totpSecret`. Config loads both (`src/config.ts:1116-1119`, `src/config.ts:1171-1174`). Authenticated dashboard `/dashboard/api/config/status` returns `configManager.getRedacted()` (`src/server/dashboard-router.ts:328-330`).
 
 **Exploit/impact:** Any dashboard session can retrieve deep research API token and browser stored login passwords/TOTP secrets in cleartext. If query-param auth leaks or dashboard exposed, compromise expands to third-party LLM account and site credentials.
 
@@ -74,7 +74,7 @@ Scope: `/Users/rhinesharar/search-mcp`. Current dirty diff reviewed. No files mo
 
 ## 8. Low — Operator-configured sidecar health probes lack URL guard and response cap
 
-**Evidence:** Dashboard provider tests fetch configured `searxng.baseUrl` and `crawl4ai.baseUrl` directly (`src/config/manager.ts:317-327`). Validation only checks URL starts with `http://` or `https://` for selected URL fields (`src/config/manager.ts:163-183`). RAG-Anything client also fetches configured bridge URLs directly and parses JSON without `safeResponseJson()` (`src/utils/ragAnythingClient.ts:268-278`, `src/utils/ragAnythingClient.ts:303-328`, `src/utils/ragAnythingClient.ts:363-384`, `src/utils/ragAnythingClient.ts:387-411`).
+**Evidence:** Dashboard provider tests fetch configured `searxng.baseUrl` and `crawl4ai.baseUrl` directly (`src/config/manager.ts:317-327`). Validation only checks URL starts with `http://` or `https://` for selected URL fields (`src/config/manager.ts:163-183`).
 
 **Exploit/impact:** Authenticated dashboard user can make server probe arbitrary internal URLs on fixed paths and receive timing/status/error text. Malicious or compromised sidecar can return very large JSON/error responses and consume memory.
 

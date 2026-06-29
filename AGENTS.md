@@ -32,7 +32,7 @@ HTTP mode: `HTTP_PORT=8050 SEARCH_MCP_CONFIG_KEY="passphrase" npm start`. First 
 - **Standalone tools** (9): `src/tools/standalone/`, call `server.registerTool()` directly.
 - **Config**: `src/config.ts` — encrypted config (`config.enc` + `SEARCH_MCP_CONFIG_KEY`) → env vars → defaults. Cached after first load.
 - **Tool responses**: `ToolResult<T>` as JSON text content. Errors sanitized, returned with `isError: true`.
-- **HTTP safety**: `src/httpGuards.ts` — SSRF guard blocks private IPs, localhost, cloud metadata. 10MB response limit. Sidecar/RAGA URLs bypass SSRF (operator config, not user input).
+- **HTTP safety**: `src/httpGuards.ts` — SSRF guard blocks private IPs, localhost, cloud metadata. 10MB response limit. Operator-configured sidecar URLs are not user input.
 
 ## Tools
 
@@ -124,8 +124,8 @@ CRAWL4AI_BASE_URL, CRAWL4AI_API_TOKEN
 EMBEDDING_PROVIDER, EMBEDDING_SIDECAR_BASE_URL, EMBEDDING_SIDECAR_API_TOKEN, EMBEDDING_DIMENSIONS (768), EMBEDDING_CODE_MODEL, EMBEDDING_OLLAMA_BASE_URL, EMBEDDING_OPENAI_API_KEY
 # LLM (contextual embeddings, browser.act, deep research — OpenAI-compatible)
 LLM_PROVIDER (model name), LLM_API_TOKEN (optional), LLM_BASE_URL (required)
-# RAG-Anything Bridge
-RAGA_ENABLED, RAGA_BRIDGE_URL (http://localhost:8000), RAGA_DEFAULT_PARSER (auto|docling|paddleocr|mineru), RAGA_TIMEOUT_MS (30000)
+# Document extraction
+Text-like document URLs are extracted in-process; binary parser adapters are not configured by default.
 # Browser
 BROWSER_ENABLED, BROWSER_ENGINE (playwright|cloak), BROWSER_MODE (stealth|user|profile), BROWSER_PROFILE_DIR, CLOAKBROWSER_HUMANIZE, CLOAKBROWSER_HUMAN_PRESET, CLOAKBROWSER_LOCALE, CLOAKBROWSER_TIMEZONE, CLOAKBROWSER_GEOIP, CLOAKBROWSER_STEALTH_ARGS
 # Deep Research
@@ -145,7 +145,6 @@ Reddit: `REDDIT_CLIENT_ID` + `REDDIT_CLIENT_SECRET` must both be set. One only �
 - `sidecar/embedding/`: FastAPI embedding service, `POST /embed` with `{ texts, mode, dimensions }`.
 - `sidecar/openai-embedding-proxy/`: OpenAI-compatible proxy to sidecar.
 - `sidecar/jobspy/`: Python sidecar for job scraping via JobSpy.
-- `services/rag-anything-bridge/`: Python FastAPI for multimodal document extraction (PDFs, Office, scanned docs) via Docling, PaddleOCR, MinerU.
 
 ## Docker
 

@@ -92,16 +92,9 @@ Copy [`config.example.json`](config.example.json) to `config.json` and fill in y
 | `LLM_BASE_URL`  | Base URL for `/v1/chat/completions` endpoint                        |
 | `LLM_API_TOKEN` | Optional API token                                                  |
 
-### RAG-Anything Bridge (multimodal document extraction)
+### Document extraction
 
-| Variable              | Default                 | Description                                                |
-| --------------------- | ----------------------- | ---------------------------------------------------------- |
-| `RAGA_ENABLED`        | `false`                 | Enable RAG-Anything bridge (`true`/`false`)                |
-| `RAGA_BRIDGE_URL`     | `http://localhost:8000` | RAG-Anything bridge URL                                    |
-| `RAGA_DEFAULT_PARSER` | `auto`                  | Parser selection: `auto`, `docling`, `paddleocr`, `mineru` |
-| `RAGA_TIMEOUT_MS`     | `30000`                 | Bridge request timeout in ms                               |
-| `RAGA_MAX_RETRIES`    | `2`                     | Max retries on bridge failure                              |
-| `RAGA_CACHE_ENABLED`  | `true`                  | Cache extraction results                                   |
+Document URLs are handled in-process for text-like formats (`.txt`, `.md`, `.csv`, `.json`, `.xml`, `.yaml`). Binary formats such as PDFs, Office files, and images fall through to Crawl4AI/readability and external recovery until a local parser adapter is configured.
 
 ### Social / Video
 

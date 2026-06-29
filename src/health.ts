@@ -331,8 +331,11 @@ export function configHealth(cfg: SearchConfig): Record<string, ToolHealth> {
   // OAuth posture without having to parse the reddit family entries.
   report.reddit_oauth = redditOAuthHealth(cfg);
 
-  // Synthesized RAG-Anything bridge indicator.
-  report.raga_bridge = ragaBridgeHealth(cfg);
+  report.document_extraction = {
+    status: 'healthy' as const,
+    message:
+      'In-process document extraction enabled for text-like documents; binary formats fall through to crawl/read recovery.',
+  };
 
   // Family tool capabilities (per-action breakdown).
   for (const cap of youtubeCapabilities(cfg)) {
@@ -478,32 +481,6 @@ function redditOAuthHealth(cfg: SearchConfig): ToolHealth {
       'Reddit OAuth not configured (using public Reddit JSON API which Reddit may block from cloud/datacenter IPs).',
     remediation:
       'Set REDDIT_CLIENT_ID and REDDIT_CLIENT_SECRET to enable OAuth access via oauth.reddit.com.',
-  };
-}
-
-function ragaBridgeHealth(cfg: SearchConfig): ToolHealth {
-  if (!cfg.raga.enabled) {
-    return {
-      status: 'unconfigured',
-      message:
-        'RAG-Anything bridge is disabled. Set RAGA_ENABLED=true to enable multimodal document extraction (PDF, Office, OCR).',
-      remediation:
-        'Set RAGA_ENABLED=true and RAGA_BRIDGE_URL to point at a running rag-anything-bridge service.',
-    };
-  }
-
-  if (!cfg.raga.baseUrl || cfg.raga.baseUrl.length === 0) {
-    return {
-      status: 'degraded',
-      message: 'RAG-Anything bridge is enabled but RAGA_BRIDGE_URL is not set.',
-      remediation:
-        'Set RAGA_BRIDGE_URL to point at the rag-anything-bridge service (e.g. http://localhost:8002).',
-    };
-  }
-
-  return {
-    status: 'healthy',
-    message: `RAG-Anything bridge configured at ${cfg.raga.baseUrl} (parser: ${cfg.raga.defaultParser}).`,
   };
 }
 
@@ -817,14 +794,6 @@ export function getNetworkProbes(cfg: SearchConfig): NetworkProbe[] {
       label: 'embedding-sidecar',
       url: `${cfg.embeddingSidecar.baseUrl.replace(/\/+$/, '')}/health`,
       tools: ['semantic_crawl'],
-    });
-  }
-
-  if (cfg.raga.enabled && cfg.raga.baseUrl.length > 0) {
-    probes.push({
-      label: 'raga-bridge',
-      url: `${cfg.raga.baseUrl.replace(/\/+$/, '')}/health`,
-      tools: ['web_crawl', 'raga_bridge'],
     });
   }
 

@@ -38,7 +38,7 @@ HTTP mode: `HTTP_PORT=8050 SEARCH_MCP_CONFIG_KEY="passphrase" npm start`. First 
 - **Standalone tools** (10): `src/tools/standalone/`, direct `server.registerTool()`.
 - **Config**: encrypted config (`config.enc` + `SEARCH_MCP_CONFIG_KEY`) → env vars → defaults. Cached after load.
 - **Responses**: `ToolResult<T>` as JSON text. Errors: `isError: true`, sanitized (no stack traces).
-- **HTTP safety**: `src/httpGuards.ts` — SSRF guard, 10MB response limit. Sidecar/RAGA URLs bypass SSRF.
+- **HTTP safety**: `src/httpGuards.ts` — SSRF guard, 10MB response limit. Operator-configured sidecar URLs are not user input.
 
 ## Tool Summary
 
@@ -79,7 +79,7 @@ Orchestrator: Decomposition → Discovery → Taxonomy → Extraction → EDA lo
 - Corpus cache: persistent SQLite, survives restarts
 - Adapter types: `job`, `code`, `text`, `transcript`, `conversation`, `academic`, `qa`
 - Never commit `config.json`, `config.enc`, or API keys
-- Embedding sidecar/RAGA bridge bypass SSRF (operator config)
+- Embedding sidecar bypasses SSRF guard only for operator-configured URLs
 
 ## Commit Style
 

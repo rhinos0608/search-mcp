@@ -329,7 +329,7 @@ Update:
 
 - `docs/tools.md`
 - `docs/architecture.md`
-- `docs/composition-with-rag-anything.md` if examples need V3 terms
+- structured-content composition docs if examples need V3 terms
 - `docs/plans/index.md` status fields when stages are complete
 
 Final commands:

@@ -87,26 +87,26 @@ search-mcp/
 │   │   ├── llmSummarizer.ts      # LLM summarization
 │   │   ├── markdownElements.ts   # markdown element types
 │   │   ├── ollamaEmbedding.ts    # Ollama local embedding
-│   │   ├── ragAnythingClient.ts  # RAG-Anything bridge client
+│   │   ├── documentExtraction.ts # in-process document extraction seam
 │   │   ├── renderRecovery.ts     # placeholder content recovery
 │   │   ├── rescore.ts            # score normalization
 │   │   ├── searchMerge.ts        # cross-backend search result merging
 │   │   ├── semanticResponse.ts   # response compaction
 │   │   ├── sitemap.ts            # XML sitemap parser
 │   │   ├── contentScrubber.ts      # threat detection & redaction
-│   │   ├── smartExtraction.ts    # quality-based escalation
 │   │   ├── transformersEmbedding.ts # Transformers.js in-process
 │   │   └── url.ts                # URL dedup
-│   └── tools/               # tool registration (26 tools: 10 standalone + 6 family + 10 KG)
+│   └── tools/               # tool registration (18 MCP tools: 10 standalone + 8 family)
 │       ├── standalone/      # standalone tools
 │       │   ├── webSearch.ts
-│       │   ├── webRead.ts
 │       │   ├── webCrawl.ts
+│       │   ├── rss.ts
 │       │   ├── semanticCrawl.ts
 │       │   ├── semanticCrawlListCorpora.ts
-│       │   ├── semanticJobs.ts
-│       │   ├── fetchFocus.ts
 │       │   ├── semanticCrawlInspectCorpus.ts
+│       │   ├── semanticJobs.ts
+│       │   ├── deepResearch.ts
+│       │   ├── fetchFocus.ts
 │       │   └── healthCheck.ts
 │       ├── families/        # family tools (action-discriminated)
 │       │   ├── youtube.ts
@@ -114,16 +114,12 @@ search-mcp/
 │       │   ├── github.ts
 │       │   ├── packages.ts
 │       │   ├── research.ts
-│       │   └── browser.ts
-│       ├── deepResearch.ts  # job/poll protocol deep research
-│       ├── graph-*.ts       # knowledge graph tools (opt-in)
-│       ├── family-*.ts      # family management
-│       ├── run-*.ts         # run management
+│       │   ├── browser.ts
+│       │   ├── agenticBrowse.ts
+│       │   └── knowledgeGraph.ts
 │       ├── registry.ts      # registerFamily() helper
 │       ├── response.ts      # shared response helpers
 │       └── queryExpansion.ts # rule-based query variation generation
-├── services/               # Python bridge services
-│   └── rag-anything-bridge/  # multimodal document extraction
 ├── sidecar/                # local service sidecars
 │   ├── embedding/          # FastAPI embedding server
 │   └── openai-embedding-proxy/
@@ -213,13 +209,13 @@ Splitting tools into separate files keeps each file small, makes individual tool
 
 ## Shared Reddit Transport
 
-Both `reddit_search` and `reddit_comments` route all HTTP through the shared client in `src/tools/redditClient.ts` (built by `createRedditClient`), which picks the transport based on config:
+Both `reddit.search` and `reddit.comments` route all HTTP through the shared client in `src/tools/redditClient.ts` (built by `createRedditClient`), which picks the transport based on config:
 
 - **No credentials configured** (`REDDIT_CLIENT_ID` and `REDDIT_CLIENT_SECRET` both unset): requests go to `https://www.reddit.com/... .json` with no `Authorization` header. Quota is Reddit's unauthenticated limit (~10 QPM, bot-detection-prone).
 - **Both credentials configured**: the client uses the `client_credentials` grant against `https://www.reddit.com/api/v1/access_token`, caches the token in memory (see `src/tools/redditAuth.ts`), and routes content requests to `https://oauth.reddit.com/...` with `Authorization: bearer <token>`. A 401 mid-session clears the cached token and retries once. Quota is 100 QPM per app.
 - **Partially configured** (exactly one of the two credentials set): the server still starts successfully. `loadConfig()` records `reddit.oauthConfigValid = false` and emits a `logger.warn`. `health_check` reports the synthesized `reddit_oauth` entry as `degraded` with remediation text. The first call to either Reddit tool throws `VALIDATION_ERROR` — there is no silent fallback to the public path when credentials are partial or broken.
 
-Runtime OAuth failures (bad credentials, token refresh failure, content-request transport errors) surface as tool-local errors, never as startup crashes. The rate-limit tracker for the `reddit` backend is shared between `reddit_search` and `reddit_comments`, so a 429 observed by one tool gates subsequent calls from either.
+Runtime OAuth failures (bad credentials, token refresh failure, content-request transport errors) surface as tool-local errors, never as startup crashes. The rate-limit tracker for the `reddit` backend is shared between `reddit.search` and `reddit.comments`, so a 429 observed by one action gates subsequent calls from either.
 
 ---
 
@@ -283,7 +279,7 @@ Swallowing errors silently would make it impossible for the AI client to recover
 | `@mozilla/readability`      | Port of Firefox Reader View. Strips navigation, ads, and boilerplate from a fetched HTML page and returns the main article content. Used by `agentic_browse.read` and `web_crawl` (Readability fallback). |
 | `jsdom`                     | Parses raw HTML into a DOM tree that `@mozilla/readability` can traverse. Used alongside `@mozilla/readability` in `agentic_browse.read` and `web_crawl`.                                                 |
 | `cheerio`                   | Fast server-side jQuery-style HTML parsing. Used by `github_trending` to scrape the GitHub trending page, which has no official API.                                                                      |
-| `youtube-transcript`        | Fetches the auto-generated or manual caption transcript for a YouTube video. Used by `youtube_transcript`.                                                                                                |
+| `youtube-transcript`        | Fetches the auto-generated or manual caption transcript for a YouTube video. Used by `youtube.transcript`.                                                                                                |
 | `better-sqlite3`            | Synchronous SQLite bindings. Used by `src/utils/corpusCache.ts` to persist prepared corpora across server restarts.                                                                                       |
 | `web-tree-sitter`           | WebAssembly port of the tree-sitter parsing library. Used by the code adapter for AST-aware symbol extraction. Grammars load lazily on first use per language.                                            |
 | `tree-sitter-wasms`         | Pre-compiled WASM grammar bundles for TypeScript, JavaScript, Python, Go, Rust, and others. Required by `web-tree-sitter` at runtime; not imported at startup.                                            |

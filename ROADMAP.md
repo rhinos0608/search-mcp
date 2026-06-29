@@ -4,23 +4,23 @@
 
 > Canonical plan status lives in `docs/plans/index.md`; this file is a legacy high-level summary.
 
-| Release          | Status        | Notes                                                                                                                     |
-| ---------------- | ------------- | ------------------------------------------------------------------------------------------------------------------------- |
-| **V3.0.0**       | ✅ Done       | RAG pipeline extraction, YouTube/Reddit adapters                                                                          |
-| **V3.0.5**       | ✅ Done       | Job adapter MVP, `semantic_jobs` tool                                                                                     |
-| **V3.1 Phase 1** | ✅ Done       | SQLite corpus cache, Exa neural search                                                                                    |
-| **V3.1.0 Code**  | ✅ Done       | Tree-sitter adapter, GitHub guardrails, `semantic_github_code`                                                            |
-| **V3.1.1**       | ✅ Done       | Crawl reliability patch: HTML threading for `semantic_jobs`, timeout scaling for `web_crawl`, `semantic_crawl` size guard |
-| **V3.1.5**       | ✅ Done       | RAG-Anything integration, code review fixes across RAG pipeline                                                           |
-| **V3.2.0**       | ✅ In progress | Domain adapters (Stack Overflow, HN, academic, news), full job pipeline, `semantic_search`, constraint ranking, dedup, distribution packaging *(parallel track)* |
-| **V3.3.0**       | ✅ Done       | Kill chain extraction, contextual embeddings, render recovery                                                              |
-| **V3.3.1**       | ✅ Done       | DuckDuckGo zero-key fallback, opt-in Ollama web search, availability-aware selection + merge                               |
-| **V3.4.0**       | ✅ Done       | Integration: resolver pattern, output budget, structured errors, diagnostics                                               |
-| **V3.5.0**       | ✅ Done       | Competitive integration and tool consolidation                                                                             |
-| **V4.0.0**       | ✅ Done       | **Deep Research Orchestration Engine** — LLM control loop, multi-backend discovery, gap analysis, audit, synthesis        |
-| **V5.0.0**       | ❌ Retired    | Persistent corpus indexes — superseded by V7.0.0 (event log subsumes corpus abstraction)                                  |
-| **V6.0.0**       | ✅ Done       | HTTP Dashboard + Tailscale access — React browser dashboard, ConfigManager AES-256-GCM, dual-mode startup                 |
-| **V7.0.0**       | 📐 Specced    | **Longitudinal Knowledge Graph** — event-sourced persistent graph, families, multi-run discourse accumulation             |
+| Release          | Status         | Notes                                                                                                                                                            |
+| ---------------- | -------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **V3.0.0**       | ✅ Done        | RAG pipeline extraction, YouTube/Reddit adapters                                                                                                                 |
+| **V3.0.5**       | ✅ Done        | Job adapter MVP, `semantic_jobs` tool                                                                                                                            |
+| **V3.1 Phase 1** | ✅ Done        | SQLite corpus cache, Exa neural search                                                                                                                           |
+| **V3.1.0 Code**  | ✅ Done        | Tree-sitter adapter, GitHub guardrails, `semantic_github_code`                                                                                                   |
+| **V3.1.1**       | ✅ Done        | Crawl reliability patch: HTML threading for `semantic_jobs`, timeout scaling for `web_crawl`, `semantic_crawl` size guard                                        |
+| **V3.1.5**       | ✅ Done        | document extraction integration, code review fixes across RAG pipeline                                                                                           |
+| **V3.2.0**       | ✅ In progress | Domain adapters (Stack Overflow, HN, academic, news), full job pipeline, `semantic_search`, constraint ranking, dedup, distribution packaging _(parallel track)_ |
+| **V3.3.0**       | ✅ Done        | Kill chain extraction, contextual embeddings, render recovery                                                                                                    |
+| **V3.3.1**       | ✅ Done        | DuckDuckGo zero-key fallback, opt-in Ollama web search, availability-aware selection + merge                                                                     |
+| **V3.4.0**       | ✅ Done        | Integration: resolver pattern, output budget, structured errors, diagnostics                                                                                     |
+| **V3.5.0**       | ✅ Done        | Competitive integration and tool consolidation                                                                                                                   |
+| **V4.0.0**       | ✅ Done        | **Deep Research Orchestration Engine** — LLM control loop, multi-backend discovery, gap analysis, audit, synthesis                                               |
+| **V5.0.0**       | ❌ Retired     | Persistent corpus indexes — superseded by V7.0.0 (event log subsumes corpus abstraction)                                                                         |
+| **V6.0.0**       | ✅ Done        | HTTP Dashboard + Tailscale access — React browser dashboard, ConfigManager AES-256-GCM, dual-mode startup                                                        |
+| **V7.0.0**       | 📐 Specced     | **Longitudinal Knowledge Graph** — event-sourced persistent graph, families, multi-run discourse accumulation                                                    |
 
 ## Roadmap Summary
 

@@ -52,7 +52,7 @@ Projection Rebuild  ──► kg_nodes, kg_edges, kg_families, kg_sources, kg_no
 MCP Tool   (`knowledge_graph` actions: query, family_list, run_list, ...)
 ```
 
-LightRAG/RAG-Anything is **not** in the write path. It may be wired as a downstream read-side projection for hybrid retrieval in V7.1+.
+External RAG frameworks are **not** in the write path. They may be wired as downstream read-side projections for hybrid retrieval in V7.1+.
 
 ---
 

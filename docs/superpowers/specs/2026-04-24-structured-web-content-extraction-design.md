@@ -1,6 +1,6 @@
 ---
 name: Structured Web Content Extraction
-description: Extend all content-fetching tools to return structured ContentElement[] arrays for multimodal downstream pipelines like RAG-Anything.
+description: Extend all content-fetching tools to return structured ContentElement[] arrays for multimodal downstream pipelines.
 type: project
 ---
 
@@ -8,7 +8,7 @@ type: project
 
 ## Goal
 
-Extend all content-fetching tools in `search-mcp` to return a structured `elements` array. This enables downstream tools (e.g., HKUDS/RAG-Anything) to consume typed document parts (headings, tables, images, code, lists) directly without re-parsing raw markdown or HTML.
+Extend all content-fetching tools in `search-mcp` to return a structured `elements` array. This enables downstream tools to consume typed document parts (headings, tables, images, code, lists) directly without re-parsing raw markdown or HTML.
 
 ## Background
 
@@ -63,4 +63,4 @@ Wrap existing text fields into a single `TextElement` for tools where structure 
 
 1. All content-fetching tools return an `elements` field in their `data` payload.
 2. `elements` correctly identifies headings, tables, lists, and code blocks where present.
-3. Downstream RAG-Anything integration can map these elements directly using the mapping logic in `docs/composition-with-rag-anything.md`.
+3. Downstream RAG integrations can map these elements directly using the structured-content composition guide.
