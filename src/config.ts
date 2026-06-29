@@ -163,15 +163,6 @@ export interface LlmConfig {
   baseUrl: string;
 }
 
-export interface RAGAConfig {
-  enabled: boolean;
-  baseUrl: string;
-  timeoutMs: number;
-  maxRetries: number;
-  cacheEnabled: boolean;
-  defaultParser: 'auto' | 'docling' | 'paddleocr' | 'mineru';
-}
-
 export type ResearchDepth = 'quick' | 'standard' | 'deep' | 'exhaustive' | 'tree';
 
 export interface DeepResearchConfig {
@@ -261,7 +252,6 @@ export interface SearchConfig {
   domainTrust: DomainTrustConfig;
   scrubContent: boolean;
   llm: LlmConfig;
-  raga: RAGAConfig;
   duckduckgo: { region: string; safeSearch: string };
   ollamaSearch: { baseUrl: string; apiKey?: string };
   deepResearch: DeepResearchConfig;
@@ -388,14 +378,6 @@ const DEFAULTS: Omit<SearchConfig, 'rescoreWeights'> = {
   },
   scrubContent: false,
   llm: { provider: '', apiToken: '', baseUrl: '' },
-  raga: {
-    enabled: false,
-    baseUrl: '',
-    timeoutMs: 30000,
-    maxRetries: 2,
-    cacheEnabled: true,
-    defaultParser: 'auto',
-  },
   duckduckgo: { region: 'us-en', safeSearch: 'moderate' },
   ollamaSearch: { baseUrl: '', apiKey: '' },
   deepResearch: {
@@ -477,7 +459,6 @@ type EnvConfig = Omit<
   | 'semanticCrawl'
   | 'domainTrust'
   | 'llm'
-  | 'raga'
   | 'scrubContent'
   | 'exa'
   | 'duckduckgo'
@@ -496,7 +477,6 @@ type EnvConfig = Omit<
   semanticCrawl?: Partial<SemanticCrawlConfig>;
   domainTrust?: Partial<DomainTrustConfig>;
   llm?: Partial<LlmConfig>;
-  raga?: Partial<RAGAConfig>;
   scrubContent?: boolean;
   duckduckgo?: Partial<{ region: string; safeSearch: string }>;
   ollamaSearch?: Partial<{ baseUrl: string; apiKey: string }>;
@@ -666,23 +646,6 @@ function loadFromEnv(): EnvConfig {
   const scrubContent = process.env.SCRUB_CONTENT;
   if (scrubContent !== undefined) {
     cfg.scrubContent = scrubContent === 'true';
-  }
-
-  // RAG-Anything Bridge configuration
-  const ragaBridgeUrl = process.env.RAGA_BRIDGE_URL;
-  const ragaEnabled = process.env.RAGA_ENABLED;
-  const ragaParser = process.env.RAGA_DEFAULT_PARSER;
-  if (ragaBridgeUrl !== undefined || ragaEnabled !== undefined || ragaParser !== undefined) {
-    const ragaCfg: Partial<RAGAConfig> = {};
-    if (ragaBridgeUrl !== undefined) ragaCfg.baseUrl = ragaBridgeUrl;
-    if (ragaEnabled !== undefined) ragaCfg.enabled = ragaEnabled === 'true';
-    if (ragaParser !== undefined) {
-      const validParsers = ['auto', 'docling', 'paddleocr', 'mineru'] as const;
-      if (validParsers.includes(ragaParser as (typeof validParsers)[number])) {
-        ragaCfg.defaultParser = ragaParser as RAGAConfig['defaultParser'];
-      }
-    }
-    cfg.raga = ragaCfg;
   }
 
   // DuckDuckGo — optional region/safesearch knobs (zero-key backend, always-on)
@@ -1082,19 +1045,6 @@ export function loadConfig(): SearchConfig {
       provider: envConfig.llm?.provider ?? fileConfig.llm?.provider ?? DEFAULTS.llm.provider,
       apiToken: envConfig.llm?.apiToken ?? fileConfig.llm?.apiToken ?? DEFAULTS.llm.apiToken ?? '',
       baseUrl: envConfig.llm?.baseUrl ?? fileConfig.llm?.baseUrl ?? DEFAULTS.llm.baseUrl,
-    },
-    raga: {
-      enabled: envConfig.raga?.enabled ?? fileConfig.raga?.enabled ?? DEFAULTS.raga.enabled,
-      baseUrl: envConfig.raga?.baseUrl ?? fileConfig.raga?.baseUrl ?? DEFAULTS.raga.baseUrl,
-      timeoutMs: envConfig.raga?.timeoutMs ?? fileConfig.raga?.timeoutMs ?? DEFAULTS.raga.timeoutMs,
-      maxRetries:
-        envConfig.raga?.maxRetries ?? fileConfig.raga?.maxRetries ?? DEFAULTS.raga.maxRetries,
-      cacheEnabled:
-        envConfig.raga?.cacheEnabled ?? fileConfig.raga?.cacheEnabled ?? DEFAULTS.raga.cacheEnabled,
-      defaultParser:
-        envConfig.raga?.defaultParser ??
-        fileConfig.raga?.defaultParser ??
-        DEFAULTS.raga.defaultParser,
     },
     duckduckgo: {
       region:

@@ -56,15 +56,6 @@
     "apiToken": "",
     "baseUrl": ""
   },
-  "raga": {
-    "//": "RAG-Anything Bridge for multimodal document extraction (PDFs, Office, etc.).",
-    "enabled": false,
-    "baseUrl": "http://localhost:8000",
-    "timeoutMs": 30000,
-    "maxRetries": 2,
-    "cacheEnabled": true,
-    "defaultParser": "auto"
-  },
   "knowledgeGraph": {
     "//": "Knowledge graph configuration. Disabled by default; set KG_ENABLED=true (or enabled=true here) to register the knowledge_graph family.",
     "//dbPath": "Resolved by resolveKgDbPath(); ~ expands to your home directory. Override with KG_DB_PATH.",

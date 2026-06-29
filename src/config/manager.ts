@@ -28,7 +28,6 @@ const SECRET_LEAF_PATHS = new Set([
   'crawl4ai.apiToken',
   'embeddingSidecar.apiToken',
   'llm.apiToken',
-  'raga.apiToken',
   'deepResearch.apiToken',
 ]);
 
@@ -128,8 +127,6 @@ const VALID_SEARCH_BACKENDS = new Set([
 
 const VALID_EMBEDDING_PROVIDERS = new Set(['sidecar', 'ollama', 'transformers', 'openai']);
 
-const VALID_RAGA_PARSERS = new Set(['auto', 'docling', 'paddleocr', 'mineru']);
-
 /**
  * Validate critical config values after a dashboard patch.
  * Returns null if valid, or an error message string.
@@ -151,14 +148,6 @@ function validateConfigValues(cfg: Record<string, unknown>): string | null {
   if (esc && typeof esc.provider === 'string') {
     if (!VALID_EMBEDDING_PROVIDERS.has(esc.provider)) {
       return `embeddingSidecar.provider must be one of: ${[...VALID_EMBEDDING_PROVIDERS].join(', ')}`;
-    }
-  }
-
-  // raga.defaultParser
-  const raga = cfg.raga as Record<string, unknown> | undefined;
-  if (raga && typeof raga.defaultParser === 'string') {
-    if (!VALID_RAGA_PARSERS.has(raga.defaultParser)) {
-      return `raga.defaultParser must be one of: ${[...VALID_RAGA_PARSERS].join(', ')}`;
     }
   }
 

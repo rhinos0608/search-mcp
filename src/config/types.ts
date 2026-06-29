@@ -20,7 +20,6 @@ export const MUTABLE_CONFIG_KEYS = new Set([
   'domainTrust',
   'scrubContent',
   'llm',
-  'raga',
   'duckduckgo',
   'ollamaSearch',
   'access',

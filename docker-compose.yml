@@ -8,7 +8,6 @@
 #   - embedding-sidecar: text embedding inference
 #   - crawl4ai: headless browser for web crawling
 #   - searxng: privacy-first metasearch engine
-#   - rag-anything-bridge: multimodal document extraction (PDF, Office, OCR)
 #
 # The MCP server connects via stdio transport by default.
 # For SSE mode, expose port 8050 and configure clients accordingly.
@@ -25,10 +24,6 @@ services:
       - CRAWL4AI_BASE_URL=http://crawl4ai:8050
       - SEARXNG_BASE_URL=http://searxng:8080
       - SEARCH_BACKEND=searxng
-      # RAG-Anything Bridge — multimodal document extraction (PDFs, Office, OCR)
-      - RAGA_ENABLED=true
-      - RAGA_BRIDGE_URL=http://rag-anything-bridge:8000
-      - RAGA_DEFAULT_PARSER=auto
       # HTTP server (leave unset to run stdio-only)
       - HTTP_PORT=8050
       - SEARCH_MCP_CONFIG_KEY=${SEARCH_MCP_CONFIG_KEY}
@@ -44,8 +39,6 @@ services:
       crawl4ai:
         condition: service_healthy
       searxng:
-        condition: service_healthy
-      rag-anything-bridge:
         condition: service_healthy
     restart: unless-stopped
     networks:
@@ -110,60 +103,7 @@ services:
     networks:
       - search-mcp-net
 
-  # ── RAG-Anything Bridge ────────────────────────────────────────────────
-  # Multimodal document extraction for PDFs, Office docs, scanned documents,
-  # images, and other complex document types. Uses Docling, PaddleOCR, and
-  # MinerU parser backends with automatic content-type detection.
-  #
-  # Build from the bridge service Dockerfile:
-  #   docker compose build rag-anything-bridge
-  # Or use pre-built image (when available):
-  #   image: search-mcp/rag-anything-bridge:latest
-  rag-anything-bridge:
-    image: search-mcp-rag-anything-bridge:latest
-    build:
-      context: ./services/rag-anything-bridge
-      dockerfile: Dockerfile
-    ports:
-      - '8002:8000'
-    environment:
-      # Core configuration
-      - RAGA_CACHE_DIR=/cache/rag-anything
-      - RAGA_MAX_SYNC_PAGES=30
-      - RAGA_MAX_SYNC_SIZE_MB=20
-      - RAGA_DEFAULT_PARSER=auto
-      - RAGA_REQUEST_TIMEOUT=30
-      - RAGA_ASYNC_TIMEOUT=300
-      # Parser configuration
-      - RAGA_DOCLING_ENABLED=true
-      - RAGA_PADDLEOCR_ENABLED=true
-      - RAGA_MINERU_ENABLED=false
-      # Async limits
-      - RAGA_ASYNC_MAX_PAGES=200
-      - RAGA_ASYNC_MAX_SIZE_MB=100
-      - REDIS_URL=redis://redis:6379
-    volumes:
-      - raga-cache:/cache
-      - raga-tmp:/tmp/rag-anything
-    healthcheck:
-      test: ['CMD', 'curl', '-f', 'http://localhost:8000/health']
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 40s
-    restart: unless-stopped
-    deploy:
-      resources:
-        limits:
-          cpus: '4'
-          memory: 8G
-        reservations:
-          cpus: '1'
-          memory: 2G
-    networks:
-      - search-mcp-net
-
-  # ── Optional: Redis for distributed caching (rag-anything bridge) ──────
+  # ── Optional: Redis for distributed caching ────────────────────────────
   # Enable by running: docker compose --profile with-redis up -d
   redis:
     image: redis:7-alpine
@@ -180,8 +120,6 @@ services:
 
 volumes:
   searxng-data:
-  raga-cache:
-  raga-tmp:
   redis-data:
 
 networks:
