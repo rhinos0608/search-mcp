@@ -10,7 +10,6 @@
  */
 import { logger } from '../logger.js';
 import { loadConfig } from '../config.js';
-import { isDocumentUrl } from '../utils/documentUtils.js';
 import { attemptExternalRecovery } from '../utils/externalRecovery.js';
 import { Readability } from '@mozilla/readability';
 import { JSDOM } from 'jsdom';
@@ -19,7 +18,6 @@ import { semanticCrawl } from '../tools/semanticCrawl.js';
 import { chunkMarkdown } from '../chunking.js';
 import { webCrawl } from '../tools/webCrawl.js';
 import { webRead } from '../tools/webRead.js';
-import { extractWithRAGA } from '../utils/ragAnythingClient.js';
 import { getYouTubeTranscript } from '../tools/youtubeTranscript.js';
 import { chunksFromTranscript } from '../rag/adapters/transcript.js';
 import { redditComments } from '../tools/redditComments.js';
@@ -651,7 +649,7 @@ export class ExtractionEngine {
 
   /**
    * Fetch a page's content. Tries multiple strategies in order:
-   * 1) RAG-Anything for document URLs when enabled
+   * 1) In-process text-document extraction for supported document URLs
    * 2) Crawl4AI via webCrawl (has built-in ExternalRecoveryMiddleware)
    * 3) webRead (Readability-based)
    * 4) External recovery via Wayback Machine / Google Cache
@@ -661,30 +659,6 @@ export class ExtractionEngine {
     url: string,
     subQuestionText?: string,
   ): Promise<{ markdown: string; title: string; success: boolean }> {
-    // ── RAG-Anything for document URLs ────────────────────────────────────
-    if (isDocumentUrl(url)) {
-      const config = loadConfig();
-      if (config.raga.enabled && config.raga.baseUrl) {
-        try {
-          const result = await extractWithRAGA(url);
-          if (result.markdown && result.markdown.trim().length > 0) {
-            logger.info({ url, parser: result.parserUsed }, 'extraction: RAGA succeeded');
-            return {
-              markdown: result.markdown,
-              title: result.title ?? '',
-              success: true,
-            };
-          }
-          logger.warn({ url }, 'extraction: RAGA returned empty content, falling back');
-        } catch (ragaErr) {
-          logger.warn(
-            { url, err: ragaErr instanceof Error ? ragaErr.message : String(ragaErr) },
-            'extraction: RAGA failed, falling back',
-          );
-        }
-      }
-    }
-
     // ── Crawl4AI ──────────────────────────────────────────────────────────
     if (this.config.useCrawl4ai) {
       try {
@@ -825,7 +799,6 @@ export class ExtractionEngine {
         config.embeddingSidecar.baseUrl,
         config.embeddingSidecar.apiToken ?? '',
         config.embeddingSidecar.dimensions,
-        config.raga,
       );
 
       if (result.chunks.length > 0) {

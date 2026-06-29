@@ -366,7 +366,6 @@ export function createResearchTools(options?: ResearchToolsOptions): ResearchToo
           cfg.embeddingSidecar.baseUrl,
           cfg.embeddingSidecar.apiToken ?? '',
           cfg.embeddingSidecar.dimensions,
-          cfg.raga,
         );
         return {
           chunks: result.chunks.map((c: SemanticCrawlChunk) => ({

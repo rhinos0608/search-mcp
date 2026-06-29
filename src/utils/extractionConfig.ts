@@ -1,5 +1,6 @@
 import { z } from 'zod/v4';
 import { validationError, configError } from '../errors.js';
+import type { LlmConfig } from '../config.js';
 
 export const REGEX_PATTERNS = [
   'email',
@@ -155,6 +156,36 @@ export function validateExtractionConfig(
       );
     }
   }
+}
+
+/**
+ * Map LLM config to the shape expected by extractionConfig validator.
+ */
+export function normalizeLlmForValidation(llm: LlmConfig): {
+  provider: string;
+  apiToken: string;
+  baseUrl?: string;
+} {
+  return {
+    provider: llm.provider,
+    apiToken: llm.apiToken ?? '',
+    ...(llm.baseUrl ? { baseUrl: llm.baseUrl } : {}),
+  };
+}
+
+/**
+ * Build llmFallback config for Crawl4AI extraction when LLM strategy is used.
+ */
+export function buildLlmFallback(
+  extractionConfig: ExtractionConfig | undefined,
+  llm: LlmConfig,
+): { provider: string; apiToken: string; baseUrl?: string } | undefined {
+  if (extractionConfig?.type !== 'llm') return undefined;
+  return {
+    provider: extractionConfig.llmProvider ?? llm.provider,
+    apiToken: llm.apiToken ?? '',
+    ...(llm.baseUrl ? { baseUrl: llm.baseUrl } : {}),
+  };
 }
 
 export function mapToCrawl4ai(

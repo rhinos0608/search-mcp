@@ -108,7 +108,7 @@ export interface ArticleResult extends StructuredContent {
   byline: string | null;
   siteName: string | null;
   url: string;
-  extractionMethod: 'readability' | 'fallback' | 'raga';
+  extractionMethod: 'readability' | 'fallback' | 'document';
   description: string | null;
   publishedDate: string | null;
   image: string | null;

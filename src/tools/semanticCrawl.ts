@@ -21,7 +21,7 @@ import { evaluateDomainTrust, type DomainTrustOptions } from '../utils/domainTru
 import { scrubContent } from '../utils/contentScrubber.js';
 import { recordOutcome } from '../utils/extractionStats.js';
 import { documentFallbackUrls, isDocumentUrl } from '../utils/documentUtils.js';
-import { extractWithRAGA } from '../utils/ragAnythingClient.js';
+import { extractDocumentUrl } from '../utils/documentExtraction.js';
 import { getUserAgent } from '../version.js';
 import type { ContentElement, StructuredContent } from '../types.js';
 import type {
@@ -33,7 +33,7 @@ import type {
   SemanticCrawlWarning,
   SemanticCrawlPageMetadata,
 } from '../types.js';
-import type { Crawl4aiConfig, DomainTrustConfig, LlmConfig, RAGAConfig } from '../config.js';
+import type { Crawl4aiConfig, DomainTrustConfig, LlmConfig } from '../config.js';
 import { loadConfig } from '../config.js';
 import type { ExtractionConfig } from '../utils/extractionConfig.js';
 import { createHash } from 'node:crypto';
@@ -897,7 +897,6 @@ export async function crawlSeeds(
   seedUrls: string[],
   crawl4aiCfg: Crawl4aiConfig,
   opts: SemanticCrawlSeedsOptions,
-  ragaConfig?: RAGAConfig,
 ): Promise<{
   pages: CrawlPageResult[];
   totalPages: number;
@@ -997,38 +996,39 @@ export async function crawlSeeds(
   const crawlResults = await concurrentMap(
     seedUrls,
     async (seedUrl: string) => {
-      // ── RAG-Anything for document URLs ──────────────────────────────
-      if (isDocumentUrl(seedUrl) && ragaConfig?.enabled && ragaConfig.baseUrl) {
-        try {
-          const ragaResult = await extractWithRAGA(seedUrl);
-          if (ragaResult.markdown && ragaResult.markdown.trim().length > 0) {
-            const page: import('../types.js').CrawlPageResult = {
-              url: seedUrl,
-              success: true,
-              markdown: ragaResult.markdown,
-              title: ragaResult.title ?? null,
-              description: null,
-              links: [],
-              statusCode: null,
-              errorMessage: null,
-            };
-            const result: import('../types.js').WebCrawlResult = {
-              seedUrl,
-              strategy: opts.strategy,
-              maxDepth: opts.maxDepth,
-              maxPages: 1,
-              totalPages: 1,
-              successfulPages: 1,
-              pages: [page],
-            };
-            return { seedUrl, result, error: undefined as unknown };
-          }
-        } catch {
-          logger.warn(
-            { seedUrl },
-            'semantic_crawl: RAGA extraction failed, falling back to Crawl4AI',
-          );
+      // ── Document URL extraction (text docs only) ────────────────────
+      if (isDocumentUrl(seedUrl)) {
+        const docResult = await extractDocumentUrl(
+          seedUrl,
+          opts.pageTimeout === undefined ? undefined : { timeoutMs: opts.pageTimeout },
+        );
+        if (docResult.success && docResult.markdown.trim().length > 0) {
+          const page: import('../types.js').CrawlPageResult = {
+            url: seedUrl,
+            success: true,
+            markdown: docResult.markdown,
+            title: null,
+            description: null,
+            links: [],
+            statusCode: null,
+            errorMessage: null,
+          };
+          const result: import('../types.js').WebCrawlResult = {
+            seedUrl,
+            strategy: opts.strategy,
+            maxDepth: opts.maxDepth,
+            maxPages: 1,
+            totalPages: 1,
+            successfulPages: 1,
+            pages: [page],
+          };
+          return { seedUrl, result, error: undefined as unknown };
         }
+        // binary or failed — fall through to Crawl4AI
+        logger.debug(
+          { seedUrl, unsupported: docResult.unsupported },
+          'semantic_crawl: document URL extraction skipped or failed, falling back to Crawl4AI',
+        );
       }
 
       const crawlOpts: WebCrawlOptions = {
@@ -1551,7 +1551,6 @@ export async function semanticCrawl(
   embeddingBaseUrl: string,
   embeddingApiToken: string,
   embeddingDimensions: number,
-  ragaConfig?: RAGAConfig,
 ): Promise<SemanticCrawlResult> {
   let corpusChunks: CorpusChunk[];
   let pagesCrawled: number;
@@ -1587,15 +1586,10 @@ export async function semanticCrawl(
           ? [opts.source.url, ...opts.source.urls]
           : [opts.source.url];
       const safeUrls = filterSafeUrls(seedUrls, opts.domainTrust);
-      const result = await crawlSeeds(
-        safeUrls,
-        crawl4aiCfg,
-        {
-          ...opts,
-          sourceType: opts.source.type,
-        },
-        ragaConfig,
-      );
+      const result = await crawlSeeds(safeUrls, crawl4aiCfg, {
+        ...opts,
+        sourceType: opts.source.type,
+      });
       crawlWarnings.push(...result.warnings);
       for (const sw of result.structuredWarnings) {
         crawlStructuredWarnings.push(sw);
@@ -1716,7 +1710,7 @@ export async function semanticCrawl(
         maxDepth: 0,
         sourceType: opts.source.type,
       };
-      const result = await crawlSeeds(selectedUrls, crawl4aiCfg, sitemapOpts, ragaConfig);
+      const result = await crawlSeeds(selectedUrls, crawl4aiCfg, sitemapOpts);
       crawlWarnings.push(...result.warnings);
       for (const sw of result.structuredWarnings) {
         crawlStructuredWarnings.push(sw);
@@ -1777,7 +1771,7 @@ export async function semanticCrawl(
         sourceType: opts.source.type,
         allowPathDrift: true,
       };
-      const result = await crawlSeeds(safeUrls, crawl4aiCfg, searchOpts, ragaConfig);
+      const result = await crawlSeeds(safeUrls, crawl4aiCfg, searchOpts);
       crawlWarnings.push(...result.warnings);
       for (const sw of result.structuredWarnings) {
         crawlStructuredWarnings.push(sw);

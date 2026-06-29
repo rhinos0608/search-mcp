@@ -1,7 +1,7 @@
 /**
  * Extraction Quality Detector
  *
- * Determines whether Crawl4AI extraction succeeded or should escalate to RAG-Anything.
+ * Determines whether Crawl4AI extraction succeeded or should use document extraction.
  * Provides configurable quality thresholds and detailed diagnostics.
  */
 
@@ -125,13 +125,13 @@ export function checkExtractionQuality(
 }
 
 /**
- * Determine if RAG-Anything escalation is needed based on quality check
+ * Determine if document extraction escalation is needed based on quality check
  *
  * @param quality - Quality check result
  * @param contentType - Content type from HTTP headers or URL
- * @returns Whether to escalate to RAG-Anything
+ * @returns Whether to escalate to document extraction
  */
-export function shouldEscalateToRAGA(quality: QualityCheck, contentType?: string): boolean {
+export function shouldEscalateExtraction(quality: QualityCheck, contentType?: string): boolean {
   // Always escalate for document types
   const documentTypes = [
     'application/pdf',
@@ -145,13 +145,13 @@ export function shouldEscalateToRAGA(quality: QualityCheck, contentType?: string
   if (contentType) {
     const normalizedType = contentType.toLowerCase();
     if (documentTypes.some((dt) => normalizedType.includes(dt))) {
-      logger.debug({ contentType }, 'Escalating to RAG-Anything: document type');
+      logger.debug({ contentType }, 'Escalating to document extraction: document type');
       return true;
     }
 
     // Escalate for images that might need OCR
     if (normalizedType.startsWith('image/')) {
-      logger.debug({ contentType }, 'Escalating to RAG-Anything: image type');
+      logger.debug({ contentType }, 'Escalating to document extraction: image type');
       return true;
     }
   }
@@ -170,7 +170,7 @@ export function shouldEscalateToRAGA(quality: QualityCheck, contentType?: string
   if (hasEscalationTrigger) {
     logger.debug(
       { escalations: quality.escalations },
-      'Escalating to RAG-Anything: quality triggers',
+      'Escalating to document extraction: quality triggers',
     );
     return true;
   }

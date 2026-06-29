@@ -2,11 +2,11 @@
  * Document URL detection utilities.
  *
  * Shared across the crawl pipeline to detect document file extensions
- * (PDF, Office, images, etc.) that should use RAG-Anything extraction
+ * (PDF, Office, images, text files, etc.) that need document extraction
  * instead of Crawl4AI headless browser rendering.
  */
 
-/** Document file extensions that should use RAG-Anything extraction. */
+/** Document file extensions that need document extraction handling. */
 export const DOCUMENT_EXTENSIONS = new Set([
   '.pdf',
   '.doc',
@@ -20,6 +20,15 @@ export const DOCUMENT_EXTENSIONS = new Set([
   '.odp',
   '.rtf',
   '.tex',
+  '.txt',
+  '.md',
+  '.markdown',
+  '.csv',
+  '.tsv',
+  '.json',
+  '.xml',
+  '.yaml',
+  '.yml',
   '.png',
   '.jpg',
   '.jpeg',

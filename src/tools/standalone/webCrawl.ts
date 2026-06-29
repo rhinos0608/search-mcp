@@ -2,7 +2,7 @@
  * Standalone web_crawl tool registration.
  *
  * Crawl a URL using a headless Playwright browser via crawl4ai sidecar
- * with RAG-Anything fallback for document URLs.
+ * with in-house text-document extraction for supported document URLs.
  */
 
 import { z } from 'zod/v4';
@@ -12,13 +12,15 @@ import type { SearchConfig } from '../../config.js';
 import { logger } from '../../logger.js';
 import { webCrawl } from '../webCrawl.js';
 import { makeResult, errorResponse, successResponse } from '../response.js';
-import {
-  tryRagaFallback,
-  normalizeLlmForValidation,
-  buildLlmFallback,
-} from '../../utils/ragaFallback.js';
+import { extractDocumentUrl } from '../../utils/documentExtraction.js';
+import { isDocumentUrl } from '../../utils/documentUtils.js';
 import { readabilityFallbackResult, extractionWarnings } from '../../utils/crawlResultShaping.js';
-import { extractionConfigSchema, validateExtractionConfig } from '../../utils/extractionConfig.js';
+import {
+  buildLlmFallback,
+  extractionConfigSchema,
+  normalizeLlmForValidation,
+  validateExtractionConfig,
+} from '../../utils/extractionConfig.js';
 import type { KnowledgeGraphHook } from '../../knowledge/hook.js';
 
 export function registerWebCrawl(
@@ -30,7 +32,7 @@ export function registerWebCrawl(
     'web_crawl',
     {
       description:
-        'Crawl a URL using a headless Playwright browser (via a crawl4ai sidecar). ' +
+        'Best tool for easily getting data from JavaScript-rendered and HTML pages using a headless Playwright browser (via a crawl4ai sidecar). ' +
         'Handles JavaScript-rendered SPAs, React/Vue apps, consent popups, and shadow DOM. ' +
         'Returns clean LLM-ready Markdown with title, description, and extracted links for each crawled page. ' +
         'Supports deep crawling across multiple pages. Requires CRAWL4AI_BASE_URL env var (self-hosted Docker sidecar).',
@@ -103,7 +105,7 @@ export function registerWebCrawl(
         pageTimeout,
         jsCode,
       },
-      extra,
+      _extra,
     ) => {
       logger.info({ tool: 'web_crawl', url, strategy, maxDepth, maxPages }, 'Tool invoked');
       const start = Date.now();
@@ -113,25 +115,17 @@ export function registerWebCrawl(
           validateExtractionConfig(extractionConfig, normalizeLlmForValidation(cfg.llm));
         }
 
-        // RAG-Anything escalation for document URLs (PDF, Office, images, etc.)
-        if (cfg.raga.enabled && cfg.raga.baseUrl) {
-          const ragaResult = await tryRagaFallback(
-            url,
-            { baseUrl: cfg.raga.baseUrl, timeoutMs: cfg.raga.timeoutMs },
-            extra,
-          );
-          if (ragaResult) {
-            logger.info(
-              { tool: 'web_crawl', url },
-              'Document URL detected — using RAG-Anything extraction',
-            );
-            warnings.push(...ragaResult.warnings);
+        if (isDocumentUrl(url)) {
+          const documentResult = await extractDocumentUrl(url, { timeoutMs: pageTimeout });
+          warnings.push(...documentResult.warnings);
+          if (documentResult.success && documentResult.markdown.trim().length > 0) {
+            logger.info({ tool: 'web_crawl', url }, 'Document URL extracted in-process');
             const article = {
               url,
-              title: null,
-              textContent: ragaResult.markdown,
-              content: ragaResult.markdown,
-              extractionMethod: 'raga' as const,
+              title: documentResult.title || null,
+              textContent: documentResult.markdown,
+              content: documentResult.markdown,
+              extractionMethod: 'document' as const,
               elements: [],
               byline: null,
               siteName: null,
@@ -142,7 +136,6 @@ export function registerWebCrawl(
             const data = readabilityFallbackResult(url, article, strategy, maxDepth, maxPages);
             const result = makeResult('web_crawl', data, Date.now() - start, { warnings });
 
-            // KG passive capture (fire-and-forget, never fails the tool call)
             if (kgHook && cfg.knowledgeGraph.enabled) {
               void kgHook.onToolCall('web_crawl', data).catch((err: unknown) => {
                 logger.warn({ err, tool: 'web_crawl' }, 'KG passive capture failed (non-fatal)');

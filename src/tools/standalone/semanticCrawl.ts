@@ -14,13 +14,15 @@ import { logger } from '../../logger.js';
 import { DEFAULT_SEMANTIC_MAX_BYTES } from '../../semanticLimits.js';
 import { semanticCrawl } from '../semanticCrawl.js';
 import { makeResult, errorResponse, successResponse } from '../response.js';
-import {
-  tryRagaFallback,
-  normalizeLlmForValidation,
-  buildLlmFallback,
-} from '../../utils/ragaFallback.js';
+import { extractDocumentUrl } from '../../utils/documentExtraction.js';
+import { isDocumentUrl } from '../../utils/documentUtils.js';
 import { readabilityFallbackResult } from '../../utils/crawlResultShaping.js';
-import { extractionConfigSchema, validateExtractionConfig } from '../../utils/extractionConfig.js';
+import {
+  buildLlmFallback,
+  extractionConfigSchema,
+  normalizeLlmForValidation,
+  validateExtractionConfig,
+} from '../../utils/extractionConfig.js';
 import { createProgressReporter } from '../progress.js';
 import type { KnowledgeGraphHook } from '../../knowledge/hook.js';
 
@@ -284,29 +286,22 @@ export function registerSemanticCrawl(
           );
         }
 
-        if (
-          typedSource.type === 'url' &&
-          cfg.raga.enabled &&
-          typeof cfg.raga.baseUrl === 'string' &&
-          cfg.raga.baseUrl.trim() !== ''
-        ) {
-          const ragaResult = await tryRagaFallback(
-            typedSource.url,
-            { baseUrl: cfg.raga.baseUrl, timeoutMs: cfg.raga.timeoutMs },
-            extra,
-          );
-          if (ragaResult) {
+        if (typedSource.type === 'url' && isDocumentUrl(typedSource.url)) {
+          const documentResult = await extractDocumentUrl(typedSource.url, {
+            timeoutMs: pageTimeout,
+          });
+          warnings.push(...documentResult.warnings);
+          if (documentResult.success && documentResult.markdown.trim().length > 0) {
             logger.info(
               { tool: 'semantic_crawl', url: typedSource.url },
-              'Document URL detected — using RAG-Anything extraction',
+              'Document URL extracted in-process',
             );
-            warnings.push(...ragaResult.warnings);
             const article: import('../../types.js').ArticleResult = {
               url: typedSource.url,
-              title: null,
-              textContent: ragaResult.markdown,
-              content: ragaResult.markdown,
-              extractionMethod: 'raga',
+              title: documentResult.title || null,
+              textContent: documentResult.markdown,
+              content: documentResult.markdown,
+              extractionMethod: 'document',
               byline: null,
               siteName: null,
               description: null,
@@ -325,7 +320,6 @@ export function registerSemanticCrawl(
               warnings,
             });
 
-            // KG passive capture (fire-and-forget, never fails the tool call)
             if (kgHook && cfg.knowledgeGraph.enabled) {
               void kgHook.onToolCall('semantic_crawl', singlePage).catch((err: unknown) => {
                 logger.warn(
@@ -380,7 +374,6 @@ export function registerSemanticCrawl(
                 cfg.embeddingSidecar.baseUrl,
                 cfg.embeddingSidecar.apiToken ?? '',
                 cfg.embeddingSidecar.dimensions,
-                cfg.raga,
               ),
             ),
           );
@@ -438,7 +431,6 @@ export function registerSemanticCrawl(
           cfg.embeddingSidecar.baseUrl,
           cfg.embeddingSidecar.apiToken ?? '',
           cfg.embeddingSidecar.dimensions,
-          cfg.raga,
         );
         const result = makeResult('semantic_crawl', data, Date.now() - start, {
           warnings: [...warnings, ...(data.warnings ?? [])],

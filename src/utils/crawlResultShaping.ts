@@ -9,7 +9,7 @@ import type { ArticleResult, WebCrawlResult } from '../types.js';
 
 /**
  * Normalize a Readability article into the WebCrawlResult shape.
- * Used when falling back to Readability or when RAGA extraction produces markdown.
+ * Used when falling back to Readability or when document extraction produces markdown.
  */
 export function readabilityFallbackResult(
   url: string,

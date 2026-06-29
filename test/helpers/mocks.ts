@@ -34,14 +34,6 @@ export function createMockRuntime(overrides?: Partial<SearchMcpRuntime>): Search
     domainTrust: { enabled: false, trustedDomains: [], blockedDomains: [] },
     scrubContent: false,
     llm: { provider: '', apiToken: '', baseUrl: '' },
-    raga: {
-      enabled: false,
-      baseUrl: '',
-      timeoutMs: 30000,
-      maxRetries: 2,
-      cacheEnabled: true,
-      defaultParser: 'auto',
-    },
     duckduckgo: { region: 'us-en', safeSearch: 'moderate' },
     ollamaSearch: { baseUrl: '', apiKey: '' },
     deepResearch: {
