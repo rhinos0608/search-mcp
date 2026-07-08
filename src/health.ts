@@ -25,6 +25,7 @@ import { researchCapabilities } from './tools/families/research.js';
 import { browserCapabilities } from './tools/families/browser.js';
 import { agenticBrowseCapabilities } from './tools/families/agenticBrowse.js';
 import { knowledgeGraphCapabilities } from './tools/families/knowledgeGraph.js';
+import { semanticCrawlCapabilities } from './tools/families/semanticCrawl.js';
 import { outputBudget } from './utils/outputBudget.js';
 import type { OutputBudgetStats } from './utils/outputBudget.js';
 import { toolStats } from './tools/stats.js';
@@ -72,11 +73,6 @@ const GATED_TOOLS: Record<string, GateRule> = {
     check: (cfg) => cfg.crawl4ai.baseUrl.length > 0,
     remediation:
       'Set CRAWL4AI_BASE_URL to point at a running crawl4ai sidecar (e.g. http://localhost:11235). Run: docker run -d -p 11235:11235 unclecode/crawl4ai:latest',
-  },
-  semantic_crawl: {
-    check: (cfg) => cfg.crawl4ai.baseUrl.length > 0 && cfg.embeddingSidecar.baseUrl.length > 0,
-    remediation:
-      'Set CRAWL4AI_BASE_URL and EMBEDDING_SIDECAR_BASE_URL. The embedding sidecar requires a running crawl4ai sidecar.',
   },
   semantic_jobs: {
     check: (cfg) =>
@@ -398,6 +394,16 @@ export function configHealth(cfg: SearchConfig): Record<string, ToolHealth> {
   }
 
   for (const cap of agenticBrowseCapabilities(cfg)) {
+    report[cap.name] = cap.available
+      ? { status: 'healthy' as const, message: 'Configured.' }
+      : {
+          status: 'unconfigured' as const,
+          message: 'Missing required configuration.',
+          remediation: cap.issue ?? undefined,
+        };
+  }
+
+  for (const cap of semanticCrawlCapabilities(cfg)) {
     report[cap.name] = cap.available
       ? { status: 'healthy' as const, message: 'Configured.' }
       : {

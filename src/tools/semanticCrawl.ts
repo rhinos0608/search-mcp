@@ -1867,7 +1867,7 @@ export async function semanticCrawl(
       });
       if (!cached) {
         throw new Error(
-          `Corpus '${opts.source.corpusId}' not found or expired. Re-issue with the original source to rebuild, or use semantic_crawl_list_corpora to browse available cached corpora.`,
+          `Corpus '${opts.source.corpusId}' not found or expired. Re-issue with the original source to rebuild, or use semantic_crawl.list_corpora to browse available cached corpora.`,
         );
       }
       corpusChunks = cached.chunks;

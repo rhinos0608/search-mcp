@@ -8,7 +8,6 @@
 
 import { loadConfig } from '../../config.js';
 import type { CitationCollector } from '../citationCollector.js';
-import type { DeepResearchLlmClient } from '../llm/chat.js';
 import type { StrategyContext } from './types.js';
 import type { ResearchTools } from '../types.js';
 
@@ -86,11 +85,6 @@ export function buildAgentTools(ctx: StrategyContext, collector: CitationCollect
   // Fetch page — needs Crawl4AI
   if (cfg.crawl4ai.baseUrl.length > 0) {
     tools.push(createFetchPageTool(getTools, collector));
-  }
-
-  // fetch_focus — needs Crawl4AI + LLM
-  if (cfg.crawl4ai.baseUrl.length > 0 && ctx.llm) {
-    tools.push(createFetchFocusTool(getTools, collector, ctx.llm));
   }
 
   // research_subtopic — needs LLM for decomposition
@@ -430,7 +424,7 @@ function createYouTubeSearchTool(
   return {
     name: 'search_youtube',
     description:
-      'Search YouTube for videos. Best for tutorials, talks, demos, interviews, and first-hand walkthroughs. Pair with fetch_focus on a video URL to pull transcript-grounded detail.',
+      'Search YouTube for videos. Best for tutorials, talks, demos, interviews, and first-hand walkthroughs.',
     parameters: {
       query: { type: 'string', description: 'The search query', required: true },
       limit: { type: 'number', description: 'Max results (1-20, default 10)' },
@@ -500,79 +494,6 @@ function createFetchPageTool(
         return {
           content: `Failed to fetch ${url}: ${err instanceof Error ? err.message : String(err)}`,
           error: 'fetch failed',
-        };
-      }
-    },
-  };
-}
-
-function createFetchFocusTool(
-  getTools: () => Promise<ResearchTools>,
-  collector: CitationCollector,
-  llm: DeepResearchLlmClient,
-): AgentTool {
-  return {
-    name: 'fetch_focus',
-    description:
-      'Fetch a web page and extract ONLY the spans relevant to a specific question. Saves tokens — use instead of fetch_page when you only need specific information.',
-    parameters: {
-      url: { type: 'string', description: 'The URL to fetch', required: true },
-      focus: {
-        type: 'string',
-        description: 'What specific information to extract from the page',
-        required: true,
-      },
-    },
-    execute: async (args) => {
-      const url = typeof args.url === 'string' ? args.url : '';
-      const focus = typeof args.focus === 'string' ? args.focus : '';
-      if (!url) return { content: 'Error: url is required', error: 'missing url' };
-      if (!focus) return { content: 'Error: focus is required', error: 'missing focus' };
-
-      try {
-        // Step 1: Fetch the page
-        const pages = await (await getTools()).webCrawl(url, 1);
-        const page = pages[0];
-        if (!page) {
-          return { content: `No content extracted from ${url}`, error: 'empty page' };
-        }
-        const rawContent = page.markdown.slice(0, 20000);
-
-        // Step 2: Ask LLM to extract relevant spans
-        const extractResp = await llm.callWorker({
-          messages: [
-            {
-              role: 'system',
-              content:
-                'Extract verbatim spans from web pages that answer a specific question. Return ONLY relevant excerpts, quoted verbatim. Be concise.',
-            },
-            {
-              role: 'user',
-              content: `Question: ${focus}\n\nPage content:\n${rawContent}`,
-            },
-          ],
-          temperature: 0.3,
-          maxTokens: 2000,
-        });
-
-        if (!extractResp.success) {
-          return {
-            content: `[Page: ${page.title}]\n${url}\n\n${rawContent.slice(0, 3000)}`,
-          };
-        }
-
-        collector.addResults(
-          [{ title: page.title, link: url, snippet: extractResp.content.slice(0, 300) }],
-          'web',
-        );
-
-        return {
-          content: `[Extracted from: ${page.title}]\n${url}\n\nFocus: ${focus}\n\n${extractResp.content}`,
-        };
-      } catch (err) {
-        return {
-          content: `fetch_focus failed for ${url}: ${err instanceof Error ? err.message : String(err)}`,
-          error: 'fetch_focus failed',
         };
       }
     },

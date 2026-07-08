@@ -24,7 +24,7 @@ interface RegisteredToolEntry {
 const STANDALONE_TOOLS = new Set(['web_search', 'health_check']);
 
 /** Tools that require specific config and may not be registered in default env. */
-const GATED_STANDALONE_TOOLS = new Set(['semantic_crawl', 'semantic_jobs', 'deep_research']);
+const GATED_STANDALONE_TOOLS = new Set(['semantic_jobs', 'deep_research']);
 
 const FAMILY_TOOLS = new Map<string, string[]>([
   [
@@ -36,6 +36,7 @@ const FAMILY_TOOLS = new Map<string, string[]>([
   ['research', ['academic', 'arxiv', 'hackernews', 'stackoverflow', 'pubmed', 'wikipedia']],
   ['packages', ['npm', 'pypi']],
   ['agentic_browse', ['browse', 'present', 'read', 'focus']],
+  ['semantic_crawl', ['crawl', 'list_corpora', 'inspect_corpus']],
 ]);
 
 /** Families that require specific config and may not be registered in default env. */
@@ -201,6 +202,13 @@ for (const [familyName, actions] of FAMILY_TOOLS) {
       }
       if (action === 'present') {
         params.documentId = 'test-doc-id';
+      }
+      if (action === 'crawl' && familyName === 'semantic_crawl') {
+        params.source = { type: 'url', url: 'https://example.com' };
+        params.query = 'test';
+      }
+      if (action === 'inspect_corpus') {
+        params.corpusId = 'test-corpus-id';
       }
       if (action === 'code_search') {
         params.repo = 'owner/repo';
@@ -419,14 +427,6 @@ interface RegisteredToolWithHandler {
 
 /** Default extra object matching SDK's extra shape for tests. */
 const DEFAULT_EXTRA = {};
-
-test('fetch_focus is registered as deprecated alias alongside agentic_browse.focus', () => {
-  const server = createServer(loadConfig()).server;
-  const tools = getAllRegisteredTools(server);
-
-  assert.ok('fetch_focus' in tools, 'fetch_focus should be registered as deprecated alias');
-  assert.ok(tools.agentic_browse, 'agentic_browse should be registered');
-});
 
 test('agentic_browse.focus returns config error when focus dependencies are missing', async () => {
   const server = createServer(loadConfig()).server;

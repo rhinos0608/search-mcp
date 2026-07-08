@@ -14,12 +14,9 @@ import { getVersion } from './version.js';
 // Standalone tools
 import { registerWebSearch } from './tools/standalone/webSearch.js';
 import { registerWebCrawl } from './tools/standalone/webCrawl.js';
-import { registerSemanticCrawl } from './tools/standalone/semanticCrawl.js';
-import { registerSemanticCrawlListCorpora } from './tools/standalone/semanticCrawlListCorpora.js';
-import { registerSemanticCrawlInspectCorpus } from './tools/standalone/semanticCrawlInspectCorpus.js';
+import { registerSemanticCrawlFamily } from './tools/families/semanticCrawl.js';
 import { registerSemanticJobs } from './tools/standalone/semanticJobs.js';
 import { registerHealthCheck } from './tools/standalone/healthCheck.js';
-import { registerFetchFocus } from './tools/standalone/fetchFocus.js';
 import { registerRssTool } from './tools/standalone/rss.js';
 
 // Family tools
@@ -81,11 +78,9 @@ export function createServer(
 
   // Gated standalone tools
   if (!gated.has('semantic_jobs')) registerSemanticJobs(server, cfg);
-  if (!gated.has('semantic_crawl')) {
-    registerSemanticCrawl(server, cfg, kgHook ?? undefined);
-    registerSemanticCrawlListCorpora(server);
-    registerSemanticCrawlInspectCorpus(server);
-  }
+  // semantic_crawl is now a family tool with crawl/list_corpora/inspect_corpus actions.
+  // The crawl action requires Crawl4AI + embedding; list_corpora/inspect_corpus are always available.
+  registerSemanticCrawlFamily(server, cfg, kgHook ?? undefined);
   if (!gated.has('deep_research')) registerDeepResearchTool(server, cfg, kgHook ?? undefined);
 
   // Family tools (pass kgHook for passive capture)
@@ -102,10 +97,6 @@ export function createServer(
 
   // Conditional / gated tools
   registerHealthCheck(server, cfg);
-
-  // Deprecated compatibility alias — use agentic_browse.focus instead.
-  // Will be removed in the next major release.
-  registerFetchFocus(server, cfg);
 
   // Knowledge graph family (conditional on KG enabled)
   if (cfg.knowledgeGraph.enabled) {
