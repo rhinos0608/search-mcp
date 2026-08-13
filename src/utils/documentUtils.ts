@@ -50,19 +50,38 @@ export function isDocumentUrl(url: string): boolean {
   }
 }
 
-/** Convert arXiv PDF URLs to the equivalent abstract page URL. */
-export function arxivPdfToAbstract(url: string): string | null {
+const ARXIV_HOST_RE = /(^|\.)arxiv\.org$/iu;
+// Modern IDs look like `0701.00123`; legacy IDs carry an archive prefix and a
+// bare 7-digit number (`math/0309136`, `cs/0701001`). Both may carry a version
+// suffix and an optional `.pdf` extension.
+const ARXIV_ID_PATH_RE =
+  /^\/(?:pdf|abs)\/((?:\d{4}\.\d{4,6})|(?:[a-z-]+\/\d{7}))(?:v\d+)?(?:\.pdf)?$/iu;
+
+/** Extract the arXiv paper id from a `/pdf/<id>` or `/abs/<id>` URL on arxiv.org. */
+export function arxivIdFromUrl(url: string): string | null {
   try {
     const parsed = new URL(url);
-    if (parsed.hostname !== 'arxiv.org' && !parsed.hostname.endsWith('.arxiv.org')) {
-      return null;
-    }
-    const match = /^\/pdf\/(\d{4}\.\d{4,6})(?:v\d+)?(?:\.pdf)?$/iu.exec(parsed.pathname);
+    if (!ARXIV_HOST_RE.test(parsed.hostname)) return null;
+    const match = ARXIV_ID_PATH_RE.exec(parsed.pathname);
     if (match?.[1] === undefined) return null;
-    return `https://arxiv.org/abs/${match[1]}`;
+    return match[1];
   } catch {
     return null;
   }
+}
+
+/** Convert arXiv PDF URLs to the equivalent abstract page URL. */
+export function arxivPdfToAbstract(url: string): string | null {
+  const id = arxivIdFromUrl(url);
+  if (id === null) return null;
+  return `https://arxiv.org/abs/${id}`;
+}
+
+/** Return arXiv HTML-rendering candidate URLs for a URL with a parseable arxiv id. */
+export function arxivHtmlUrls(url: string): string[] {
+  const id = arxivIdFromUrl(url);
+  if (id === null) return [];
+  return [`https://arxiv.org/html/${id}`, `https://ar5iv.labs.arxiv.org/html/${id}`];
 }
 
 /** Strip a known document extension, which often reveals an HTML landing page. */
@@ -81,8 +100,10 @@ export function documentUrlToHtmlFallback(url: string): string | null {
 }
 
 export function documentFallbackUrls(url: string): string[] {
-  const fallbacks = [arxivPdfToAbstract(url), documentUrlToHtmlFallback(url)].filter(
-    (candidate): candidate is string => candidate !== null && candidate !== url,
-  );
+  const fallbacks = [
+    ...arxivHtmlUrls(url),
+    arxivPdfToAbstract(url),
+    documentUrlToHtmlFallback(url),
+  ].filter((candidate): candidate is string => candidate !== null && candidate !== url);
   return [...new Set(fallbacks)];
 }
