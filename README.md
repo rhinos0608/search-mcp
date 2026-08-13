@@ -6,21 +6,23 @@
 [![MCP Compatible](https://img.shields.io/badge/MCP-Compatible-green)](https://modelcontextprotocol.io)
 
 > **18 MCP tools** (77 actions) for web search, RSS/Atom feeds, semantic RAG, code analysis, knowledge graph, job search, academic research, social media, browser automation, agentic browsing, and deep research — all in one MCP server.
+>
+> **New in v3.3+:** All-provider parallel fanout with Codex-first dedup, source credibility tiering (institutional domain registry), bare-Markdown result formatting with per-block `[N-M]` citations, overflow artifacts, in-process PDF/Office document parsing with opt-in multimodal VLM tier, auto-enrichment of thin document snippets, and `aiSummary` modes for Exa/Tavily native summaries.
 
 ## Features at a Glance
 
-| Category            | Tools                                                                                                                                                                                                                                                                                         |
-| ------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Web**             | `web_search` (Exa/Brave/SearXNG/DuckDuckGo/Tavily/Ollama Search), `rss` (RSS/Atom parse/search/monitor), `web_crawl` ⚙️, `agentic_browse` family (`browse`/`present`/`read`/`focus`)                                                                                                          |
-| **Semantic RAG**    | `semantic_crawl` ⚙️ (URL/sitemap/search/github/cached sources, BM25+embedding+RRF), `semantic_crawl_list_corpora` ⚙️, `semantic_crawl_inspect_corpus` ⚙️                                                                                                                                      |
-| **GitHub**          | `github` family: `repo`, `file`, `list_dir`, `tree`, `search`, `trending`, `code_search`                                                                                                                                                                                                      |
-| **Video/Social**    | `youtube` family (search/transcript/semantic), `reddit` family (search/comments/semantic)                                                                                                                                                                                                     |
-| **Research**        | `research` family (academic/arxiv/hackernews/stackoverflow/pubmed/wikipedia/openalex/crossref/datacite/ror/semantic_scholar/gdelt/wikidata/v2ex/auto), `deep_research` ⚙️ (start/run/poll/list/cancel/save via job-poll protocol)                                                             |
-| **Packages**        | `packages` family (npm/pypi)                                                                                                                                                                                                                                                                  |
-| **Jobs**            | `semantic_jobs` ⚙️ — structured extraction from 20+ boards (SEEK, Indeed, LinkedIn, etc.) with constraint filtering and weighted ranking                                                                                                                                                      |
-| **Browser**         | `browser` ⚙️ family (navigate/snapshot/click/type/evaluate/screenshot/extract/act/wait/pdf/storage/network/tabs/session/wait_for/dialog_handle/iframe_context/scroll_to_load/paginate/download/table_extract/network_intercept/resource_timing/diff) with CDP stealth or CloakBrowser backend |
-| **Knowledge Graph** | `knowledge_graph` ⚙️ family: `ingest`, `query`, `entity_lookup_batch`, `status`, `rebuild`, `family_list`, `family_get`, `family_merge`, `run_list`, `run_rollback` — entity extraction, querying, and family management                                                                      |
-| **System**          | `health_check` — live probe of all backends with tool tiers, active backend, and missing config hints                                                                                                                                                                                         |
+| Category            | Tools                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| ------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Web**             | `web_search` (Codex main source; all configured Exa/Brave/SearXNG/DuckDuckGo/Tavily/Ollama backends fan out in parallel; URL-dedupe keeping richest representation; bare-Markdown output with per-block `[N-M]` citations and 192 KiB budget; excerpt-only by default; `aiSummary` no/yes/only for Exa/Tavily native summaries; optional semantic rerank with source-credibility floor; auto-enrich thin document snippets via in-process PDF/Office parsing), `rss` (RSS/Atom parse/search/monitor), `web_crawl` ⚙️, `agentic_browse` family (`browse`/`present`/`read`/`focus`) |
+| **Semantic RAG**    | `semantic_crawl` ⚙️ (URL/sitemap/search/github/cached sources, BM25+embedding+RRF), `semantic_crawl_list_corpora` ⚙️, `semantic_crawl_inspect_corpus` ⚙️                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| **GitHub**          | `github` family: `repo`, `file`, `list_dir`, `tree`, `search`, `trending`, `code_search`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| **Video/Social**    | `youtube` family (search/transcript/semantic), `reddit` family (search/comments/semantic)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| **Research**        | `research` family (academic/arxiv/hackernews/stackoverflow/pubmed/wikipedia/openalex/crossref/datacite/ror/semantic_scholar/gdelt/wikidata/v2ex/auto), `deep_research` ⚙️ (start/run/poll/list/cancel/save via job-poll protocol)                                                                                                                                                                                                                                                                                                                                                 |
+| **Packages**        | `packages` family (npm/pypi)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| **Jobs**            | `semantic_jobs` ⚙️ — structured extraction from 20+ boards (SEEK, Indeed, LinkedIn, etc.) with constraint filtering and weighted ranking                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| **Browser**         | `browser` ⚙️ family (navigate/snapshot/click/type/evaluate/screenshot/extract/act/wait/pdf/storage/network/tabs/session/wait_for/dialog_handle/iframe_context/scroll_to_load/paginate/download/table_extract/network_intercept/resource_timing/diff) with CDP stealth or CloakBrowser backend                                                                                                                                                                                                                                                                                     |
+| **Knowledge Graph** | `knowledge_graph` ⚙️ family: `ingest`, `query`, `entity_lookup_batch`, `status`, `rebuild`, `family_list`, `family_get`, `family_merge`, `run_list`, `run_rollback` — entity extraction, querying, and family management                                                                                                                                                                                                                                                                                                                                                          |
+| **System**          | `health_check` — live probe of all backends with tool tiers, active backend, and missing config hints                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
 
 > ⚙️ = **config-gated**: tool is only registered when its required env vars are set. If config is missing, the tool does not appear at all — no silent failures, no broken handlers. See [Configuration](#configuration) for required vars per tool.
 
@@ -47,19 +49,26 @@ The server loads config from three sources (resolution order):
 
 Copy [`config.example.json`](config.example.json) to `config.json` and fill in your values. All fields are also settable via the env vars documented below.
 
+> `config.example.json` intentionally does **not** set `searchBackend`; Codex is main source and every configured available backend runs in parallel. Matching URLs deduplicate against Codex results. `SEARCH_BACKEND` sets fallback ordering only; it does not limit provider scope. Plain legacy `"searchBackend": "searxng"` stays non-explicit, but all configured providers still run.
+
 ### Search Backend (choose one or more)
 
-| Variable                       | Description                                                                            |
-| ------------------------------ | -------------------------------------------------------------------------------------- |
-| `SEARCH_BACKEND`               | Primary backend: `brave`, `searxng`, `exa`, `duckduckgo`, `ollama-search`, or `tavily` |
-| `SEARXNG_BASE_URL`             | SearXNG instance URL (privacy-first, no API key needed)                                |
-| `BRAVE_API_KEY`                | Brave Search API key                                                                   |
-| `EXA_API_KEY`                  | Exa Search API key                                                                     |
-| `TAVILY_API_KEY`               | Tavily Search API key (tavily.com)                                                     |
-| `SEARCH_DUCKDUCKGO_REGION`     | DuckDuckGo region code (default `us-en`)                                               |
-| `SEARCH_DUCKDUCKGO_SAFESEARCH` | DuckDuckGo safe search (default `moderate`)                                            |
-| `SEARCH_OLLAMA_BASE_URL`       | Ollama web-search base URL (distinct from embedding Ollama)                            |
-| `SEARCH_OLLAMA_API_KEY`        | Ollama web-search API key (optional)                                                   |
+| Variable                       | Description                                                                                                                       |
+| ------------------------------ | --------------------------------------------------------------------------------------------------------------------------------- |
+| `SEARCH_BACKEND`               | Fallback preference: `brave`, `searxng`, `exa`, `duckduckgo`, `ollama-search`, `tavily`, or `codex`; all configured providers run |
+| `SEARXNG_BASE_URL`             | SearXNG instance URL (privacy-first, no API key needed)                                                                           |
+| `BRAVE_API_KEY`                | Brave Search API key                                                                                                              |
+| `EXA_API_KEY`                  | Exa Search API key                                                                                                                |
+| `TAVILY_API_KEY`               | Tavily Search API key (tavily.com)                                                                                                |
+| `CODEX_ACCESS_TOKEN`           | ChatGPT/Codex access token — enables default Codex web search                                                                     |
+| `CODEX_ACCOUNT_ID`             | Optional ChatGPT account ID for Codex search                                                                                      |
+| `CODEX_HOME`                   | Codex config dir (default `~/.codex`) — `auth.json` is auto-discovered                                                            |
+| `SEARCH_DUCKDUCKGO_REGION`     | DuckDuckGo region code (default `us-en`)                                                                                          |
+| `SEARCH_DUCKDUCKGO_SAFESEARCH` | DuckDuckGo safe search (default `moderate`)                                                                                       |
+| `SEARCH_OLLAMA_BASE_URL`       | Ollama web-search base URL (distinct from embedding Ollama)                                                                       |
+| `SEARCH_OLLAMA_API_KEY`        | Ollama web-search API key (optional)                                                                                              |
+
+**Codex (ChatGPT) web search — limited support:** Codex is main source when `CODEX_ACCESS_TOKEN`, or `tokens.access_token` in `$CODEX_HOME/auth.json` / `~/.codex/auth.json`, is available. Every configured available backend runs in parallel; matching URLs deduplicate while retaining Codex provenance. When embedding provider is configured, unique results are semantically reranked against query. Uses fixed `https://chatgpt.com/backend-api/codex/alpha/search` endpoint (no override). Endpoint undocumented; may change, rate-limit, or be unavailable by account; NOT official OpenAI integration. `SEARCH_BACKEND` only controls fallback ordering.
 
 ### Crawl
 
@@ -94,7 +103,21 @@ Copy [`config.example.json`](config.example.json) to `config.json` and fill in y
 
 ### Document extraction
 
-Document URLs are handled in-process for text-like formats (`.txt`, `.md`, `.csv`, `.json`, `.xml`, `.yaml`). Binary formats such as PDFs, Office files, and images fall through to Crawl4AI/readability and external recovery until a local parser adapter is configured.
+Document URLs are handled in-process for text-like formats (`.txt`, `.md`, `.csv`, `.json`, `.xml`, `.yaml`, `.toml`, `.ini`, `.log`, `.env`). PDF and Office files (`.pdf`, `.docx`, `.pptx`, `.xlsx`) are parsed in-process via a tiered pipeline:
+
+1. **HTML-first:** arxiv HTML twins and stripped-extension landing pages are fetched and converted to markdown via Readability.
+2. **PDF:** `pdf-parse` v2 extracts paragraph-aware text, embedded images, and best-effort tables as markdown.
+3. **Office:** `officeparser` extracts text from modern Office formats.
+
+Parsers auto-discover `pdf-parse`/`officeparser` and degrade gracefully (a warning) if absent. An opt-in **multimodal VLM tier** (`DOCUMENT_PARSING_MULTIMODAL=true`) sends extracted figures and rasterized pages to the configured LLM vision endpoint for figure/table descriptions.
+
+`web_search` auto-enriches thin document-snippet results (e.g. arxiv abstracts) by discovering same-site PDF links and parsing the full document, capped to top-N results (`DOCUMENT_PARSING_MAX_ENRICH`, default 3).
+
+| Variable                      | Default | Description                                                  |
+| ----------------------------- | ------- | ------------------------------------------------------------ |
+| `DOCUMENT_PARSING_ENABLED`    | `true`  | Enable in-process document parsing                           |
+| `DOCUMENT_PARSING_MULTIMODAL` | `false` | Enable VLM figure/table descriptions (requires LLM config)   |
+| `DOCUMENT_PARSING_MAX_ENRICH` | `3`     | Max results to enrich with full-text parsing in `web_search` |
 
 ### Social / Video
 
@@ -333,11 +356,35 @@ docker compose up -d
 
 See the [Full Tool Reference](docs/tools.md) for the complete tool reference.
 
+## Web Search Pipeline
+
+`web_search` runs every configured backend in parallel, then merges results through a multi-stage pipeline:
+
+1. **Parallel fanout:** All configured backends (Codex, Exa, Brave, SearXNG, DuckDuckGo, Tavily, Ollama) execute simultaneously. `SEARCH_BACKEND` controls fallback ordering only — it does not limit provider scope.
+2. **Richness-aware dedup:** Matching URLs are deduplicated, keeping the richest representation (full text > summary > snippet). Codex gets only a bounded tiebreak preference on near-equal scores — rich Exa/Tavily results are never starved by thin Codex snippets.
+3. **Source credibility tiering:** Each result is assigned a deterministic `quality` tier (`high`/`medium`/`low`) with an explainable basis — institutional domains (`.gov`, `.edu`, research organizations from the ROR registry), known technical authorities, and user-generated platforms are scored via suffix-aware domain matching.
+4. **Semantic rerank (optional):** When an embedding provider is configured, unique results are semantically reranked against the query with a source-credibility floor — low-quality sources can only outrank higher-quality ones within a narrow relevance band.
+5. **Document enrichment:** Thin snippet results (e.g. arxiv abstracts) are auto-enriched by discovering same-site PDF links and parsing the full document in-process.
+6. **Bare-Markdown output:** Results are formatted as clean Markdown with `## [N] Title` sections, compact `via`/`published`/`quality` metadata, and stable per-block `[N-M]` citations. A 192 KiB total budget with adaptive per-document allocation (8–24 KiB) ensures deterministic output size.
+7. **Overflow artifacts:** When more usable candidates exist than the requested limit, the complete sanitized result set is written to a private per-invocation artifact file (absolute path returned inline) that an agent can read.
+
+### Source Credibility Tiers
+
+| Tier     | Basis                                                                | Examples                                                       |
+| -------- | -------------------------------------------------------------------- | -------------------------------------------------------------- |
+| `high`   | Institutional domain (`.gov`, `.edu`, ROR registry), known authority | `arxiv.org`, `ieee.org`, `github.com`, `developer.mozilla.org` |
+| `medium` | Established technical source, news organization, official docs       | `medium.com`, `dev.to`, `techcrunch.com`                       |
+| `low`    | User-generated platform, self-hosted commercial, publishing platform | `reddit.com`, `wordpress.com`, personal blogs                  |
+
+The tier is a ranking signal, never a truth claim. The [Domain Facts Registry](docs/domain-facts-registry.md) documents the provenance-pinned external data sources (CISA dotgov-data, ROR) that feed institutional domain matching.
+
 ## Documentation
 
 - [Full Tool Reference](docs/tools.md) — Detailed docs for all tools
 - [Architecture Overview](docs/architecture.md) — System architecture and data flow
 - [Quick Start Guide](docs/quickstart.md) — Getting started with examples
+- [Domain Facts Registry](docs/domain-facts-registry.md) — Institutional domain data sources and provenance
+- [Integration Points](docs/integration-points.md) — Injection points for document parsing and enrichment
 
 ## License
 
