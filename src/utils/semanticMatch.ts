@@ -10,6 +10,13 @@ export interface SemanticMatchOptions<T> {
   embeddingApiToken?: string;
   embeddingDimensions: number;
   topK: number;
+  /**
+   * Optional web-search-specific credibility floor. When provided, each
+   * authority is used only as a tiebreaker when cosine scores are within a
+   * small relevance band. Absent for all non-web-search callers (no generic
+   * semantic-match behavior change).
+   */
+  authorityFloor?: ((item: T) => number) | undefined;
 }
 
 export interface SemanticMatchResult<T> {
@@ -18,7 +25,16 @@ export interface SemanticMatchResult<T> {
   rank: number;
 }
 
-const MAX_EMBEDDING_BATCH = 512;
+export const MAX_EMBEDDING_BATCH = 512;
+
+/**
+ * Credibility-aware score used only as a conservative semantic tiebreaker when
+ * an `authorityFloor` is passed (web-search specific).
+ */
+export function authorityWeightedScore(cosine: number, authority: number): number {
+  const clamped = Math.max(0, Math.min(1, authority));
+  return cosine * (0.5 + 0.5 * clamped);
+}
 
 async function embedBatches(
   texts: string[],
@@ -77,18 +93,12 @@ export async function semanticMatch<T>(
         err.name === 'TimeoutError' ||
         err.name === 'AbortError'
       ) {
-        logger.warn(
-          { err },
-          'semanticMatch query embedding timed out, returning unsorted candidates',
-        );
+        logger.warn('semanticMatch query embedding timed out, returning unsorted candidates');
       } else {
-        logger.warn({ err }, 'semanticMatch query embedding failed, returning unsorted candidates');
+        logger.warn('semanticMatch query embedding failed, returning unsorted candidates');
       }
     } else {
-      logger.warn(
-        { err: String(err) },
-        'semanticMatch query embedding failed (non-Error throw), returning unsorted candidates',
-      );
+      logger.warn('semanticMatch query embedding failed, returning unsorted candidates');
     }
     return candidates.map((item) => ({ item, score: 0, rank: 0 }));
   }
@@ -107,21 +117,12 @@ export async function semanticMatch<T>(
         err.name === 'TimeoutError' ||
         err.name === 'AbortError'
       ) {
-        logger.warn(
-          { err },
-          'semanticMatch candidate embedding timed out, returning unsorted candidates',
-        );
+        logger.warn('semanticMatch candidate embedding timed out, returning unsorted candidates');
       } else {
-        logger.warn(
-          { err },
-          'semanticMatch candidate embedding failed, returning unsorted candidates',
-        );
+        logger.warn('semanticMatch candidate embedding failed, returning unsorted candidates');
       }
     } else {
-      logger.warn(
-        { err: String(err) },
-        'semanticMatch candidate embedding failed (non-Error throw), returning unsorted candidates',
-      );
+      logger.warn('semanticMatch candidate embedding failed, returning unsorted candidates');
     }
     return candidates.map((item) => ({ item, score: 0, rank: 0 }));
   }
@@ -135,13 +136,42 @@ export async function semanticMatch<T>(
     return candidates.map((item) => ({ item, score: 0, rank: 0 }));
   }
 
-  const scored = candidates.map((item, index) => ({
-    item,
-    score: cosineSimilarity(queryEmbedding, candidateEmbeddings[index] ?? []),
-  }));
+  const scored = candidates.map((item, index) => {
+    const cosine = cosineSimilarity(queryEmbedding, candidateEmbeddings[index] ?? []);
+    const authority = options.authorityFloor?.(item);
+    return {
+      item,
+      cosine,
+      authority,
+      // Authority is only a conservative tiebreaker for close relevance.
+      authorityScore: authority === undefined ? cosine : authorityWeightedScore(cosine, authority),
+    };
+  });
 
-  return scored
-    .sort((a, b) => b.score - a.score)
+  // A fixed 0.05 cosine bucket is a monotonic ordering key (transitive total
+  // order), unlike the previous band-based pairwise comparator. Within a bucket
+  // authority is a separate non-negative sort key so higher authority
+  // consistently ranks first even for negative and zero cosine values.
+  // Raw cosine and original input index are subsequent deterministic tie-breakers.
+  const relevanceTieBand = 0.05;
+  const keyed = scored.map((s, idx) => ({
+    ...s,
+    bucket: Math.floor(s.cosine / relevanceTieBand),
+    authorityKey:
+      options.authorityFloor !== undefined && s.authority !== undefined
+        ? Math.max(0, Math.min(1, s.authority))
+        : 0,
+    idx,
+  }));
+  return keyed
+    .sort((a, b) => {
+      if (a.bucket !== b.bucket) return b.bucket - a.bucket;
+      if (options.authorityFloor !== undefined) {
+        if (a.authorityKey !== b.authorityKey) return b.authorityKey - a.authorityKey;
+      }
+      if (a.cosine !== b.cosine) return b.cosine - a.cosine;
+      return a.idx - b.idx;
+    })
     .slice(0, topK)
-    .map((result, index) => ({ item: result.item, score: result.score, rank: index + 1 }));
+    .map((result, index) => ({ item: result.item, score: result.cosine, rank: index + 1 }));
 }

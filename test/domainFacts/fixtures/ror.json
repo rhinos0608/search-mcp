@@ -1,0 +1,57 @@
+[
+  {
+    "id": "https://ror.org/activeedu",
+    "status": "active",
+    "domains": ["ExampleEdu.edu", "www.exampleuni.org", "xn--tst-qla.de"],
+    "types": ["education", "funder"],
+    "names": [
+      { "value": "Ex U", "types": ["acronym"], "lang": null },
+      { "value": "Example University", "types": ["ror_display", "label"], "lang": "en" }
+    ]
+  },
+  {
+    "id": "https://ror.org/activenp",
+    "status": "active",
+    "domains": ["eosc.org"],
+    "types": ["nonprofit"],
+    "names": [{ "value": "Example Nonprofit", "types": ["ror_display", "label"], "lang": "en" }]
+  },
+  {
+    "id": "https://ror.org/activecom",
+    "status": "active",
+    "domains": ["corp.example.com"],
+    "types": ["company"],
+    "names": [{ "value": "Example Corp", "types": ["ror_display", "label"], "lang": "en" }]
+  },
+  {
+    "id": "https://ror.org/inactive",
+    "status": "inactive",
+    "domains": ["olduniv.edu"],
+    "types": ["education"],
+    "names": [{ "value": "Old Univ", "types": ["ror_display", "label"], "lang": "en" }]
+  },
+  {
+    "id": "https://ror.org/withdrawn",
+    "status": "withdrawn",
+    "domains": ["gone.edu"],
+    "types": ["education"],
+    "names": [{ "value": "Gone Univ", "types": ["ror_display", "label"], "lang": "en" }]
+  },
+  {
+    "id": "https://ror.org/edu2",
+    "status": "active",
+    "domains": ["another.edu", "bad..domain", "co.uk"],
+    "types": ["education"],
+    "names": [{ "value": "Another Univ", "types": ["ror_display", "label"], "lang": "en" }]
+  },
+  {
+    "id": "https://ror.org/labelonly",
+    "status": "active",
+    "domains": ["labeled.edu"],
+    "types": ["education"],
+    "names": [
+      { "value": "Alt Alias", "types": ["alias"], "lang": "en" },
+      { "value": "Labeled University", "types": ["label"], "lang": "en" }
+    ]
+  }
+]

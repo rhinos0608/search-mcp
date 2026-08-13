@@ -92,8 +92,10 @@ function parseLiteHtml(html: string, startPosition: number): SearchResult[] {
       domain,
       source: 'duckduckgo' as const,
       age: null,
+      ageKind: 'unknown' as const,
       extraSnippet: null,
       deepLinks: null,
+      contentKind: 'snippet' as const,
     });
   }
 
@@ -187,7 +189,7 @@ export async function duckduckgoSearch(
 
   // Check for bot challenge pages
   if (isBotChallengePage(html)) {
-    logger.warn({ query }, 'DuckDuckGo returned a bot challenge page');
+    logger.warn({ backend: 'duckduckgo' }, 'DuckDuckGo returned a bot challenge page');
     throw unavailableError(
       'DuckDuckGo returned a bot challenge page. The backend is temporarily unavailable.',
       { backend: 'duckduckgo', retryable: true },
@@ -197,7 +199,9 @@ export async function duckduckgoSearch(
   const parsed = parseLiteHtml(html, 0);
 
   if (parsed.length === 0) {
-    logger.debug({ query, htmlPreview: html.slice(0, 300) }, 'DuckDuckGo returned no results');
+    // Log metadata only — never the raw query or the htmlPreview (which can echo
+    // user content). Error classification is handled by the caller.
+    logger.debug({ backend: 'duckduckgo' }, 'DuckDuckGo returned no results');
   }
 
   const mapped = parsed.slice(0, limit).map((r, i) => ({

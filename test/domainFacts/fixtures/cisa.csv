@@ -1,0 +1,11 @@
+Domain name,Domain type,Organization name,Suborganization name,City,State,Security contact email
+access-board.gov,Federal - Executive,Access Board,,Washington,DC,info@access-board.gov
+nist.gov,Federal - Executive,"Department of Commerce, Technology Administration",National Institute of Standards and Technology,Gaithersburg,MD,info@nist.gov
+whitehouse.gov,Federal - Executive,Executive Office of the President,White House Office,Washington,DC,info@whitehouse.gov
+anl.gov,Federal - Executive,Department of Energy,Argonne National Laboratory,Argonne,IL,info@anl.gov
+springfield.gov,City,City of Springfield,,Springfield,IL,info@springfield.gov
+cookcounty.gov,County,Cook County,,Chicago,IL,info@cookcounty.gov
+navajo-nsn.gov,Tribal,Navajo Nation,,Window Rock,AZ,info@navajo-nsn.gov
+192.168.0.1,Federal - Executive,Invalid,IP,,,
+*.bad.gov,Federal - Executive,Wildcard,,,
+co.uk,Federal - Executive,PSLLike,,,

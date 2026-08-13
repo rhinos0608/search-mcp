@@ -5,6 +5,7 @@ import { retryWithBackoff } from '../retry.js';
 import { assertRateLimitOk, getTracker } from '../rateLimit.js';
 import { ToolError, unavailableError } from '../errors.js';
 import type { SearchResult } from '../types.js';
+import { strOrNull } from './providerFields.js';
 
 const BRAVE_API_URL = 'https://api.search.brave.com/res/v1/web/search';
 
@@ -328,6 +329,28 @@ export async function braveSearch(
     const typed = formatTypedData(r);
     if (typed) snippetParts.push(typed);
 
+    // Untrusted provider dates: only validated non-empty string values are
+    // accepted. Numeric/malformed dates coerce to null/unknown so they can
+    // never reach SearchResult.age (where the formatter's `.trim()` would crash).
+    const publishedDate = (() => {
+      // Skip empty strings: a valid page_age is used when age is empty rather
+      // than letting an empty `r.age` shadow it.
+      const age = strOrNull(r.age);
+      const v = age !== null && age.length > 0 ? age : strOrNull(r.page_age);
+      return v !== null && v.length > 0 ? v : null;
+    })();
+    const fetchedDate = (() => {
+      const v = strOrNull(r.page_fetched);
+      return v !== null && v.length > 0 ? v : null;
+    })();
+    const age = publishedDate ?? fetchedDate;
+    const ageKind =
+      age === null
+        ? ('unknown' as const)
+        : publishedDate !== null
+          ? ('published' as const)
+          : ('fetched' as const);
+
     return {
       title: r.title ?? '',
       url: r.url ?? '',
@@ -335,9 +358,11 @@ export async function braveSearch(
       position: i + 1,
       domain,
       source: 'brave' as const,
-      age: r.age ?? r.page_age ?? r.page_fetched ?? null,
+      age,
+      ageKind,
       extraSnippet: snippetParts.length > 0 ? snippetParts.join('\n\n') : null,
       deepLinks: deepLinks && deepLinks.length > 0 ? deepLinks : null,
+      contentKind: 'snippet' as const,
     };
   });
 

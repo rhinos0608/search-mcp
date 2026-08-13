@@ -4,6 +4,7 @@ import { ToolCache, cacheKey } from '../cache.js';
 import { retryWithBackoff } from '../retry.js';
 import { unavailableError } from '../errors.js';
 import type { SearchResult } from '../types.js';
+import { strOrNull } from './providerFields.js';
 
 const cache = new ToolCache<SearchResult[]>({ maxSize: 200, ttlMs: 60 * 60 * 1000 });
 
@@ -12,8 +13,28 @@ interface SearxResult {
   url?: string;
   content?: string;
   publishedDate?: string;
-  engines?: string[];
+  /** Unknown external value: may be an array of strings, contain null/number/
+   * non-string members, or not be an array at all. Validated at runtime. */
+  engines?: unknown;
   score?: number;
+}
+
+/**
+ * Safely extract SearXNG upstream engine names from an untrusted value.
+ * Accepts only trimmed nonempty strings from an array; dedupes and sorts
+ * deterministically. Any malformed shape (non-array, null/number members)
+ * yields `undefined` rather than throwing.
+ */
+function sanitizeUpstreamEngines(value: unknown): string[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const out = new Set<string>();
+  for (const e of value) {
+    if (typeof e === 'string') {
+      const trimmed = e.trim();
+      if (trimmed.length > 0) out.add(trimmed);
+    }
+  }
+  return out.size > 0 ? [...out].sort() : undefined;
 }
 
 interface SearxResponse {
@@ -78,6 +99,13 @@ export async function searxngSearch(
     } catch {
       /* invalid URL — leave domain empty */
     }
+    // Untrusted provider date: only a validated non-empty string is accepted.
+    // Numeric/malformed publishedDate coerces to null/unknown so it never
+    // reaches SearchResult.age (where the formatter's `.trim()` would crash).
+    const publishedDate = (() => {
+      const v = strOrNull(r.publishedDate);
+      return v !== null && v.length > 0 ? v : null;
+    })();
     return {
       title: r.title ?? '',
       url: r.url ?? '',
@@ -85,9 +113,14 @@ export async function searxngSearch(
       position: i + 1,
       domain,
       source: 'searxng' as const,
-      age: r.publishedDate ?? null,
-      extraSnippet: r.engines ? `via ${r.engines.join(', ')}` : null,
+      age: publishedDate,
+      ageKind: publishedDate !== null ? ('published' as const) : ('unknown' as const),
+      // SearXNG upstream engines (Google/Bing/etc.) are structured metadata, never
+      // body prose — rendered as bracketed labels after `SearXNG`, not cited text.
+      extraSnippet: null,
+      upstreamEngines: sanitizeUpstreamEngines(r.engines),
       deepLinks: null,
+      contentKind: 'snippet' as const,
     };
   });
 

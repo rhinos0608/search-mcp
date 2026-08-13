@@ -4,7 +4,16 @@ import prettierConfig from 'eslint-config-prettier';
 
 export default tseslint.config(
   {
-    ignores: ['dist/**', 'node_modules/**', '**/*.d.ts', 'coverage/**', 'test/**'],
+    ignores: [
+      'dist/**',
+      'node_modules/**',
+      '**/*.d.ts',
+      'coverage/**',
+      'test/**',
+      'scripts/**',
+      'src/domainFacts/*.generated.ts',
+      'eslint.config.js',
+    ],
   },
   eslint.configs.recommended,
   ...tseslint.configs.strictTypeChecked,

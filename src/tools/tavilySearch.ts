@@ -14,17 +14,19 @@ import { ToolCache, cacheKey } from '../cache.js';
 import { retryWithBackoff } from '../retry.js';
 import { ToolError, unavailableError } from '../errors.js';
 import type { SearchResult } from '../types.js';
+import type { AiSummaryMode } from './webSearch.js';
+import { strField, strOrNull } from './providerFields.js';
 
 const TAVILY_API_URL = 'https://api.tavily.com/search';
 
 const cache = new ToolCache<SearchResult[]>({ maxSize: 200, ttlMs: 60 * 60 * 1000 });
 
 interface TavilyResult {
-  title?: string | null;
-  url?: string | null;
-  content?: string | null;
+  title?: unknown;
+  url?: unknown;
+  content?: unknown;
   score?: number;
-  raw_content?: string | null;
+  raw_content?: unknown;
 }
 
 interface TavilySearchResponse {
@@ -44,15 +46,33 @@ function safeDomain(url: string): string {
   }
 }
 
+/**
+ * Normalize Tavily's literal URL-attributed chunk-join delimiter `[...]` to a
+ * paragraph boundary. Snippet-mode content joins multiple query-relevant
+ * chunks with `[...]`; without normalization it renders as a fake-looking
+ * ellipsis. Only applied in snippet mode (default/yes): Tavily's ultra-fast
+ * `only` summary is a single NLP summary where `[...]` is not a chunk join.
+ *
+ * Only the provider chunk-join delimiter is rewritten, and only when the
+ * literal `[...]` is surrounded by whitespace on both sides (documented chunks
+ * are joined with ` [...] `). Non-whitespace-adjacent literals inside prose,
+ * code, or quotes such as `'[...]'`, `` `[...]` ``, `array[...]`, or a
+ * standalone `[...]` are preserved unchanged.
+ */
+function normalizeChunkJoinDelimiter(text: string): string {
+  return text.replace(/\s+\[\.\.\.\]\s+/g, '\n\n');
+}
+
 export async function tavilySearch(
   query: string,
   apiKey: string,
   limit = 10,
   safeSearch: 'strict' | 'moderate' | 'off' = 'moderate',
+  aiSummary: AiSummaryMode = 'no',
 ): Promise<SearchResult[]> {
-  logger.info({ limit, safeSearch }, 'Running Tavily search');
+  logger.info({ limit, safeSearch, aiSummary }, 'Running Tavily search');
 
-  const key = cacheKey('tavily', query, String(limit), safeSearch);
+  const key = cacheKey('tavily', query, String(limit), safeSearch, aiSummary);
   const cached = cache.get(key);
   if (cached !== null) {
     logger.debug({ cacheHit: true }, 'Tavily search cache hit');
@@ -75,9 +95,15 @@ export async function tavilySearch(
   const body: Record<string, unknown> = {
     query,
     max_results: clampedLimit,
-    search_depth: 'basic',
-    include_answer: 'basic',
-    include_raw_content: 'markdown',
+    // `only` uses Tavily's per-result NLP summary mode: content is summary-only.
+    search_depth: aiSummary === 'only' ? 'ultra-fast' : 'basic',
+    // Excerpt-only by default: `include_raw_content` is left unset (default
+    // false) so full page HTML is never requested. For `basic`, request a few
+    // query-relevant snippets per source (URL-attributed, joined by Tavily).
+    ...(aiSummary === 'only' ? {} : { chunks_per_source: 3 }),
+    // Tavily's query-level `answer` has no per-URL grounding, so it is never
+    // requested nor mapped.
+    include_answer: false,
     include_images: false,
     topic: effectiveTopic,
   };
@@ -126,27 +152,44 @@ export async function tavilySearch(
   );
 
   const data = (await safeResponseJson(response, TAVILY_API_URL)) as TavilySearchResponse;
-  const results = data.results ?? [];
-
-  const mapped: SearchResult[] = results.slice(0, limit).map((r, i) => {
-    const url = r.url ?? '';
-    const snippetParts: string[] = [];
-    // Include Tavily's LLM-generated answer on the first result
-    if (i === 0 && data.answer) snippetParts.push(`[Answer] ${data.answer}`);
-    if (r.score !== undefined) snippetParts.push(`relevance: ${String(r.score)}`);
-    if (r.raw_content) snippetParts.push(`[Full Content]\n${r.raw_content}`);
-    return {
-      title: r.title ?? '',
-      url,
-      description: r.content ?? '',
-      position: i + 1,
-      domain: safeDomain(url),
-      source: 'tavily' as const,
-      age: null,
-      extraSnippet: snippetParts.length > 0 ? snippetParts.join('\n\n') : null,
-      deepLinks: null,
-    };
-  });
+  // `data.results` is untrusted: only an array is mapped, and only plain-object
+  // elements are kept. `{}`, null, scalars, or null entries safely yield `[]` /
+  // are skipped — never a throw.
+  const mapped: SearchResult[] = [];
+  const rawResults: unknown = (data as Record<string, unknown>).results;
+  if (Array.isArray(rawResults)) {
+    for (const r of rawResults) {
+      if (mapped.length >= limit) break;
+      if (typeof r !== 'object' || r === null) continue;
+      const record = r as Record<string, unknown>;
+      const url = strField(record.url);
+      // Normalize an empty published_date/publishedDate to null so an empty
+      // value yields age: null with ageKind: 'unknown' (matching other providers).
+      const publishedDate = (() => {
+        const v = strOrNull(record.published_date ?? record.publishedDate);
+        return v !== null && v.length > 0 ? v : null;
+      })();
+      const rawContent = strField(record.content);
+      // Snippet mode joins URL-attributed chunks with `[...]`; normalize those
+      // to paragraph breaks. Ultra-fast `only` summary keeps `[...]` literal.
+      const description =
+        aiSummary === 'only' ? rawContent : normalizeChunkJoinDelimiter(rawContent);
+      mapped.push({
+        title: strField(record.title),
+        url,
+        description,
+        position: mapped.length + 1,
+        domain: safeDomain(url),
+        source: 'tavily' as const,
+        age: publishedDate,
+        ageKind: publishedDate !== null ? ('published' as const) : ('unknown' as const),
+        extraSnippet: null,
+        deepLinks: null,
+        contentKind: aiSummary === 'only' ? ('summary' as const) : ('snippet' as const),
+        generatedSummary: null,
+      });
+    }
+  }
 
   cache.set(key, mapped);
   logger.debug({ count: mapped.length }, 'Tavily search complete');
