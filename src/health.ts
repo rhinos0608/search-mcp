@@ -25,6 +25,7 @@ import { researchCapabilities } from './tools/families/research.js';
 import { browserCapabilities } from './tools/families/browser.js';
 import { agenticBrowseCapabilities } from './tools/families/agenticBrowse.js';
 import { knowledgeGraphCapabilities } from './tools/families/knowledgeGraph.js';
+import { detectDocumentParsers } from './utils/documentParsers/availability.js';
 import { semanticCrawlCapabilities } from './tools/families/semanticCrawl.js';
 import { outputBudget } from './utils/outputBudget.js';
 import type { OutputBudgetStats } from './utils/outputBudget.js';
@@ -35,6 +36,8 @@ import { braveSearch } from './tools/braveSearch.js';
 import { searxngSearch } from './tools/searxngSearch.js';
 import { tavilySearch } from './tools/tavilySearch.js';
 import { duckduckgoSearch } from './tools/duckduckgoSearch.js';
+import { codexConfigured, codexSearch } from './tools/codexSearch.js';
+import { resolveBackends } from './tools/webSearch.js';
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -49,6 +52,8 @@ export interface ToolHealth {
   tier?: ToolTier | undefined;
   /** Active backend for multi-backend tools (e.g. 'exa', 'brave', 'searxng'). */
   activeBackend?: string | undefined;
+  /** Discovered in-process document-parser availability (reported on live health checks). */
+  parsers?: { pdf: boolean; office: boolean } | undefined;
   configuration?: FeatureConfiguration | undefined;
 }
 
@@ -108,11 +113,13 @@ const OPTIONAL_CONFIG: Record<string, OptionalRule> = {
       (cfg.exa.apiKey ?? '').length > 0 ||
       (cfg.brave.apiKey ?? '').length > 0 ||
       cfg.searxng.baseUrl.length > 0 ||
-      (cfg.tavily.apiKey ?? '').length > 0,
+      (cfg.tavily.apiKey ?? '').length > 0 ||
+      cfg.ollamaSearch.baseUrl.length > 0 ||
+      codexConfigured(process.env),
     degradedMessage:
       'No key-backed search backend configured; DuckDuckGo fallback remains available.',
     remediation:
-      'Set EXA_API_KEY, BRAVE_API_KEY, SEARXNG_BASE_URL, or TAVILY_API_KEY for higher-quality web search.',
+      'Set EXA_API_KEY, BRAVE_API_KEY, SEARXNG_BASE_URL, TAVILY_API_KEY, CODEX_ACCESS_TOKEN, or SEARCH_OLLAMA_BASE_URL for higher-quality web search.',
   },
 };
 
@@ -166,12 +173,24 @@ function searchBackendConfigured(cfg: SearchConfig, backend: SearchBackend): boo
       return cfg.ollamaSearch.baseUrl.length > 0;
     case 'duckduckgo':
       return true;
+    case 'codex':
+      return codexConfigured(process.env);
   }
 }
 
-function orderedSearchBackends(cfg: SearchConfig): SearchBackend[] {
-  const fallbackOrder: SearchBackend[] = ['exa', 'brave', 'searxng', 'tavily', 'duckduckgo'];
-  return [cfg.searchBackend, ...fallbackOrder.filter((backend) => backend !== cfg.searchBackend)];
+/**
+ * Probe ordering mirrors runtime web-search ordering exactly (single source of
+ * truth: `resolveBackends` in tools/webSearch.ts, which includes all provider
+ * candidates). Codex is first; SEARCH_BACKEND controls fallback ordering only.
+ * `codexAvailable` gates whether an unavailable (non-primary) Codex backend is
+ * prepended; the health probe passes `true` so every candidate — including an
+ * unconfigured Codex — is still reported.
+ */
+export function orderedSearchBackends(
+  cfg: SearchConfig,
+  codexAvailable: boolean = codexConfigured(process.env),
+): SearchBackend[] {
+  return resolveBackends(cfg, undefined, codexAvailable);
 }
 
 async function probeSearchBackend(cfg: SearchConfig, backend: SearchBackend): Promise<ToolHealth> {
@@ -202,13 +221,14 @@ async function probeSearchBackend(cfg: SearchConfig, backend: SearchBackend): Pr
       case 'duckduckgo':
         await duckduckgoSearch('health check', 1, 'moderate', cfg.duckduckgo);
         break;
-      case 'ollama-search':
-        return {
-          status: 'degraded',
-          message: 'ollama-search health probing is config-only for now.',
-          latencyMs: Date.now() - start,
-          tier: 'optional',
-        };
+      case 'codex':
+        await codexSearch('health check', 1);
+        break;
+      case 'ollama-search': {
+        const { ollamaSearch } = await import('./tools/ollamaSearch.js');
+        await ollamaSearch('health check', 1, 'moderate', cfg.ollamaSearch);
+        break;
+      }
     }
     return {
       status: 'healthy',
@@ -239,9 +259,11 @@ function webSearchBackendRemediation(backend: SearchBackend): string {
     case 'tavily':
       return 'Set TAVILY_API_KEY or select another SEARCH_BACKEND.';
     case 'ollama-search':
-      return 'Set OLLAMA_SEARCH_BASE_URL to a reachable Ollama-compatible search service.';
+      return 'Set SEARCH_OLLAMA_BASE_URL to a reachable Ollama-compatible search service.';
     case 'duckduckgo':
       return 'Check outbound network access to DuckDuckGo Lite.';
+    case 'codex':
+      return 'Set CODEX_ACCESS_TOKEN or run `codex login` to create ~/.codex/auth.json (auto-detected). Limited support: undocumented ChatGPT endpoint, may be rate-limited or unavailable.';
   }
 }
 
@@ -327,11 +349,16 @@ export function configHealth(cfg: SearchConfig): Record<string, ToolHealth> {
   // OAuth posture without having to parse the reddit family entries.
   report.reddit_oauth = redditOAuthHealth(cfg);
 
-  report.document_extraction = {
-    status: 'healthy' as const,
-    message:
-      'In-process document extraction enabled for text-like documents; binary formats fall through to crawl/read recovery.',
-  };
+  report.document_extraction = cfg.documentParsing.enabled
+    ? {
+        status: 'healthy' as const,
+        message: `In-process PDF/office parsing enabled (multimodal: ${cfg.documentParsing.multimodal ? 'on' : 'off'}, maxEnrich: ${String(cfg.documentParsing.maxEnrich)}). Parser availability is reported on live health checks.`,
+      }
+    : {
+        status: 'healthy' as const,
+        message:
+          'In-process document extraction enabled for text-like documents; PDF/office parsing is disabled (DOCUMENT_PARSING_ENABLED=false).',
+      };
 
   // Family tool capabilities (per-action breakdown).
   for (const cap of youtubeCapabilities(cfg)) {
@@ -825,7 +852,23 @@ export const RATE_LIMIT_TOOL_MAP: [string, RateLimitedBackend][] = [
 export async function runHealthProbes(cfg: SearchConfig): Promise<HealthReport> {
   const tools = configHealth(cfg);
 
-  const webBackendOrder = orderedSearchBackends(cfg);
+  // Report discovered parser availability (never throws) on the live report.
+  const parserAvailability = await detectDocumentParsers();
+  const existingDocExtraction = tools.document_extraction;
+  if (existingDocExtraction !== undefined) {
+    tools.document_extraction = {
+      ...existingDocExtraction,
+      parsers: parserAvailability,
+      message:
+        existingDocExtraction.message +
+        ` Parsers available: pdf ${parserAvailability.pdf ? 'yes' : 'no'}, office ${parserAvailability.office ? 'yes' : 'no'}.`,
+    };
+  }
+
+  // Probe every provider candidate (including an unconfigured Codex) so the
+  // health report surfaces each backend's status; runtime fanout separately
+  // filters unavailable backends via `codexConfigured`.
+  const webBackendOrder = orderedSearchBackends(cfg, true);
   const webBackendResults = await Promise.all(
     webBackendOrder.map(async (backend) => ({
       backend,

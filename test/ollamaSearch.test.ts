@@ -321,6 +321,126 @@ test('does not send Authorization header when apiKey is empty', async () => {
 
 // ── URL Construction ─────────────────────────────────────────────────────────
 
+// ── Content Truncation ───────────────────────────────────────────────────────
+
+test('caps long full-body content to a concise excerpt and stays honest as a snippet', async () => {
+  const nav =
+    '# Nav\n\n[Home](/) [Docs](/docs)\n\n' +
+    'Body sentence with real details about the topic. '.repeat(80);
+  globalThis.fetch = async () => {
+    return new Response(
+      JSON.stringify({
+        results: [{ title: 'Long', url: 'https://example.com', content: nav }],
+      }),
+      { status: 200, headers: { 'content-type': 'application/json' } },
+    );
+  };
+
+  const results = await ollamaSearch('long', 10, 'moderate', DEFAULT_CONFIG);
+  const desc = results[0]!.description;
+  assert.ok(
+    Buffer.byteLength(desc, 'utf8') <= 2560,
+    `excerpt bytes ${Buffer.byteLength(desc, 'utf8')} > 2560`,
+  );
+  assert.equal(results[0]!.contentKind, 'snippet', 'content stays labeled a snippet');
+  assert.equal(results[0]!.age, null, 'no invented age');
+  assert.equal(results[0]!.ageKind, 'unknown');
+});
+
+test('caps long ASCII content to the UTF-8 byte budget', async () => {
+  const base = 'A'.repeat(3000);
+  globalThis.fetch = async () => {
+    return new Response(
+      JSON.stringify({
+        results: [{ title: 'Ascii', url: 'https://example.com', content: base }],
+      }),
+      { status: 200, headers: { 'content-type': 'application/json' } },
+    );
+  };
+  const results = await ollamaSearch('ascii', 10, 'moderate', DEFAULT_CONFIG);
+  const desc = results[0]!.description;
+  assert.equal(desc, 'A'.repeat(2560), 'ASCII content hard-capped at 2560 bytes');
+  assert.equal(Buffer.byteLength(desc, 'utf8'), 2560);
+});
+
+test('prefers a paragraph boundary within the byte budget', async () => {
+  const base = 'A'.repeat(2000) + '\n\n' + 'B'.repeat(2000);
+  globalThis.fetch = async () => {
+    return new Response(
+      JSON.stringify({
+        results: [{ title: 'Para', url: 'https://example.com', content: base }],
+      }),
+      { status: 200, headers: { 'content-type': 'application/json' } },
+    );
+  };
+  const results = await ollamaSearch('para', 10, 'moderate', DEFAULT_CONFIG);
+  const desc = results[0]!.description;
+  assert.equal(desc, 'A'.repeat(2000), 'cut at paragraph boundary');
+  assert.ok(Buffer.byteLength(desc, 'utf8') <= 2560);
+});
+
+test('prefers a sentence boundary within the byte budget', async () => {
+  const base = 'A'.repeat(2000) + '. ' + 'B'.repeat(2000);
+  globalThis.fetch = async () => {
+    return new Response(
+      JSON.stringify({
+        results: [{ title: 'Sent', url: 'https://example.com', content: base }],
+      }),
+      { status: 200, headers: { 'content-type': 'application/json' } },
+    );
+  };
+  const results = await ollamaSearch('sent', 10, 'moderate', DEFAULT_CONFIG);
+  const desc = results[0]!.description;
+  assert.equal(desc, 'A'.repeat(2000) + '.', 'cut at sentence boundary');
+  assert.ok(Buffer.byteLength(desc, 'utf8') <= 2560);
+});
+
+test('does not split a surrogate pair when capping long content', async () => {
+  // 2550 'A' + 3 emoji (4 UTF-8 bytes each) + 'x' = 2563 bytes > 2560 cap. The
+  // hard cut at 2560 bytes lands on the high surrogate of the third emoji.
+  const base = 'A'.repeat(2550) + '😀😀😀' + 'x';
+  globalThis.fetch = async () => {
+    return new Response(
+      JSON.stringify({
+        results: [{ title: 'Emoji', url: 'https://example.com', content: base }],
+      }),
+      { status: 200, headers: { 'content-type': 'application/json' } },
+    );
+  };
+
+  const results = await ollamaSearch('emoji', 10, 'moderate', DEFAULT_CONFIG);
+  const desc = results[0]!.description;
+  // The hard cut lands on the third emoji's high surrogate; that lone high
+  // surrogate must be dropped, retaining the full safe prefix and the two
+  // complete emoji that precede the cut.
+  assert.equal(
+    desc,
+    'A'.repeat(2550) + '😀😀',
+    'safe prefix and two complete emoji retained, partial third emoji dropped',
+  );
+  assert.ok(
+    Buffer.byteLength(desc, 'utf8') <= 2560,
+    `excerpt bytes ${Buffer.byteLength(desc, 'utf8')} > 2560`,
+  );
+  assert.ok(!/[\uD800-\uDBFF](?![\uDC00-\uDFFF])/.test(desc), 'no orphan high surrogate');
+  assert.ok(!/(^|[^\uD800-\uDBFF])[\uDC00-\uDFFF]/.test(desc), 'no orphan low surrogate');
+});
+
+test('preserves short content unchanged', async () => {
+  const short = 'A concise snippet with a clear summary.';
+  globalThis.fetch = async () => {
+    return new Response(
+      JSON.stringify({
+        results: [{ title: 'Short', url: 'https://example.com', content: short }],
+      }),
+      { status: 200, headers: { 'content-type': 'application/json' } },
+    );
+  };
+
+  const results = await ollamaSearch('short', 10, 'moderate', DEFAULT_CONFIG);
+  assert.equal(results[0]!.description, short);
+});
+
 test('strips trailing slash from baseUrl before appending path', async () => {
   let calledUrl = '';
 

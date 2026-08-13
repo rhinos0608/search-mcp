@@ -6,6 +6,7 @@
  */
 
 import type { SearchConfig } from './config.js';
+import { loadConfig } from './config.js';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { getGatedTools, configHealth } from './health.js';
 import { logger } from './logger.js';
@@ -42,6 +43,7 @@ import { KnowledgeGraphHook } from './knowledge/hook.js';
 export function createServer(
   cfg: SearchConfig,
   existingHook?: KnowledgeGraphHook,
+  getConfig?: () => SearchConfig,
 ): {
   server: McpServer;
   kgHook: KnowledgeGraphHook | null;
@@ -72,7 +74,7 @@ export function createServer(
   }
 
   // Standalone tools (pass kgHook for passive capture)
-  registerWebSearch(server, cfg, kgHook ?? undefined);
+  registerWebSearch(server, kgHook ?? undefined, getConfig ?? loadConfig);
   registerWebCrawl(server, cfg, kgHook ?? undefined);
   registerRssTool(server);
 

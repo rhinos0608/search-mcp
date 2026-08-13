@@ -1,6 +1,5 @@
 {
-  "//": "Copy to config.json and fill in your values. Never commit config.json.",
-  "searchBackend": "searxng",
+  "//": "Copy to config.json and fill in your values. Never commit config.json. searchBackend is intentionally NOT set here: Codex is main source when credentials are available (CODEX_ACCESS_TOKEN or ~/.codex/auth.json); all configured available providers run in parallel, dedupe URLs, then optionally semantic-rerank results. SEARCH_BACKEND only controls fallback ordering.",
   "brave": {
     "apiKey": ""
   },
@@ -31,6 +30,12 @@
   "crawl4ai": {
     "baseUrl": "",
     "apiToken": ""
+  },
+  "documentParsing": {
+    "//": "In-process document & multimodal parsing. On by default; auto-discovers pdf-parse/officeparser and degrades gracefully if absent. Set DOCUMENT_PARSING_ENABLED=false (or enabled=false here) to disable. Multimodal VLM tier remains opt-in.",
+    "enabled": true,
+    "multimodal": false,
+    "maxEnrich": 3
   },
   "embeddingSidecar": {
     "provider": "sidecar",
@@ -157,8 +162,10 @@
   "rescoreWeights": {
     "//": "Per-tool rescoring weights. Tune these to prioritize recency, citations, engagement, etc. rrfAnchor should dominate any single other signal.",
     "webSearch": {
-      "rrfAnchor": 0.5,
-      "recency": 0.2,
+      "rrfAnchor": 0.45,
+      "domainAuthority": 0.25,
+      "recency": 0.12,
+      "yearAlignment": 0.12,
       "hasDeepLinks": 0.05
     },
     "academicSearch": {

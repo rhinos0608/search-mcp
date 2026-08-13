@@ -16,6 +16,7 @@ import type { AccessConfig } from './config/types.js';
 import { decryptConfig } from './config/crypto.js';
 import type { KnowledgeGraphConfig } from './knowledge/types.js';
 import { DEFAULT_KG_CONFIG } from './knowledge/config.js';
+import { codexConfigured } from './tools/codexSearch.js';
 
 /** Load .env from the project root if present. Only sets vars not already in the environment. */
 function loadDotEnv(pkgRoot: string): void {
@@ -54,7 +55,14 @@ function loadDotEnv(pkgRoot: string): void {
 /** Directory containing this file (dist/ or src/). Go up one level to reach project root. */
 const PKG_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 
-export type SearchBackend = 'brave' | 'searxng' | 'exa' | 'duckduckgo' | 'ollama-search' | 'tavily';
+export type SearchBackend =
+  | 'brave'
+  | 'searxng'
+  | 'exa'
+  | 'duckduckgo'
+  | 'ollama-search'
+  | 'tavily'
+  | 'codex';
 
 export interface RescoreWeights {
   rrfAnchor: number;
@@ -82,6 +90,8 @@ function validateRescoreWeights(weights: RescoreWeights, toolName: string): void
     'commentEngagement',
     'venue',
     'hasDeepLinks',
+    'domainAuthority',
+    'yearAlignment',
   ] as const;
   const otherWeights = knownKeys.map((k) => weights[k]).filter((v): v is number => v !== undefined);
   const maxOther = otherWeights.length > 0 ? Math.max(...otherWeights) : 0;
@@ -94,7 +104,13 @@ function validateRescoreWeights(weights: RescoreWeights, toolName: string): void
 }
 
 const DEFAULT_RESCORE_WEIGHTS: RescoreConfig = {
-  webSearch: { rrfAnchor: 0.5, recency: 0.2, hasDeepLinks: 0.05 },
+  webSearch: {
+    rrfAnchor: 0.45,
+    domainAuthority: 0.25,
+    recency: 0.12,
+    yearAlignment: 0.12,
+    hasDeepLinks: 0.05,
+  },
   academicSearch: {
     rrfAnchor: 0.5,
     recency: 0.05,
@@ -136,6 +152,12 @@ export interface ExaConfig {
 export interface Crawl4aiConfig {
   baseUrl: string;
   apiToken?: string;
+}
+
+export interface DocumentParsingConfig {
+  enabled: boolean;
+  multimodal: boolean;
+  maxEnrich: number;
 }
 
 export interface EmbeddingSidecarConfig {
@@ -238,6 +260,8 @@ export interface BrowserConfig {
 
 export interface SearchConfig {
   searchBackend: SearchBackend;
+  /** Legacy persisted selection marker. SEARCH_BACKEND now controls fallback order only. */
+  searchBackendExplicit: boolean;
   brave: { apiKey?: string };
   searxng: { baseUrl: string };
   exa: ExaConfig;
@@ -247,6 +271,7 @@ export interface SearchConfig {
   github: GitHubConfig;
   reddit: RedditConfig;
   crawl4ai: Crawl4aiConfig;
+  documentParsing: DocumentParsingConfig;
   embeddingSidecar: EmbeddingSidecarConfig;
   semanticCrawl: SemanticCrawlConfig;
   domainTrust: DomainTrustConfig;
@@ -277,12 +302,16 @@ export interface FeatureConfiguration {
 
 export const FEATURE_REQUIREMENTS: Record<string, FeatureRequirement> = {
   web_search_keyed_backends: {
-    required: ['EXA_API_KEY or BRAVE_API_KEY or SEARXNG_BASE_URL or TAVILY_API_KEY'],
+    required: [
+      'EXA_API_KEY or BRAVE_API_KEY or SEARXNG_BASE_URL or TAVILY_API_KEY or CODEX_ACCESS_TOKEN or SEARCH_OLLAMA_BASE_URL',
+    ],
     isConfigured: (cfg) =>
       (cfg.exa.apiKey ?? '').length > 0 ||
       (cfg.brave.apiKey ?? '').length > 0 ||
       cfg.searxng.baseUrl.length > 0 ||
-      (cfg.tavily.apiKey ?? '').length > 0,
+      (cfg.tavily.apiKey ?? '').length > 0 ||
+      cfg.ollamaSearch.baseUrl.length > 0 ||
+      codexConfigured(process.env),
   },
   web_crawl: {
     required: ['CRAWL4AI_BASE_URL'],
@@ -344,7 +373,8 @@ export function getFeatureConfiguration(
 }
 
 const DEFAULTS: Omit<SearchConfig, 'rescoreWeights'> = {
-  searchBackend: 'searxng',
+  searchBackend: 'codex',
+  searchBackendExplicit: false,
   brave: { apiKey: '' },
   searxng: { baseUrl: '' },
   exa: { apiKey: '' },
@@ -360,6 +390,7 @@ const DEFAULTS: Omit<SearchConfig, 'rescoreWeights'> = {
     oauthConfigValid: true,
   },
   crawl4ai: { baseUrl: '', apiToken: '' },
+  documentParsing: { enabled: true, multimodal: false, maxEnrich: 3 },
   embeddingSidecar: {
     provider: 'sidecar',
     baseUrl: '',
@@ -414,7 +445,7 @@ const DEFAULTS: Omit<SearchConfig, 'rescoreWeights'> = {
     },
   },
   browser: {
-    enabled: false,
+    enabled: true,
     executablePath: '',
     headless: true,
     viewport: { width: 1280, height: 720 },
@@ -436,7 +467,7 @@ const DEFAULTS: Omit<SearchConfig, 'rescoreWeights'> = {
     credentials: {},
     mode: 'user' as const,
     browserPort: 9222,
-    autoConnect: false,
+    autoConnect: true,
   },
   knowledgeGraph: DEFAULT_KG_CONFIG,
 };
@@ -448,12 +479,14 @@ const VALID_BACKENDS = new Set<string>([
   'duckduckgo',
   'ollama-search',
   'tavily',
+  'codex',
 ]);
 
 type EnvConfig = Omit<
   Partial<SearchConfig>,
   | 'reddit'
   | 'crawl4ai'
+  | 'documentParsing'
   | 'github'
   | 'embeddingSidecar'
   | 'semanticCrawl'
@@ -470,6 +503,7 @@ type EnvConfig = Omit<
   deepResearch?: Partial<DeepResearchConfig>;
   reddit?: Partial<RedditConfig>;
   crawl4ai?: Partial<Crawl4aiConfig>;
+  documentParsing?: Partial<DocumentParsingConfig>;
   github?: Partial<GitHubConfig>;
   exa?: Partial<ExaConfig>;
   tavily?: Partial<{ apiKey: string }>;
@@ -489,6 +523,7 @@ function loadFromEnv(): EnvConfig {
   const backend = process.env.SEARCH_BACKEND;
   if (backend && VALID_BACKENDS.has(backend)) {
     cfg.searchBackend = backend as SearchBackend;
+    cfg.searchBackendExplicit = true;
   }
 
   const braveKey = process.env.BRAVE_API_KEY;
@@ -552,6 +587,37 @@ function loadFromEnv(): EnvConfig {
     if (crawl4aiUrl !== undefined) crawl4aiCfg.baseUrl = crawl4aiUrl;
     if (crawl4aiToken !== undefined) crawl4aiCfg.apiToken = crawl4aiToken;
     cfg.crawl4ai = crawl4aiCfg;
+  }
+
+  const documentParsingEnabled = process.env.DOCUMENT_PARSING_ENABLED;
+  const documentParsingMultimodal = process.env.DOCUMENT_PARSING_MULTIMODAL;
+  const documentParsingMaxEnrich = process.env.DOCUMENT_PARSING_MAX_ENRICH;
+  if (
+    documentParsingEnabled !== undefined ||
+    documentParsingMultimodal !== undefined ||
+    documentParsingMaxEnrich !== undefined
+  ) {
+    const documentParsingCfg: Partial<DocumentParsingConfig> = {};
+    if (documentParsingEnabled !== undefined) {
+      documentParsingCfg.enabled =
+        documentParsingEnabled === 'true' || documentParsingEnabled === '1';
+    }
+    if (documentParsingMultimodal !== undefined) {
+      documentParsingCfg.multimodal =
+        documentParsingMultimodal === 'true' || documentParsingMultimodal === '1';
+    }
+    if (documentParsingMaxEnrich !== undefined) {
+      // Accept only whole, non-negative safe integers. `Number.parseInt` would
+      // silently accept partial/negative values like "3junk" or "-5"; reject
+      // those so a malformed value falls back to the default instead of being
+      // assigned/merged.
+      const raw = documentParsingMaxEnrich.trim();
+      const parsed = Number(raw);
+      if (/^\d+$/.test(raw) && Number.isSafeInteger(parsed)) {
+        documentParsingCfg.maxEnrich = parsed;
+      }
+    }
+    cfg.documentParsing = documentParsingCfg;
   }
 
   const embeddingSidecarUrl = process.env.EMBEDDING_SIDECAR_BASE_URL;
@@ -895,7 +961,36 @@ function loadFromEnv(): EnvConfig {
   return cfg;
 }
 
+/**
+ * Preserve legacy marker values while reading configs created before this field
+ * existed. It is retained for encrypted-config compatibility; provider fanout
+ * no longer depends on explicit backend selection.
+ */
+export function resolveSearchBackendExplicit(
+  envExplicit: boolean | undefined,
+  fileExplicit: boolean | undefined,
+  fileBackend: unknown,
+): boolean {
+  if (envExplicit !== undefined) return envExplicit;
+  if (fileExplicit !== undefined) return fileExplicit;
+  return fileBackend !== undefined && fileBackend !== 'searxng';
+}
+
 let cached: SearchConfig | undefined;
+
+const MAX_ENRICH_CEILING = 10;
+
+export function resolveMaxEnrich(...candidates: unknown[]): number | undefined {
+  for (const c of candidates) {
+    // Only a non-negative safe integer is acceptable; negative, unsafe,
+    // partial, or non-numeric values are rejected so the default is used.
+    // Values above MAX_ENRICH_CEILING are clamped to prevent runaway enrichment.
+    if (typeof c === 'number' && Number.isSafeInteger(c) && c >= 0) {
+      return Math.min(c, MAX_ENRICH_CEILING);
+    }
+  }
+  return undefined;
+}
 
 export function loadConfig(): SearchConfig {
   if (cached) return cached;
@@ -956,6 +1051,11 @@ export function loadConfig(): SearchConfig {
 
   cached = {
     searchBackend: envConfig.searchBackend ?? fileConfig.searchBackend ?? DEFAULTS.searchBackend,
+    searchBackendExplicit: resolveSearchBackendExplicit(
+      envConfig.searchBackendExplicit,
+      fileConfig.searchBackendExplicit,
+      (fileConfig as { searchBackend?: unknown }).searchBackend,
+    ),
     brave: {
       apiKey: envConfig.brave?.apiKey ?? fileConfig.brave?.apiKey ?? DEFAULTS.brave.apiKey ?? '',
     },
@@ -992,6 +1092,21 @@ export function loadConfig(): SearchConfig {
         fileConfig.crawl4ai?.apiToken ??
         DEFAULTS.crawl4ai.apiToken ??
         '',
+    },
+    documentParsing: {
+      enabled:
+        envConfig.documentParsing?.enabled ??
+        fileConfig.documentParsing?.enabled ??
+        DEFAULTS.documentParsing.enabled,
+      multimodal:
+        envConfig.documentParsing?.multimodal ??
+        fileConfig.documentParsing?.multimodal ??
+        DEFAULTS.documentParsing.multimodal,
+      maxEnrich:
+        resolveMaxEnrich(
+          envConfig.documentParsing?.maxEnrich,
+          fileConfig.documentParsing?.maxEnrich,
+        ) ?? DEFAULTS.documentParsing.maxEnrich,
     },
     embeddingSidecar: {
       provider:

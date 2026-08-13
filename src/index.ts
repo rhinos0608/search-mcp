@@ -10,6 +10,7 @@ import { startHttpServer } from './server/http.js';
 import { isAddressInUseError } from './server/startupErrors.js';
 import type { SearchMcpRuntime } from './config/types.js';
 import { closeKgDb } from './knowledge/store/db.js';
+import { startArtifactSweeper } from './tools/webSearchArtifact.js';
 
 // ── Shutdown handler registration ──────────────────────────────────────────
 
@@ -49,6 +50,9 @@ function registerShutdownHandlers(close: () => Promise<void>): void {
 
 async function main(): Promise<void> {
   logger.info('Starting search-mcp server');
+
+  // Periodic artifact TTL/capacity sweep, independent of web_search traffic.
+  startArtifactSweeper();
 
   const httpPortEnv = process.env.HTTP_PORT;
   const useHttp = httpPortEnv !== undefined && httpPortEnv !== '';

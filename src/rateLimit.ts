@@ -25,7 +25,8 @@ export type RateLimitedBackend =
   | 'github_search'
   | 'reddit'
   | 'semantic_scholar'
-  | 'arxiv';
+  | 'arxiv'
+  | 'codex';
 
 const LOW_REMAINING_THRESHOLD = 5;
 const MAX_SHORT_BACKOFF_MS = 5_000;
@@ -166,6 +167,10 @@ export function parseRateLimitHeaders(
       return parseSemanticScholarHeaders(headers);
     case 'arxiv':
       // ArXiv doesn't send rate-limit headers; throttling is time-based (see academicSearch)
+      return null;
+    case 'codex':
+      // Codex sends no standard rate-limit headers; 429s are recorded via
+      // recordLimitHit() so pre-request gating works after a hit.
       return null;
   }
 }

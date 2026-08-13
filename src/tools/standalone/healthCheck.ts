@@ -5,13 +5,23 @@
  */
 
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import type { SearchConfig } from '../../config.js';
+import { loadConfig, type SearchConfig } from '../../config.js';
 import { logger } from '../../logger.js';
 import { runHealthProbes } from '../../health.js';
 import { makeResult, errorResponse } from '../response.js';
 import { z } from 'zod/v4';
 
-export function registerHealthCheck(server: McpServer, cfg: SearchConfig): void {
+/**
+ * Register the health_check tool.
+ *
+ * `cfg` is retained for registration-time compatibility (callers pass the
+ * startup config), but the handler reloads the live persisted config on every
+ * invocation via `loadConfig()` — matching web_search's runtime behavior — so
+ * a dashboard config update is reflected on the next health_check call
+ * without a restart. The dashboard's ConfigManager invalidates the loadConfig
+ * cache when it persists changes.
+ */
+export function registerHealthCheck(server: McpServer, _cfg: SearchConfig): void {
   server.registerTool(
     'health_check',
     {
@@ -30,6 +40,7 @@ export function registerHealthCheck(server: McpServer, cfg: SearchConfig): void 
             latencyMs: z.number().optional(),
             tier: z.enum(['free', 'core', 'gated', 'optional', 'family']).optional(),
             activeBackend: z.string().optional(),
+            parsers: z.object({ pdf: z.boolean(), office: z.boolean() }).optional(),
             configuration: z
               .object({
                 configured: z.boolean(),
@@ -81,7 +92,10 @@ export function registerHealthCheck(server: McpServer, cfg: SearchConfig): void 
       logger.info({ tool: 'health_check' }, 'Tool invoked');
       const start = Date.now();
       try {
-        const report = await runHealthProbes(cfg);
+        // Live config: dashboard updates are persisted and invalidate the
+        // loadConfig cache, so a fresh read reflects them on the next call.
+        const currentCfg = loadConfig();
+        const report = await runHealthProbes(currentCfg);
         const result = makeResult('health_check', report, Date.now() - start);
         const formatted = JSON.stringify(result, null, 2);
         return {

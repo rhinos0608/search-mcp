@@ -80,15 +80,66 @@ export interface SearchResult {
   /** Domain extracted from the result URL (e.g. "example.com"). */
   domain: string;
   /** Which search backend produced this result. */
-  source: 'brave' | 'searxng' | 'exa' | 'duckduckgo' | 'ollama-search' | 'tavily';
+  source: 'brave' | 'searxng' | 'exa' | 'duckduckgo' | 'ollama-search' | 'tavily' | 'codex';
   /** Which backends reported this result (when cross-backend merging is active). */
   engines?: string[] | undefined;
+  /**
+   * SearXNG upstream engine names only (e.g. `Google`, `Bing`). Kept separate
+   * from `engines` (the MCP search backends) so upstream names are never
+   * confused with which provider supplied this result. Optional.
+   */
+  upstreamEngines?: string[] | undefined;
   /** Page age / publication date hint when available (e.g. "2 days ago", ISO date). */
   age: string | null;
   /** Additional snippet text beyond the primary description. */
   extraSnippet: string | null;
   /** Related deep links surfaced by the search backend (e.g. Brave deep_results buttons). */
   deepLinks: { title: string; url: string }[] | null;
+  /**
+   * Representation kind of `description` (and `extraSnippet`) content.
+   * `snippet` = thin provider excerpt, `full` = raw page text, `summary` = native
+   * generated summary. Used for content-truth dedup (richest representation wins)
+   * and the markdown formatter's metadata line. Optional — legacy providers and
+   * callers that don't classify content leave it unset (treated as snippet).
+   */
+  contentKind?: 'snippet' | 'full' | 'summary' | undefined;
+  /**
+   * Native provider-generated summary, kept separate from page content so the
+   * formatter can render it under a dedicated `### AI summary` label without
+   * mixing it into the result body. Null when the provider supplied none (or
+   * summaries were disabled).
+   */
+  generatedSummary?: string | null | undefined;
+  /**
+   * Which provider generated the `generatedSummary` (e.g. `exa`). Preserved
+   * across dedup merges so the formatter can label `### AI summary (provider)`.
+   * Optional — absent when no URL-attributable generated summary is attached.
+   */
+  generatedSummaryProvider?: string | undefined;
+  /**
+   * Honest origin of the `age` value: `published` = backend publication date,
+   * `fetched` = page-fetch time (Brave page_fetched), `unknown` = no date
+   * available. Optional — absent means the age kind was not classified.
+   */
+  ageKind?: 'published' | 'fetched' | 'unknown' | undefined;
+  /**
+   * Deterministic 0–1 domain-credibility score (see `getDomainAuthority`),
+   * exposed additively so consumers can see the ranking signal. Optional.
+   */
+  domainAuthorityScore?: number | undefined;
+  /**
+   * Honest source-quality label derived from `domainAuthorityScore`
+   * (high/medium/low). Never implies the source is correct — only that its
+   * domain is a recognized technical authority. Optional.
+   */
+  sourceQuality?: 'high' | 'medium' | 'low' | undefined;
+  /**
+   * Category-aware explainable basis for the credibility tier (see
+   * `getSourceBasis`), computed and stored at the final path so the formatter
+   * never recomputes it without the category context it was derived from.
+   * Optional — absent when the caller built a bare `SearchResult` directly.
+   */
+  sourceBasis?: string | null | undefined;
 }
 
 // ── Structured Content Elements ──────────────────────────────────────────────

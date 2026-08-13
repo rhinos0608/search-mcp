@@ -13,6 +13,8 @@ models/
 .pi-lens/
 .cache/semantic-crawl/
 .pi-smartread.embeddings.cache/
+.subagents/
+.pi-subagents/
 
 # Python
 __pycache__/

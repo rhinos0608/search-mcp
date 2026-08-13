@@ -2,9 +2,31 @@ import { assertSafeUrl } from '../httpGuards.js';
 
 export type OpenAiChatRole = 'system' | 'user' | 'assistant';
 
+/** Text part of a multimodal (vision) message. */
+export interface OpenAiChatTextPart {
+  type: 'text';
+  text: string;
+}
+
+/** Base64 data-URL image part of a multimodal (vision) message. */
+export interface OpenAiChatImageUrlPart {
+  type: 'image_url';
+  image_url: { url: string };
+}
+
+export type OpenAiChatContentPart = OpenAiChatTextPart | OpenAiChatImageUrlPart;
+
+/**
+ * Message content: a plain string, or a multimodal part array (text + image_url)
+ * for vision-capable endpoints. The request body is JSON-serialized directly, so
+ * part arrays pass through unchanged. Backward-compatible: all existing callers
+ * pass plain strings.
+ */
+export type OpenAiChatContent = string | OpenAiChatContentPart[];
+
 export interface OpenAiChatMessage {
   role: OpenAiChatRole;
-  content: string;
+  content: OpenAiChatContent;
 }
 
 export interface OpenAiChatCompletionOptions {

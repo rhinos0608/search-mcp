@@ -123,6 +123,7 @@ const VALID_SEARCH_BACKENDS = new Set([
   'duckduckgo',
   'ollama-search',
   'tavily',
+  'codex',
 ]);
 
 const VALID_EMBEDDING_PROVIDERS = new Set(['sidecar', 'ollama', 'transformers', 'openai']);
@@ -251,12 +252,16 @@ export class ConfigManager {
     return redactValue('', this.get()) as RedactedConfig;
   }
 
-  /** Write encrypted config to disk and update in-memory cache. */
+  /** Write encrypted config to disk, update in-memory manager state, and invalidate the runtime cache. */
   private persistEncryptedConfig(cfg: SearchConfig): void {
     const password = process.env.SEARCH_MCP_CONFIG_KEY;
     if (!password) throw new Error('SEARCH_MCP_CONFIG_KEY not set; cannot persist config update');
     this._writeEncrypted(cfg, password);
     this.config = cfg;
+    // The runtime config cache (loadConfig) must observe the persisted change
+    // on the next read without a restart. Env vars still take precedence in
+    // the reload merge, so no other dynamic config behavior changes.
+    resetConfig();
   }
 
   update(patch: ConfigPatch): void {
@@ -284,6 +289,13 @@ export class ConfigManager {
     }
 
     const updated = cfg as unknown as SearchConfig;
+
+    // Preserve marker for readers of older encrypted config. Backend selection
+    // now controls fallback order only; all configured providers still run.
+    const backendPatch = patch.searchBackend;
+    if (backendPatch !== undefined && 'op' in backendPatch && backendPatch.op === 'set') {
+      updated.searchBackendExplicit = true;
+    }
 
     // Validate the patched config before persisting.
     // This catches invalid values that MUTABLE_CONFIG_KEYS alone doesn't guard.

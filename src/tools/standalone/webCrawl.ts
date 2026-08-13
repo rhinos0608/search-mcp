@@ -89,6 +89,13 @@ export function registerWebCrawl(
           .describe(
             'Custom JavaScript to execute on the page (e.g. scroll to bottom, click "Load More"). Runs after wait_for completes.',
           ),
+        multimodal: z
+          .boolean()
+          .optional()
+          .default(false)
+          .describe(
+            'Opt-in: describe figures/complex tables in parsed documents via the configured vision LLM. Requires DOCUMENT_PARSING_ENABLED and a configured LLM.',
+          ),
       },
       annotations: { readOnlyHint: true },
     },
@@ -104,6 +111,7 @@ export function registerWebCrawl(
         delayBeforeReturnHtml,
         pageTimeout,
         jsCode,
+        multimodal,
       },
       _extra,
     ) => {
@@ -116,7 +124,25 @@ export function registerWebCrawl(
         }
 
         if (isDocumentUrl(url)) {
-          const documentResult = await extractDocumentUrl(url, { timeoutMs: pageTimeout });
+          if (multimodal && !cfg.documentParsing.enabled) {
+            warnings.push(
+              'Multimodal figure/table enrichment ignored because document parsing is disabled (DOCUMENT_PARSING_ENABLED=false).',
+            );
+          }
+          // Per-call multimodal override: shallow-clone the loaded config so THIS
+          // invocation uses documentParsing.multimodal=true without mutating the
+          // shared cached config object.
+          const extractionCfg =
+            multimodal && !cfg.documentParsing.multimodal
+              ? {
+                  ...cfg,
+                  documentParsing: { ...cfg.documentParsing, multimodal: true },
+                }
+              : cfg;
+          const documentResult = await extractDocumentUrl(url, {
+            timeoutMs: pageTimeout,
+            config: extractionCfg,
+          });
           warnings.push(...documentResult.warnings);
           if (documentResult.success && documentResult.markdown.trim().length > 0) {
             logger.info({ tool: 'web_crawl', url }, 'Document URL extracted in-process');
