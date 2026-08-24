@@ -25,7 +25,6 @@
 import { z } from 'zod/v4';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { SearchConfig } from '../../config.js';
-import type { KnowledgeGraphHook } from '../../knowledge/hook.js';
 import { getGitHubRepo } from '../githubRepo.js';
 import { getGitHubRepoFile } from '../githubRepoFile.js';
 import { getGitHubRepoTree } from '../githubRepoTree.js';
@@ -910,12 +909,8 @@ const githubFamily: FamilyDefinition = {
 
 // ── Registration ─────────────────────────────────────────────────────────────
 
-export function registerGitHubTool(
-  server: McpServer,
-  cfg: SearchConfig,
-  kgHook?: KnowledgeGraphHook,
-): void {
-  registerFamily(server, githubFamily, cfg, kgHook);
+export function registerGitHubTool(server: McpServer, cfg: SearchConfig): void {
+  registerFamily(server, githubFamily, cfg);
 }
 
 export function gitHubCapabilities(cfg: SearchConfig) {

@@ -1,9 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {
-  makeResult,
-  wrapResponse,
-} from '../src/tools/response.js';
+import { makeResult, wrapResponse } from '../src/tools/response.js';
 import type { ToolResult } from '../src/types.js';
 
 void test('makeResult includes provenance when provided', () => {
@@ -21,7 +18,7 @@ void test('makeResult includes provenance when provided', () => {
 });
 
 void test('makeResult includes retry when provided', () => {
-  const result = makeResult('deep_research', { jobId: 'abc' }, 150, {
+  const result = makeResult('research', { jobId: 'abc' }, 150, {
     retry: {
       recommended: true,
       reason: 'Incomplete corpus — try with a broader query',
@@ -85,11 +82,9 @@ void test('makeResult merges multiple new fields with existing fields', () => {
 });
 
 void test('wrapResponse can carry provenance/retry/normalized/partial', () => {
-  const wrapped = wrapResponse(
-    { key: 'val' },
-    ['note'],
-    { provenance: { usedBackend: 'tavily', usedFallback: false } },
-  );
+  const wrapped = wrapResponse({ key: 'val' }, ['note'], {
+    provenance: { usedBackend: 'tavily', usedFallback: false },
+  });
   assert.equal(wrapped.kind, 'wrapped');
   assert.deepEqual(wrapped.data, { key: 'val' });
   assert.deepEqual(wrapped.warnings, ['note']);
@@ -112,7 +107,10 @@ void test('makeResult provenance can show fallback reason', () => {
       fallbackReason: 'brave unavailable (degraded); duckduckgo circuit-tripped',
     },
   });
-  assert.equal(result.meta.provenance!.fallbackReason, 'brave unavailable (degraded); duckduckgo circuit-tripped');
+  assert.equal(
+    result.meta.provenance!.fallbackReason,
+    'brave unavailable (degraded); duckduckgo circuit-tripped',
+  );
 });
 
 void test('makeResult retry with minimalCall omitted', () => {

@@ -15,7 +15,6 @@ import { randomUUID } from 'node:crypto';
 import { z } from 'zod/v4';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { SearchConfig } from '../../config.js';
-import type { KnowledgeGraphHook } from '../../knowledge/hook.js';
 import { assertSafeUrl, safeResponseText } from '../../httpGuards.js';
 import { registerFamily, type FamilyDefinition } from '../registry.js';
 import { fetchFocus } from '../fetchFocus.js';
@@ -260,7 +259,7 @@ const agenticBrowseFamily: FamilyDefinition = {
         if (cfg.crawl4ai.baseUrl.length === 0) {
           return 'Set CRAWL4AI_BASE_URL to use agentic_browse.focus.';
         }
-        if (!cfg.deepResearch.baseUrl || !cfg.deepResearch.model) {
+        if (!cfg.llm.baseUrl || !cfg.llm.model) {
           return 'Set DEEP_RESEARCH_BASE_URL and DEEP_RESEARCH_MODEL to use agentic_browse.focus.';
         }
         return null;
@@ -271,12 +270,8 @@ const agenticBrowseFamily: FamilyDefinition = {
 
 // ── Registration ───────────────────────────────────────────────────────────
 
-export function registerAgenticBrowseTool(
-  server: McpServer,
-  cfg: SearchConfig,
-  kgHook?: KnowledgeGraphHook,
-): void {
-  registerFamily(server, agenticBrowseFamily, cfg, kgHook);
+export function registerAgenticBrowseTool(server: McpServer, cfg: SearchConfig): void {
+  registerFamily(server, agenticBrowseFamily, cfg);
 }
 
 /**

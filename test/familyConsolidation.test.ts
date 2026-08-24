@@ -24,7 +24,7 @@ interface RegisteredToolEntry {
 const STANDALONE_TOOLS = new Set(['web_search', 'health_check']);
 
 /** Tools that require specific config and may not be registered in default env. */
-const GATED_STANDALONE_TOOLS = new Set(['semantic_jobs', 'deep_research']);
+const GATED_STANDALONE_TOOLS = new Set(['semantic_jobs']);
 
 const FAMILY_TOOLS = new Map<string, string[]>([
   [
@@ -40,23 +40,7 @@ const FAMILY_TOOLS = new Map<string, string[]>([
 ]);
 
 /** Families that require specific config and may not be registered in default env. */
-const GATED_FAMILIES = new Map<string, string[]>([
-  [
-    'knowledge_graph',
-    [
-      'ingest',
-      'query',
-      'entity_lookup_batch',
-      'status',
-      'rebuild',
-      'family_list',
-      'family_get',
-      'family_merge',
-      'run_list',
-      'run_rollback',
-    ],
-  ],
-]);
+const GATED_FAMILIES = new Map<string, string[]>([]);
 
 type McpServerInstance = ReturnType<typeof createServer>['server'];
 
@@ -277,117 +261,6 @@ for (const toolName of GATED_STANDALONE_TOOLS) {
     }
   });
 }
-
-// ── Gated family tools ──────────────────────────────────────────────────────
-
-for (const [familyName, actions] of GATED_FAMILIES) {
-  test(`${familyName} family is either registered as a single tool or gated (not leaked as separate tools)`, () => {
-    const server = createServer(loadConfig()).server;
-    const tools = getAllRegisteredTools(server);
-
-    if (familyName in tools) {
-      // Family registered — verify it's a single tool
-      const entry = tools[familyName];
-      assert.ok(entry !== undefined, `${familyName} tool should be registered`);
-      assert.ok(entry.inputSchema !== undefined, `${familyName} should have an input schema`);
-
-      // No leaked per-action tools
-      for (const action of actions) {
-        const leakedName = `${familyName}_${action}`;
-        assert.ok(
-          !(leakedName in tools),
-          `"${leakedName}" should NOT be a separate tool — it should be an action within the "${familyName}" family tool`,
-        );
-      }
-    } else {
-      // Not registered due to gating — fine
-      assert.ok(true, `${familyName} is gated (config missing)`);
-    }
-  });
-}
-
-for (const [familyName, actions] of GATED_FAMILIES) {
-  test(`${familyName} input schema validates every known action if registered`, () => {
-    const server = createServer(loadConfig()).server;
-    const tools = getAllRegisteredTools(server);
-
-    if (!(familyName in tools)) {
-      // Gated — skip
-      assert.ok(true, `${familyName} is gated (config missing)`);
-      return;
-    }
-
-    const entry = tools[familyName]!;
-    const schema = entry.inputSchema!;
-
-    // Each known action should parse successfully
-    for (const action of actions) {
-      const params: Record<string, unknown> = { action };
-
-      // Add required fields for actions that need them
-      if (action === 'ingest') {
-        params.content = { type: 'text', value: 'test content' };
-      }
-      if (action === 'query' || action === 'entity_lookup_batch') {
-        if (action === 'query') params.query = 'test';
-        if (action === 'entity_lookup_batch') params.entity_ids = ['id1'];
-      }
-      if (action === 'status') {
-        // no required fields
-      }
-      if (action === 'rebuild') {
-        // all fields optional
-      }
-      if (action === 'family_list') {
-        // all fields optional
-      }
-      if (action === 'family_get') {
-        params.family_id = 'test-family';
-      }
-      if (action === 'family_merge') {
-        params.from_id = 'fam-a';
-        params.into_id = 'fam-b';
-        params.reason = 'test merge';
-      }
-      if (action === 'run_list') {
-        // all fields optional
-      }
-      if (action === 'run_rollback') {
-        params.run_id = 'test-run';
-      }
-
-      const result = schema.safeParse(params);
-      assert.ok(
-        result.success,
-        `${familyName}.${action} should validate with discriminated union. Errors: ${JSON.stringify(
-          result.error?.issues ?? 'none',
-        )}`,
-      );
-    }
-
-    // Unknown action should be rejected
-    const bad = schema.safeParse({ action: 'nonexistent_xyz' });
-    assert.ok(!bad.success, `${familyName} should reject unknown action`);
-  });
-}
-
-test('knowledge_graph entity_lookup_batch schema accepts label lookup', () => {
-  const server = createServer(loadConfig()).server;
-  const tools = getAllRegisteredTools(server);
-  const entry = tools.knowledge_graph;
-
-  if (entry === undefined) {
-    assert.ok(true, 'knowledge_graph is gated (config missing)');
-    return;
-  }
-
-  const result = entry.inputSchema?.safeParse({
-    action: 'entity_lookup_batch',
-    entity_label: 'Mechanistic interpretability',
-  });
-
-  assert.equal(result?.success, true, JSON.stringify(result?.error?.issues ?? []));
-});
 
 // ── Full tool list sanity check ─────────────────────────────────────────────
 

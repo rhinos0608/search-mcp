@@ -15,7 +15,6 @@ import { tolerant } from '../normalize.js';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { SearchConfig } from '../../config.js';
 import type { SemanticCrawlBatchResult, SemanticCrawlSource } from '../../types.js';
-import type { KnowledgeGraphHook } from '../../knowledge/hook.js';
 import { logger } from '../../logger.js';
 import { DEFAULT_SEMANTIC_MAX_BYTES } from '../../semanticLimits.js';
 import { semanticCrawl } from '../semanticCrawl.js';
@@ -459,12 +458,8 @@ const semanticCrawlFamily: FamilyDefinition = {
 
 // ── Registration ─────────────────────────────────────────────────────────────
 
-export function registerSemanticCrawlFamily(
-  server: McpServer,
-  cfg: SearchConfig,
-  kgHook?: KnowledgeGraphHook,
-): void {
-  registerFamily(server, semanticCrawlFamily, cfg, kgHook);
+export function registerSemanticCrawlFamily(server: McpServer, cfg: SearchConfig): void {
+  registerFamily(server, semanticCrawlFamily, cfg);
 }
 
 /**

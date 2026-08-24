@@ -1,7 +1,7 @@
 {
   "name": "search-mcp",
   "version": "7.0.0",
-  "description": "MCP server with 18 tools for web search, semantic RAG, code analysis, knowledge graph, job search, academic research, social media, browser automation, and health",
+  "description": "MCP server for web search, semantic RAG, code analysis, job search, academic research, social media, browser automation, and health",
   "type": "module",
   "main": "dist/index.js",
   "bin": {

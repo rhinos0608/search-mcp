@@ -29,24 +29,11 @@ import { registerResearchTool } from './tools/families/research.js';
 import { registerBrowserTool } from './tools/families/browser.js';
 import { registerAgenticBrowseTool } from './tools/families/agenticBrowse.js';
 
-// Deep research
-import { registerDeepResearchTool } from './tools/standalone/deepResearch.js';
-
-// Knowledge graph tool family
-import { registerKnowledgeGraphTool } from './tools/families/knowledgeGraph.js';
-
-// Knowledge graph
-import { initKgDb } from './knowledge/store/db.js';
-import { resolveKgDbPath } from './knowledge/config.js';
-import { KnowledgeGraphHook } from './knowledge/hook.js';
-
 export function createServer(
   cfg: SearchConfig,
-  existingHook?: KnowledgeGraphHook,
   getConfig?: () => SearchConfig,
 ): {
   server: McpServer;
-  kgHook: KnowledgeGraphHook | null;
 } {
   logger.info({ backend: cfg.searchBackend }, 'Primary search backend');
 
@@ -64,46 +51,28 @@ export function createServer(
     version: getVersion(),
   });
 
-  // Initialize KG database and hook
-  let kgHook: KnowledgeGraphHook | null = existingHook ?? null;
-  if (cfg.knowledgeGraph.enabled) {
-    if (kgHook === null) {
-      initKgDb(resolveKgDbPath(cfg.knowledgeGraph));
-      kgHook = new KnowledgeGraphHook(cfg);
-    }
-  }
-
-  // Standalone tools (pass kgHook for passive capture)
-  registerWebSearch(server, kgHook ?? undefined, getConfig ?? loadConfig);
-  registerWebCrawl(server, cfg, kgHook ?? undefined);
+  registerWebSearch(server, getConfig ?? loadConfig);
+  registerWebCrawl(server, cfg);
   registerRssTool(server);
 
   // Gated standalone tools
   if (!gated.has('semantic_jobs')) registerSemanticJobs(server, cfg);
   // semantic_crawl is now a family tool with crawl/list_corpora/inspect_corpus actions.
   // The crawl action requires Crawl4AI + embedding; list_corpora/inspect_corpus are always available.
-  registerSemanticCrawlFamily(server, cfg, kgHook ?? undefined);
-  if (!gated.has('deep_research')) registerDeepResearchTool(server, cfg, kgHook ?? undefined);
+  registerSemanticCrawlFamily(server, cfg);
 
-  // Family tools (pass kgHook for passive capture)
-  registerYoutubeTool(server, cfg, kgHook ?? undefined);
-  registerRedditTool(server, cfg, kgHook ?? undefined);
-  registerGitHubTool(server, cfg, kgHook ?? undefined);
-  registerPackagesTool(server, cfg, kgHook ?? undefined);
-  registerResearchTool(server, cfg, kgHook ?? undefined);
+  registerYoutubeTool(server, cfg);
+  registerRedditTool(server, cfg);
+  registerGitHubTool(server, cfg);
+  registerPackagesTool(server, cfg);
+  registerResearchTool(server, cfg);
   // Browser is excluded from passive KG capture: its output is complex HTML
   // and session-heavy, and the extraction pipeline is not designed for DOM trees.
-  // If browser capture is added later, registerBrowserTool should accept kgHook.
   registerBrowserTool(server, cfg);
-  registerAgenticBrowseTool(server, cfg, kgHook ?? undefined);
+  registerAgenticBrowseTool(server, cfg);
 
   // Conditional / gated tools
   registerHealthCheck(server, cfg);
 
-  // Knowledge graph family (conditional on KG enabled)
-  if (cfg.knowledgeGraph.enabled) {
-    registerKnowledgeGraphTool(server, cfg, kgHook ?? undefined);
-  }
-
-  return { server, kgHook };
+  return { server };
 }

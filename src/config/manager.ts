@@ -28,7 +28,6 @@ const SECRET_LEAF_PATHS = new Set([
   'crawl4ai.apiToken',
   'embeddingSidecar.apiToken',
   'llm.apiToken',
-  'deepResearch.apiToken',
 ]);
 
 /** Key-name suffixes that indicate a credential value to redact under browser.credentials. */

@@ -21,7 +21,6 @@ import { outputBudget } from '../../utils/outputBudget.js';
 import { scrubContent } from '../../utils/contentScrubber.js';
 import { enrichDocumentSnippets } from '../webSearchDocEnrich.js';
 import type { SearchResult } from '../../types.js';
-import type { KnowledgeGraphHook } from '../../knowledge/hook.js';
 import { CATEGORY_NAMES } from '../../utils/searchCategories.js';
 
 export interface RegisterWebSearchOptions {
@@ -36,7 +35,6 @@ export interface RegisterWebSearchOptions {
 
 export function registerWebSearch(
   server: McpServer,
-  kgHook?: KnowledgeGraphHook,
   getConfig: () => SearchConfig = loadConfig,
   options?: RegisterWebSearchOptions,
 ): void {
@@ -166,14 +164,6 @@ export function registerWebSearch(
           aiSummary: summaryMode,
           ...(writer !== undefined ? { writeArtifact: writer } : {}),
         });
-        const data: { text: string } = { text: markdown };
-
-        // KG passive capture (fire-and-forget, never fails the tool call)
-        if (kgHook && invocationCfg.knowledgeGraph.enabled) {
-          void kgHook.onToolCall('web_search', data).catch((err: unknown) => {
-            logger.warn({ err, tool: 'web_search' }, 'KG passive capture failed (non-fatal)');
-          });
-        }
 
         outputBudget.recordResponse('web_search', Buffer.byteLength(markdown));
         return { content: [{ type: 'text' as const, text: markdown }] };

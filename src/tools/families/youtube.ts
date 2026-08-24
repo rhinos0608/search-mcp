@@ -13,7 +13,6 @@
 import { z } from 'zod/v4';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { SearchConfig } from '../../config.js';
-import type { KnowledgeGraphHook } from '../../knowledge/hook.js';
 import { DEFAULT_SEMANTIC_MAX_BYTES } from '../../semanticLimits.js';
 import { compactSemanticResponse } from '../../utils/semanticResponse.js';
 import { youtubeSearch } from '../youtubeSearch.js';
@@ -215,12 +214,8 @@ const youtubeFamily: FamilyDefinition = {
 
 // ── Registration ─────────────────────────────────────────────────────────────
 
-export function registerYoutubeTool(
-  server: McpServer,
-  cfg: SearchConfig,
-  kgHook?: KnowledgeGraphHook,
-): void {
-  registerFamily(server, youtubeFamily, cfg, kgHook);
+export function registerYoutubeTool(server: McpServer, cfg: SearchConfig): void {
+  registerFamily(server, youtubeFamily, cfg);
 }
 
 /**

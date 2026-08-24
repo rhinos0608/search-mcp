@@ -30,10 +30,10 @@ const baseConfig: SearchConfig = {
   semanticCrawl: { defaultMaxBytes: 50_000_000, maxMaxBytes: 50_000_000 },
   domainTrust: { enabled: false, trustedDomains: [], blockedDomains: [] },
   scrubContent: false,
-  llm: { provider: '', apiToken: '', baseUrl: '' },
   duckduckgo: { region: 'us-en', safeSearch: 'moderate' },
   ollamaSearch: { baseUrl: '', apiKey: '' },
-  deepResearch: {
+  llm: {
+    provider: '',
     enabled: false,
     defaultDepth: 'standard',
     maxDepth: 'deep',
@@ -90,35 +90,6 @@ const baseConfig: SearchConfig = {
     mode: 'stealth',
     browserPort: 9222,
     autoConnect: false,
-  },
-  knowledgeGraph: {
-    enabled: false,
-    dbPath: ':memory:',
-    projection: {
-      maxEvents: 500,
-      maxAgeMs: 86_400_000,
-    },
-    solidification: {
-      minRuns: 2,
-      minEntities: 5,
-      highConfidenceOverride: 0.85,
-      minVerbatimRatio: 0.7,
-      minSourceCount: 3,
-    },
-    session: {
-      maxBufferItems: 20,
-      maxIdleMs: 300_000,
-      captureStdio: true,
-    },
-    consolidation: {
-      cadenceMs: 604_800_000,
-      annThreshold: 200,
-      maxFamilies: 50,
-    },
-    relations: {
-      maxFamilies: 50,
-      maxNodesPerFamily: 100,
-    },
   },
   rescoreWeights: {
     webSearch: {

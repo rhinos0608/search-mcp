@@ -14,8 +14,6 @@ import { logger } from './logger.js';
 import { DEFAULT_SEMANTIC_MAX_BYTES } from './semanticLimits.js';
 import type { AccessConfig } from './config/types.js';
 import { decryptConfig } from './config/crypto.js';
-import type { KnowledgeGraphConfig } from './knowledge/types.js';
-import { DEFAULT_KG_CONFIG } from './knowledge/config.js';
 import { codexConfigured } from './tools/codexSearch.js';
 
 /** Load .env from the project root if present. Only sets vars not already in the environment. */
@@ -188,6 +186,8 @@ export interface LlmConfig {
 export type ResearchDepth = 'quick' | 'standard' | 'deep' | 'exhaustive' | 'tree';
 
 export interface DeepResearchConfig {
+  /** Model alias used by generic LLM consumers. */
+  provider: string;
   enabled: boolean;
   defaultDepth: ResearchDepth;
   maxDepth: ResearchDepth;
@@ -276,17 +276,15 @@ export interface SearchConfig {
   semanticCrawl: SemanticCrawlConfig;
   domainTrust: DomainTrustConfig;
   scrubContent: boolean;
-  llm: LlmConfig;
   duckduckgo: { region: string; safeSearch: string };
   ollamaSearch: { baseUrl: string; apiKey?: string };
-  deepResearch: DeepResearchConfig;
+  llm: DeepResearchConfig;
   browser: BrowserConfig;
   rescoreWeights: RescoreConfig;
   challengeLatencyThreshold: number;
   mcpApiKey?: string; // Generated on first run; stored encrypted.
   apiKeyClaimed: boolean; // True once the setup screen has been dismissed.
   access: AccessConfig; // External access configuration.
-  knowledgeGraph: KnowledgeGraphConfig;
 }
 
 export interface FeatureRequirement {
@@ -329,10 +327,6 @@ export const FEATURE_REQUIREMENTS: Record<string, FeatureRequirement> = {
       ((cfg.exa.apiKey ?? '').length > 0 ||
         (cfg.brave.apiKey ?? '').length > 0 ||
         cfg.searxng.baseUrl.length > 0),
-  },
-  deep_research: {
-    required: ['DEEP_RESEARCH_ENABLED=true'],
-    isConfigured: (cfg) => cfg.deepResearch.enabled,
   },
   browser: {
     required: ['BROWSER_ENABLED=true'],
@@ -408,10 +402,10 @@ const DEFAULTS: Omit<SearchConfig, 'rescoreWeights'> = {
     blockedDomains: [],
   },
   scrubContent: false,
-  llm: { provider: '', apiToken: '', baseUrl: '' },
   duckduckgo: { region: 'us-en', safeSearch: 'moderate' },
   ollamaSearch: { baseUrl: '', apiKey: '' },
-  deepResearch: {
+  llm: {
+    provider: '',
     enabled: false,
     defaultDepth: 'standard' as const,
     maxDepth: 'deep' as const,
@@ -469,7 +463,6 @@ const DEFAULTS: Omit<SearchConfig, 'rescoreWeights'> = {
     browserPort: 9222,
     autoConnect: true,
   },
-  knowledgeGraph: DEFAULT_KG_CONFIG,
 };
 
 const VALID_BACKENDS = new Set<string>([
@@ -500,7 +493,7 @@ type EnvConfig = Omit<
 > & {
   challengeLatencyThreshold?: number;
   browser?: Partial<BrowserConfig>;
-  deepResearch?: Partial<DeepResearchConfig>;
+  llm?: Partial<DeepResearchConfig>;
   reddit?: Partial<RedditConfig>;
   crawl4ai?: Partial<Crawl4aiConfig>;
   documentParsing?: Partial<DocumentParsingConfig>;
@@ -510,11 +503,9 @@ type EnvConfig = Omit<
   embeddingSidecar?: Partial<EmbeddingSidecarConfig>;
   semanticCrawl?: Partial<SemanticCrawlConfig>;
   domainTrust?: Partial<DomainTrustConfig>;
-  llm?: Partial<LlmConfig>;
   scrubContent?: boolean;
   duckduckgo?: Partial<{ region: string; safeSearch: string }>;
   ollamaSearch?: Partial<{ baseUrl: string; apiKey: string }>;
-  knowledgeGraph?: Partial<KnowledgeGraphConfig>;
 };
 
 function loadFromEnv(): EnvConfig {
@@ -699,13 +690,14 @@ function loadFromEnv(): EnvConfig {
   const llmApiToken = process.env.LLM_API_TOKEN;
   const llmBaseUrl = process.env.LLM_BASE_URL;
   if (llmProvider !== undefined || llmApiToken !== undefined || llmBaseUrl !== undefined) {
-    // Intentionally partial: missing keys are resolved via ?? chaining
-    // in the final merge block below.
-    const llmCfg: Partial<LlmConfig> = {};
-    if (llmProvider !== undefined) llmCfg.provider = llmProvider;
+    const llmCfg: Partial<DeepResearchConfig> = {};
+    if (llmProvider !== undefined) {
+      llmCfg.provider = llmProvider;
+      llmCfg.model = llmProvider;
+    }
     if (llmApiToken !== undefined) llmCfg.apiToken = llmApiToken;
     if (llmBaseUrl !== undefined) llmCfg.baseUrl = llmBaseUrl;
-    cfg.llm = llmCfg;
+    cfg.llm = { ...(cfg.llm ?? {}), ...llmCfg };
   }
 
   // Content scrubbing
@@ -923,10 +915,10 @@ function loadFromEnv(): EnvConfig {
       hasAny = true;
     }
     if (hasAny) {
-      cfg.deepResearch = {
-        ...(cfg.deepResearch ?? {}),
+      cfg.llm = {
+        ...(cfg.llm ?? {}),
         ...partial,
-      } as unknown as DeepResearchConfig;
+      };
     }
   }
 
@@ -934,28 +926,6 @@ function loadFromEnv(): EnvConfig {
   if (challengeLatencyThreshold !== undefined) {
     const n = Number(challengeLatencyThreshold);
     if (!isNaN(n)) cfg.challengeLatencyThreshold = n;
-  }
-
-  // ── Knowledge Graph env vars ────────────────────────────────────────────
-  {
-    const partial: Partial<KnowledgeGraphConfig> = {};
-    let hasAny = false;
-    const kgEnabled = process.env.KG_ENABLED;
-    if (kgEnabled !== undefined) {
-      partial.enabled = kgEnabled === 'true';
-      hasAny = true;
-    }
-    const kgDbPath = process.env.KG_DB_PATH;
-    if (kgDbPath !== undefined) {
-      partial.dbPath = kgDbPath;
-      hasAny = true;
-    }
-    if (hasAny) {
-      cfg.knowledgeGraph = {
-        ...(cfg.knowledgeGraph ?? {}),
-        ...partial,
-      } as unknown as KnowledgeGraphConfig;
-    }
   }
 
   return cfg;
@@ -1156,11 +1126,6 @@ export function loadConfig(): SearchConfig {
         DEFAULTS.domainTrust.blockedDomains,
     },
     scrubContent: envConfig.scrubContent ?? fileConfig.scrubContent ?? DEFAULTS.scrubContent,
-    llm: {
-      provider: envConfig.llm?.provider ?? fileConfig.llm?.provider ?? DEFAULTS.llm.provider,
-      apiToken: envConfig.llm?.apiToken ?? fileConfig.llm?.apiToken ?? DEFAULTS.llm.apiToken ?? '',
-      baseUrl: envConfig.llm?.baseUrl ?? fileConfig.llm?.baseUrl ?? DEFAULTS.llm.baseUrl,
-    },
     duckduckgo: {
       region:
         envConfig.duckduckgo?.region ?? fileConfig.duckduckgo?.region ?? DEFAULTS.duckduckgo.region,
@@ -1271,108 +1236,47 @@ export function loadConfig(): SearchConfig {
         fileConfig.browser?.autoConnect ??
         DEFAULTS.browser.autoConnect,
     },
-    deepResearch: {
-      enabled:
-        envConfig.deepResearch?.enabled ??
-        fileConfig.deepResearch?.enabled ??
-        DEFAULTS.deepResearch.enabled,
+    llm: {
+      provider: envConfig.llm?.provider ?? fileConfig.llm?.provider ?? DEFAULTS.llm.provider,
+      enabled: envConfig.llm?.enabled ?? fileConfig.llm?.enabled ?? DEFAULTS.llm.enabled,
       defaultDepth:
-        envConfig.deepResearch?.defaultDepth ??
-        fileConfig.deepResearch?.defaultDepth ??
-        DEFAULTS.deepResearch.defaultDepth,
-      maxDepth:
-        envConfig.deepResearch?.maxDepth ??
-        fileConfig.deepResearch?.maxDepth ??
-        DEFAULTS.deepResearch.maxDepth,
+        envConfig.llm?.defaultDepth ?? fileConfig.llm?.defaultDepth ?? DEFAULTS.llm.defaultDepth,
+      maxDepth: envConfig.llm?.maxDepth ?? fileConfig.llm?.maxDepth ?? DEFAULTS.llm.maxDepth,
       maxToolCalls:
-        envConfig.deepResearch?.maxToolCalls ??
-        fileConfig.deepResearch?.maxToolCalls ??
-        DEFAULTS.deepResearch.maxToolCalls,
-      maxTokens:
-        envConfig.deepResearch?.maxTokens ??
-        fileConfig.deepResearch?.maxTokens ??
-        DEFAULTS.deepResearch.maxTokens,
-      maxTimeMs:
-        envConfig.deepResearch?.maxTimeMs ??
-        fileConfig.deepResearch?.maxTimeMs ??
-        DEFAULTS.deepResearch.maxTimeMs,
-      baseUrl:
-        envConfig.deepResearch?.baseUrl ??
-        fileConfig.deepResearch?.baseUrl ??
-        DEFAULTS.deepResearch.baseUrl,
+        envConfig.llm?.maxToolCalls ?? fileConfig.llm?.maxToolCalls ?? DEFAULTS.llm.maxToolCalls,
+      maxTokens: envConfig.llm?.maxTokens ?? fileConfig.llm?.maxTokens ?? DEFAULTS.llm.maxTokens,
+      maxTimeMs: envConfig.llm?.maxTimeMs ?? fileConfig.llm?.maxTimeMs ?? DEFAULTS.llm.maxTimeMs,
+      baseUrl: envConfig.llm?.baseUrl ?? fileConfig.llm?.baseUrl ?? DEFAULTS.llm.baseUrl,
       workerBaseUrl:
-        envConfig.deepResearch?.workerBaseUrl ??
-        fileConfig.deepResearch?.workerBaseUrl ??
-        DEFAULTS.deepResearch.workerBaseUrl,
-      model:
-        envConfig.deepResearch?.model ??
-        fileConfig.deepResearch?.model ??
-        DEFAULTS.deepResearch.model,
+        envConfig.llm?.workerBaseUrl ?? fileConfig.llm?.workerBaseUrl ?? DEFAULTS.llm.workerBaseUrl,
+      model: envConfig.llm?.model ?? fileConfig.llm?.model ?? DEFAULTS.llm.model,
       workerModel:
-        envConfig.deepResearch?.workerModel ??
-        fileConfig.deepResearch?.workerModel ??
-        DEFAULTS.deepResearch.workerModel,
-      apiToken:
-        envConfig.deepResearch?.apiToken ??
-        fileConfig.deepResearch?.apiToken ??
-        DEFAULTS.deepResearch.apiToken,
+        envConfig.llm?.workerModel ?? fileConfig.llm?.workerModel ?? DEFAULTS.llm.workerModel,
+      apiToken: envConfig.llm?.apiToken ?? fileConfig.llm?.apiToken ?? DEFAULTS.llm.apiToken,
       treeBreadth:
-        envConfig.deepResearch?.treeBreadth ??
-        fileConfig.deepResearch?.treeBreadth ??
-        DEFAULTS.deepResearch.treeBreadth,
-      treeDepth:
-        envConfig.deepResearch?.treeDepth ??
-        fileConfig.deepResearch?.treeDepth ??
-        DEFAULTS.deepResearch.treeDepth,
+        envConfig.llm?.treeBreadth ?? fileConfig.llm?.treeBreadth ?? DEFAULTS.llm.treeBreadth,
+      treeDepth: envConfig.llm?.treeDepth ?? fileConfig.llm?.treeDepth ?? DEFAULTS.llm.treeDepth,
       treeConcurrency:
-        envConfig.deepResearch?.treeConcurrency ??
-        fileConfig.deepResearch?.treeConcurrency ??
-        DEFAULTS.deepResearch.treeConcurrency,
+        envConfig.llm?.treeConcurrency ??
+        fileConfig.llm?.treeConcurrency ??
+        DEFAULTS.llm.treeConcurrency,
       treeContextWordLimit:
-        envConfig.deepResearch?.treeContextWordLimit ??
-        fileConfig.deepResearch?.treeContextWordLimit ??
-        DEFAULTS.deepResearch.treeContextWordLimit,
+        envConfig.llm?.treeContextWordLimit ??
+        fileConfig.llm?.treeContextWordLimit ??
+        DEFAULTS.llm.treeContextWordLimit,
       agentMaxIterations:
-        envConfig.deepResearch?.agentMaxIterations ??
-        fileConfig.deepResearch?.agentMaxIterations ??
-        DEFAULTS.deepResearch.agentMaxIterations,
+        envConfig.llm?.agentMaxIterations ??
+        fileConfig.llm?.agentMaxIterations ??
+        DEFAULTS.llm.agentMaxIterations,
       agentMaxSubIterations:
-        envConfig.deepResearch?.agentMaxSubIterations ??
-        fileConfig.deepResearch?.agentMaxSubIterations ??
-        DEFAULTS.deepResearch.agentMaxSubIterations,
+        envConfig.llm?.agentMaxSubIterations ??
+        fileConfig.llm?.agentMaxSubIterations ??
+        DEFAULTS.llm.agentMaxSubIterations,
       agentDefaultFetchMode:
-        envConfig.deepResearch?.agentDefaultFetchMode ??
-        fileConfig.deepResearch?.agentDefaultFetchMode ??
-        DEFAULTS.deepResearch.agentDefaultFetchMode,
-      autoSave:
-        envConfig.deepResearch?.autoSave ??
-        fileConfig.deepResearch?.autoSave ??
-        DEFAULTS.deepResearch.autoSave,
-    },
-    knowledgeGraph: {
-      ...DEFAULTS.knowledgeGraph,
-      ...fileConfig.knowledgeGraph,
-      ...envConfig.knowledgeGraph,
-      projection: {
-        ...DEFAULTS.knowledgeGraph.projection,
-        ...(fileConfig.knowledgeGraph?.projection ?? {}),
-        ...(envConfig.knowledgeGraph?.projection ?? {}),
-      },
-      solidification: {
-        ...DEFAULTS.knowledgeGraph.solidification,
-        ...(fileConfig.knowledgeGraph?.solidification ?? {}),
-        ...(envConfig.knowledgeGraph?.solidification ?? {}),
-      },
-      session: {
-        ...DEFAULTS.knowledgeGraph.session,
-        ...(fileConfig.knowledgeGraph?.session ?? {}),
-        ...(envConfig.knowledgeGraph?.session ?? {}),
-      },
-      consolidation: {
-        ...DEFAULTS.knowledgeGraph.consolidation,
-        ...(fileConfig.knowledgeGraph?.consolidation ?? {}),
-        ...(envConfig.knowledgeGraph?.consolidation ?? {}),
-      },
+        envConfig.llm?.agentDefaultFetchMode ??
+        fileConfig.llm?.agentDefaultFetchMode ??
+        DEFAULTS.llm.agentDefaultFetchMode,
+      autoSave: envConfig.llm?.autoSave ?? fileConfig.llm?.autoSave ?? DEFAULTS.llm.autoSave,
     },
     rescoreWeights: DEFAULT_RESCORE_WEIGHTS,
     mcpApiKey: (fileConfig as Partial<SearchConfig>).mcpApiKey ?? '',

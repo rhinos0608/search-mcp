@@ -9,7 +9,6 @@ import * as http from 'node:http';
 import { startHttpServer } from './server/http.js';
 import { isAddressInUseError } from './server/startupErrors.js';
 import type { SearchMcpRuntime } from './config/types.js';
-import { closeKgDb } from './knowledge/store/db.js';
 import { startArtifactSweeper } from './tools/webSearchArtifact.js';
 
 // ── Shutdown handler registration ──────────────────────────────────────────
@@ -27,7 +26,6 @@ function registerShutdownHandlers(close: () => Promise<void>): void {
     } catch (err) {
       logger.error({ err }, 'Error during server close');
     } finally {
-      closeKgDb();
       if (exitCode !== 0) process.exit(exitCode);
     }
   }
@@ -68,19 +66,10 @@ async function main(): Promise<void> {
     configManager.load();
     const cfg = configManager.get();
 
-    const { server: stdioServer, kgHook } = createServer(cfg);
+    const { server: stdioServer } = createServer(cfg);
     const stdioTransport = new StdioServerTransport();
     await stdioServer.connect(stdioTransport);
     logger.info('search-mcp server connected via stdio');
-
-    // KG startup recovery
-    if (cfg.knowledgeGraph.enabled && kgHook) {
-      try {
-        await kgHook.recover();
-      } catch (err) {
-        logger.warn({ err }, 'KG startup recovery failed (non-fatal)');
-      }
-    }
 
     const runtime: SearchMcpRuntime = {
       getConfig: () => configManager.get(),
@@ -126,19 +115,10 @@ async function main(): Promise<void> {
     });
   } else {
     const cfg = loadConfig();
-    const { server, kgHook } = createServer(cfg);
+    const { server } = createServer(cfg);
     const transport = new StdioServerTransport();
     await server.connect(transport);
     logger.info('search-mcp server connected via stdio');
-
-    // KG startup recovery
-    if (cfg.knowledgeGraph.enabled && kgHook) {
-      try {
-        await kgHook.recover();
-      } catch (err) {
-        logger.warn({ err }, 'KG startup recovery failed (non-fatal)');
-      }
-    }
 
     registerShutdownHandlers(async () => {
       await server.close();

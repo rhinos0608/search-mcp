@@ -1034,7 +1034,7 @@ void test('web_search MCP default output is bare Markdown (no XML/JSON envelope)
     };
 
     const cfg = createMockConfig();
-    const { server } = createServer(cfg, undefined, () => cfg);
+    const { server } = createServer(cfg, () => cfg);
     const entry = getRegisteredTool(server, 'web_search');
     assert.ok(entry.inputSchema !== undefined);
     assert.ok(entry.handler !== undefined);
@@ -1099,7 +1099,7 @@ void test('web_search returns bare Markdown even when output exceeds 8KB (no hyb
     };
 
     const cfg = createMockConfig();
-    const { server } = createServer(cfg, undefined, () => cfg);
+    const { server } = createServer(cfg, () => cfg);
     const entry = getRegisteredTool(server, 'web_search');
     assert.ok(entry.inputSchema !== undefined);
     assert.ok(entry.handler !== undefined);
@@ -1152,11 +1152,7 @@ void test('web_search scrubs hostile snippet when SCRUB_CONTENT is enabled', asy
     // enables it — proves the handler uses the invocation-time snapshot, not the
     // registration cfg (regression: current cfg scrub true redacts).
     const currentCfg = createMockConfig({ scrubContent: true });
-    const { server } = createServer(
-      createMockConfig({ scrubContent: false }),
-      undefined,
-      () => currentCfg,
-    );
+    const { server } = createServer(createMockConfig({ scrubContent: false }), () => currentCfg);
     const entry = getRegisteredTool(server, 'web_search');
     assert.ok(entry.inputSchema !== undefined);
     assert.ok(entry.handler !== undefined);
@@ -1206,11 +1202,7 @@ void test('web_search uses injected invocation config, not ambient loadConfig (n
     };
 
     const currentCfg = createMockConfig({ scrubContent: false });
-    const { server } = createServer(
-      createMockConfig({ scrubContent: false }),
-      undefined,
-      () => currentCfg,
-    );
+    const { server } = createServer(createMockConfig({ scrubContent: false }), () => currentCfg);
     const entry = getRegisteredTool(server, 'web_search');
     assert.ok(entry.inputSchema !== undefined);
     assert.ok(entry.handler !== undefined);
@@ -1628,7 +1620,7 @@ test('web_search handler overflow writes an artifact to the injected base dir, n
       makeResult('https://b.example.com/y', 2),
       makeResult('https://c.example.com/z', 3),
     ];
-    registerWebSearch(server, undefined, () => createMockConfig(), {
+    registerWebSearch(server, () => createMockConfig(), {
       artifactOptions: { baseDir: dir },
       search: async () => results,
     });

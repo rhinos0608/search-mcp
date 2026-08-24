@@ -1,5 +1,5 @@
 import type { SearchConfig } from '../config.js';
-import { DeepResearchLlmClient } from '../research/llm/chat.js';
+import { callOpenAiChatCompletion } from '../utils/llmChat.js';
 import { webCrawl } from './webCrawl.js';
 import { scrubContent } from '../utils/contentScrubber.js';
 
@@ -20,7 +20,7 @@ export async function fetchFocus(
     throw new Error('fetch_focus requires CRAWL4AI_BASE_URL.');
   }
 
-  if (!cfg.deepResearch.baseUrl || !cfg.deepResearch.model) {
+  if (!cfg.llm.baseUrl || !cfg.llm.model) {
     throw new Error('fetch_focus requires DEEP_RESEARCH_BASE_URL and DEEP_RESEARCH_MODEL.');
   }
 
@@ -37,22 +37,11 @@ export async function fetchFocus(
   }
 
   const rawContent = page.markdown.slice(0, 20_000);
-  const llm = new DeepResearchLlmClient(
-    {
-      baseUrl: cfg.deepResearch.baseUrl,
-      workerBaseUrl: cfg.deepResearch.workerBaseUrl,
-      model: cfg.deepResearch.model,
-      workerModel: cfg.deepResearch.workerModel || cfg.deepResearch.model,
-      ...(cfg.deepResearch.apiToken ? { apiToken: cfg.deepResearch.apiToken } : {}),
-    },
-    { recordTokens: () => true },
-  );
-
   // Scrub raw content to mitigate prompt injection before sending to LLM
   const scrubbed =
     process.env.SCRUB_CONTENT === 'true' ? scrubContent(rawContent).content : rawContent;
 
-  const extractResp = await llm.callWorker({
+  const extractResp = await callOpenAiChatCompletion({
     messages: [
       {
         role: 'system',
@@ -66,6 +55,9 @@ export async function fetchFocus(
     ],
     temperature: 0.3,
     maxTokens: 2000,
+    model: cfg.llm.model,
+    baseUrl: cfg.llm.baseUrl,
+    ...(cfg.llm.apiToken ? { apiToken: cfg.llm.apiToken } : {}),
   });
 
   const extractedText =

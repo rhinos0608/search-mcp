@@ -815,7 +815,7 @@ const browserFamily: FamilyDefinition = {
           const llmConfig = cfg.llm.provider
             ? {
                 provider: cfg.llm.provider,
-                apiToken: cfg.llm.apiToken ?? '',
+                apiToken: cfg.llm.apiToken,
                 baseUrl: cfg.llm.baseUrl,
               }
             : undefined;

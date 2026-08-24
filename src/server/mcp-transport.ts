@@ -4,13 +4,11 @@ import type { Transport } from '@modelcontextprotocol/sdk/shared/transport.js';
 import { createServer } from '../server.js';
 import { logger } from '../logger.js';
 import type { SearchMcpRuntime } from '../config/types.js';
-import type { KnowledgeGraphHook } from '../knowledge/hook.js';
 
 const SESSION_IDLE_TTL_MS = 4 * 60 * 60 * 1000; // 4 hours
 
 interface SessionEntry {
   transport: StreamableHTTPServerTransport;
-  kgHook: KnowledgeGraphHook | null;
   createdAt: number;
   lastUsedAt: number;
 }
@@ -54,29 +52,16 @@ export class HttpTransportManager {
       enableJsonResponse: true,
     });
     // Each HTTP session gets its own McpServer instance
-    const { server, kgHook } = createServer(this.runtime.getConfig());
-    // Bind hook's internal session ID to the HTTP session UUID so
-    // passive captures and flushSession() use the same ID.
-    if (kgHook) {
-      kgHook.setSessionId(newId);
-    }
+    const { server } = createServer(this.runtime.getConfig());
     await server.connect(transport as unknown as Transport);
     const now = Date.now();
-    this.sessions.set(newId, { transport, kgHook, createdAt: now, lastUsedAt: now });
+    this.sessions.set(newId, { transport, createdAt: now, lastUsedAt: now });
     return { sessionId: newId, transport, isNew: true };
   }
 
   async close(sessionId: string): Promise<void> {
     const entry = this.sessions.get(sessionId);
     if (entry) {
-      // Flush pending KG extractions for this session
-      if (entry.kgHook) {
-        try {
-          await entry.kgHook.flushSession(sessionId);
-        } catch (err) {
-          logger.debug({ err, sessionId }, 'KG flush error during session close');
-        }
-      }
       try {
         await entry.transport.close();
       } catch (err) {

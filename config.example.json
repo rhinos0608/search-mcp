@@ -56,41 +56,11 @@
   },
   "scrubContent": false,
   "llm": {
-    "//": "OpenAI-compatible LLM for contextual embeddings (optional). Base URL required; API token optional. provider = model name (e.g. gpt-4o-mini, llama3).",
+    "//": "OpenAI-compatible LLM for agentic_browse focus action and content extraction.",
     "provider": "",
+    "model": "",
     "apiToken": "",
     "baseUrl": ""
-  },
-  "knowledgeGraph": {
-    "//": "Knowledge graph configuration. Disabled by default; set KG_ENABLED=true (or enabled=true here) to register the knowledge_graph family.",
-    "//dbPath": "Resolved by resolveKgDbPath(); ~ expands to your home directory. Override with KG_DB_PATH.",
-    "enabled": false,
-    "dbPath": "~/.cache/search-mcp/kg/kg.sqlite",
-    "projection": {
-      "maxEvents": 500,
-      "maxAgeMs": 86400000
-    },
-    "solidification": {
-      "minRuns": 2,
-      "minEntities": 5,
-      "highConfidenceOverride": 0.85,
-      "minVerbatimRatio": 0.7,
-      "minSourceCount": 3
-    },
-    "session": {
-      "maxBufferItems": 20,
-      "maxIdleMs": 300000,
-      "captureStdio": true
-    },
-    "consolidation": {
-      "cadenceMs": 604800000,
-      "annThreshold": 200,
-      "maxFamilies": 300
-    },
-    "relations": {
-      "maxFamilies": 100,
-      "maxNodesPerFamily": 100
-    }
   },
   "duckduckgo": {
     "//": "Zero-key fallback search (V3.3.1). Region / safeSearch configurable via env vars.",
@@ -101,33 +71,6 @@
     "//": "Opt-in Ollama web-search backend (V3.3.1). Uses SEARCH_OLLAMA_* env vars — distinct from EMBEDDING_OLLAMA_*.",
     "baseUrl": "",
     "apiKey": ""
-  },
-  "deepResearch": {
-    "//": "Deep Research Orchestration Engine (V4.0.0). Opt-in, disabled by default.",
-    "enabled": false,
-    "defaultDepth": "standard",
-    "maxDepth": "deep",
-    "maxToolCalls": 200,
-    "maxTokens": 500000,
-    "baseUrl": "",
-    "//baseUrl": "OpenAI-compatible base URL for the orchestrator LLM. Do NOT include /v1 — it is appended automatically (e.g. http://localhost:11434)",
-    "workerBaseUrl": "",
-    "//workerBaseUrl": "Optional separate base URL for the worker LLM. Falls back to baseUrl if not set. Use this when worker and orchestrator use different endpoints.",
-    "model": "",
-    "//model": "Orchestrator model — mid-tier for planning, evaluation, audit, synthesis (e.g. gpt-4o, claude-sonnet-4)",
-    "workerModel": "",
-    "//workerModel": "Worker model — cheap for extraction, classification (e.g. gpt-4o-mini, llama-3.1-8b)",
-    "apiToken": "",
-    "//apiToken": "Optional API token for authenticated LLM endpoints (e.g. OpenAI API key)",
-    "maxTimeMs": 300000,
-    "autoSave": true,
-    "treeBreadth": 4,
-    "treeDepth": 2,
-    "treeConcurrency": 2,
-    "treeContextWordLimit": 25000,
-    "agentMaxIterations": 30,
-    "agentMaxSubIterations": 8,
-    "agentDefaultFetchMode": "summary_focus_query"
   },
   "browser": {
     "//": "CDP Browser Control (V5.2). Opt-in, disabled by default. Requires playwright-core. Three modes:",

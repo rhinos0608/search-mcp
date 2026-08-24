@@ -11,7 +11,6 @@
 import { z } from 'zod/v4';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { SearchConfig } from '../../config.js';
-import type { KnowledgeGraphHook } from '../../knowledge/hook.js';
 import { npmSearch } from '../npmSearch.js';
 import { pypiSearch } from '../pypiSearch.js';
 import { logger } from '../../logger.js';
@@ -82,12 +81,8 @@ const packagesFamily: FamilyDefinition = {
   ],
 };
 
-export function registerPackagesTool(
-  server: McpServer,
-  cfg: SearchConfig,
-  kgHook?: KnowledgeGraphHook,
-): void {
-  registerFamily(server, packagesFamily, cfg, kgHook);
+export function registerPackagesTool(server: McpServer, cfg: SearchConfig): void {
+  registerFamily(server, packagesFamily, cfg);
 }
 
 export function packagesCapabilities(_cfg: SearchConfig) {

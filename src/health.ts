@@ -24,7 +24,6 @@ import { packagesCapabilities } from './tools/families/packages.js';
 import { researchCapabilities } from './tools/families/research.js';
 import { browserCapabilities } from './tools/families/browser.js';
 import { agenticBrowseCapabilities } from './tools/families/agenticBrowse.js';
-import { knowledgeGraphCapabilities } from './tools/families/knowledgeGraph.js';
 import { detectDocumentParsers } from './utils/documentParsers/availability.js';
 import { semanticCrawlCapabilities } from './tools/families/semanticCrawl.js';
 import { outputBudget } from './utils/outputBudget.js';
@@ -87,10 +86,6 @@ const GATED_TOOLS: Record<string, GateRule> = {
         cfg.searxng.baseUrl.length > 0),
     remediation:
       'Set EMBEDDING_SIDECAR_BASE_URL and a search backend (EXA_API_KEY, BRAVE_API_KEY, or SEARXNG_BASE_URL) to use semantic_jobs.',
-  },
-  deep_research: {
-    check: (cfg) => cfg.deepResearch.enabled,
-    remediation: 'Set DEEP_RESEARCH_ENABLED=true to enable the deep research orchestration engine.',
   },
   browser: {
     check: (cfg) => cfg.browser.enabled,
@@ -271,7 +266,6 @@ const FEATURE_BY_TOOL: Record<string, keyof typeof import('./config.js').FEATURE
   web_crawl: 'web_crawl',
   semantic_crawl: 'semantic_crawl',
   semantic_jobs: 'semantic_jobs',
-  deep_research: 'deep_research',
   browser: 'browser',
   web_search: 'web_search_keyed_backends',
   reddit_oauth: 'reddit_oauth',
@@ -431,16 +425,6 @@ export function configHealth(cfg: SearchConfig): Record<string, ToolHealth> {
   }
 
   for (const cap of semanticCrawlCapabilities(cfg)) {
-    report[cap.name] = cap.available
-      ? { status: 'healthy' as const, message: 'Configured.' }
-      : {
-          status: 'unconfigured' as const,
-          message: 'Missing required configuration.',
-          remediation: cap.issue ?? undefined,
-        };
-  }
-
-  for (const cap of knowledgeGraphCapabilities(cfg)) {
     report[cap.name] = cap.available
       ? { status: 'healthy' as const, message: 'Configured.' }
       : {
