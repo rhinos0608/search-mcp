@@ -168,7 +168,7 @@ export function normalizeLlmForValidation(llm: LlmConfig): {
 } {
   return {
     provider: llm.provider,
-    apiToken: llm.apiToken ?? '',
+    apiToken: llm.apiToken,
     ...(llm.baseUrl ? { baseUrl: llm.baseUrl } : {}),
   };
 }
@@ -183,7 +183,7 @@ export function buildLlmFallback(
   if (extractionConfig?.type !== 'llm') return undefined;
   return {
     provider: extractionConfig.llmProvider ?? llm.provider,
-    apiToken: llm.apiToken ?? '',
+    apiToken: llm.apiToken,
     ...(llm.baseUrl ? { baseUrl: llm.baseUrl } : {}),
   };
 }

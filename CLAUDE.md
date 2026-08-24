@@ -2,11 +2,11 @@
 
 > **Max 300 lines.** Keep this file concise. Details in AGENTS.md and source.
 
-Guidance for Claude Code working in this repository. See [AGENTS.md](./AGENTS.md) for full tool catalog, RAG pipeline, deep research internals, config/env vars, and sidecar details.
+Guidance for Claude Code working in this repository. See [AGENTS.md](./AGENTS.md) for full tool catalog, RAG pipeline, config/env vars, and sidecar details.
 
 ## What This Is
 
-MCP server over stdio/HTTP exposing **17 tools, 73 actions**: web search/crawl, semantic RAG, GitHub, YouTube, Reddit, academic research (14 backends), HN, Stack Overflow, npm, PyPI, jobs, browser automation, agentic browsing, knowledge graph, deep research. Clients (Claude Desktop, Claude CLI) connect via stdin/stdout or HTTP.
+MCP server over stdio/HTTP exposing **16 tools, 63 actions**: web search/crawl, semantic RAG, GitHub, YouTube, Reddit, academic research (14 backends), HN, Stack Overflow, npm, PyPI, jobs, browser automation, agentic browsing. Clients (Claude Desktop, Claude CLI) connect via stdin/stdout or HTTP.
 
 V6.0.0 adds opt-in HTTP transport with React dashboard (`HTTP_PORT` to enable). ConfigManager with AES-256-GCM encrypted config. Dual-mode startup: stdio-only or HTTP+stdio.
 
@@ -42,11 +42,11 @@ HTTP mode: `HTTP_PORT=8050 SEARCH_MCP_CONFIG_KEY="passphrase" npm start`. First 
 
 ## Tool Summary
 
-See AGENTS.md for full action lists. Config-gated tools: `web_crawl`, `semantic_crawl*`, `semantic_jobs`, `deep_research`, `browser`, `knowledge_graph`.
+See AGENTS.md for full action lists. Config-gated tools: `web_crawl`, `semantic_crawl*`, `semantic_jobs`, `browser`.
 
-**Standalone**: web_search, rss, web_crawl, semantic_crawl, semantic_crawl_list_corpora, semantic_crawl_inspect_corpus, semantic_jobs, health_check, deep_research, fetch_focus (deprecated).
+**Standalone**: web_search, rss, web_crawl, semantic_crawl, semantic_crawl_list_corpora, semantic_crawl_inspect_corpus, semantic_jobs, health_check, fetch_focus (deprecated).
 
-**Families**: github (7 actions), youtube (3), reddit (3), research (15), packages (2), browser (24), agentic_browse (4), knowledge_graph (10).
+**Families**: github (7 actions), youtube (3), reddit (3), research (15), packages (2), browser (24), agentic_browse (4).
 
 ## RAG Pipeline (`src/rag/`)
 
@@ -62,12 +62,6 @@ Shared by semantic_crawl, youtube.semantic, reddit.semantic, semantic_jobs, gith
 8. SQLite corpus cache, configurable TTL, LRU eviction
 
 Key: `pipeline.ts`, `embedding.ts`, `profiles.ts`, `bm25.ts`, `fusion.ts`, `dedup.ts`, `corpusCache.ts`, `rerank.ts`, `adapters/` (text, transcript, conversation, job, code, academic, qa), `code/` (tree-sitter, symbol extraction).
-
-## Deep Research (`src/research/`)
-
-Job/poll: start (async jobId), poll (60s block), list, cancel, save. Jobs expire 24h after terminal.
-
-Orchestrator: Decomposition → Discovery → Taxonomy → Extraction → EDA loop → Audit → Synthesis. Tree path: 4×2 recursive expansion. Model routing: orchestrator (0.7 temp) + worker (0.3 temp). 3D confidence: evidence × extraction × consistency (min). Falls back to rule-based without LLM.
 
 ## Key Constraints
 

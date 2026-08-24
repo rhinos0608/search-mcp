@@ -96,7 +96,7 @@ Copy [`config.example.json`](config.example.json) to `config.json` and fill in y
 | `EMBEDDING_OPENAI_MODEL`       | `text-embedding-3-small`    | OpenAI embedding model                              |
 | `EMBEDDING_OPENAI_API_KEY`     | —                           | OpenAI API key                                      |
 
-### LLM (for contextual embeddings, browser.act, deep research & `agentic_browse.focus`)
+### LLM (for contextual embeddings, browser.act & `agentic_browse.focus`)
 
 | Variable        | Description                                                         |
 | --------------- | ------------------------------------------------------------------- |

@@ -949,7 +949,7 @@ export async function runHealthProbes(cfg: SearchConfig): Promise<HealthReport> 
   if (cfg.crawl4ai.baseUrl.length > 0) {
     const extractionHealth = await probeExtractionSupport(
       cfg.crawl4ai.baseUrl,
-      cfg.crawl4ai.apiToken ?? '',
+      cfg.crawl4ai.apiToken,
     );
     tools.web_crawl_extraction = extractionHealth;
     tools.semantic_crawl_extraction = extractionHealth;

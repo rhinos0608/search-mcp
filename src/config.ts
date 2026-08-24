@@ -149,7 +149,7 @@ export interface ExaConfig {
 
 export interface Crawl4aiConfig {
   baseUrl: string;
-  apiToken?: string;
+  apiToken: string;
 }
 
 export interface DocumentParsingConfig {
@@ -177,45 +177,12 @@ export interface DomainTrustConfig {
   blockedDomains: string[];
 }
 
+/** Minimal LLM config consumed by fetchFocus, agenticBrowse.focus, browser.act, VLM, and extraction. */
 export interface LlmConfig {
   provider: string;
-  apiToken?: string;
   baseUrl: string;
-}
-
-export type ResearchDepth = 'quick' | 'standard' | 'deep' | 'exhaustive' | 'tree';
-
-export interface DeepResearchConfig {
-  /** Model alias used by generic LLM consumers. */
-  provider: string;
-  enabled: boolean;
-  defaultDepth: ResearchDepth;
-  maxDepth: ResearchDepth;
-  maxToolCalls: number;
-  maxTokens: number;
-  maxTimeMs: number;
-  /** OpenAI-compatible base URL for the orchestrator LLM. */
-  baseUrl: string;
-  /** Optional separate base URL for the worker LLM. Falls back to baseUrl if not set. */
-  workerBaseUrl: string;
-  /** Main orchestrator model (mid-tier: planning, gap analysis, synthesis). */
   model: string;
-  /** Worker model (cheap: search, extraction notes, classification). */
-  workerModel: string;
-  /** Optional API token for authenticated LLM endpoints. */
   apiToken: string;
-  treeBreadth: number;
-  treeDepth: number;
-  treeConcurrency: number;
-  treeContextWordLimit: number;
-  /** Max ReAct loop iterations for agent strategy (default 30). */
-  agentMaxIterations: number;
-  /** Max iterations per sub-agent (default 8). */
-  agentMaxSubIterations: number;
-  /** Default fetch mode: full | summary_focus_query | disabled (default summary_focus_query). */
-  agentDefaultFetchMode: string;
-  /** Automatically save results to disk when research completes (unless optOut is set). Default: true. */
-  autoSave: boolean;
 }
 
 export type BrowserMode = 'stealth' | 'user' | 'profile';
@@ -278,7 +245,7 @@ export interface SearchConfig {
   scrubContent: boolean;
   duckduckgo: { region: string; safeSearch: string };
   ollamaSearch: { baseUrl: string; apiKey?: string };
-  llm: DeepResearchConfig;
+  llm: LlmConfig;
   browser: BrowserConfig;
   rescoreWeights: RescoreConfig;
   challengeLatencyThreshold: number;
@@ -406,25 +373,9 @@ const DEFAULTS: Omit<SearchConfig, 'rescoreWeights'> = {
   ollamaSearch: { baseUrl: '', apiKey: '' },
   llm: {
     provider: '',
-    enabled: false,
-    defaultDepth: 'standard' as const,
-    maxDepth: 'deep' as const,
-    maxToolCalls: 200,
-    maxTokens: 500_000,
-    maxTimeMs: 300_000,
     baseUrl: '',
-    workerBaseUrl: '',
     model: '',
-    workerModel: '',
     apiToken: '',
-    treeBreadth: 4,
-    treeDepth: 2,
-    treeConcurrency: 2,
-    treeContextWordLimit: 25000,
-    agentMaxIterations: 30,
-    agentMaxSubIterations: 8,
-    agentDefaultFetchMode: 'summary_focus_query',
-    autoSave: true,
   },
   challengeLatencyThreshold: 5000,
   mcpApiKey: '',
@@ -493,7 +444,7 @@ type EnvConfig = Omit<
 > & {
   challengeLatencyThreshold?: number;
   browser?: Partial<BrowserConfig>;
-  llm?: Partial<DeepResearchConfig>;
+  llm?: Partial<LlmConfig>;
   reddit?: Partial<RedditConfig>;
   crawl4ai?: Partial<Crawl4aiConfig>;
   documentParsing?: Partial<DocumentParsingConfig>;
@@ -690,7 +641,7 @@ function loadFromEnv(): EnvConfig {
   const llmApiToken = process.env.LLM_API_TOKEN;
   const llmBaseUrl = process.env.LLM_BASE_URL;
   if (llmProvider !== undefined || llmApiToken !== undefined || llmBaseUrl !== undefined) {
-    const llmCfg: Partial<DeepResearchConfig> = {};
+    const llmCfg: Partial<LlmConfig> = {};
     if (llmProvider !== undefined) {
       llmCfg.provider = llmProvider;
       llmCfg.model = llmProvider;
@@ -851,22 +802,13 @@ function loadFromEnv(): EnvConfig {
     }
   }
 
-  // ── Deep Research env vars ────────────────────────────────────────────
+  // ── LLM env vars (used by fetchFocus, agenticBrowse.focus, browser.act, VLM, extraction) ──
   {
-    const partial: Partial<DeepResearchConfig> = {};
+    const partial: Partial<LlmConfig> = {};
     let hasAny = false;
-    const e = process.env.DEEP_RESEARCH_ENABLED;
-    if (e !== undefined) {
-      partial.enabled = e === 'true';
-    }
     const u = process.env.DEEP_RESEARCH_BASE_URL;
     if (u !== undefined) {
       partial.baseUrl = u;
-      hasAny = true;
-    }
-    const wu = process.env.DEEP_RESEARCH_WORKER_BASE_URL;
-    if (wu !== undefined) {
-      partial.workerBaseUrl = wu;
       hasAny = true;
     }
     const m = process.env.DEEP_RESEARCH_MODEL;
@@ -874,44 +816,9 @@ function loadFromEnv(): EnvConfig {
       partial.model = m;
       hasAny = true;
     }
-    const w = process.env.DEEP_RESEARCH_WORKER_MODEL;
-    if (w !== undefined) {
-      partial.workerModel = w;
-      hasAny = true;
-    }
     const tok = process.env.DEEP_RESEARCH_API_TOKEN;
     if (tok !== undefined) {
       partial.apiToken = tok;
-      hasAny = true;
-    }
-    const d = process.env.DEEP_RESEARCH_DEFAULT_DEPTH;
-    if (d !== undefined && ['quick', 'standard', 'deep', 'exhaustive', 'tree'].includes(d)) {
-      partial.defaultDepth = d as ResearchDepth;
-      hasAny = true;
-    }
-    const maxIters = process.env.DEEP_RESEARCH_AGENT_MAX_ITERATIONS;
-    if (maxIters !== undefined) {
-      const n = Number(maxIters);
-      if (!isNaN(n) && n > 0) {
-        partial.agentMaxIterations = n;
-        hasAny = true;
-      }
-    }
-    const maxSubIters = process.env.DEEP_RESEARCH_AGENT_MAX_SUB_ITERATIONS;
-    if (maxSubIters !== undefined) {
-      const n = Number(maxSubIters);
-      if (!isNaN(n) && n > 0) {
-        partial.agentMaxSubIterations = n;
-        hasAny = true;
-      }
-    }
-    const fetchMode = process.env.DEEP_RESEARCH_AGENT_DEFAULT_FETCH_MODE;
-    if (
-      fetchMode !== undefined &&
-      ['full', 'summary_focus_query', 'disabled'].includes(fetchMode)
-    ) {
-      // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion
-      partial.agentDefaultFetchMode = fetchMode as 'full' | 'summary_focus_query' | 'disabled';
       hasAny = true;
     }
     if (hasAny) {
@@ -1058,10 +965,7 @@ export function loadConfig(): SearchConfig {
       baseUrl:
         envConfig.crawl4ai?.baseUrl ?? fileConfig.crawl4ai?.baseUrl ?? DEFAULTS.crawl4ai.baseUrl,
       apiToken:
-        envConfig.crawl4ai?.apiToken ??
-        fileConfig.crawl4ai?.apiToken ??
-        DEFAULTS.crawl4ai.apiToken ??
-        '',
+        envConfig.crawl4ai?.apiToken ?? fileConfig.crawl4ai?.apiToken ?? DEFAULTS.crawl4ai.apiToken,
     },
     documentParsing: {
       enabled:
@@ -1238,45 +1142,9 @@ export function loadConfig(): SearchConfig {
     },
     llm: {
       provider: envConfig.llm?.provider ?? fileConfig.llm?.provider ?? DEFAULTS.llm.provider,
-      enabled: envConfig.llm?.enabled ?? fileConfig.llm?.enabled ?? DEFAULTS.llm.enabled,
-      defaultDepth:
-        envConfig.llm?.defaultDepth ?? fileConfig.llm?.defaultDepth ?? DEFAULTS.llm.defaultDepth,
-      maxDepth: envConfig.llm?.maxDepth ?? fileConfig.llm?.maxDepth ?? DEFAULTS.llm.maxDepth,
-      maxToolCalls:
-        envConfig.llm?.maxToolCalls ?? fileConfig.llm?.maxToolCalls ?? DEFAULTS.llm.maxToolCalls,
-      maxTokens: envConfig.llm?.maxTokens ?? fileConfig.llm?.maxTokens ?? DEFAULTS.llm.maxTokens,
-      maxTimeMs: envConfig.llm?.maxTimeMs ?? fileConfig.llm?.maxTimeMs ?? DEFAULTS.llm.maxTimeMs,
       baseUrl: envConfig.llm?.baseUrl ?? fileConfig.llm?.baseUrl ?? DEFAULTS.llm.baseUrl,
-      workerBaseUrl:
-        envConfig.llm?.workerBaseUrl ?? fileConfig.llm?.workerBaseUrl ?? DEFAULTS.llm.workerBaseUrl,
       model: envConfig.llm?.model ?? fileConfig.llm?.model ?? DEFAULTS.llm.model,
-      workerModel:
-        envConfig.llm?.workerModel ?? fileConfig.llm?.workerModel ?? DEFAULTS.llm.workerModel,
       apiToken: envConfig.llm?.apiToken ?? fileConfig.llm?.apiToken ?? DEFAULTS.llm.apiToken,
-      treeBreadth:
-        envConfig.llm?.treeBreadth ?? fileConfig.llm?.treeBreadth ?? DEFAULTS.llm.treeBreadth,
-      treeDepth: envConfig.llm?.treeDepth ?? fileConfig.llm?.treeDepth ?? DEFAULTS.llm.treeDepth,
-      treeConcurrency:
-        envConfig.llm?.treeConcurrency ??
-        fileConfig.llm?.treeConcurrency ??
-        DEFAULTS.llm.treeConcurrency,
-      treeContextWordLimit:
-        envConfig.llm?.treeContextWordLimit ??
-        fileConfig.llm?.treeContextWordLimit ??
-        DEFAULTS.llm.treeContextWordLimit,
-      agentMaxIterations:
-        envConfig.llm?.agentMaxIterations ??
-        fileConfig.llm?.agentMaxIterations ??
-        DEFAULTS.llm.agentMaxIterations,
-      agentMaxSubIterations:
-        envConfig.llm?.agentMaxSubIterations ??
-        fileConfig.llm?.agentMaxSubIterations ??
-        DEFAULTS.llm.agentMaxSubIterations,
-      agentDefaultFetchMode:
-        envConfig.llm?.agentDefaultFetchMode ??
-        fileConfig.llm?.agentDefaultFetchMode ??
-        DEFAULTS.llm.agentDefaultFetchMode,
-      autoSave: envConfig.llm?.autoSave ?? fileConfig.llm?.autoSave ?? DEFAULTS.llm.autoSave,
     },
     rescoreWeights: DEFAULT_RESCORE_WEIGHTS,
     mcpApiKey: (fileConfig as Partial<SearchConfig>).mcpApiKey ?? '',

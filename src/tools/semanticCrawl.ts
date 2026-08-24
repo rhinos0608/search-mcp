@@ -1050,7 +1050,7 @@ export async function crawlSeeds(
         const result = await webCrawl(
           seedUrl,
           crawl4aiCfg.baseUrl,
-          crawl4aiCfg.apiToken ?? '',
+          crawl4aiCfg.apiToken,
           crawlOpts,
         );
         return { seedUrl, result, error: undefined as unknown };
@@ -1062,7 +1062,7 @@ export async function crawlSeeds(
               const fallbackResult = await webCrawl(
                 fallbackUrl,
                 crawl4aiCfg.baseUrl,
-                crawl4aiCfg.apiToken ?? '',
+                crawl4aiCfg.apiToken,
                 crawlOpts,
               );
               if (fallbackResult.successfulPages > 0) {

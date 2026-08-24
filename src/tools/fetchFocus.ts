@@ -24,7 +24,7 @@ export async function fetchFocus(
     throw new Error('fetch_focus requires DEEP_RESEARCH_BASE_URL and DEEP_RESEARCH_MODEL.');
   }
 
-  const crawled = await webCrawl(url, cfg.crawl4ai.baseUrl, cfg.crawl4ai.apiToken ?? '', {
+  const crawled = await webCrawl(url, cfg.crawl4ai.baseUrl, cfg.crawl4ai.apiToken, {
     strategy: 'bfs',
     maxDepth: 1,
     maxPages: 1,

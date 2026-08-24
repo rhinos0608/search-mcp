@@ -162,7 +162,7 @@ export function registerWebCrawl(server: McpServer, cfg: SearchConfig): void {
         }
 
         const llmFallback = buildLlmFallback(extractionConfig, cfg.llm);
-        const data = await webCrawl(url, cfg.crawl4ai.baseUrl, cfg.crawl4ai.apiToken ?? '', {
+        const data = await webCrawl(url, cfg.crawl4ai.baseUrl, cfg.crawl4ai.apiToken, {
           strategy,
           maxDepth,
           maxPages,

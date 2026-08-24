@@ -2,7 +2,7 @@
 
 > **Max 300 lines.** Keep this file concise. Details belong in source or dedicated docs.
 
-MCP server over stdio/HTTP exposing 18 tools (77 actions): web search/crawl, RSS/Atom, semantic RAG, GitHub, YouTube, Reddit, academic/community research (15 backends), HN, Stack Overflow, npm, PyPI, jobs, browser automation, agentic browsing, knowledge graph, deep research.
+MCP server over stdio/HTTP exposing 16 tools (63 actions): web search/crawl, RSS/Atom, semantic RAG, GitHub, YouTube, Reddit, academic/community research (15 backends), HN, Stack Overflow, npm, PyPI, jobs, browser automation, agentic browsing.
 
 ## Commands
 
@@ -36,7 +36,7 @@ HTTP mode: `HTTP_PORT=8050 SEARCH_MCP_CONFIG_KEY="passphrase" npm start`. First 
 
 ## Tools
 
-Config-gated: `web_crawl` (Crawl4AI), `semantic_crawl*` (Crawl4AI + embedding), `semantic_jobs` (embedding + search), `deep_research` (`DEEP_RESEARCH_ENABLED`), `knowledge_graph` (`KG_ENABLED`). Family actions may also be individually gated.
+Config-gated: `web_crawl` (Crawl4AI), `semantic_crawl*` (Crawl4AI + embedding), `semantic_jobs` (embedding + search). Family actions may also be individually gated.
 
 `browser` is enabled by default — auto-discovers existing Chrome on CDP ports (9222/9223/9229) or spins up a headless instance. Set `BROWSER_ENABLED=false` to disable.
 
@@ -52,21 +52,21 @@ Config-gated: `web_crawl` (Crawl4AI), `semantic_crawl*` (Crawl4AI + embedding), 
 | `semantic_crawl_inspect_corpus` | Inspect specific cached corpus                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 | `semantic_jobs`                 | SEEK/Indeed/Jora job search with dedup, constraints, weighted ranking                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
 | `health_check`                  | Server status, config health, backend connectivity                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
-| `deep_research`                 | Async job/poll protocol. Actions: start, run, poll, list, cancel, save. Phases: decomposition → discovery → extraction → gap analysis → audit → synthesis                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+|  |
 | `fetch_focus`                   | ⚠️ deprecated — use `agentic_browse.focus`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
 
 ### Family tools
 
-| Tool              | Actions                                                                                                                                                                                                                                                                                                |
-| ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `github`          | repo, file, list_dir, tree, search, trending, code_search (AST-aware)                                                                                                                                                                                                                                  |
-| `youtube`         | search (API), transcript (free), semantic (search+transcript+RAG)                                                                                                                                                                                                                                      |
-| `reddit`          | search (free), comments (nested tree), semantic (search+comments+RAG)                                                                                                                                                                                                                                  |
-| `research`        | academic, pubmed, wikipedia, arxiv, hackernews, stackoverflow, openalex, crossref, datacite, ror, semantic_scholar, gdelt, wikidata, v2ex, auto                                                                                                                                                        |
-| `packages`        | npm, pypi                                                                                                                                                                                                                                                                                              |
-| `browser`         | navigate, snapshot, click, type, evaluate, screenshot, extract, act, wait, wait_for, dialog_handle, iframe_context, scroll_to_load, paginate, download, table_extract, network_intercept, resource_timing, diff, pdf, storage, network, tabs, session. Backends: Playwright+CDP, optional CloakBrowser |
-| `agentic_browse`  | browse, present, read, focus (in-memory doc store + optional deep research)                                                                                                                                                                                                                            |
-| `knowledge_graph` | ingest, query, entity_lookup_batch, status, rebuild, family_list, family_get, family_merge, run_list, run_rollback                                                                                                                                                                                     |
+| Tool             | Actions                                                                                                                                                                                                                                                                                                |
+| ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `github`         | repo, file, list_dir, tree, search, trending, code_search (AST-aware)                                                                                                                                                                                                                                  |
+| `youtube`        | search (API), transcript (free), semantic (search+transcript+RAG)                                                                                                                                                                                                                                      |
+| `reddit`         | search (free), comments (nested tree), semantic (search+comments+RAG)                                                                                                                                                                                                                                  |
+| `research`       | academic, pubmed, wikipedia, arxiv, hackernews, stackoverflow, openalex, crossref, datacite, ror, semantic_scholar, gdelt, wikidata, v2ex, auto                                                                                                                                                        |
+| `packages`       | npm, pypi                                                                                                                                                                                                                                                                                              |
+| `browser`        | navigate, snapshot, click, type, evaluate, screenshot, extract, act, wait, wait_for, dialog_handle, iframe_context, scroll_to_load, paginate, download, table_extract, network_intercept, resource_timing, diff, pdf, storage, network, tabs, session. Backends: Playwright+CDP, optional CloakBrowser |
+| `agentic_browse` | browse, present, read, focus (in-memory doc store)                                                                                                                                                                                                                                                     |
+|  |
 
 ## RAG Pipeline (`src/rag/`)
 
@@ -82,20 +82,6 @@ Shared by `semantic_crawl`, `youtube.semantic`, `reddit.semantic`, `semantic_job
 8. **Corpus cache**: SQLite (`better-sqlite3`), configurable TTL, LRU eviction. Re-query via `source: { type: 'cached', corpusId }`.
 
 Key modules: `pipeline.ts` (prepareCorpus/retrieveCorpus), `embedding.ts` (multi-provider dispatch), `profiles.ts` (balanced/lexical-heavy/semantic-heavy/high-precision/fast/precision/recall), `bm25.ts`, `fusion.ts` (RRF), `dedup.ts` (URL/source+id/company+title), `corpusCache.ts`, `rerank.ts`, `adapters/` (text, transcript, conversation, job, code, academic, qa), `code/` (language detection, tree-sitter, symbol extraction).
-
-## Deep Research (`src/research/`)
-
-Job/poll protocol: `start` → jobId (async), `poll` (blocks 60s), `list`, `cancel`, `save` (JSON to disk). Jobs: queued → running → complete|failed|cancelled → expired (24h TTL).
-
-**Orchestrator**: Standard path (quick/standard/deep/exhaustive): Decomposition → Discovery → Taxonomy → Extraction → EDA loop (Evaluate→Decide→Act→Update) → Audit → Synthesis. Tree path (tree depth): breadth×depth recursive exploration (4×2), bypasses phases 2–5.
-
-**Model routing**: orchestrator model (planning/eval/audit/synthesis, temp 0.7) + worker model (extraction, temp 0.3). Both OpenAI-compatible. Falls back to rule-based when LLM unconfigured.
-
-**3D confidence**: evidence quality × extraction reliability × source consistency. Aggregate = min of all three.
-
-Key modules: `orchestrator.ts`, `jobManager.ts` (singleton, max 5 active), `workerAgent.ts`, `state.ts`, `decomposer.ts`, `discovery.ts`, `extraction.ts`, `gapAnalysis.ts`, `audit.ts`, `synthesizer.ts`, `llm/chat.ts`, `llm/prompts.ts`, `llm/schemas.ts`, `compaction.ts`, `treeEngine.ts`, `actionGates.ts`, `agenda.ts`, `taxonomy.ts`, `language.ts`, `sourceQuality.ts`, `sourceRanking.ts`, `trace.ts`, `progress.ts`.
-
-Failures: LLM failure → rule-based fallback. Budget exhaustion → partial synthesis. Per-source failures isolated. Stale jobs force-expired at 2× max runtime.
 
 ## Embedding Providers
 
@@ -125,7 +111,7 @@ LISTENNOTES_API_KEY, PRODUCTHUNT_API_TOKEN, PATENTSVIEW_API_KEY, STACKEXCHANGE_A
 CRAWL4AI_BASE_URL, CRAWL4AI_API_TOKEN
 # Embedding
 EMBEDDING_PROVIDER, EMBEDDING_SIDECAR_BASE_URL, EMBEDDING_SIDECAR_API_TOKEN, EMBEDDING_DIMENSIONS (768), EMBEDDING_CODE_MODEL, EMBEDDING_OLLAMA_BASE_URL, EMBEDDING_OPENAI_API_KEY
-# LLM (contextual embeddings, browser.act, deep research — OpenAI-compatible)
+# LLM (contextual embeddings, browser.act — OpenAI-compatible)
 LLM_PROVIDER (model name), LLM_API_TOKEN (optional), LLM_BASE_URL (required)
 # Document extraction
 Text-like document URLs are extracted in-process; binary parser adapters are not configured by default.
@@ -134,10 +120,8 @@ Text-like document URLs are extracted in-process; binary parser adapters are not
 DOCUMENT_PARSING_ENABLED (default true), DOCUMENT_PARSING_MULTIMODAL (VLM figure/table enrichment, opt-in), DOCUMENT_PARSING_MAX_ENRICH (cap, default 3)
 # Browser
 BROWSER_ENABLED (default true), BROWSER_ENGINE (playwright|cloak), BROWSER_MODE (stealth|user|profile), BROWSER_AUTO_CONNECT (default true), BROWSER_CDP_PORT, BROWSER_PROFILE_DIR, CLOAKBROWSER_HUMANIZE, CLOAKBROWSER_HUMAN_PRESET, CLOAKBROWSER_LOCALE, CLOAKBROWSER_TIMEZONE, CLOAKBROWSER_GEOIP, CLOAKBROWSER_STEALTH_ARGS
-# Deep Research
-DEEP_RESEARCH_ENABLED, DEEP_RESEARCH_BASE_URL, DEEP_RESEARCH_MODEL, DEEP_RESEARCH_WORKER_MODEL, DEEP_RESEARCH_DEFAULT_DEPTH (quick|standard|deep|exhaustive|tree)
-# Knowledge Graph
-KG_ENABLED
+# LLM
+LLM_PROVIDER, LLM_BASE_URL, LLM_MODEL, LLM_API_TOKEN; DEEP_RESEARCH_BASE_URL, DEEP_RESEARCH_MODEL, DEEP_RESEARCH_API_TOKEN (alias)
 # Security (opt-in)
 DOMAIN_TRUST_ENABLED, TRUSTED_DOMAINS, BLOCKED_DOMAINS, SCRUB_CONTENT
 # Persistence

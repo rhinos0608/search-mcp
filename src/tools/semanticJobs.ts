@@ -655,7 +655,7 @@ async function crawlWithRetry(
 
   for (let attempt = 0; attempt <= maxRetries; attempt += 1) {
     try {
-      const result = await webCrawl(url, cfg.crawl4ai.baseUrl, cfg.crawl4ai.apiToken ?? '', {
+      const result = await webCrawl(url, cfg.crawl4ai.baseUrl, cfg.crawl4ai.apiToken, {
         strategy: 'bfs',
         maxDepth: 1,
         maxPages: 1,

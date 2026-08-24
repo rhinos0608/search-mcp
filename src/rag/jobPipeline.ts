@@ -228,17 +228,12 @@ export class JobPipeline {
     const firstUrl = searchResults[0]?.url;
     if (!firstUrl) return [];
 
-    const crawlResult = await webCrawlFn(
-      firstUrl,
-      cfg.crawl4ai.baseUrl,
-      cfg.crawl4ai.apiToken ?? '',
-      {
-        strategy: 'bfs',
-        maxDepth: 1,
-        maxPages: 10,
-        includeExternalLinks: true,
-      },
-    );
+    const crawlResult = await webCrawlFn(firstUrl, cfg.crawl4ai.baseUrl, cfg.crawl4ai.apiToken, {
+      strategy: 'bfs',
+      maxDepth: 1,
+      maxPages: 10,
+      includeExternalLinks: true,
+    });
 
     const jobLinks: string[] = [];
     for (const page of crawlResult.pages) {
@@ -460,7 +455,7 @@ export class JobPipeline {
           const crawlResult = await webCrawlFn(
             record.jobUrl,
             cfg.crawl4ai.baseUrl,
-            cfg.crawl4ai.apiToken ?? '',
+            cfg.crawl4ai.apiToken,
             {
               strategy: 'bfs',
               maxDepth: 1,

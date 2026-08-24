@@ -33,6 +33,7 @@ function makeLlmConfig(): LlmConfig {
     provider: 'openai',
     apiToken: 'test-token',
     baseUrl: 'https://api.example.com/v1',
+    model: 'gpt-4o-mini',
   };
 }
 
@@ -78,11 +79,7 @@ describe('contextualEmbedding', () => {
       }
       await rejects(
         () =>
-          contextualEmbeddingModule!.enrichChunkWithContext(
-            'some chunk text',
-            '',
-            makeLlmConfig(),
-          ),
+          contextualEmbeddingModule!.enrichChunkWithContext('some chunk text', '', makeLlmConfig()),
         /document.*empty/i,
       );
     });
@@ -121,26 +118,33 @@ describe('contextualEmbedding', () => {
       globalThis.fetch = mock.fn(() =>
         Promise.resolve(
           makeMockResponse({
-            choices: [{ message: { content: 'Context: function declaration in TypeScript file.\n---\nfunction hello() { return "world"; }' } }],
+            choices: [
+              {
+                message: {
+                  content:
+                    'Context: function declaration in TypeScript file.\n---\nfunction hello() { return "world"; }',
+                },
+              },
+            ],
           }),
         ),
       );
 
       try {
-          const result = await contextualEmbeddingModule!.enrichChunkWithContext(
-            'function hello() { return "world"; }',
-            'A TypeScript file demonstrating basic function syntax.',
-            makeLlmConfig(),
-          );
+        const result = await contextualEmbeddingModule!.enrichChunkWithContext(
+          'function hello() { return "world"; }',
+          'A TypeScript file demonstrating basic function syntax.',
+          makeLlmConfig(),
+        );
 
-          strictEqual(result.enriched, true);
-          ok(result.embedText.length > 0, 'embedText should not be empty');
-          strictEqual(result.originalText, 'function hello() { return "world"; }');
-          ok(result.context.length > 0, 'context should be non-empty');
-        } finally {
-          globalThis.fetch = originalFetch;
-        }
-      });
+        strictEqual(result.enriched, true);
+        ok(result.embedText.length > 0, 'embedText should not be empty');
+        strictEqual(result.originalText, 'function hello() { return "world"; }');
+        ok(result.context.length > 0, 'context should be non-empty');
+      } finally {
+        globalThis.fetch = originalFetch;
+      }
+    });
   });
 
   // ── Unit: enrichChunksBatched ──────────────────────────────────────────────
@@ -216,9 +220,7 @@ describe('contextualEmbedding', () => {
             currentConcurrent--;
             resolve(
               makeMockResponse({
-                choices: [
-                  { message: { content: 'Context.\n---\nchunk content' } },
-                ],
+                choices: [{ message: { content: 'Context.\n---\nchunk content' } }],
               }),
             );
           }, 50);
@@ -235,12 +237,7 @@ describe('contextualEmbedding', () => {
         }
 
         // concurrency = 2 should keep maxConcurrent at 2
-        await contextualEmbeddingModule!.enrichChunksBatched(
-          chunks,
-          docMap,
-          makeLlmConfig(),
-          2,
-        );
+        await contextualEmbeddingModule!.enrichChunksBatched(chunks, docMap, makeLlmConfig(), 2);
 
         strictEqual(totalCalls, 6);
         ok(maxConcurrent <= 2, `Concurrency exceeded: max=${String(maxConcurrent)}, expected ≤2`);
@@ -352,8 +349,7 @@ describe('contextualEmbedding', () => {
             choices: [
               {
                 message: {
-                  content:
-                    'Context: doc.\n---\nchunk',
+                  content: 'Context: doc.\n---\nchunk',
                 },
               },
             ],
@@ -370,9 +366,7 @@ describe('contextualEmbedding', () => {
 
         ok(capturedBody !== undefined, 'Request body should be captured');
         const parsed = JSON.parse(capturedBody!);
-        const userMessage = parsed.messages?.find(
-          (m: { role: string }) => m.role === 'user',
-        );
+        const userMessage = parsed.messages?.find((m: { role: string }) => m.role === 'user');
         ok(userMessage !== undefined, 'Should have a user message');
         ok(
           userMessage.content.includes('<document>') &&
@@ -380,8 +374,7 @@ describe('contextualEmbedding', () => {
           'Prompt should contain document tag and content',
         );
         ok(
-          userMessage.content.includes('<chunk>') &&
-            userMessage.content.includes('my chunk text'),
+          userMessage.content.includes('<chunk>') && userMessage.content.includes('my chunk text'),
           'Prompt should contain chunk tag and content',
         );
       } finally {
