@@ -48,7 +48,7 @@ test('transcriptSegmentsToStructuredContent adds metadata to long segment text',
   }
 });
 
-test('getYouTubeTranscript computes structured truncation metadata from all fetched segments', async (t) => {
+test('getYouTubeTranscript computes structured truncation metadata from capped transcript (bounded)', async (t) => {
   const raw = Array.from({ length: 1505 }, (_, idx) => ({
     text: `Segment ${idx}`,
     duration: 1,
@@ -58,11 +58,33 @@ test('getYouTubeTranscript computes structured truncation metadata from all fetc
 
   const result = await getYouTubeTranscript('abc123def45', 'metadata-test');
 
+  // Bounded-parser cap: transcript and structured both capped at 1500 (see youtubeTranscript.ts MAX_SEGMENTS)
   assert.equal(result.transcript.length, 1500);
   assert.equal(result.elements?.length, MAX_ELEMENTS);
   assert.equal(result.truncatedElements, true);
-  assert.equal(result.originalElementCount, raw.length);
-  assert.equal(result.omittedElementCount, raw.length - MAX_ELEMENTS);
+  // structured built from capped transcript, not unbounded raw (1505)
+  assert.equal(result.originalElementCount, 1500);
+  assert.equal(result.omittedElementCount, 1500 - MAX_ELEMENTS);
+});
+
+test('getYouTubeTranscript enforces bounded cap on oversized transcript (structured does not grow unbounded)', async (t) => {
+  // 5000 segments exceeds MAX_SEGMENTS (1500) — proves bounded cap.
+  const raw = Array.from({ length: 5000 }, (_, idx) => ({
+    text: `word ${idx}`,
+    duration: 1,
+    offset: idx,
+  }));
+  t.mock.method(YoutubeTranscript, 'fetchTranscript', async () => raw);
+
+  const result = await getYouTubeTranscript('abc123def45', 'oversized-test');
+
+  // transcript + structured are bounded (totalSegments not exposed on YouTubeResult, raw=5000)
+  assert.equal(result.transcript.length, 1500);
+  assert.equal(result.elements?.length, MAX_ELEMENTS);
+  assert.equal(result.originalElementCount, 1500);
+  assert.equal(result.omittedElementCount, 1500 - MAX_ELEMENTS);
+  // fullText also bounded to 50_000 chars (youtubeTranscript.ts MAX_TEXT_LENGTH) — matches githubRepoFile.ts MAX_FILE_LENGTH pattern
+  assert.ok(result.fullText.length <= 50_000 + TRUNCATED_MARKER.length);
 });
 
 test('chunksFromTranscript groups adjacent caption segments into contextual chunks', () => {

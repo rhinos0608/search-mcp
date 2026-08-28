@@ -88,7 +88,12 @@ export async function getYouTubeTranscript(
   const transcript = allSegments.slice(0, MAX_SEGMENTS);
 
   const MAX_TEXT_LENGTH = 50_000;
-  let fullText = allSegments.map((seg) => seg.text.replace(/\n/g, ' ')).join(' ');
+  // Build fullText from capped transcript so we never join unbounded segments.
+  // Pattern matches bounded-parser caps in sibling code:
+  // - src/tools/githubRepoFile.ts: MAX_FILE_LENGTH=50_000 with slice+TRUNCATED_MARKER (line 343, 619-621)
+  // - src/utils/htmlElements.ts: early-break at MAX_RAW_ELEMENTS=1000 (line 115)
+  // - src/utils/elementTruncation.ts: MAX_ELEMENTS=50 + MAX_TEXT_LENGTH=10000
+  let fullText = transcript.map((seg) => seg.text.replace(/\n/g, ' ')).join(' ');
 
   if (fullText.length > MAX_TEXT_LENGTH) {
     fullText = fullText.slice(0, MAX_TEXT_LENGTH) + TRUNCATED_MARKER;
@@ -101,7 +106,8 @@ export async function getYouTubeTranscript(
     fullTextLength: fullText.length,
   });
 
-  const structured = transcriptSegmentsToStructuredContent(allSegments);
+  // Bounded: structured output from capped transcript, not uncapped allSegments.
+  const structured = transcriptSegmentsToStructuredContent(transcript);
 
   const result: YouTubeResult = {
     videoId,
