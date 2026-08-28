@@ -236,6 +236,8 @@ export interface GitHubRepo extends StructuredContent {
   readme: string | null;
   /** Non-null when README was requested but could not be fetched (e.g. rate limit, network error). */
   readmeError: string | null;
+  /** Present only when README was truncated. Full representation written to artifact. */
+  readmeOverflowArtifact?: OverflowArtifact;
 }
 
 export interface GitHubRelease {
@@ -518,9 +520,30 @@ export interface GitHubTreeResult {
   entries: GitHubTreeEntry[];
   truncated: boolean;
   warnings?: string[];
+  /** Present only when entries were truncated. Full list written to artifact. */
+  overflowArtifact?: OverflowArtifact;
   /** Monorepo detection result, present when scanning root of a monorepo. */
   monorepo?: MonorepoDetectResult;
 }
+
+/** Shared overflow artifact metadata — present only when inline result was truncated. */
+export type OverflowArtifact =
+  | {
+      available: true;
+      path: string;
+      complete: boolean;
+      sourceBytes: number;
+      storedBytes: number;
+      expiresAt: string;
+    }
+  | {
+      available: false;
+      path: null;
+      complete: false;
+      sourceBytes: number;
+      storedBytes: 0;
+      expiresAt: null;
+    };
 
 export interface GitHubFileResult extends StructuredContent {
   name: string;
@@ -541,6 +564,8 @@ export interface GitHubFileResult extends StructuredContent {
   lineLimit: number | null;
   /** True when there are more lines/bytes after this chunk. */
   hasMore: boolean;
+  /** Present only when inline content was truncated. Full representation written to artifact. */
+  overflowArtifact?: OverflowArtifact;
   /** 0-based byte offset of this chunk, or null. */
   byteOffset: number | null;
   /** Max bytes requested, or null. */
@@ -660,6 +685,24 @@ export interface GitHubCommitHistoryResult {
   limit: number;
   hasNextPage: boolean;
   commits: GitHubCommit[];
+  /** Bidirectional page navigation metadata derived from Link header. */
+  pageInfo: {
+    order: 'newest_first';
+    currentPage: number;
+    perPage: number;
+    firstPage: 1;
+    previousPage: number | null;
+    nextPage: number | null;
+    lastPage: number | null;
+  };
+  /** Parent-SHA walk metadata for backward traversal. */
+  walk: {
+    oldestReturnedSha: string | null;
+    parentShas: string[];
+    firstParentSha: string | null;
+    reachedInitialCommit: boolean;
+    initialCommitSha: string | null;
+  };
 }
 
 export interface GitHubRefObject {
@@ -683,6 +726,8 @@ export interface GitHubRefsResult {
   filter: string | null;
   refs: GitHubRef[];
   truncated: boolean;
+  /** Present only when refs were truncated. Full list written to artifact. */
+  overflowArtifact?: OverflowArtifact;
 }
 
 // ── Crawl4AI ───────────────────────────────────────────────────────────────

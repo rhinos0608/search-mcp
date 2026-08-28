@@ -19,7 +19,10 @@ afterEach(() => {
 /**
  * Build a mock Response-like object for fetch with the given JSON body.
  */
-function buildMockResponse(body: unknown, init?: { status?: number; statusText?: string }): Response {
+function buildMockResponse(
+  body: unknown,
+  init?: { status?: number; statusText?: string },
+): Response {
   return new Response(JSON.stringify(body), {
     status: init?.status ?? 200,
     statusText: init?.statusText ?? 'OK',
@@ -228,6 +231,7 @@ test('getGitHubRepoTree recursive with truncated flag from GitHub', async () => 
 
   assert.equal(result.truncated, true);
   assert.equal(result.entries.length, 1);
+  assert.ok(result.overflowArtifact, 'overflowArtifact should be present when GitHub truncates');
 });
 
 test('getGitHubRepoTree recursive falls back to non-recursive on 404', async () => {
@@ -269,9 +273,7 @@ test('getGitHubRepoTree throws notFoundError on 404 for non-recursive', async ()
   await assert.rejects(
     async () => getGitHubRepoTree('o', 'nonexistent', undefined, 'main', false),
     (err: unknown) => {
-      return (
-        err instanceof Error && /not found/i.test(err.message)
-      );
+      return err instanceof Error && /not found/i.test(err.message);
     },
   );
 });
@@ -287,9 +289,7 @@ test('getGitHubRepoTree throws notFoundError when both recursive and fallback 40
   await assert.rejects(
     async () => getGitHubRepoTree('o', 'nonexistent', undefined, 'main', true),
     (err: unknown) => {
-      return (
-        err instanceof Error && /not found/i.test(err.message)
-      );
+      return err instanceof Error && /not found/i.test(err.message);
     },
   );
 
@@ -315,6 +315,12 @@ test('getGitHubRepoTree applies limit to entries', async () => {
   assert.equal(result.entries[0]!.name, 'a.txt');
   assert.equal(result.entries[1]!.name, 'b.txt');
   assert.equal(result.entries[2]!.name, 'c.txt');
+  assert.equal(result.truncated, true, 'Should be truncated when limit < entries');
+  assert.ok(result.overflowArtifact, 'overflowArtifact should be present on limit truncation');
+  if (result.overflowArtifact) {
+    assert.equal(result.overflowArtifact.available, true);
+    assert.ok(result.overflowArtifact.path);
+  }
 });
 
 test('getGitHubRepoTree with limit greater than entry count returns all', async () => {
@@ -352,7 +358,10 @@ test('getGitHubRepoTree recursive applies limit', async () => {
 
 test('getGitHubRepoTree throws rateLimitError on 429', async () => {
   globalThis.fetch = async () =>
-    buildMockResponse({ message: 'Rate limit exceeded' }, { status: 429, statusText: 'Too Many Requests' });
+    buildMockResponse(
+      { message: 'Rate limit exceeded' },
+      { status: 429, statusText: 'Too Many Requests' },
+    );
 
   await assert.rejects(
     async () => getGitHubRepoTree('o', 'r', undefined, 'main', false),
@@ -446,13 +455,19 @@ test('getGitHubRepoTree recursive with branch containing slashes encodes once in
   const result = await getGitHubRepoTree('o', 'r', undefined, 'feature/test', true);
 
   // API URL should have the branch encoded once
-  assert.ok(fetchedUrl!.includes('feature%2Ftest'), `Expected branch to be encoded once in API URL, got: ${fetchedUrl}`);
+  assert.ok(
+    fetchedUrl!.includes('feature%2Ftest'),
+    `Expected branch to be encoded once in API URL, got: ${fetchedUrl}`,
+  );
   // The ref should not be double-encoded (would appear as %252F)
   assert.ok(!fetchedUrl!.includes('%252F'), `Branch was double-encoded in API URL: ${fetchedUrl}`);
 
   // htmlUrl should have branch encoded once (feature%2Ftest, not feature/test)
   const entry = result.entries[0]!;
-  assert.ok(entry.htmlUrl.includes('feature%2Ftest'), `htmlUrl should have branch encoded once: ${entry.htmlUrl}`);
+  assert.ok(
+    entry.htmlUrl.includes('feature%2Ftest'),
+    `htmlUrl should have branch encoded once: ${entry.htmlUrl}`,
+  );
 });
 
 // ── Path segment encoding ────────────────────────────────────────────────────
@@ -480,10 +495,7 @@ test('getGitHubRepoTree non-recursive encodes path segments individually preserv
   await getGitHubRepoTree('owner', 'repo', 'src/lib', 'main', false);
 
   // URL must contain "src/lib" with literal slashes, not "src%2Flib"
-  assert.ok(
-    fetchedUrl!.includes('src/lib'),
-    `Expected "src/lib" in URL but got: ${fetchedUrl}`,
-  );
+  assert.ok(fetchedUrl!.includes('src/lib'), `Expected "src/lib" in URL but got: ${fetchedUrl}`);
   // Verify slashes are NOT percent-encoded
   assert.ok(
     !fetchedUrl!.includes('src%2Flib'),

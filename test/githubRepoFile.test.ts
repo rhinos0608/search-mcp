@@ -254,9 +254,7 @@ test('getGitHubRepoFile throws validationError when path is a directory', async 
     async () => getGitHubRepoFile('o', 'r', 'src', 'main'),
     (err: unknown) => {
       return (
-        err instanceof Error &&
-        /directory/i.test(err.message) &&
-        /github.tree/i.test(err.message)
+        err instanceof Error && /directory/i.test(err.message) && /github.tree/i.test(err.message)
       );
     },
   );
@@ -449,6 +447,13 @@ test('getGitHubRepoFile truncates files larger than 50 KB', async () => {
   assert.equal(result.truncated, true);
   assert.ok(result.content.length < encoded.length, 'Content should be shorter than full base64');
   assert.ok(result.content.endsWith(TRUNCATED_MARKER), 'Content should end with truncation marker');
+  assert.ok(result.overflowArtifact, 'overflowArtifact should be present on truncation');
+  if (result.overflowArtifact) {
+    assert.equal(result.overflowArtifact.available, true);
+    assert.ok(result.overflowArtifact.path);
+    assert.equal(result.overflowArtifact.complete, false);
+    assert.ok(result.overflowArtifact.sourceBytes > 50_000);
+  }
   assert.equal(result.elements?.[0]?.type, 'code');
   const code = result.elements?.[0];
   if (code?.type === 'code') {

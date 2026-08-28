@@ -15,6 +15,7 @@ import { assertRateLimitOk, getTracker } from '../rateLimit.js';
 import { rateLimitError, notFoundError, unavailableError, timeoutError } from '../errors.js';
 import type { GitHubTreeEntry, GitHubTreeResult } from '../types.js';
 import { getMonorepoInfo, buildMonorepoOverview } from '../utils/monorepoDetector.js';
+import { writeGitHubListArtifact } from './githubOverflowArtifact.js';
 import { getUserAgent } from '../version.js';
 
 const GITHUB_API = 'https://api.github.com';
@@ -267,15 +268,29 @@ export async function getGitHubRepoTree(
       .filter((e): e is GitHubTreeEntry => e !== null);
 
     const sliced = limit > 0 ? entries.slice(0, limit) : entries;
-    const warnings =
-      entries.length > limit
-        ? [`Result truncated from ${String(entries.length)} to ${String(limit)} entries.`]
+    const localTruncated = limit > 0 && entries.length > limit;
+    const anyTruncated = truncated || localTruncated;
+    const warnings = localTruncated
+      ? [`Result truncated from ${String(entries.length)} to ${String(limit)} entries.`]
+      : truncated
+        ? ['GitHub tree API truncated — not all entries returned.']
         : undefined;
+
+    // Finding 1: artifact stores full locally available list, not the sliced preview
+    const overflowArtifact = anyTruncated
+      ? writeGitHubListArtifact(
+          `${owner}/${repo} tree${path ? ` (${path})` : ''} — ${String(entries.length)} entries`,
+          entries,
+          Buffer.byteLength(JSON.stringify(entries), 'utf8'),
+          true,
+        )
+      : undefined;
 
     const result: GitHubTreeResult = {
       entries: sliced,
-      truncated,
+      truncated: anyTruncated,
       ...(warnings ? { warnings } : {}),
+      ...(overflowArtifact !== undefined ? { overflowArtifact } : {}),
     };
 
     // ── Monorepo detection (root path only) ──
@@ -327,9 +342,29 @@ export async function getGitHubRepoTree(
     .filter((e): e is GitHubTreeEntry => e !== null);
 
   const sliced = limit > 0 ? entries.slice(0, limit) : entries;
+  const localTruncated = limit > 0 && entries.length > limit;
+
+  // Finding 1: artifact stores full locally available list, not the sliced preview
+  const overflowArtifact = localTruncated
+    ? writeGitHubListArtifact(
+        `${owner}/${repo} tree${path ? ` (${path})` : ''} — ${String(entries.length)} entries`,
+        entries,
+        Buffer.byteLength(JSON.stringify(entries), 'utf8'),
+        true,
+      )
+    : undefined;
+
+  const warnings = localTruncated
+    ? [`Result truncated from ${String(entries.length)} to ${String(limit)} entries.`]
+    : undefined;
 
   // ── Monorepo detection (root path only) ─────────────────────────────────
-  const result: GitHubTreeResult = { entries: sliced, truncated };
+  const result: GitHubTreeResult = {
+    entries: sliced,
+    truncated: localTruncated,
+    ...(warnings !== undefined ? { warnings } : {}),
+    ...(overflowArtifact !== undefined ? { overflowArtifact } : {}),
+  };
 
   if (!path && includeMonorepo !== false) {
     try {

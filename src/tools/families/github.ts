@@ -355,10 +355,31 @@ const codeSearchAction = z
       .optional()
       .describe('Repository in owner/repo form or GitHub URL'),
     ref: z.string().optional().describe('Git ref, branch, tag, or commit SHA'),
+    path: z
+      .string()
+      .optional()
+      .describe(
+        'Repository-relative directory scope (e.g. "src/server"). ' +
+          'Restricts search to files under this path.',
+      ),
+    extensions: z
+      .array(z.string())
+      .optional()
+      .describe(
+        'Include only files matching these extensions (e.g. ["ts", "tsx"], [".py"]). ' +
+          'Cannot be used together with language.',
+      ),
+    excludeExtensions: z
+      .array(z.string())
+      .optional()
+      .describe(
+        'Exclude files matching these extensions (e.g. ["test.ts", ".d.ts"]). ' +
+          'Always wins over include extensions.',
+      ),
     language: z
       .enum(['typescript', 'javascript', 'python', 'go', 'rust', 'markdown', 'shell'])
       .optional()
-      .describe('Language filter'),
+      .describe('Language filter. Cannot be used together with extensions.'),
     maxFiles: z
       .number()
       .int()
@@ -406,6 +427,76 @@ const codeSearchAction = z
         message: 'Missing repository: provide `repo` or `repository` (owner/repo or GitHub URL)',
       });
     }
+
+    if (data.language !== undefined && data.extensions !== undefined) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['extensions'],
+        message: 'Cannot specify both language and extensions; choose one',
+      });
+    }
+
+    if (data.path !== undefined) {
+      const p = data.path.replace(/^\/+/u, '').replace(/\/+$/u, '');
+      if (p.length > 1024) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['path'],
+          message: 'path must be at most 1024 characters',
+        });
+      } else if (
+        p.includes('\0') ||
+        p.includes('\\') ||
+        p.startsWith('/') ||
+        p.split('/').includes('..')
+      ) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['path'],
+          message:
+            'path must be repository-relative and cannot contain NUL, backslashes, absolute paths, or ".."',
+        });
+      }
+    }
+
+    const validateExtensions = (
+      field: 'extensions' | 'excludeExtensions',
+      arr: string[] | undefined,
+    ) => {
+      if (arr === undefined) return;
+      if (arr.length > 32) {
+        ctx.addIssue({
+          code: 'custom',
+          path: [field],
+          message: `${field} must have at most 32 entries`,
+        });
+        return;
+      }
+      for (const ext of arr) {
+        if (ext.length === 0 || ext === '.') {
+          ctx.addIssue({
+            code: 'custom',
+            path: [field],
+            message: `${field} entry must not be empty or "."`,
+          });
+        } else if (ext.length > 32) {
+          ctx.addIssue({
+            code: 'custom',
+            path: [field],
+            message: `${field} entry must be at most 32 characters: "${ext}"`,
+          });
+        } else if (/[\s?*{}|<>]/u.test(ext) || ext.includes('/')) {
+          ctx.addIssue({
+            code: 'custom',
+            path: [field],
+            message: `${field} entry must not contain glob characters or "/": "${ext}"`,
+          });
+        }
+      }
+    };
+
+    validateExtensions('extensions', data.extensions);
+    validateExtensions('excludeExtensions', data.excludeExtensions);
   });
 
 // ── Family definition ───────────────────────────────────────────────────────
@@ -833,6 +924,9 @@ const githubFamily: FamilyDefinition = {
           repo: rawRepo,
           repository,
           ref,
+          path: scopePath,
+          extensions: rawExtensions,
+          excludeExtensions: rawExcludeExtensions,
           language,
           maxFiles,
           fileFilter,
@@ -844,6 +938,9 @@ const githubFamily: FamilyDefinition = {
           repo?: string;
           repository?: string;
           ref?: string;
+          path?: string;
+          extensions?: string[];
+          excludeExtensions?: string[];
           language?: string;
           maxFiles: number;
           fileFilter?: string[];
@@ -868,11 +965,29 @@ const githubFamily: FamilyDefinition = {
           );
         }
 
+        // Normalize path: strip leading/trailing slashes
+        const normalizedPath = scopePath?.replace(/^\/+/u, '').replace(/\/+$/u, '') ?? null;
+
+        // Normalize extensions: ensure dot prefix, lowercase
+        const normalizedExtensions = rawExtensions?.map((e) => {
+          const ext = e.toLowerCase();
+          return ext.startsWith('.') ? ext : `.${ext}`;
+        });
+        const normalizedExcludeExtensions = rawExcludeExtensions?.map((e) => {
+          const ext = e.toLowerCase();
+          return ext.startsWith('.') ? ext : `.${ext}`;
+        });
+
         const data = await semanticGitHubCode({
           query,
           repo,
           ...(ref !== undefined ? { ref } : {}),
           ...(language !== undefined ? { language } : {}),
+          ...(normalizedPath !== null ? { scopePath: normalizedPath } : {}),
+          ...(normalizedExtensions !== undefined ? { extensions: normalizedExtensions } : {}),
+          ...(normalizedExcludeExtensions !== undefined
+            ? { excludeExtensions: normalizedExcludeExtensions }
+            : {}),
           maxFiles,
           maxFileBytes,
           ...(fileFilter !== undefined ? { fileFilter } : {}),
@@ -892,7 +1007,18 @@ const githubFamily: FamilyDefinition = {
         });
 
         const warnings = data.warnings;
-        return wrapResponse(data, warnings);
+        return wrapResponse(
+          {
+            ...data,
+            scope: {
+              path: normalizedPath,
+              extensions: normalizedExtensions ?? null,
+              excludeExtensions: normalizedExcludeExtensions ?? [],
+              fileFilter: fileFilter ?? [],
+            },
+          },
+          warnings,
+        );
       },
       configIssue: (cfg) => {
         if (!cfg.github.token) {

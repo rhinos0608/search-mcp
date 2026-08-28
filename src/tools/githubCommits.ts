@@ -131,6 +131,16 @@ function hasNextPage(response: Response): boolean {
   return response.headers.get('link')?.includes('rel="next"') ?? false;
 }
 
+/** Parse page number from a GitHub Link header relation. Returns null on malformed/missing. */
+function parseLinkPage(response: Response, rel: string): number | null {
+  const linkHeader = response.headers.get('link');
+  if (!linkHeader) return null;
+  const pattern = new RegExp(`<[^>]*[?&]page=(\\d+)[^>]*>;\\s*rel="${rel}"`);
+  const match = pattern.exec(linkHeader);
+  const num = match?.[1] !== undefined ? Number(match[1]) : NaN;
+  return Number.isFinite(num) && num >= 1 ? num : null;
+}
+
 function nestedRecord(obj: Record<string, unknown>, key: string): Record<string, unknown> | null {
   const value = obj[key];
   return isRecord(value) ? value : null;
@@ -218,6 +228,20 @@ export async function getGitHubCommitHistory(
     .map(normalizeCommit)
     .filter((item) => item !== null);
 
+  // ── Link header → pageInfo ──
+  const nextPage = parseLinkPage(response, 'next');
+  const prevPage = parseLinkPage(response, 'prev');
+  const lastPage = parseLinkPage(response, 'last');
+  const firstPage = parseLinkPage(response, 'first');
+
+  // ── walk metadata ──
+  const oldestCommit = commits.length > 0 ? commits[commits.length - 1] : null;
+  const oldestReturnedSha = oldestCommit?.sha ?? null;
+  const parentShas = oldestCommit?.parents.map((p) => p.sha) ?? [];
+  const firstParentSha = parentShas.length > 0 ? (parentShas[0] ?? null) : null;
+  const reachedInitialCommit = commits.some((c) => c.parents.length === 0);
+  const initialCommitSha = commits.find((c) => c.parents.length === 0)?.sha ?? null;
+
   return {
     repository: `${owner}/${repo}`,
     ref: options.sha ?? null,
@@ -229,5 +253,21 @@ export async function getGitHubCommitHistory(
     limit,
     hasNextPage: hasNextPage(response),
     commits,
+    pageInfo: {
+      order: 'newest_first' as const,
+      currentPage: page,
+      perPage: limit,
+      firstPage: (firstPage ?? 1) as 1,
+      previousPage: prevPage,
+      nextPage,
+      lastPage,
+    },
+    walk: {
+      oldestReturnedSha,
+      parentShas,
+      firstParentSha,
+      reachedInitialCommit,
+      initialCommitSha,
+    },
   };
 }

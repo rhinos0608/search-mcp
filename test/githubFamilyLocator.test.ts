@@ -170,6 +170,147 @@ test('github.code_search rejects malformed repo', () => {
   assert.equal(result.success, false);
 });
 
+test('github.code_search accepts path, extensions, and excludeExtensions', () => {
+  const { server } = createServer(loadConfig());
+  const entry = getRegisteredTool(server, 'github');
+
+  const result = (
+    entry.inputSchema as { safeParse: (v: unknown) => { success: boolean; data?: unknown } }
+  ).safeParse({
+    action: 'code_search',
+    query: 'authentication middleware',
+    repo: 'owner/repo',
+    path: 'src/server',
+    extensions: ['ts', 'tsx'],
+    excludeExtensions: ['test.ts', '.d.ts'],
+    fileFilter: ['*auth*'],
+    topK: 10,
+  });
+
+  assert.equal(result.success, true);
+  const data = result.data as Record<string, unknown>;
+  assert.equal(data.path, 'src/server');
+  assert.deepEqual(data.extensions, ['ts', 'tsx']);
+  assert.deepEqual(data.excludeExtensions, ['test.ts', '.d.ts']);
+});
+
+test('github.code_search rejects simultaneous language and extensions', () => {
+  const { server } = createServer(loadConfig());
+  const entry = getRegisteredTool(server, 'github');
+
+  const result = (
+    entry.inputSchema as { safeParse: (v: unknown) => { success: boolean } }
+  ).safeParse({
+    action: 'code_search',
+    query: 'function foo',
+    repo: 'owner/repo',
+    language: 'typescript',
+    extensions: ['ts'],
+  });
+
+  assert.equal(result.success, false);
+});
+
+test('github.code_search rejects path with double dots', () => {
+  const { server } = createServer(loadConfig());
+  const entry = getRegisteredTool(server, 'github');
+
+  const result = (
+    entry.inputSchema as { safeParse: (v: unknown) => { success: boolean } }
+  ).safeParse({
+    action: 'code_search',
+    query: 'function foo',
+    repo: 'owner/repo',
+    path: '../etc/passwd',
+  });
+
+  assert.equal(result.success, false);
+});
+
+test('github.code_search rejects path with backslashes', () => {
+  const { server } = createServer(loadConfig());
+  const entry = getRegisteredTool(server, 'github');
+
+  const result = (
+    entry.inputSchema as { safeParse: (v: unknown) => { success: boolean } }
+  ).safeParse({
+    action: 'code_search',
+    query: 'function foo',
+    repo: 'owner/repo',
+    path: 'src\\server',
+  });
+
+  assert.equal(result.success, false);
+});
+
+test('github.code_search rejects extensions with glob characters', () => {
+  const { server } = createServer(loadConfig());
+  const entry = getRegisteredTool(server, 'github');
+
+  const result = (
+    entry.inputSchema as { safeParse: (v: unknown) => { success: boolean } }
+  ).safeParse({
+    action: 'code_search',
+    query: 'function foo',
+    repo: 'owner/repo',
+    extensions: ['*.ts'],
+  });
+
+  assert.equal(result.success, false);
+});
+
+// Finding 7: reject empty or '.' extensions
+
+test('github.code_search rejects empty string extensions', () => {
+  const { server } = createServer(loadConfig());
+  const entry = getRegisteredTool(server, 'github');
+
+  const result = (
+    entry.inputSchema as { safeParse: (v: unknown) => { success: boolean } }
+  ).safeParse({
+    action: 'code_search',
+    query: 'function foo',
+    repo: 'owner/repo',
+    extensions: [''],
+  });
+
+  assert.equal(result.success, false);
+});
+
+test('github.code_search rejects single dot extension', () => {
+  const { server } = createServer(loadConfig());
+  const entry = getRegisteredTool(server, 'github');
+
+  const result = (
+    entry.inputSchema as { safeParse: (v: unknown) => { success: boolean } }
+  ).safeParse({
+    action: 'code_search',
+    query: 'function foo',
+    repo: 'owner/repo',
+    extensions: ['.'],
+  });
+
+  assert.equal(result.success, false);
+});
+
+// Finding 8: path traversal rejects exact '..' segments only, allows foo..bar
+
+test('github.code_search allows path containing foo..bar', () => {
+  const { server } = createServer(loadConfig());
+  const entry = getRegisteredTool(server, 'github');
+
+  const result = (
+    entry.inputSchema as { safeParse: (v: unknown) => { success: boolean } }
+  ).safeParse({
+    action: 'code_search',
+    query: 'function foo',
+    repo: 'owner/repo',
+    path: 'foo..bar/src',
+  });
+
+  assert.equal(result.success, true);
+});
+
 // ── github.commits / github.refs ───────────────────────────────────────────
 
 test('github.commits accepts repository URL and ref alias', () => {

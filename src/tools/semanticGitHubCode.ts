@@ -17,6 +17,9 @@ export interface SemanticGitHubCodeInput {
   repo: string;
   ref?: string | undefined;
   language?: string | undefined;
+  scopePath?: string | undefined;
+  extensions?: string[] | undefined;
+  excludeExtensions?: string[] | undefined;
   maxFiles?: number | undefined;
   maxFileBytes?: number | undefined;
   fileFilter?: string[] | undefined;
@@ -87,18 +90,6 @@ function languageExtensions(language: string | undefined): string[] | undefined 
   }
 }
 
-function matchesFileFilter(path: string, filters: string[] | undefined): boolean {
-  if (filters === undefined || filters.length === 0) return true;
-  return filters.some((filter) => {
-    if (filter.length === 0) return true;
-    if (filter.includes('*')) {
-      const pattern = filter.replace(/[.+?^${}()|[\]\\]/gu, '\\$&').replace(/\*/gu, '.*');
-      return new RegExp(`^${pattern}$`, 'u').test(path);
-    }
-    return path.startsWith(filter) || path.includes(filter);
-  });
-}
-
 function stringMetadata(value: unknown): string | undefined {
   return typeof value === 'string' ? value : undefined;
 }
@@ -121,8 +112,8 @@ export async function semanticGitHubCode(
   }
 
   // Validate maxFiles and topK bounds
-  if (input.maxFiles !== undefined && (input.maxFiles < 1 || input.maxFiles > 200)) {
-    throw validationError('maxFiles must be between 1 and 200');
+  if (input.maxFiles !== undefined && (input.maxFiles < 1 || input.maxFiles > 500)) {
+    throw validationError('maxFiles must be between 1 and 500');
   }
   if (input.topK !== undefined && (input.topK < 1 || input.topK > 50)) {
     throw validationError('topK must be between 1 and 50');
@@ -132,22 +123,35 @@ export async function semanticGitHubCode(
   }
 
   const cfg = loadConfig();
-  const extensions = languageExtensions(input.language);
+  const langExtensions = languageExtensions(input.language);
   const fetchCorpus = deps.fetchCorpus ?? fetchGitHubCorpus;
   const maxFiles = input.maxFiles ?? 100;
   const requestedTopK = input.topK ?? getProfileSettings(input.profile ?? 'lexical-heavy').topK;
+
+  // Combine language extensions with explicit extensions (explicit takes precedence when set)
+  const corpusExtensions = input.extensions ?? langExtensions;
+
+  // Build excludeExtensions: union of oracle excludeExtensions + language extensions (when language is set without explicit extensions)
+  const corpusExcludeExtensions = input.excludeExtensions;
+
   const docs = await fetchCorpus({
     owner,
     repo,
     ...(input.ref !== undefined ? { branch: input.ref } : {}),
+    ...(input.scopePath !== undefined ? { scopePath: input.scopePath } : {}),
+    ...(input.fileFilter !== undefined ? { fileFilter: input.fileFilter } : {}),
     maxFiles,
     ...(input.maxFileBytes !== undefined ? { maxFileBytes: input.maxFileBytes } : {}),
-    ...(extensions !== undefined ? { extensions } : {}),
+    ...(corpusExtensions !== undefined ? { extensions: corpusExtensions } : {}),
+    ...(corpusExcludeExtensions !== undefined
+      ? { excludeExtensions: corpusExcludeExtensions }
+      : {}),
     ...(input.query.length > 0 ? { query: input.query } : {}),
     preFilterByContent: input.preFilterByContent,
   });
 
-  const scopedDocs = docs.filter((doc) => matchesFileFilter(doc.path, input.fileFilter));
+  // Finding 9: fileFilter now applied in corpus before downloads; no post-download filter needed
+  const scopedDocs = docs;
   const corpusWarnings = getGitHubCorpusWarnings({
     repo: input.repo,
     query: input.query,

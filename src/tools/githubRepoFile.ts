@@ -24,6 +24,7 @@ import {
 } from '../errors.js';
 import type { GitHubFileResult } from '../types.js';
 import { wrapCodeAsStructuredContent } from '../utils/elementHelpers.js';
+import { writeGitHubArtifact } from './githubOverflowArtifact.js';
 import { getUserAgent } from '../version.js';
 
 const GITHUB_API = 'https://api.github.com';
@@ -591,7 +592,16 @@ export async function getGitHubRepoFile(
         backend: 'github',
       });
     }
-    return normalizeBinaryContent(name, path, size, sha, bytes, htmlUrl, apiUrl);
+    const binResult = normalizeBinaryContent(name, path, size, sha, bytes, htmlUrl, apiUrl);
+    if (binResult.truncated) {
+      // Write full base64 content to artifact — binary data cannot be UTF-8 text
+      binResult.overflowArtifact = writeGitHubArtifact(
+        bytes.toString('base64'),
+        bytes.length,
+        false,
+      );
+    }
+    return binResult;
   }
 
   // Text file
@@ -611,6 +621,10 @@ export async function getGitHubRepoFile(
       finalContent = finalContent.slice(0, MAX_FILE_LENGTH) + TRUNCATED_MARKER;
     }
 
+    const overflowArtifact = truncated
+      ? writeGitHubArtifact(decoded, Buffer.byteLength(decoded, 'utf8'), false)
+      : undefined;
+
     return {
       name,
       path,
@@ -628,6 +642,7 @@ export async function getGitHubRepoFile(
       hasMore,
       byteOffset: null,
       byteLimit: null,
+      ...(overflowArtifact !== undefined ? { overflowArtifact } : {}),
     };
   }
 
@@ -672,6 +687,10 @@ export async function getGitHubRepoFile(
     : decoded;
   const structured = wrapCodeAsStructuredContent(decodedFinalContent, detectLanguage(path));
 
+  const overflowArtifact = truncated
+    ? writeGitHubArtifact(decoded, Buffer.byteLength(decoded, 'utf8'), false)
+    : undefined;
+
   return {
     name,
     path,
@@ -690,6 +709,7 @@ export async function getGitHubRepoFile(
     byteOffset: null,
     byteLimit: null,
     ...structured,
+    ...(overflowArtifact !== undefined ? { overflowArtifact } : {}),
   };
 }
 
@@ -834,6 +854,10 @@ async function fetchRawAndNormalize(
 
     finalContent = text;
 
+    const overflowArtifact = truncated
+      ? writeGitHubArtifact(content, Buffer.byteLength(content, 'utf8'), false)
+      : undefined;
+
     return {
       name: path.split('/').pop() ?? path,
       path,
@@ -851,6 +875,7 @@ async function fetchRawAndNormalize(
       hasMore,
       byteOffset: null,
       byteLimit: null,
+      ...(overflowArtifact !== undefined ? { overflowArtifact } : {}),
     };
   }
 
@@ -863,6 +888,10 @@ async function fetchRawAndNormalize(
   }
 
   const hasMore = totalBytes !== null && rangeEnd !== null ? rangeEnd < totalBytes - 1 : false;
+
+  const overflowArtifact2 = truncated
+    ? writeGitHubArtifact(content, Buffer.byteLength(content, 'utf8'), false)
+    : undefined;
 
   return {
     name: path.split('/').pop() ?? path,
@@ -881,5 +910,6 @@ async function fetchRawAndNormalize(
     hasMore,
     byteOffset: byteOffset ?? null,
     byteLimit: byteLimit ?? null,
+    ...(overflowArtifact2 !== undefined ? { overflowArtifact: overflowArtifact2 } : {}),
   };
 }

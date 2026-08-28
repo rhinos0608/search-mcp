@@ -7,6 +7,7 @@ import { assertRateLimitOk, getTracker } from '../rateLimit.js';
 import { rateLimitError, notFoundError, unavailableError, timeoutError } from '../errors.js';
 import type { GitHubRepo, GitHubRelease } from '../types.js';
 import { safeStructuredFromMarkdown } from '../utils/elementHelpers.js';
+import { writeGitHubArtifact } from './githubOverflowArtifact.js';
 import { getUserAgent } from '../version.js';
 
 const GITHUB_API = 'https://api.github.com';
@@ -179,6 +180,8 @@ export async function getGitHubRepo(
   // README is optional — surface errors instead of swallowing them
   let readme: string | null = null;
   let readmeError: string | null = null;
+  let readmeBase64Content: string | null = null;
+  let readmeTruncated = false;
   if (readmeSettled.status === 'fulfilled' && readmeSettled.value !== null) {
     const { response: readmeResponse, body: readmeBody } = readmeSettled.value;
     const rm = isRecord(readmeBody) ? readmeBody : null;
@@ -196,6 +199,8 @@ export async function getGitHubRepo(
           decoded.length > MAX_README_LENGTH
             ? decoded.slice(0, MAX_README_LENGTH) + TRUNCATED_MARKER
             : decoded;
+        readmeTruncated = decoded.length > MAX_README_LENGTH;
+        readmeBase64Content = content;
       } else if (encoding.length > 0 && encoding !== 'base64') {
         readmeError = `Unexpected README encoding: ${encoding}`;
         logger.warn({ encoding, owner, repo }, 'Unexpected README encoding — skipping');
@@ -248,6 +253,16 @@ export async function getGitHubRepo(
     readmeError,
     ...readmeStructured,
   };
+
+  // README overflow artifact when truncated
+  if (readmeTruncated && readmeBase64Content !== null) {
+    const fullDecoded = Buffer.from(readmeBase64Content, 'base64').toString('utf-8');
+    result.readmeOverflowArtifact = writeGitHubArtifact(
+      fullDecoded,
+      Buffer.byteLength(fullDecoded, 'utf8'),
+      false,
+    );
+  }
 
   cache.set(key, result);
   return result;

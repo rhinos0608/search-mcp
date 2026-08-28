@@ -9,9 +9,12 @@ export interface GitHubCorpusOptions {
   repo: string;
   branch?: string;
   extensions?: string[];
+  excludeExtensions?: string[];
+  scopePath?: string;
   query?: string;
   includePaths?: string[];
   excludePaths?: string[];
+  fileFilter?: string[];
   maxFiles?: number;
   maxFileBytes?: number;
   preFilterByContent?: boolean;
@@ -439,6 +442,38 @@ export function shouldIncludeFile(entry: GitHubTreeEntry, extensions: string[]):
   return true;
 }
 
+/**
+ * Check if a path is within a directory scope.
+ * 'src' matches 'src/foo.ts' but not 'src-old/foo.ts'.
+ */
+function isInScopePath(filePath: string, scopePath: string): boolean {
+  // Exact directory match or prefix with / separator
+  return filePath === scopePath || filePath.startsWith(scopePath + '/');
+}
+
+/**
+ * Check if a file's extension matches any of the exclude extensions.
+ * Exclude extensions are suffixes like '.test.ts', '.d.ts'.
+ */
+function isExcludedByExtension(filePath: string, excludeExtensions: string[] | undefined): boolean {
+  if (excludeExtensions === undefined || excludeExtensions.length === 0) return false;
+  const lowerPath = filePath.toLowerCase();
+  return excludeExtensions.some((ext) => lowerPath.endsWith(ext));
+}
+
+/** Check if a file path matches any of the legacy fileFilter patterns. */
+function matchesFileFilter(filePath: string, filters: string[] | undefined): boolean {
+  if (filters === undefined || filters.length === 0) return true;
+  return filters.some((filter) => {
+    if (filter.length === 0) return true;
+    if (filter.includes('*')) {
+      const pattern = filter.replace(/[.+?^${}()|[\]\\]/gu, '\\$&').replace(/\*/gu, '.*');
+      return new RegExp(`^${pattern}$`, 'u').test(filePath);
+    }
+    return filePath.startsWith(filter) || filePath.includes(filter);
+  });
+}
+
 export async function fetchGitHubCorpus(
   opts: GitHubCorpusOptions,
   deps: GitHubCorpusDependencies = {},
@@ -453,13 +488,18 @@ export async function fetchGitHubCorpus(
   const queryTerms = tokenizeQuery(opts.query);
 
   // Phase 1: Always fetch the full repo tree first — exhaustive file listing.
+  // When scopePath is set, fetch unsliced (limit=0) to avoid the default 500 cap
+  // that would miss files in large repos.
   let treeFiles: GitHubTreeEntry[] = [];
   try {
-    const treeResult = await getTree(opts.owner, opts.repo, '', opts.branch, true, 500);
+    const treeResult = await getTree(opts.owner, opts.repo, '', opts.branch, true, 0);
     treeFiles = treeResult.entries.filter(
       (e) =>
         shouldIncludeFile(e, extensions) &&
-        passesPathFilters(e.path, opts.includePaths, opts.excludePaths),
+        passesPathFilters(e.path, opts.includePaths, opts.excludePaths) &&
+        matchesFileFilter(e.path, opts.fileFilter) &&
+        (opts.scopePath === undefined || isInScopePath(e.path, opts.scopePath)) &&
+        !isExcludedByExtension(e.path, opts.excludeExtensions),
     );
     logger.info(
       { repo: opts.repo, treeFiles: treeFiles.length },
@@ -481,7 +521,7 @@ export async function fetchGitHubCorpus(
         opts.owner,
         opts.repo,
         undefined,
-        undefined,
+        opts.scopePath,
         Math.min(maxFiles, 100),
       );
       for (const r of searchResult.results) {
@@ -494,7 +534,10 @@ export async function fetchGitHubCorpus(
         };
         if (
           shouldIncludeFile(entry, extensions) &&
-          passesPathFilters(entry.path, opts.includePaths, opts.excludePaths)
+          passesPathFilters(entry.path, opts.includePaths, opts.excludePaths) &&
+          matchesFileFilter(entry.path, opts.fileFilter) &&
+          (opts.scopePath === undefined || isInScopePath(entry.path, opts.scopePath)) &&
+          !isExcludedByExtension(entry.path, opts.excludeExtensions)
         ) {
           searchFiles.push(entry);
         }

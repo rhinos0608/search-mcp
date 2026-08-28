@@ -71,6 +71,84 @@ test('getGitHubCommitHistory returns normalized commits', async () => {
   assert.equal(result.commits[0]!.message, 'fix: repair parser');
   assert.equal(result.commits[0]!.authorLogin, 'ada');
   assert.equal(result.commits[0]!.parents[0]!.sha, 'parent1');
+  // pageInfo from Link header
+  assert.equal(result.pageInfo.order, 'newest_first');
+  assert.equal(result.pageInfo.currentPage, 1);
+  assert.equal(result.pageInfo.perPage, 10);
+  assert.equal(result.pageInfo.nextPage, 2);
+  assert.equal(result.pageInfo.previousPage, null);
+  assert.equal(result.pageInfo.lastPage, null);
+  // walk metadata
+  assert.equal(result.walk.oldestReturnedSha, 'abc123');
+  assert.deepEqual(result.walk.parentShas, ['parent1']);
+  assert.equal(result.walk.firstParentSha, 'parent1');
+  assert.equal(result.walk.reachedInitialCommit, false);
+  assert.equal(result.walk.initialCommitSha, null);
+});
+
+test('getGitHubCommitHistory detects initial commit in walk', async () => {
+  globalThis.fetch = async () =>
+    buildMockResponse(
+      [
+        {
+          sha: 'root123',
+          url: 'https://api.github.com/repos/o/r/commits/root123',
+          html_url: 'https://github.com/o/r/commit/root123',
+          comments_url: 'https://api.github.com/repos/o/r/commits/root123/comments',
+          commit: {
+            message: 'initial commit',
+            author: { name: 'Ada', email: 'ada@example.com', date: '2026-01-01T00:00:00Z' },
+            committer: { name: 'Ada', email: 'ada@example.com', date: '2026-01-01T00:00:00Z' },
+          },
+          author: { login: 'ada' },
+          committer: { login: 'ada' },
+          parents: [],
+        },
+      ],
+      {
+        headers: {
+          link: '<https://api.github.com/repos/o/r/commits?page=1>; rel="last"',
+        },
+      },
+    );
+
+  const result = await getGitHubCommitHistory('o', 'r', { page: 1, limit: 10 });
+
+  assert.equal(result.walk.reachedInitialCommit, true);
+  assert.equal(result.walk.initialCommitSha, 'root123');
+  assert.equal(result.pageInfo.lastPage, 1);
+  assert.equal(result.pageInfo.previousPage, null);
+});
+
+test('getGitHubCommitHistory handles malformed Link header gracefully', async () => {
+  globalThis.fetch = async () =>
+    buildMockResponse(
+      [
+        {
+          sha: 'abc123',
+          url: 'https://api.github.com/repos/o/r/commits/abc123',
+          html_url: 'https://github.com/o/r/commit/abc123',
+          comments_url: 'https://api.github.com/repos/o/r/commits/abc123/comments',
+          commit: {
+            message: 'test',
+            author: { name: 'A', email: 'a@b.com', date: '2026-01-01T00:00:00Z' },
+            committer: { name: 'A', email: 'a@b.com', date: '2026-01-01T00:00:00Z' },
+          },
+          parents: [],
+        },
+      ],
+      {
+        headers: {
+          link: 'garbage',
+        },
+      },
+    );
+
+  const result = await getGitHubCommitHistory('o', 'r');
+
+  assert.equal(result.hasNextPage, false);
+  assert.equal(result.pageInfo.nextPage, null);
+  assert.equal(result.pageInfo.lastPage, null);
 });
 
 test('getGitHubCommitHistory builds commit query filters', async () => {

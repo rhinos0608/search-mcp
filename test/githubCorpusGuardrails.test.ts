@@ -109,3 +109,102 @@ test('fetchGitHubCorpus forwards a configurable maxFileBytes limit', async () =>
   assert.equal(fileCalls[0]?.[8], 12_345);
   assert.equal(docs[0]?.path, 'src/index.ts');
 });
+
+test('fetchGitHubCorpus applies scopePath filtering', async () => {
+  const treeEntries = [
+    entry('src/server.ts'),
+    entry('src/client.ts'),
+    entry('lib/old.ts'),
+    entry('src-old/legacy.ts'),
+  ];
+
+  const docs = await fetchGitHubCorpus(
+    {
+      owner: 'owner',
+      repo: 'repo',
+      scopePath: 'src',
+      extensions: ['.ts'],
+      maxFiles: 10,
+    } as any,
+    {
+      getGitHubRepoTree: async () => ({ entries: treeEntries, truncated: false }) as any,
+      getGitHubRepoFile: async (...args: any[]) =>
+        ({
+          isBinary: false,
+          content: 'export const ok = 1;\n',
+          htmlUrl: `https://github.com/owner/repo/blob/main/${args[2]}`,
+        }) as any,
+      getGitHubRepoSearch: async () => {
+        throw new Error('not used');
+      },
+    },
+  );
+
+  assert.equal(docs.length, 2);
+  assert.ok(docs.some((d) => d.path === 'src/server.ts'));
+  assert.ok(docs.some((d) => d.path === 'src/client.ts'));
+  assert.ok(!docs.some((d) => d.path === 'lib/old.ts'));
+  assert.ok(!docs.some((d) => d.path === 'src-old/legacy.ts'));
+});
+
+test('fetchGitHubCorpus applies excludeExtensions filtering', async () => {
+  const treeEntries = [entry('src/index.ts'), entry('src/index.test.ts'), entry('src/types.d.ts')];
+
+  const docs = await fetchGitHubCorpus(
+    {
+      owner: 'owner',
+      repo: 'repo',
+      extensions: ['.ts'],
+      excludeExtensions: ['.test.ts', '.d.ts'],
+      maxFiles: 10,
+    } as any,
+    {
+      getGitHubRepoTree: async () => ({ entries: treeEntries, truncated: false }) as any,
+      getGitHubRepoFile: async (...args: any[]) =>
+        ({
+          isBinary: false,
+          content: 'export const ok = 1;\n',
+          htmlUrl: `https://github.com/owner/repo/blob/main/${args[2]}`,
+        }) as any,
+      getGitHubRepoSearch: async () => {
+        throw new Error('not used');
+      },
+    },
+  );
+
+  assert.equal(docs.length, 1);
+  assert.equal(docs[0]?.path, 'src/index.ts');
+});
+
+test('fetchGitHubCorpus uses unsliced tree when scopePath is set', async () => {
+  const treeEntries = Array.from({ length: 600 }, (_, i) => entry(`src/file${i}.ts`));
+  let treeArgs: unknown[] = [];
+
+  await fetchGitHubCorpus(
+    {
+      owner: 'owner',
+      repo: 'repo',
+      scopePath: 'src',
+      extensions: ['.ts'],
+      maxFiles: 10,
+    } as any,
+    {
+      getGitHubRepoTree: async (...args: any[]) => {
+        treeArgs = args;
+        return { entries: treeEntries.slice(0, 10), truncated: false } as any;
+      },
+      getGitHubRepoFile: async (...args: any[]) =>
+        ({
+          isBinary: false,
+          content: 'export const ok = 1;\n',
+          htmlUrl: `https://github.com/owner/repo/blob/main/${args[2]}`,
+        }) as any,
+      getGitHubRepoSearch: async () => {
+        throw new Error('not used');
+      },
+    },
+  );
+
+  // limit=0 means unsliced (6th arg)
+  assert.equal(treeArgs[5], 0);
+});

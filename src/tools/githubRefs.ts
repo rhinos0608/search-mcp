@@ -6,6 +6,7 @@ import { assertRateLimitOk, getTracker } from '../rateLimit.js';
 import { rateLimitError, notFoundError, unavailableError, timeoutError } from '../errors.js';
 import type { GitHubRef, GitHubRefsResult } from '../types.js';
 import { getUserAgent } from '../version.js';
+import { writeGitHubListArtifact } from './githubOverflowArtifact.js';
 
 const GITHUB_API = 'https://api.github.com';
 
@@ -221,13 +222,25 @@ export async function getGitHubRefs(
   const refs = rawRefs
     .map((item) => normalizeRef(item, owner, repo))
     .filter((item) => item !== null);
+  const truncated = refs.length > limit;
   const limitedRefs = refs.slice(0, limit);
+
+  // Finding 1: artifact stores full locally available list, not the sliced preview
+  const overflowArtifact = truncated
+    ? writeGitHubListArtifact(
+        `${owner}/${repo} refs (${type}) — ${String(refs.length)} refs`,
+        refs,
+        Buffer.byteLength(JSON.stringify(refs), 'utf8'),
+        true,
+      )
+    : undefined;
 
   return {
     repository: `${owner}/${repo}`,
     type,
     filter: options.filter ?? null,
     refs: limitedRefs,
-    truncated: refs.length > limitedRefs.length,
+    truncated,
+    ...(overflowArtifact !== undefined ? { overflowArtifact } : {}),
   };
 }

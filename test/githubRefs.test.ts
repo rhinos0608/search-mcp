@@ -79,6 +79,11 @@ test('getGitHubRefs builds matching refs URL and truncates results', async () =>
   assert.equal(new URL(capturedUrl).pathname, '/repos/owner/repo/git/matching-refs/tags/v1');
   assert.equal(result.refs.length, 1);
   assert.equal(result.truncated, true);
+  assert.ok(result.overflowArtifact, 'overflowArtifact should be present on refs truncation');
+  if (result.overflowArtifact) {
+    assert.equal(result.overflowArtifact.available, true);
+    assert.ok(result.overflowArtifact.path);
+  }
   assert.equal(result.refs[0]!.htmlUrl, 'https://github.com/owner/repo/releases/tag/v1.0.0');
 });
 

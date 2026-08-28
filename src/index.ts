@@ -10,6 +10,7 @@ import { startHttpServer } from './server/http.js';
 import { isAddressInUseError } from './server/startupErrors.js';
 import type { SearchMcpRuntime } from './config/types.js';
 import { startArtifactSweeper } from './tools/webSearchArtifact.js';
+import { startGitHubArtifactSweeper } from './tools/githubOverflowArtifact.js';
 
 // ── Shutdown handler registration ──────────────────────────────────────────
 
@@ -51,6 +52,7 @@ async function main(): Promise<void> {
 
   // Periodic artifact TTL/capacity sweep, independent of web_search traffic.
   startArtifactSweeper();
+  startGitHubArtifactSweeper();
 
   const httpPortEnv = process.env.HTTP_PORT;
   const useHttp = httpPortEnv !== undefined && httpPortEnv !== '';
