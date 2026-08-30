@@ -4,7 +4,7 @@
 
 Model Context Protocol (MCP) is an open standard that lets AI assistants (clients) call external tools and access resources through a defined JSON-RPC interface. An MCP server exposes a set of named tools; the client discovers them, sends structured call requests, and receives structured responses.
 
-`search-mcp` is a stdio-transport MCP server. Communication follows this flow:
+`search-mcp` is a stdio-transport MCP server (with optional HTTP MCP transport when `HTTP_PORT` is set). Communication follows this flow:
 
 ```
 AI client (e.g. Claude Desktop, claude CLI)
@@ -69,13 +69,11 @@ search-mcp/
 │   │   ├── sitemap.ts       # XML sitemap parser
 │   │   ├── url.ts           # URL dedup
 │   │   ├── rescore.ts       # score normalization
-│   │   ├── embedding.ts     # provider dispatch
 │   │   ├── ollamaEmbedding.ts # Ollama local embedding
 │   │   ├── transformersEmbedding.ts # Transformers.js in-process
 │   │   ├── domainTrust.ts          # domain reputation & typosquat detection
 │   │   ├── elementHelpers.ts     # element utilities
 │   │   ├── elementTruncation.ts  # truncation logic
-│   │   ├── embedding.ts          # provider dispatch
 │   │   ├── externalRecovery.ts   # Wayback Machine & Google Cache fallbacks
 │   │   ├── extractionConfig.ts   # extraction config schema
 │   │   ├── extractionQuality.ts  # quality thresholds
@@ -96,17 +94,12 @@ search-mcp/
 │   │   ├── contentScrubber.ts      # threat detection & redaction
 │   │   ├── transformersEmbedding.ts # Transformers.js in-process
 │   │   └── url.ts                # URL dedup
-│   └── tools/               # tool registration (18 MCP tools: 10 standalone + 8 family)
+│   └── tools/               # tool registration (13 MCP tools: 5 standalone + 8 family via registry)
 │       ├── standalone/      # standalone tools
 │       │   ├── webSearch.ts
 │       │   ├── webCrawl.ts
 │       │   ├── rss.ts
-│       │   ├── semanticCrawl.ts
-│       │   ├── semanticCrawlListCorpora.ts
-│       │   ├── semanticCrawlInspectCorpus.ts
 │       │   ├── semanticJobs.ts
-│       │   ├── deepResearch.ts
-│       │   ├── fetchFocus.ts
 │       │   └── healthCheck.ts
 │       ├── families/        # family tools (action-discriminated)
 │       │   ├── youtube.ts
@@ -116,7 +109,7 @@ search-mcp/
 │       │   ├── research.ts
 │       │   ├── browser.ts
 │       │   ├── agenticBrowse.ts
-│       │   └── knowledgeGraph.ts
+│       │   └── semanticCrawl.ts
 │       ├── registry.ts      # registerFamily() helper
 │       ├── response.ts      # shared response helpers
 │       └── queryExpansion.ts # rule-based query variation generation
@@ -140,6 +133,7 @@ The process entry point. Responsibilities:
 - Instantiate the pino logger with the appropriate formatter
 - Create the `McpServer` (from `server.ts`)
 - Attach a `StdioServerTransport` and call `server.connect(transport)`
+- If `HTTP_PORT` is set (1–65535), also start an HTTP MCP transport via `src/server/http.ts`; if the port is in use, log a warning and continue with stdio only
 
 ### `src/server.ts`
 
@@ -172,12 +166,12 @@ Code retrieval defaults to `lexical-heavy` because identifiers, function names, 
 
 ### Embedding Providers
 
-Embedding provider dispatch lives in `src/utils/embedding.ts`. Provider selection via `EMBEDDING_PROVIDER` env var (default `sidecar`):
+Embedding provider dispatch lives in `src/rag/embedding.ts` (legacy `src/config.ts` shim for env fallback). Provider selection via `EMBEDDING_PROVIDER` env var (default `sidecar`):
 
 - **`sidecar`** (default): FastAPI server at `sidecar/embedding/`, with OpenAI-compatible proxy at `sidecar/openai-embedding-proxy/`
 - **`ollama`**: Local embeddings via `src/utils/ollamaEmbedding.ts`, defaults to `http://localhost:11434` with `nomic-embed-text`
 - **`transformers`**: In-process ONNX embeddings via `src/utils/transformersEmbedding.ts`, no external service needed
-- **`openai`**: OpenAI-compatible API via `src/utils/embedding.ts`, supports any OpenAI-compatible endpoint
+- **`openai`**: OpenAI-compatible API via `src/rag/embedding.ts`, supports any OpenAI-compatible endpoint
 
 ### Docker Compose Deployment
 
@@ -201,7 +195,7 @@ Tool registration follows two patterns:
 - **Standalone tools** (`standalone/`) — one file per tool, exports a `register*` function
 - **Family tools** (`families/`) — one file per family, uses `registerFamily()` for action-discriminated tools (e.g. `youtube` with `search | transcript | semantic` actions)
 
-Knowledge graph tools (`graph-*.ts`, `family-*.ts`, `run-*.ts`) are conditionally registered when `knowledgeGraph.enabled` is set.
+All registered tools are enumerated in `src/server.ts` (standalone + `register*Family` calls); acquisition-only — no knowledge-graph or deep-research surfaces remain after Trellis extraction.
 
 Splitting tools into separate files keeps each file small, makes individual tools easy to find and modify, and avoids merge conflicts when multiple tools are developed in parallel.
 

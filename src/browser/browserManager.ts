@@ -527,6 +527,19 @@ export class BrowserManager {
     if (session.timeoutHandle) {
       clearTimeout(session.timeoutHandle);
     }
+    // Cleanup network listeners (idempotent, safe if page already closed)
+    try {
+      const { stopRequestTracking } = await import('./network.js');
+      for (const p of [...session.pages, ...session.context.pages()]) {
+        try {
+          stopRequestTracking(p);
+        } catch {
+          /* best-effort cleanup */
+        }
+      }
+    } catch {
+      /* network cleanup not critical */
+    }
     try {
       await session.context.close();
       if (session.browser) {

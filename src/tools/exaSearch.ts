@@ -89,12 +89,10 @@ export async function exaSearch(
       aiSummary === 'only'
         ? { summary: true }
         : {
-            // Excerpt-only: request bounded query-relevant highlights and a
-            // bounded slice of the full page text (both capped via maxCharacters),
-            // never unbounded raw content. `yes` additionally requests the
+            // Excerpt-only: request bounded query-relevant highlights,
+            // never full page text/raw content. `yes` additionally requests the
             // URL-attributable generated summary.
             highlights: { maxCharacters: EXA_HIGHLIGHTS_MAX_CHARACTERS },
-            text: { maxCharacters: EXA_HIGHLIGHTS_MAX_CHARACTERS },
             ...(aiSummary === 'yes' ? { summary: true } : {}),
           },
   };

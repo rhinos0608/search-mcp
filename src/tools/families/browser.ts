@@ -1308,6 +1308,12 @@ const browserFamily: FamilyDefinition = {
             session.pages = session.context.pages();
             const page = session.pages[index];
             if (!page) throw new Error(`No tab at index ${String(index)}`);
+            try {
+              const { stopRequestTracking } = await import('../../browser/network.js');
+              stopRequestTracking(page);
+            } catch {
+              /* stopRequestTracking best-effort */
+            }
             await page.close();
             session.pages.splice(index, 1);
             // If we closed the active tab, switch to nearest

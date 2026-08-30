@@ -544,7 +544,7 @@ test('codex failure falls back to remaining backends; provenance records usedFal
         codexSearch: async () => {
           throw new Error('HTTP 500 for Codex search');
         },
-        braveSearch: async () => [braveResult('https://example.com/b', 'B')],
+        braveSearch: async () => [braveResult('https://example.com/b', 'Brave-Fallback')],
       };
       const results = await searchWithBackends(
         'x',
