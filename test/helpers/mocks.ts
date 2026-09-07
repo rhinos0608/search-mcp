@@ -50,6 +50,10 @@ const baseConfig: SearchConfig = {
       allowDashboardOverFunnel: false,
     },
   },
+  jobsAcquisition: {
+    destinationFetchEnabled: false,
+    atsTenants: [],
+  },
   browser: {
     enabled: false,
     executablePath: '',

@@ -13,6 +13,7 @@ import { fileURLToPath } from 'node:url';
 import { logger } from './logger.js';
 import { DEFAULT_SEMANTIC_MAX_BYTES } from './semanticLimits.js';
 import type { AccessConfig } from './config/types.js';
+import type { JobsAcquisitionConfig } from './jobs/acquisition/sourceClass/contracts.js';
 import { decryptConfig } from './config/crypto.js';
 import { codexConfigured } from './tools/codexSearch.js';
 
@@ -252,6 +253,7 @@ export interface SearchConfig {
   mcpApiKey?: string; // Generated on first run; stored encrypted.
   apiKeyClaimed: boolean; // True once the setup screen has been dismissed.
   access: AccessConfig; // External access configuration.
+  jobsAcquisition: JobsAcquisitionConfig;
 }
 
 export interface FeatureRequirement {
@@ -388,6 +390,10 @@ const DEFAULTS: Omit<SearchConfig, 'rescoreWeights'> = {
       funnelConfigured: false,
       allowDashboardOverFunnel: false,
     },
+  },
+  jobsAcquisition: {
+    destinationFetchEnabled: false,
+    atsTenants: [],
   },
   browser: {
     enabled: true,
@@ -1166,6 +1172,10 @@ export function loadConfig(): SearchConfig {
             ?.tailscale?.allowDashboardOverFunnel ??
           DEFAULTS.access.tailscale.allowDashboardOverFunnel,
       },
+    },
+    jobsAcquisition: {
+      destinationFetchEnabled: false,
+      atsTenants: [],
     },
   };
 
