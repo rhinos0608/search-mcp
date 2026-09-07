@@ -38,7 +38,11 @@ function buildTermFreq(tokens: string[]): Map<string, number> {
   return tf;
 }
 
-export function buildBm25Index(docs: Bm25Document[]): Bm25Index {
+export function buildBm25Index(
+  docs: Bm25Document[],
+  tokenizeFn?: (text: string) => string[],
+): Bm25Index {
+  const tok = tokenizeFn ?? tokenize;
   const N = docs.length;
 
   if (N === 0) {
@@ -54,7 +58,7 @@ export function buildBm25Index(docs: Bm25Document[]): Bm25Index {
   let totalLength = 0;
 
   for (const doc of docs) {
-    const tokens = tokenize(doc.text);
+    const tokens = tok(doc.text);
     corpus.push({ id: doc.id, tf: buildTermFreq(tokens), dl: tokens.length });
     totalLength += tokens.length;
   }
@@ -76,7 +80,7 @@ export function buildBm25Index(docs: Bm25Document[]): Bm25Index {
 
   return {
     search(query: string, topK?: number): { id: string; score: number }[] {
-      const queryTerms = [...new Set(tokenize(query))];
+      const queryTerms = [...new Set(tok(query))];
       if (queryTerms.length === 0) return [];
 
       const scores: { id: string; score: number }[] = [];
