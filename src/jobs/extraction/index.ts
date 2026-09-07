@@ -1,0 +1,57 @@
+export {
+  EXTRACTION_CONTRACT_VERSION,
+  EXTRACTOR_VERSION,
+  ExtractionError,
+  ExtractionAdapterKindSchema,
+  ExtractionMethodSchema,
+  ExtractionWarningSchema,
+  ExtractionCoverageSchema,
+  ExtractionScrubSummarySchema,
+  ExtractionHotFieldsSchema,
+  ExtractedRequirementSchema,
+  ExtractObservationInputSchema,
+  ExtractionResultSchema,
+  ExtractionProjectionSchema,
+  ExtractionRunIdSchema,
+  ExtractionProjectionIdSchema,
+  JobsEvidenceIdSchema,
+  RequirementIdSchema,
+  ExtractionClaimCandidateIdSchema,
+  ExtractionFieldPathSchema,
+  EXTRACTION_BOUNDED_TEXT_MAX,
+  EXTRACTION_EXCERPT_MAX,
+  EXTRACTION_DESCRIPTION_MAX,
+  PARSER_MAX_INPUT_BYTES,
+  METHOD_CONFIDENCE,
+  ExtractionPackContextSchema,
+  ExtractionAttachmentSchema,
+} from './contracts.js';
+
+export type {
+  ExtractionRunId,
+  ExtractionProjectionId,
+  JobsEvidenceId,
+  RequirementId,
+  ExtractionClaimCandidateId,
+  ExtractionAdapterKind,
+  ExtractionMethod,
+  ExtractionWarning,
+  ExtractionScrubSummary,
+  ExtractionHotFields,
+  ExtractedRequirement,
+  ExtractObservationInput,
+  ExtractionResult,
+  ExtractionProjection,
+  ExtractionErrorCode,
+  ExtractionPackContext,
+} from './contracts.js';
+
+export { extractObservation } from './pipeline.js';
+export { interpretRequirements } from './requirements.js';
+export {
+  extractionRunId,
+  extractionProjectionId,
+  jobsEvidenceId,
+  extractionClaimCandidateId,
+  extractionRequirementId,
+} from './ids.js';
