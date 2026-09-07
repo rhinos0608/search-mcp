@@ -141,3 +141,4 @@ export const RrfConfigSchema = z
   })
   .strict();
 export type RrfConfig = z.infer<typeof RrfConfigSchema>;
+export const DEFAULT_RRF_K = RrfConfigSchema.parse({}).k;

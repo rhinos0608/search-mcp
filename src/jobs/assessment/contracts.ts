@@ -143,7 +143,13 @@ export const CandidateAssessmentSchema = z
   .object({
     candidateId: z.string().min(1),
     /** Six grouped scores. */
-    groups: z.array(AssessmentGroupSchema).length(6),
+    groups: z
+      .array(AssessmentGroupSchema)
+      .length(6)
+      .refine(
+        (groups) => new Set(groups.map((g) => g.group)).size === 6,
+        'groups must contain six distinct group values',
+      ),
     /** Overall utility score (0-1), weighted mean of group scores. */
     utilityScore: z.number().min(0).max(1),
     /** Eligibility verdict (discrete, separate from utility). */
@@ -176,7 +182,7 @@ export const AssessmentResultSchema = z
     candidates: z.array(CandidateAssessmentSchema),
     /** Group weights used for utility aggregation. */
     groupWeights: z.record(ScoreGroupSchema, z.number().min(0).max(1)),
-    /** Total weight of groups with non-zero weight. */
+    /** Count of groups with non-zero weight. */
     activeGroupCount: z.number().int().nonnegative(),
     /** Emitted timestamp. */
     emittedAt: InstantSchema,

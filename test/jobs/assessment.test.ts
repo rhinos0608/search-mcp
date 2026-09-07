@@ -188,6 +188,13 @@ test('absent evidence components get neutral 0.5', () => {
     assert.equal(c.hasEvidence, false, `component ${c.dimension} should have no evidence`);
     assert.equal(c.score, 0.5, `component ${c.dimension} should be 0.5`);
   }
+
+  const pfGroup = result.groups.find((g) => g.group === 'preferenceFit');
+  assert.ok(pfGroup);
+  for (const c of pfGroup.components) {
+    assert.equal(c.hasEvidence, false, `component ${c.dimension} should have no evidence`);
+    assert.equal(c.score, 0.5, `component ${c.dimension} should be 0.5`);
+  }
 });
 
 // ---------------------------------------------------------------------------
@@ -512,13 +519,8 @@ test('computeUtilityScore weighted mean', () => {
 // ---------------------------------------------------------------------------
 
 test('computeUtilityScore uses NEUTRAL 0.5 for missing group scores', () => {
-  const scores: Record<ScoreGroup, number> = {
+  const scores: Partial<Record<ScoreGroup, number>> = {
     relevance: 0.8,
-    candidateFit: 0.5, // missing → neutral
-    preferenceFit: 0.5, // missing → neutral
-    marketState: 0.5, // missing → neutral
-    evidenceQuality: 0.5, // missing → neutral
-    personalAdaptation: 0.5, // missing → neutral
   };
 
   const weights: Record<ScoreGroup, number> = {
@@ -761,10 +763,7 @@ test('evidence quality summary counts refs', () => {
     intent: makeIntent(),
   });
 
-  assert.ok(result.evidenceQualitySummary.totalEvidenceRefs >= 0);
-  assert.ok(result.evidenceQualitySummary.uniqueEvidenceRefs >= 0);
-  assert.ok(
-    result.evidenceQualitySummary.coverageRatio >= 0 &&
-      result.evidenceQualitySummary.coverageRatio <= 1,
-  );
+  assert.equal(result.evidenceQualitySummary.totalEvidenceRefs, 21);
+  assert.equal(result.evidenceQualitySummary.uniqueEvidenceRefs, 2);
+  assert.equal(result.evidenceQualitySummary.coverageRatio, (1 + 0 + 2 / 3 + 1 + 1 + 0) / 6);
 });

@@ -15,8 +15,10 @@
 import type { DomainPack, LocalePack } from '../packs/types.js';
 import type {
   CandidateRetrievalMetadata,
+  ChannelResult,
   RetrievalChannelWeights,
   RetrievalResult,
+  RrfConfig,
 } from './contracts.js';
 import {
   RETRIEVAL_CONTRACT_VERSION,
@@ -79,6 +81,9 @@ export interface RetrievalPipelineInput {
 
   /** Maximum candidates to emit (truncation). Undefined = no truncation. */
   readonly topK?: number;
+
+  /** Optional RRF config. Default k is 60. */
+  readonly rrfConfig?: RrfConfig;
 }
 
 // ---------------------------------------------------------------------------
@@ -126,7 +131,7 @@ export function runRetrieval(input: RetrievalPipelineInput): RetrievalResult {
   // Score each channel
   // -----------------------------------------------------------------------
 
-  const channelResults = [];
+  const channelResults: ChannelResult[] = [];
 
   // 1. Text BM25
   if (weights.text_bm25 > 0 && postings.length > 0) {
@@ -186,6 +191,7 @@ export function runRetrieval(input: RetrievalPipelineInput): RetrievalResult {
     channelResults,
     weights,
     candidateIds,
+    ...(input.rrfConfig?.k !== undefined ? { k: input.rrfConfig.k } : {}),
   });
 
   // -----------------------------------------------------------------------

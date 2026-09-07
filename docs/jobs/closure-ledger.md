@@ -40,8 +40,8 @@
 
 - **File**: `src/jobs/evaluation/gates.ts:332-362`
 - **Bug**: D17 checkpoint only emitted success rate check. ADR requires stratification (≥2 categories), Recall/NDCG parity, and category divergence checks.
-- **Fix**: Added P1 deferred gates for STRATIFICATION, RECALL_PARITY, CATEGORY_DIVERGENCE. Currently `passed: true` with deferred notes. Gates emitted when D17 cutover requested.
-- **Risk**: Low. Deferred gates do not change existing behavior. Real enforcement requires per-category SuiteMetrics.
+- **Fix**: D17 P1 gates evaluate category count (≥2), Recall@20/NDCG@10 presence, and per-category >20% regression vs suite macro. `D.no_open_p0p1` runs after so failed D17 P1s are included.
+- **Risk**: Low. Empty metrics fail stratification/recall_parity; `D.no_open_p0p1` then fails.
 
 ### F6. extraction/pipeline.ts — claim candidate IDs violate contract (P1)
 
@@ -49,6 +49,22 @@
 - **Bug**: `buildClaimCandidate` used `claim-candidate:${field.evidenceId}` (non-hashed, non-deterministic) instead of `extractionClaimCandidateId()` which produces `claim-candidate:<sha256>`.
 - **Fix**: Calls `extractionClaimCandidateId(observationId, fieldPath, origin, method, value)` for proper deterministic ID.
 - **Risk**: Low. IDs change for new extractions. Existing persisted IDs unchanged.
+
+### D5. profile store — expectedRevision null is explicit initial revision (P1)
+
+- **File**: `src/jobs/profile/persist/store.ts:346-365`
+- **Dispositon**: FIXED — empty store current revision normalized to null; `expectedRevision: null` accepted as the explicit initial revision. Mismatched non-null revisions still throw `REVISION_CONFLICT`.
+
+### D8. identity/resolve — proposeIdentityDecision always empty listingIds (P1)
+
+- **File**: `src/jobs/identity/resolve.ts:25`, `src/jobs/identity/contracts.ts:60-68`
+- **Dispositon**: FIXED — `proposeIdentityDecision` now accepts optional `leftListingId`/`rightListingId` in opts. Callers pass listing IDs when available.
+
+### D9. persistence — observation immutability triggers (P1)
+
+- **File**: `src/jobs/persistence/schema.sql.ts`
+- **Dispositon**: FIXED — Added `CREATE TRIGGER` for BEFORE UPDATE and BEFORE DELETE on `observations` table. `CHECK(immutable = 1)` only prevented inserts; triggers now enforce immutability at SQL level.
+- **Note**: `setMemberships` delete-before-insert is standard for mutable projections, not a defect.
 
 ---
 
@@ -73,7 +89,7 @@
 - **File**: `src/jobs/evaluation/gates.ts:55-333`
 - **Dispositon**: Many gates emit `passed: true` as placeholders. Privacy, policy, compatibility, retention gates lack typed evidence requirements.
 - **Edge**: F5 adds deferred D17 gates. Remaining gates require evidence schema design.
-- **Dependency**: D12 (evidence typing).
+- **Dependency**: None (this finding covers evidence typing).
 
 ### D4. evaluation/types — EvalQuery.intent: unknown loads raw fixture intent (P0)
 
@@ -81,11 +97,6 @@
 - **Dispositon**: `intent: unknown` is fixture-only by contract comment. `intentFingerprint` is persisted. Intent never written to process logs.
 - **Edge**: Low risk — intent field is not in process logs. Fixture files are committed artifacts.
 - **Dependency**: None if fixture-only contract holds.
-
-### D5. profile store — expectedRevision null should fail-closed (P1)
-
-- **File**: `src/jobs/profile/persist/store.ts:346-365`
-- **Dispositon**: FIXED — `expectedRevision: null` now throws VALIDATION_ERROR instead of skipping optimistic check. Fail-closed: callers must always provide known revision.
 
 ### D6. acquisition/sourceClass — SEEK direct-block and manual entry collision (P1)
 
@@ -99,17 +110,6 @@
 - **File**: `src/jobs/enrichment/pipeline.ts`
 - **Dispositon**: Budget check gates each stage correctly (`unitsConsumed < budget`). Final `budgetRemaining: 0` in both paths.
 - **Edge**: Appears correct — budget checked before each stage increment.
-
-### D8. identity/resolve — proposeIdentityDecision always empty listingIds (P1)
-
-- **File**: `src/jobs/identity/resolve.ts:25`, `src/jobs/identity/contracts.ts:60-68`
-- **Dispositon**: FIXED — `proposeIdentityDecision` now accepts optional `leftListingId`/`rightListingId` in opts. Callers pass listing IDs when available.
-
-### D9. persistence — observation immutability triggers (P1)
-
-- **File**: `src/jobs/persistence/schema.sql.ts`
-- **Dispositon**: FIXED — Added `CREATE TRIGGER` for BEFORE UPDATE and BEFORE DELETE on `observations` table. `CHECK(immutable = 1)` only prevented inserts; triggers now enforce immutability at SQL level.
-- **Note**: `setMemberships` delete-before-insert is standard for mutable projections, not a defect.
 
 ### D10. reasoning/packet — profileRevision in SAFE_STRUCTURAL_KEYS (P1)
 
@@ -140,9 +140,9 @@ F5 (D17 gates) ─────────────────────�
 F6 (extraction candidate IDs) ──────── independent
 D1 (keychain provider) ─────────────── requires decision
 D2 (persistence typed blobs) ────────── independent
-D3 (gate evidence) ──────────────────── depends on D12 (evidence typing)
+D3 (gate evidence) ──────────────────── independent (evidence typing)
 D4 (intent: unknown) ────────────────── independent
-D5 (expectedRevision null) ──────────── FIXED (fail-closed null rejected)
+D5 (expectedRevision null) ──────────── FIXED (null = initial revision)
 D6 (seek registry collision) ────────── resolved (no bug)
 D7 (budget gating) ──────────────────── resolved (no bug)
 D8 (identity listing IDs) ───────────── FIXED (opts threading)
@@ -154,15 +154,15 @@ D12 (verifyManifest test) ────────────── test recomm
 
 ## Validation Evidence
 
-| Command                                  | Status    | Detail                                                    |
-| ---------------------------------------- | --------- | --------------------------------------------------------- |
-| `npx tsc --noEmit -p tsconfig.json`      | passed    | Clean compile, strict mode                                |
-| `npx tsc --noEmit -p tsconfig.test.json` | passed    | Clean compile, test project                               |
-| `npm test` (focused files)               | passed    | assessment: 25 pass, retrieval: 57 pass, evaluation: pass |
-| `npx eslint` (touched src)               | passed    | No lint errors                                            |
-| `npx prettier --check` (touched files)   | passed    | All formatted                                             |
-| `git diff --check`                       | passed    | No whitespace issues                                      |
-| No staged files                          | confirmed | git diff --cached empty                                   |
+| Command                                  | Status    | Detail                                                       |
+| ---------------------------------------- | --------- | ------------------------------------------------------------ |
+| `npx tsc --noEmit -p tsconfig.json`      | passed    | Clean compile, strict mode                                   |
+| `npx tsc --noEmit -p tsconfig.test.json` | passed    | Clean compile, test project                                  |
+| `npm test` (focused files)               | passed    | assessment: 25 pass, retrieval: 31 pass, evaluation: 26 pass |
+| `npx eslint` (touched src)               | passed    | No lint errors                                               |
+| `npx prettier --check` (touched files)   | passed    | All formatted                                                |
+| `git diff --check`                       | passed    | No whitespace issues                                         |
+| No staged files                          | confirmed | git diff --cached empty                                      |
 
 ---
 
@@ -200,20 +200,18 @@ D12 (verifyManifest test) ────────────── test recomm
 | No LLM, no network, no locale defaults              | All pure functions, no external calls                                                   |
 | Reuse generic BM25 only where direction fits        | `textBm25.ts` imports `src/utils/bm25.ts` (reusable util, correct dependency direction) |
 
-### Tests: `test/jobs/retrieval.test.ts` (21 tests)
+### Tests: `test/jobs/retrieval.test.ts` (31 tests)
 
-| Test                     | Coverage                                                               |
-| ------------------------ | ---------------------------------------------------------------------- |
-| Lexical tokenization (3) | Split, lowercase, numbers, empty                                       |
-| Token merging (1)        | Dedup + sort                                                           |
-| Text BM25 channel (2)    | Title relevance ranking, field weights                                 |
-| Semantic channel (2)     | Neutral fallback, provided scores                                      |
-| RRF fusion (4)           | Single channel, tie-breaking, multi-channel, weight non-redistribution |
-| Metadata separation (1)  | No utility/confidence/coverage in output                               |
-| Pipeline integration (4) | Minimal input, truncation, empty candidates, determinism               |
-| Version metadata (1)     | Schema/version stamps present                                          |
-| Geography channel (1)    | Hierarchy matching                                                     |
-| Null channel ranks (1)   | Absent channels → null                                                 |
+| Test                     | Coverage                                                                  |
+| ------------------------ | ------------------------------------------------------------------------- |
+| Lexical tokenization (3) | Split, lowercase, numbers, empty                                          |
+| Token merging (1)        | Dedup + sort                                                              |
+| Text BM25 channel (4)    | Title ranking, field weights, candidateId mapping, lexical consistency    |
+| Semantic channel (3)     | Omit missing scores, provided scores, partial maps                        |
+| RRF fusion (8)           | Single/multi-channel, ties, weight non-redistribution, metadata, neutrals |
+| Pipeline integration (9) | Minimal input, truncation, empty, determinism, postingId map, flags       |
+| Geography channel (2)    | Hierarchy matching, omitted when intent has no locations                  |
+| Capability overlap (1)   | Mixed-case role IDs                                                       |
 
 ### What W8 does NOT do (W9 territory):
 

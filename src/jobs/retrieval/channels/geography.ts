@@ -59,10 +59,12 @@ function buildGeoIndex(localePack: LocalePack): GeoIndex {
 /** Get all ancestor IDs (inclusive) for a node. */
 function ancestors(nodeId: string, geo: GeoIndex): string[] {
   const chain: string[] = [nodeId];
+  const visited = new Set<string>([nodeId]);
   let current = nodeId;
   for (;;) {
     const parent = geo.parentMap.get(current);
-    if (!parent || parent === current) break;
+    if (!parent || parent === current || visited.has(parent)) break;
+    visited.add(parent);
     chain.push(parent);
     current = parent;
   }
@@ -92,15 +94,9 @@ function scoreLocationMatch(
     if (id) candidateNodeIds.push(id);
   }
 
-  // Check remote match
-  if (candidateRemote) {
-    // Remote candidates match any intent location
-    return 0.8;
-  }
+  if (candidateNodeIds.length === 0 && !candidateRemote) return 0.5; // no location data
 
-  if (candidateNodeIds.length === 0) return 0.5; // no location data
-
-  // For each intent location, find best candidate match
+  // Exact and hierarchical matches first; remote is a floor, not a cap.
   let bestScore = 0;
   for (const intentId of intentLocationIds) {
     const intentChain = new Set(ancestors(intentId, geo));
@@ -144,6 +140,7 @@ function scoreLocationMatch(
     }
   }
 
+  if (candidateRemote) return Math.max(bestScore, 0.8);
   return bestScore;
 }
 

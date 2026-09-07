@@ -26,6 +26,8 @@ interface GraphIndex {
   readonly adjacency: ReadonlyMap<string, readonly RoleEdge[]>;
   /** label/alias lowercase → node ID */
   readonly aliasIndex: ReadonlyMap<string, string>;
+  /** undirected adjacency: node ID → {to, edge} */
+  readonly undirected: ReadonlyMap<string, readonly { to: string; edge: RoleEdge }[]>;
 }
 
 function buildGraphIndex(domainPack: DomainPack): GraphIndex {
@@ -46,7 +48,19 @@ function buildGraphIndex(domainPack: DomainPack): GraphIndex {
     for (const alias of n.aliases) aliasIndex.set(alias.toLowerCase(), n.id);
   }
 
-  return { nodes, adjacency, aliasIndex };
+  const undirected = new Map<string, { to: string; edge: RoleEdge }[]>();
+  for (const [from, edges] of adjacency) {
+    for (const edge of edges) {
+      const fwd = undirected.get(from) ?? [];
+      fwd.push({ to: edge.to, edge });
+      undirected.set(from, fwd);
+      const rev = undirected.get(edge.to) ?? [];
+      rev.push({ to: from, edge });
+      undirected.set(edge.to, rev);
+    }
+  }
+
+  return { nodes, adjacency, aliasIndex, undirected };
 }
 
 // ---------------------------------------------------------------------------
@@ -61,6 +75,14 @@ function resolveRoleId(name: string, graph: GraphIndex): string | undefined {
 // BFS proximity score from a set of source IDs to target IDs
 // ---------------------------------------------------------------------------
 
+const EDGE_TYPE_WEIGHT: Readonly<Record<RoleEdge['type'], number>> = {
+  equivalent_title: 1.0,
+  adjacent: 0.6,
+  capability_transfer: 0.4,
+  prerequisite: 0.3,
+  false_friend: 0.0,
+};
+
 function proximityScore(
   sourceIds: readonly string[],
   targetIds: readonly string[],
@@ -68,60 +90,39 @@ function proximityScore(
 ): number {
   if (sourceIds.length === 0 || targetIds.length === 0) return 0;
 
-  // BFS from all sources simultaneously
   const dist = new Map<string, number>();
-  const queue: { id: string; d: number }[] = [];
+  const pathWeight = new Map<string, number>();
+  const queue: { id: string; d: number; weight: number }[] = [];
 
   for (const sid of sourceIds) {
     if (!dist.has(sid)) {
       dist.set(sid, 0);
-      queue.push({ id: sid, d: 0 });
-    }
-  }
-
-  // Build reverse adjacency for bidirectional traversal
-  const reverseAdj = new Map<string, { to: string; edge: RoleEdge }[]>();
-  for (const [from, edges] of graph.adjacency) {
-    for (const edge of edges) {
-      // Forward
-      const fwd = reverseAdj.get(from) ?? [];
-      fwd.push({ to: edge.to, edge });
-      reverseAdj.set(from, fwd);
-      // Reverse (bidirectional for graph proximity)
-      const rev = reverseAdj.get(edge.to) ?? [];
-      rev.push({ to: from, edge });
-      reverseAdj.set(edge.to, rev);
+      pathWeight.set(sid, 1);
+      queue.push({ id: sid, d: 0, weight: 1 });
     }
   }
 
   let head = 0;
   while (head < queue.length) {
     const entry = queue[head];
-    if (!entry) continue;
-    const { id, d } = entry;
     head++;
+    if (!entry) continue;
+    const { id, d, weight } = entry;
     if (d > 4) continue; // depth cap
 
-    const neighbors = reverseAdj.get(id) ?? [];
+    const neighbors = graph.undirected.get(id) ?? [];
     for (const { to, edge } of neighbors) {
       if (dist.has(to)) continue;
       // false_friend edges do not contribute to proximity
       if (edge.type === 'false_friend') continue;
+      const edgeW = EDGE_TYPE_WEIGHT[edge.type];
+      const nextWeight = weight * edgeW;
       dist.set(to, d + 1);
-      queue.push({ id: to, d: d + 1 });
+      pathWeight.set(to, nextWeight);
+      queue.push({ id: to, d: d + 1, weight: nextWeight });
     }
   }
 
-  // Find best proximity to any target
-  let bestDist = Infinity;
-  for (const tid of targetIds) {
-    const d = dist.get(tid);
-    if (d !== undefined && d < bestDist) bestDist = d;
-  }
-
-  if (bestDist === Infinity) return 0;
-
-  // Map distance to score: exact = 1.0, dist 1 = 0.8, dist 2 = 0.5, dist 3 = 0.3, dist 4 = 0.1
   const distanceScoreMap: Readonly<Record<number, number>> = {
     0: 1.0,
     1: 0.8,
@@ -129,7 +130,16 @@ function proximityScore(
     3: 0.3,
     4: 0.1,
   };
-  return distanceScoreMap[bestDist] ?? 0;
+
+  let best = 0;
+  for (const tid of targetIds) {
+    const d = dist.get(tid);
+    if (d === undefined) continue;
+    const w = pathWeight.get(tid) ?? 0;
+    const score = w > 0 ? w : (distanceScoreMap[d] ?? 0);
+    if (score > best) best = score;
+  }
+  return best;
 }
 
 // ---------------------------------------------------------------------------

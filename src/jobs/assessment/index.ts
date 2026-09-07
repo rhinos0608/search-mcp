@@ -32,5 +32,5 @@ export type {
   GroupWeights,
 } from './contracts.js';
 
-export { assessCandidate, processPersonalAdaptationDelta } from './scorer.js';
+export { assessCandidate, computeUtilityScore, processPersonalAdaptationDelta } from './scorer.js';
 export type { AssessmentInput } from './scorer.js';

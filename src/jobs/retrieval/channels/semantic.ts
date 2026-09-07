@@ -28,6 +28,8 @@ export function scoreSemantic(input: {
   return {
     channelId: 'semantic',
     entries,
-    fullyScored: input.candidateScores !== undefined,
+    fullyScored:
+      input.candidateScores !== undefined &&
+      input.candidateIds.every((id) => input.candidateScores?.has(id) === true),
   };
 }

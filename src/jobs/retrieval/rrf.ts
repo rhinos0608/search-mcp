@@ -10,12 +10,7 @@
  */
 
 import type { ChannelResult, RetrievalChannelId, RetrievalChannelWeights } from './contracts.js';
-
-// ---------------------------------------------------------------------------
-// RRF config
-// ---------------------------------------------------------------------------
-
-const DEFAULT_K = 60;
+import { DEFAULT_RRF_K } from './contracts.js';
 
 // ---------------------------------------------------------------------------
 // Weighted RRF fusion
@@ -30,7 +25,7 @@ export interface RrfFusedEntry {
   readonly channelScores: Readonly<Record<RetrievalChannelId, number | null>>;
   /** Count of channels that contributed a non-neutral real score. */
   readonly scoredChannelCount: number;
-  /** Count of channels with non-zero weight. */
+  /** Count of channels with positive weight and an available channel result. */
   readonly activeChannelCount: number;
 }
 
@@ -40,11 +35,22 @@ export function weightedRrfFuse(input: {
   readonly candidateIds: readonly string[];
   readonly k?: number;
 }): readonly RrfFusedEntry[] {
-  const k = input.k ?? DEFAULT_K;
+  const k = input.k ?? DEFAULT_RRF_K;
   const { weights, candidateIds } = input;
 
-  // Count active channels (non-zero weight)
-  const activeChannelCount = Object.values(weights).filter((w) => w > 0).length;
+  const ALL_CHANNELS: RetrievalChannelId[] = [
+    'text_bm25',
+    'role_family',
+    'capability_overlap',
+    'geography',
+    'semantic',
+  ];
+
+  const available = new Set(input.channelResults.map((r) => r.channelId));
+  const activeChannelCount = ALL_CHANNELS.filter((ch) => {
+    const w = (weights as Record<string, number>)[ch] ?? 0;
+    return w > 0 && available.has(ch);
+  }).length;
 
   // Build per-channel rank maps: candidateId → rank (1-based)
   const channelRankMaps = new Map<RetrievalChannelId, Map<string, number>>();
@@ -72,14 +78,6 @@ export function weightedRrfFuse(input: {
     scoredChannelCount: number;
     activeChannelCount: number;
   }[] = [];
-
-  const ALL_CHANNELS: RetrievalChannelId[] = [
-    'text_bm25',
-    'role_family',
-    'capability_overlap',
-    'geography',
-    'semantic',
-  ];
 
   for (const cid of candidateIds) {
     let rrfScore = 0;

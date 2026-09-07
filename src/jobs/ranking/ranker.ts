@@ -12,6 +12,7 @@ import {
   SCORE_GROUPS,
   DEFAULT_GROUP_WEIGHTS,
 } from '../assessment/contracts.js';
+export { computeUtilityScore } from '../assessment/scorer.js';
 
 // ---------------------------------------------------------------------------
 // Ranking input
@@ -81,9 +82,10 @@ export function applyDiversityPresentation(
   ranked: readonly RankedCandidate[],
   _maxGap = 0.05,
 ): { readonly candidates: readonly RankedCandidate[]; readonly moves: readonly DiversityMove[] } {
-  // For now, diversity is a no-op (transparent moves only when explicitly enabled)
-  // This preserves utility ordering exactly
-  return { candidates: ranked, moves: [] };
+  // Unimplemented: score-gap (_maxGap) exemption and DiversityMove generation.
+  // Presentation-only identity until the algorithm is implemented.
+  void _maxGap;
+  return { candidates: [...ranked], moves: [] };
 }
 
 // ---------------------------------------------------------------------------
@@ -91,7 +93,13 @@ export function applyDiversityPresentation(
 // ---------------------------------------------------------------------------
 
 export function rankCandidates(input: RankingInput): RankingResult {
-  const weights = { ...DEFAULT_GROUP_WEIGHTS, ...input.groupWeights };
+  const weights: Record<ScoreGroup, number> = { ...DEFAULT_GROUP_WEIGHTS };
+  if (input.groupWeights) {
+    for (const g of SCORE_GROUPS) {
+      const w = input.groupWeights[g];
+      if (w !== undefined) weights[g] = w;
+    }
+  }
 
   // Compute active group count (groups with non-zero weight)
   let activeGroupCount = 0;
@@ -110,9 +118,13 @@ export function rankCandidates(input: RankingInput): RankingResult {
   }));
 
   // Stable sort
-  ranked.sort(
-    (a, b) => b.utilityScore - a.utilityScore || a.candidateId.localeCompare(b.candidateId),
-  );
+  ranked.sort((a, b) => {
+    const scoreDiff = b.utilityScore - a.utilityScore;
+    if (scoreDiff !== 0) return scoreDiff;
+    if (a.candidateId < b.candidateId) return -1;
+    if (a.candidateId > b.candidateId) return 1;
+    return 0;
+  });
 
   // Assign ranks
   for (let i = 0; i < ranked.length; i++) {
@@ -123,7 +135,9 @@ export function rankCandidates(input: RankingInput): RankingResult {
   // Apply diversity presentation
   const { candidates: diversified, moves } = applyDiversityPresentation(ranked);
 
-  // Truncate
+  if (input.topK !== undefined && (!Number.isInteger(input.topK) || input.topK < 0)) {
+    throw new Error(`INVALID_TOP_K: ${String(input.topK)}`);
+  }
   const limit = input.topK ?? diversified.length;
   const truncated = diversified.slice(0, limit);
 
@@ -136,33 +150,6 @@ export function rankCandidates(input: RankingInput): RankingResult {
     emittedAt: input.emittedAt,
     diversityMoves: moves,
   };
-}
-
-// ---------------------------------------------------------------------------
-// Utility (re-export for barrel)
-// ---------------------------------------------------------------------------
-
-/**
- * Compute utility score from group scores and weights.
- * Missing evidence groups use NEUTRAL (0.5) and are not redistributed.
- */
-export function computeUtilityScore(
-  groupScores: Readonly<Record<ScoreGroup, number>>,
-  weights: Readonly<Record<ScoreGroup, number>>,
-): number {
-  let weightedSum = 0;
-  let totalWeight = 0;
-
-  for (const group of SCORE_GROUPS) {
-    const w = (weights as Record<string, number>)[group] ?? 0;
-    if (w <= 0) continue;
-
-    const score = (groupScores as Record<string, number>)[group] ?? 0.5; // NEUTRAL fallback
-    weightedSum += score * w;
-    totalWeight += w;
-  }
-
-  return totalWeight > 0 ? weightedSum / totalWeight : 0.5;
 }
 
 // ---------------------------------------------------------------------------

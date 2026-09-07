@@ -17,7 +17,7 @@ Implemented W9 assessment + ranking using enriched canonical posting and real W8
 | `src/jobs/assessment/index.ts`     | Barrel exports                                            |
 | `src/jobs/ranking/ranker.ts`       | Utility aggregation, diversity presentation, ranking      |
 | `src/jobs/ranking/index.ts`        | Barrel exports                                            |
-| `test/jobs/assessment.test.ts`     | 24 tests covering all invariants                          |
+| `test/jobs/assessment.test.ts`     | 25 tests covering all invariants                          |
 
 ### Public Grouped Score Fields (exactly)
 
@@ -39,7 +39,7 @@ Implemented W9 assessment + ranking using enriched canonical posting and real W8
 | Deterministic ties                | Sort by utilityScore desc, then candidateId asc                    |
 | Explainable evidence refs         | Every `ComponentScore` carries `evidenceRefs[]`                    |
 
-### Tests (24/24 pass)
+### Tests (25/25 pass)
 
 1. All six score groups present
 2. Missing evidence → stable 0.5
@@ -52,23 +52,24 @@ Implemented W9 assessment + ranking using enriched canonical posting and real W8
 9. Eligibility separate from utility
 10. Diversity non-mutation
 11. PA delta clamp ±0.10
-12. Deterministic ties
-13. computeUtilityScore weighted mean
-14. Missing evidence fallback to 0.5
-15. Evidence refs propagated
-16. Flag propagation
-17. Ranking truncation
-18. Weight=0 no redistribution
-19. Active group count
-20. PA accepted delta
-21. Conditionally eligible
-22. Employment type mismatch ineligible
-23. Component dimension strings
-24. Evidence quality summary
+12. PA delta out of range throws
+13. Deterministic ties
+14. computeUtilityScore weighted mean
+15. Missing evidence fallback to 0.5
+16. Evidence refs propagated
+17. Flag propagation
+18. Ranking truncation
+19. Weight=0 no redistribution
+20. Active group count
+21. PA accepted delta
+22. Conditionally eligible
+23. Employment type mismatch ineligible
+24. Component dimension strings
+25. Evidence quality summary
 
-### Prior Tests (31/31 pass)
+### Prior Tests (57/57 pass)
 
-`test/jobs/retrieval.test.ts` — no regressions
+`test/jobs/retrieval.test.ts` — 31/31 pass
 `test/jobs/evaluation.test.ts` — 26/26 pass
 
 ## Commands Run
@@ -79,7 +80,7 @@ Implemented W9 assessment + ranking using enriched canonical posting and real W8
 | `eslint src/jobs/assessment/ src/jobs/ranking/`           | passed                    |
 | `prettier --check src/jobs/assessment/ src/jobs/ranking/` | passed                    |
 | `npm run build`                                           | passed                    |
-| `tsx --test test/jobs/assessment.test.ts`                 | 24/24 pass                |
+| `tsx --test test/jobs/assessment.test.ts`                 | 25/25 pass                |
 | `tsx --test test/jobs/retrieval.test.ts`                  | 31/31 pass                |
 | `tsx --test test/jobs/evaluation.test.ts`                 | 26/26 pass                |
 | `git status --short`                                      | only new files, no staged |

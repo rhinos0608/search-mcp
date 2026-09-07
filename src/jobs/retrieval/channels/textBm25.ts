@@ -57,14 +57,12 @@ export function scoreTextBm25(input: {
   const postings = input.postings;
   const candidateIds = postings.map((p) => p.candidateId ?? p.postingId);
 
-  // Accumulate per-candidate raw scores across fields
   const scoreAccum = new Map<string, number>();
-  for (const id of candidateIds) scoreAccum.set(id, 0);
+  const hasText = new Set<string>();
 
   for (const fw of fieldWeights) {
     if (fw.weight <= 0) continue;
 
-    // Build BM25 documents for this field using lexicalTokenize for version consistency
     const docs = postings
       .map((p) => {
         const text = extractField(p, fw.field);
@@ -73,28 +71,33 @@ export function scoreTextBm25(input: {
       .filter((d) => d.text.length > 0);
 
     if (docs.length === 0) continue;
+    for (const d of docs) hasText.add(d.id);
 
     const idx = buildBm25Index(docs, lexicalTokenize);
     const hits = idx.search(input.query, docs.length);
 
-    // Raw fielded BM25 scores — no result-set normalization (ADR-006)
     for (const hit of hits) {
       const prev = scoreAccum.get(hit.id) ?? 0;
       scoreAccum.set(hit.id, prev + hit.score * fw.weight);
     }
   }
 
-  // Build sorted entries
-  const entries: ChannelScoreEntry[] = candidateIds.map((id) => ({
-    candidateId: id,
-    score: scoreAccum.get(id) ?? 0,
-  }));
+  const uniqueIds = [...new Set(candidateIds)];
+  const entries: ChannelScoreEntry[] = uniqueIds
+    .filter((id) => hasText.has(id))
+    .map((id) => ({
+      candidateId: id,
+      score: scoreAccum.get(id) ?? 0,
+    }));
 
   entries.sort((a, b) => b.score - a.score || a.candidateId.localeCompare(b.candidateId));
+
+  const scoredIds = new Set(entries.map((e) => e.candidateId));
+  const fullyScored = uniqueIds.every((id) => scoredIds.has(id));
 
   return {
     channelId: 'text_bm25',
     entries,
-    fullyScored: true,
+    fullyScored,
   };
 }

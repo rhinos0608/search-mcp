@@ -95,15 +95,13 @@ test('scoreTextBm25 respects field weights', () => {
 // 5. Semantic channel neutral fallback
 // ---------------------------------------------------------------------------
 
-test('scoreSemantic returns neutral 0.5 when no scores provided', () => {
+test('scoreSemantic omits entries when no scores provided', () => {
   const result = scoreSemantic({
     candidateIds: [CANDIDATE_A, CANDIDATE_B],
   });
   assert.equal(result.channelId, 'semantic');
   assert.equal(result.fullyScored, false);
-  for (const entry of result.entries) {
-    assert.equal(entry.score, 0.5);
-  }
+  assert.equal(result.entries.length, 0);
 });
 
 test('scoreSemantic uses provided scores', () => {
@@ -841,11 +839,20 @@ test('runRetrieval no truncation when all candidates returned', () => {
   const result = runRetrieval({
     runId: 'run-no-trunc',
     emittedAt: '2026-01-01T00:00:00+00:00',
-    candidates: [],
-    postings: new Map(),
-    intent: { query: 'x', requestedRoleFamilies: [], locations: [] },
+    candidates: [
+      { candidateId: CANDIDATE_A, postingId: CANDIDATE_A, roleFamilies: [], locations: [] },
+      { candidateId: CANDIDATE_B, postingId: CANDIDATE_B, roleFamilies: [], locations: [] },
+    ],
+    postings: new Map([
+      [CANDIDATE_A, { postingId: CANDIDATE_A, title: 'Alpha', description: '' }],
+      [CANDIDATE_B, { postingId: CANDIDATE_B, title: 'Beta', description: '' }],
+    ]),
+    intent: { query: 'Alpha', requestedRoleFamilies: [], locations: [] },
     topK: 10,
-    weights: { text_bm25: 0, role_family: 0, capability_overlap: 0, geography: 0, semantic: 0 },
+    weights: { text_bm25: 1.0, role_family: 0, capability_overlap: 0, geography: 0, semantic: 0 },
   });
-  assert.equal(result.candidates.length, 0);
+  assert.equal(result.candidates.length, 2);
+  for (const c of result.candidates) {
+    assert.equal(c.truncated, false);
+  }
 });

@@ -18,7 +18,7 @@ import type {
   EligibilityGate,
   EligibilityStatus,
 } from './contracts.js';
-import { DEFAULT_GROUP_WEIGHTS, W11_DELTA_RANGE } from './contracts.js';
+import { DEFAULT_GROUP_WEIGHTS, SCORE_GROUPS, W11_DELTA_RANGE } from './contracts.js';
 
 // ---------------------------------------------------------------------------
 // Neutral fallback
@@ -55,8 +55,8 @@ function evidentiaryComponent(
 // Relevance components
 // ---------------------------------------------------------------------------
 
-function scoreTitleRelevance(posting: JobPosting, _intent: SearchIntent): ComponentScore {
-  const query = _intent.query.toLowerCase();
+function scoreTitleRelevance(posting: JobPosting, intent: SearchIntent): ComponentScore {
+  const query = intent.query.toLowerCase();
   const title = posting.normalizedTitle.toLowerCase();
   const tokens = query.split(/\s+/).filter(Boolean);
   if (tokens.length === 0) return neutralComponent('titleRelevance');
@@ -68,8 +68,8 @@ function scoreTitleRelevance(posting: JobPosting, _intent: SearchIntent): Compon
   return evidentiaryComponent('titleRelevance', ratio, posting.evidenceRefs, 0.7);
 }
 
-function scoreRoleFamilyRelevance(posting: JobPosting, _intent: SearchIntent): ComponentScore {
-  const intentFamilies = new Set(_intent.requestedRoleFamilies.map((f) => f.toLowerCase()));
+function scoreRoleFamilyRelevance(posting: JobPosting, intent: SearchIntent): ComponentScore {
+  const intentFamilies = new Set(intent.requestedRoleFamilies.map((f) => f.toLowerCase()));
   if (intentFamilies.size === 0) return neutralComponent('roleFamilyRelevance');
 
   const postingFamilies = posting.roleFamilies.map((rf) => rf.family.toLowerCase());
@@ -174,8 +174,8 @@ function scoreCompensationPreference(posting: JobPosting, intent: SearchIntent):
   if (intent.compensation.length === 0) return neutralComponent('compensationPreference');
   if (posting.salaries.length === 0) return neutralComponent('compensationPreference');
 
-  // Simple overlap check
-  return evidentiaryComponent('compensationPreference', 0.5, posting.evidenceRefs, 0.4);
+  // Overlap comparison not implemented — stay neutral until a real check exists.
+  return neutralComponent('compensationPreference');
 }
 
 // ---------------------------------------------------------------------------
@@ -409,6 +409,29 @@ export function processPersonalAdaptationDelta(
   };
 }
 
+/**
+ * Weighted mean of group scores. Undefined weight overrides keep defaults.
+ * Missing group scores fall back to NEUTRAL (0.5) and are not redistributed.
+ */
+export function computeUtilityScore(
+  groupScores: Readonly<Partial<Record<ScoreGroup, number>>>,
+  weights?: Readonly<Partial<Record<ScoreGroup, number>>>,
+): number {
+  let weightedSum = 0;
+  let totalWeight = 0;
+
+  for (const group of SCORE_GROUPS) {
+    const override = weights?.[group];
+    const w = override ?? DEFAULT_GROUP_WEIGHTS[group];
+    if (w <= 0) continue;
+    const score = groupScores[group] ?? NEUTRAL;
+    weightedSum += score * w;
+    totalWeight += w;
+  }
+
+  return totalWeight > 0 ? weightedSum / totalWeight : NEUTRAL;
+}
+
 // ---------------------------------------------------------------------------
 // Full assessment
 // ---------------------------------------------------------------------------
@@ -501,18 +524,9 @@ export function assessCandidate(input: AssessmentInput): {
     aggregateGroup('personalAdaptation', [scorePersonalAdaptation(posting, intent, paDelta)]),
   );
 
-  // Compute utility score (weighted mean of group scores)
-  const weights = { ...DEFAULT_GROUP_WEIGHTS, ...input.groupWeights };
-  let weightedSum = 0;
-  let totalWeight = 0;
-  for (const g of groupScores) {
-    const w = weights[g.group];
-    if (w > 0) {
-      weightedSum += g.score * w;
-      totalWeight += w;
-    }
-  }
-  const utilityScore = totalWeight > 0 ? weightedSum / totalWeight : NEUTRAL;
+  const scoreByGroup: Partial<Record<ScoreGroup, number>> = {};
+  for (const g of groupScores) scoreByGroup[g.group] = g.score;
+  const utilityScore = computeUtilityScore(scoreByGroup, input.groupWeights);
 
   // Eligibility
   const eligibility = evaluateEligibility(posting, intent);
@@ -538,7 +552,10 @@ export function assessCandidate(input: AssessmentInput): {
     evidenceQualitySummary: {
       totalEvidenceRefs: allEvidenceRefs.length,
       uniqueEvidenceRefs: uniqueEvidenceRefs.length,
-      coverageRatio: uniqueEvidenceRefs.length > 0 ? 1.0 : 0.0,
+      coverageRatio:
+        groupScores.length === 0
+          ? 0
+          : groupScores.reduce((sum, g) => sum + g.coverageRatio, 0) / groupScores.length,
     },
     flags,
   };

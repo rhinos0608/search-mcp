@@ -22,19 +22,21 @@ function buildCapabilityIndex(domainPack: DomainPack): ReadonlyMap<string, Reado
 }
 
 // ---------------------------------------------------------------------------
-// Resolve role family name to node ID
+// Resolve role family name to node ID via lowercase alias index
 // ---------------------------------------------------------------------------
 
-function resolveRoleId(name: string, domainPack: DomainPack): string | undefined {
-  const lower = name.toLowerCase();
-  for (const node of domainPack.roleNodes) {
-    if (node.id.toLowerCase() === lower) return node.id;
-    if (node.label.toLowerCase() === lower) return node.id;
-    for (const alias of node.aliases) {
-      if (alias.toLowerCase() === lower) return node.id;
-    }
+function buildAliasIndex(domainPack: DomainPack): ReadonlyMap<string, string> {
+  const aliasIndex = new Map<string, string>();
+  for (const n of domainPack.roleNodes) {
+    aliasIndex.set(n.id.toLowerCase(), n.id);
+    aliasIndex.set(n.label.toLowerCase(), n.id);
+    for (const alias of n.aliases) aliasIndex.set(alias.toLowerCase(), n.id);
   }
-  return undefined;
+  return aliasIndex;
+}
+
+function resolveRoleId(name: string, aliasIndex: ReadonlyMap<string, string>): string | undefined {
+  return aliasIndex.get(name.toLowerCase());
 }
 
 // ---------------------------------------------------------------------------
@@ -66,6 +68,7 @@ export function scoreCapabilityOverlap(input: {
   readonly domainPack: DomainPack;
 }): ChannelResult {
   const capIndex = buildCapabilityIndex(input.domainPack);
+  const aliasIndex = buildAliasIndex(input.domainPack);
 
   // Resolve intent capabilities to a set
   const intentCaps = new Set<string>();
@@ -75,7 +78,7 @@ export function scoreCapabilityOverlap(input: {
 
   // Also gather capabilities from intent role families
   for (const rf of input.intentRoleFamilies ?? []) {
-    const id = resolveRoleId(rf, input.domainPack);
+    const id = resolveRoleId(rf, aliasIndex);
     if (id) {
       const caps = capIndex.get(id.toLowerCase());
       if (caps) for (const c of caps) intentCaps.add(c);
@@ -96,7 +99,7 @@ export function scoreCapabilityOverlap(input: {
       // Resolve from role families
       const caps = new Set<string>();
       for (const rf of roleFamilies) {
-        const id = resolveRoleId(rf, input.domainPack);
+        const id = resolveRoleId(rf, aliasIndex);
         if (id) {
           const nodeCaps = capIndex.get(id.toLowerCase());
           if (nodeCaps) for (const c of nodeCaps) caps.add(c);

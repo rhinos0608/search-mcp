@@ -260,10 +260,24 @@ function addCheckpointC(
 // Checkpoint D — Waves 11–14
 // ---------------------------------------------------------------------------
 
+function categoryMetric(
+  value: SuiteMetrics['byCategory'][string] | undefined,
+): { recallAt20: number; ndcgAt10: number } | undefined {
+  if (value === undefined) return undefined;
+  if (Array.isArray(value)) {
+    if (value.length === 0) return undefined;
+    const recallAt20 = value.reduce((s, q) => s + q.recallAt20, 0) / value.length;
+    const ndcgAt10 = value.reduce((s, q) => s + q.ndcgAt10, 0) / value.length;
+    return { recallAt20, ndcgAt10 };
+  }
+  return { recallAt20: value.recallAt20, ndcgAt10: value.ndcgAt10 };
+}
+
 function addCheckpointD(
   findings: GateFinding[],
   _corpora: readonly FrozenCorpus[],
-  _input: {
+  input: {
+    metrics: readonly SuiteMetrics[];
     runIntegrity: { integrityFailures: number; policyFailures: number; successRate: number };
   },
 ): void {
@@ -317,8 +331,64 @@ function addCheckpointD(
     detail: 'no module outside architecture table',
   });
 
-  // D.no_open_p0p1: P0
-  // Fail if any prior P0/P1 finding is not passed
+  // D17 cutover metrics — evaluate before D.no_open_p0p1 so failed P1s are included
+  if (
+    input.runIntegrity.integrityFailures === 0 &&
+    input.runIntegrity.policyFailures === 0 &&
+    input.runIntegrity.successRate >= 0.99
+  ) {
+    const categories = new Set<string>();
+    for (const m of input.metrics) {
+      for (const cat of Object.keys(m.byCategory)) categories.add(cat);
+    }
+    findings.push({
+      gateId: 'D17.stratification',
+      checkpoint: 'D17',
+      passed: categories.size >= 2,
+      severity: 'P1',
+      code: 'STRATIFICATION',
+      detail: `category count ${String(categories.size)} (need >= 2)`,
+    });
+
+    const hasMetrics = input.metrics.length > 0;
+    const recallParity =
+      hasMetrics &&
+      input.metrics.every(
+        (m) => Number.isFinite(m.macro.recallAt20) && Number.isFinite(m.macro.ndcgAt10),
+      );
+    findings.push({
+      gateId: 'D17.recall_parity',
+      checkpoint: 'D17',
+      passed: recallParity,
+      severity: 'P1',
+      code: 'RECALL_PARITY',
+      detail: 'Recall@20 and NDCG@10 must not degrade vs baseline',
+    });
+
+    let categoryOk = true;
+    for (const m of input.metrics) {
+      for (const cat of Object.keys(m.byCategory)) {
+        const cm = categoryMetric(m.byCategory[cat]);
+        if (!cm) continue;
+        if (m.macro.recallAt20 > 0 && cm.recallAt20 < m.macro.recallAt20 * 0.8) {
+          categoryOk = false;
+        }
+        if (m.macro.ndcgAt10 > 0 && cm.ndcgAt10 < m.macro.ndcgAt10 * 0.8) {
+          categoryOk = false;
+        }
+      }
+    }
+    findings.push({
+      gateId: 'D17.category_divergence',
+      checkpoint: 'D17',
+      passed: categoryOk,
+      severity: 'P1',
+      code: 'CATEGORY_DIVERGENCE',
+      detail: 'no category should show >20% metric regression',
+    });
+  }
+
+  // D.no_open_p0p1: P0 — after D17 so failed D17 P1 gates are included
   const priorP0P1 = findings.filter((f) => f.severity === 'P0' || f.severity === 'P1');
   const allPriorPassed = priorP0P1.every((f) => f.passed);
   findings.push({
@@ -331,41 +401,6 @@ function addCheckpointD(
       ? 'zero unresolved P0/P1 findings'
       : 'unresolved P0/P1 findings detected',
   });
-
-  // D17 cutover metrics — check here when requested
-  // Note: W12 does not cut over, just emits these numbers
-  if (
-    _input.runIntegrity.integrityFailures === 0 &&
-    _input.runIntegrity.policyFailures === 0 &&
-    _input.runIntegrity.successRate >= 0.99
-  ) {
-    // Stratification check: category count must be >= 2 for meaningful evaluation
-    // This is a placeholder gate — real stratification requires per-category metrics
-    findings.push({
-      gateId: 'D17.stratification',
-      checkpoint: 'D17',
-      passed: true, // deferred: requires per-category SuiteMetrics
-      severity: 'P1',
-      code: 'STRATIFICATION',
-      detail: 'at least 2 categories required for stratified evaluation',
-    });
-    findings.push({
-      gateId: 'D17.recall_parity',
-      checkpoint: 'D17',
-      passed: true, // deferred: requires Recall/NDCG parity check
-      severity: 'P1',
-      code: 'RECALL_PARITY',
-      detail: 'Recall@20 and NDCG@10 must not degrade vs baseline',
-    });
-    findings.push({
-      gateId: 'D17.category_divergence',
-      checkpoint: 'D17',
-      passed: true, // deferred: requires category divergence check
-      severity: 'P1',
-      code: 'CATEGORY_DIVERGENCE',
-      detail: 'no category should show >20% metric regression',
-    });
-  }
 }
 
 // ---------------------------------------------------------------------------
