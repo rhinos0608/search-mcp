@@ -19,7 +19,12 @@ import {
   ExtractionError,
 } from './contracts.js';
 import type { JobsEvidenceId } from './contracts.js';
-import { extractionRunId, extractionProjectionId, jobsEvidenceId } from './ids.js';
+import {
+  extractionRunId,
+  extractionProjectionId,
+  jobsEvidenceId,
+  extractionClaimCandidateId,
+} from './ids.js';
 import { extractScrub } from './scrub.js';
 import { extractJsonLdJobPosting } from './structured.js';
 import {
@@ -198,12 +203,18 @@ function buildEvidence(field: ExtractedField, observationId: string, capturedAt:
 
 function buildClaimCandidate(
   field: ExtractedField,
-  _observationId: string,
+  observationId: string,
   producedAt: string,
 ): ClaimCandidate<unknown> {
+  const candidateId = extractionClaimCandidateId(
+    observationId,
+    field.fieldPath,
+    field.origin,
+    field.method,
+    field.value,
+  );
   return {
-    candidateId:
-      `claim-candidate:${field.evidenceId}` as unknown as ClaimCandidate<unknown>['candidateId'],
+    candidateId: candidateId as unknown as ClaimCandidate<unknown>['candidateId'],
     value: field.value,
     evidenceRefs: [field.evidenceId as unknown as ClaimCandidate<unknown>['evidenceRefs'][number]],
     confidence: field.confidence,

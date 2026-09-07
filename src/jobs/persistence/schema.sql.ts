@@ -506,4 +506,17 @@ CREATE INDEX IF NOT EXISTS idx_identity_dec_superseded ON identity_decisions(sup
 CREATE INDEX IF NOT EXISTS idx_lifecycle_events ON lifecycle_events(posting_id, occurred_at);
 CREATE INDEX IF NOT EXISTS idx_run_candidates_posting ON run_candidates(posting_id);
 CREATE INDEX IF NOT EXISTS idx_source_health_source ON source_health(source_id, sampled_at);
+
+-- Observation immutability: prevent UPDATE/DELETE on immutable rows
+CREATE TRIGGER IF NOT EXISTS trg_observations_immutable_update
+BEFORE UPDATE ON observations
+BEGIN
+  SELECT RAISE(ABORT, 'OBSERVATION_IMMUTABLE: UPDATE forbidden');
+END;
+
+CREATE TRIGGER IF NOT EXISTS trg_observations_immutable_delete
+BEFORE DELETE ON observations
+BEGIN
+  SELECT RAISE(ABORT, 'OBSERVATION_IMMUTABLE: DELETE forbidden');
+END;
 `;

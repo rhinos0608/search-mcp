@@ -58,6 +58,7 @@ export function createFeedbackStore(deps?: { now?: () => Date }): FeedbackStore 
           existing.postingId === input.postingId &&
           existing.rating === input.rating &&
           existing.occurredAt === input.occurredAt &&
+          existing.runId === input.runId &&
           existing.featureKeys.length === input.featureKeys.length &&
           existing.featureKeys.every((fk, i) => {
             const other = input.featureKeys[i];

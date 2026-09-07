@@ -4,7 +4,12 @@ import {
   type IdentityDecision,
   type IdentityFeatureContribution,
 } from '../domain/identity.js';
-import type { IdentityDecisionId, EvidenceRef, SourceObservationId } from '../domain/ids.js';
+import type {
+  IdentityDecisionId,
+  EvidenceRef,
+  SourceListingId,
+  SourceObservationId,
+} from '../domain/ids.js';
 import { IDENTITY_RESOLVER_VERSION, type IdentityCluster, type PairScore } from './contracts.js';
 import type { IdentitySubject } from './contracts.js';
 
@@ -17,12 +22,21 @@ import type { IdentitySubject } from './contracts.js';
  */
 export function proposeIdentityDecision(
   pair: PairScore,
-  opts: { now: string; decisionId: IdentityDecisionId },
+  opts: {
+    now: string;
+    decisionId: IdentityDecisionId;
+    leftListingId?: SourceListingId;
+    rightListingId?: SourceListingId;
+  },
 ): IdentityDecision {
+  const listingIds: SourceListingId[] = [];
+  if (opts.leftListingId) listingIds.push(opts.leftListingId);
+  if (opts.rightListingId) listingIds.push(opts.rightListingId);
+
   return IdentityDecisionSchema.parse({
     decisionId: opts.decisionId,
     subjectObservationIds: [pair.leftObservationId, pair.rightObservationId],
-    subjectListingIds: [],
+    subjectListingIds: listingIds,
     outcome: pair.proposedOutcome,
     confidence: pair.confidence,
     featureContributions: pair.contributions,

@@ -19,13 +19,13 @@ import { canonicalJson, sha256Hex, computeManifestHash } from './hashes.js';
 /** Sets status=freezing, fills manifestHash, deep-freezes the object graph. */
 export function freezeCorpus(draft: FrozenCorpus, frozenAt: Instant): FrozenCorpus {
   const manifest = { ...draft.manifest, status: 'frozen' as const, frozenAt };
-  manifest.manifestHash = computeManifestHash(manifest);
 
-  // Recompute label content hashes
+  // Recompute label content hashes BEFORE computing manifest hash
   manifest.labels = draft.labels.map((l, i) => ({
     labelId: manifest.labels[i]?.labelId ?? 'label-' + String(i),
     contentHash: sha256Hex(canonicalJson(l)),
   }));
+  manifest.manifestHash = computeManifestHash(manifest);
 
   const frozen: FrozenCorpus = {
     manifest,

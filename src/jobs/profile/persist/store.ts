@@ -343,8 +343,11 @@ export function createProfileStore(deps: ProfileStoreDeps): ProfileStore {
     await initForWrite();
     const d = ensureDb();
 
-    // Optimistic revision check
-    if (input.expectedRevision !== null) {
+    // Optimistic revision check — null rejected (fail-closed)
+    if (input.expectedRevision === null) {
+      throw new ProfileStoreError('VALIDATION_ERROR', 'expected_revision_required');
+    }
+    {
       const current = d
         .prepare('SELECT current_revision_id FROM profiles WHERE profile_id = ?')
         .get(LOCAL_PROFILE_ID);

@@ -43,6 +43,7 @@ export function enrichKnowledge(input: unknown): EnrichmentResult {
   const allFlags: string[] = [];
   let unitsConsumed = 0;
   const budget = req.budget.units;
+  const allRoleFamilies: { family: string; confidence: number; evidenceRefs: string[] }[] = [];
 
   // 5. Listing enrichment
   if (unitsConsumed < budget) {
@@ -50,6 +51,7 @@ export function enrichKnowledge(input: unknown): EnrichmentResult {
     const listingResult = enrichListing(snapshot, req.localePack, req.domainPack, req.clock);
     allDerivedClaimCandidates.push(...listingResult.derivedClaimCandidates);
     allDerivedEvidence.push(...listingResult.derivedEvidence);
+    allRoleFamilies.push(...listingResult.roleFamilies);
     warnings.push(...listingResult.warnings);
   }
 
@@ -182,7 +184,7 @@ export function enrichKnowledge(input: unknown): EnrichmentResult {
       fieldEvidenceLinks,
       salaries: [...salaryResult.stated, ...salaryResult.annualized],
       classifications: [...clsResult.mapped],
-      roleFamilies: [],
+      roleFamilies: [...allRoleFamilies],
       employer: {
         employerRecordId: employerResult.employerMatch.employerRecordId,
         legalName: employerResult.employerMatch.legalName,
@@ -230,7 +232,7 @@ export function enrichKnowledge(input: unknown): EnrichmentResult {
     fieldEvidenceLinks: [...snapshot.fieldEvidenceLinks],
     salaries: [...salaryResult.stated, ...salaryResult.annualized],
     classifications: [...clsResult.mapped],
-    roleFamilies: [],
+    roleFamilies: [...allRoleFamilies],
     employer: {
       employerRecordId: employerResult.employerMatch.employerRecordId,
       legalName: employerResult.employerMatch.legalName,
