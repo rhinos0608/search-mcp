@@ -40,6 +40,7 @@
     "@modelcontextprotocol/sdk": "^1.28.0",
     "@mozilla/readability": "^0.6.0",
     "better-sqlite3": "^11.10.0",
+    "better-sqlite3-multiple-ciphers": "^13.0.3",
     "cheerio": "^1.2.0",
     "dotenv": "^16.4.0",
     "jobspy-js": "^1.7.0",
