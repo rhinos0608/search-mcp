@@ -9,6 +9,7 @@
  * rasterization happens here. Screenshot-based multimodal extraction lives in
  * the VLM tier (Task 7).
  */
+import { createRequire } from 'node:module';
 import type { PDFParse, ParseParameters } from 'pdf-parse';
 import type { ParsedDocument } from './types.js';
 import { logger } from '../../logger.js';
@@ -24,9 +25,33 @@ const MAX_IMAGE_BYTES = 20 * 1024 * 1024;
 // resolves to `null` and callers degrade with a structured warning.
 let pdfParseModulePromise: Promise<typeof import('pdf-parse') | null> | undefined;
 
+/**
+ * Ensure DOMMatrix / DOMPoint / DOMRect are available as globals before
+ * pdf-parse (via pdfjs-dist) initialises. On Node ≥ 25 the @napi-rs/canvas
+ * native binding may fail to dlopen, preventing its normal global-polyfill
+ * side-effects. The geometry.js file is pure JS and always loadable.
+ */
+function ensureGeometryGlobals(): void {
+  if (typeof globalThis.DOMMatrix !== 'undefined') return;
+  try {
+    const require = createRequire(import.meta.url);
+    const geo = require('@napi-rs/canvas/geometry') as {
+      DOMMatrix: typeof globalThis.DOMMatrix;
+      DOMPoint: typeof globalThis.DOMPoint;
+      DOMRect: typeof globalThis.DOMRect;
+    };
+    globalThis.DOMMatrix = geo.DOMMatrix;
+    globalThis.DOMPoint = geo.DOMPoint;
+    globalThis.DOMRect = geo.DOMRect;
+  } catch {
+    // Canvas geometry polyfill unavailable — pdf-parse will likely fail too.
+  }
+}
+
 async function loadPdfParse(): Promise<typeof import('pdf-parse') | null> {
   pdfParseModulePromise ??= (async () => {
     try {
+      ensureGeometryGlobals();
       return await import('pdf-parse');
     } catch (err) {
       logger.warn({ err }, 'pdf-parse unavailable: PDF parsing disabled');

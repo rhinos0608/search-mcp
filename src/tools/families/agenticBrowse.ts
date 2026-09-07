@@ -15,7 +15,7 @@ import { randomUUID } from 'node:crypto';
 import { z } from 'zod/v4';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { SearchConfig } from '../../config.js';
-import { assertSafeUrl, safeResponseText } from '../../httpGuards.js';
+import { assertSafeUrl, safeFetch } from '../../httpGuards.js';
 import { registerFamily, type FamilyDefinition } from '../registry.js';
 import { fetchFocus } from '../fetchFocus.js';
 
@@ -46,30 +46,19 @@ setInterval(() => {
 async function fetchPage(url: string): Promise<{ content: string; status: number }> {
   assertSafeUrl(url);
 
-  const controller = new AbortController();
-  const timeout = setTimeout(() => {
-    controller.abort();
-  }, 30000);
-
-  let response: Response;
-  try {
-    response = await fetch(url, {
-      signal: controller.signal,
+  const response = await safeFetch(
+    url,
+    {
       headers: {
         'User-Agent': 'Mozilla/5.0 (compatible; search-mcp/1.0)',
         Accept: 'text/html,application/xhtml+xml',
       },
-    });
-  } finally {
-    clearTimeout(timeout);
-  }
-
-  if (!response.ok) {
-    throw new Error(`HTTP ${String(response.status)} ${response.statusText} for URL "${url}"`);
-  }
-
-  const content = await safeResponseText(response, url);
-  return { content, status: response.status };
+    },
+    { timeoutMs: 30_000, maxBytes: 10_000_000 },
+  );
+  if (response.status < 200 || response.status >= 300)
+    throw new Error(`HTTP ${String(response.status)} ${response.statusText}`);
+  return { content: new TextDecoder().decode(response.body), status: response.status };
 }
 
 /**

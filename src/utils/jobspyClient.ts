@@ -14,6 +14,7 @@
 
 import { scrapeJobs } from 'jobspy-js';
 import { logger } from '../logger.js';
+import { jobErrorCode, jobTelemetry } from './jobTelemetry.js';
 
 export const DEFAULT_JOBSPY_SITES = ['linkedin', 'indeed', 'glassdoor', 'zip_recruiter'] as const;
 
@@ -150,8 +151,13 @@ export async function searchJobSpy(params: JobSpyAcquisitionParams): Promise<Fla
     {
       tool: 'jobspy',
       sites: opts.site_name,
-      search_term: opts.search_term,
-      location: opts.location,
+      ...jobTelemetry({
+        query: typeof opts.search_term === 'string' ? opts.search_term : undefined,
+        location:
+          typeof opts.location === 'string' || Array.isArray(opts.location)
+            ? (opts.location as string | string[])
+            : undefined,
+      }),
       results_wanted: opts.results_wanted,
     },
     'JobSpy: starting acquisition',
@@ -168,9 +174,14 @@ export async function searchJobSpy(params: JobSpyAcquisitionParams): Promise<Fla
 
     return records;
   } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : String(err);
     logger.error(
-      { tool: 'jobspy', search_term: opts.search_term, err: message },
+      {
+        tool: 'jobspy',
+        ...jobTelemetry({
+          query: typeof opts.search_term === 'string' ? opts.search_term : undefined,
+        }),
+        errorCode: jobErrorCode(err),
+      },
       'JobSpy: acquisition failed',
     );
     return [];
@@ -199,9 +210,8 @@ export async function jobSpyHealth(): Promise<boolean> {
     );
     return true;
   } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : String(err);
     logger.warn(
-      { tool: 'jobspy', healthCheck: 'failed', err: message },
+      { tool: 'jobspy', healthCheck: 'failed', errorCode: jobErrorCode(err) },
       'JobSpy: health check failed',
     );
     return false;

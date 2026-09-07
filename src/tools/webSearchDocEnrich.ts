@@ -92,9 +92,14 @@ export function discoverPdfLinks(raw: string, parentUrl: string, maxLinks: numbe
  * original snippet intact; this function never throws).
  */
 
-import { extractDocumentUrl, extractHtmlPage } from '../utils/documentExtraction.js';
+import {
+  extractDocumentUrl,
+  extractHtmlPage,
+  type DocumentFetch,
+} from '../utils/documentExtraction.js';
 import { isDocumentUrl } from '../utils/documentUtils.js';
 import { logger } from '../logger.js';
+import { jobErrorCode } from '../utils/jobTelemetry.js';
 import type { SearchConfig } from '../config.js';
 import type { SearchResult } from '../types.js';
 
@@ -144,6 +149,7 @@ export async function enrichDocumentSnippets(
   results: SearchResult[],
   cfg: SearchConfig,
   limit: number,
+  fetchSafe?: DocumentFetch,
 ): Promise<SearchResult[]> {
   // Disabled → identical behavior (no fetches).
   if (!cfg.documentParsing.enabled) return results;
@@ -178,13 +184,19 @@ export async function enrichDocumentSnippets(
         let markdown: string;
         let rawHtml: string | undefined;
         if (isDoc) {
-          const parsed = await extractDocumentUrl(result.url, { config: cfg });
+          const parsed = await extractDocumentUrl(result.url, {
+            config: cfg,
+            ...(fetchSafe ? { fetchSafe } : {}),
+          });
           if (!(parsed.success && parsed.markdown.trim().length > 0)) {
             return { index, updated: null };
           }
           markdown = parsed.markdown;
         } else {
-          const page = await extractHtmlPage(result.url, { timeoutMs: HTML_EXTRACT_TIMEOUT_MS });
+          const page = await extractHtmlPage(result.url, {
+            timeoutMs: HTML_EXTRACT_TIMEOUT_MS,
+            ...(fetchSafe ? { fetchSafe } : {}),
+          });
           if (page === null) return { index, updated: null };
           markdown = page.markdown;
           rawHtml = page.rawHtml;
@@ -199,7 +211,15 @@ export async function enrichDocumentSnippets(
           rawHtml,
         };
       } catch (err) {
-        logger.warn({ err, url: result.url }, 'webSearchDocEnrich: enrichment failed (isolated)');
+        logger.warn(
+          {
+            errorCode: jobErrorCode(err),
+            status: 'failed',
+            stage: 'document_enrichment',
+            failureCount: 1,
+          },
+          'webSearchDocEnrich: enrichment failed (isolated)',
+        );
       }
       return { index, updated: null };
     }),
@@ -223,7 +243,10 @@ export async function enrichDocumentSnippets(
       if (appended.length >= MAX_APPENDED_PDFS) break;
       if (existingUrls.has(pdfUrl)) continue;
       try {
-        const parsed = await extractDocumentUrl(pdfUrl, { config: cfg });
+        const parsed = await extractDocumentUrl(pdfUrl, {
+          config: cfg,
+          ...(fetchSafe ? { fetchSafe } : {}),
+        });
         if (!(parsed.success && parsed.markdown.trim().length > 0)) continue;
         existingUrls.add(pdfUrl);
         appended.push({
@@ -240,7 +263,15 @@ export async function enrichDocumentSnippets(
           contentKind: 'full' as const,
         });
       } catch (err) {
-        logger.warn({ err, url: pdfUrl }, 'webSearchDocEnrich: PDF discovery failed (isolated)');
+        logger.warn(
+          {
+            errorCode: jobErrorCode(err),
+            status: 'failed',
+            stage: 'pdf_discovery',
+            failureCount: 1,
+          },
+          'webSearchDocEnrich: PDF discovery failed (isolated)',
+        );
       }
     }
   }

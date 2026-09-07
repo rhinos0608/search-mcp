@@ -2,12 +2,26 @@ import test, { afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { webRead } from '../src/tools/webRead.js';
 import { MAX_ELEMENTS } from '../src/utils/htmlElements.js';
+import type { DocumentFetch } from '../src/utils/documentExtraction.js';
 
 const originalFetch = globalThis.fetch;
 
 afterEach(() => {
   globalThis.fetch = originalFetch;
 });
+
+const fetchSafe: DocumentFetch = async (url) => {
+  const response = await globalThis.fetch(url);
+  return {
+    finalUrl: url,
+    status: response.status,
+    statusText: response.statusText,
+    headers: response.headers,
+    body: new Uint8Array(await response.arrayBuffer()),
+    redirectCount: 0,
+  };
+};
+const read = (url: string) => webRead(url, { fetchSafe });
 
 function makeHtmlResponse(html: string, status = 200): Response {
   return new Response(html, {
@@ -45,7 +59,7 @@ test('webRead extracts structured elements from HTML article', async () => {
 
   globalThis.fetch = async () => makeHtmlResponse(html);
 
-  const result = await webRead('https://example.com/article');
+  const result = await read('https://example.com/article');
 
   assert.ok(result.elements, 'should have elements array');
   assert.ok(result.elements!.length > 0, 'should have at least one element');
@@ -92,7 +106,7 @@ test('webRead extracts rich elements in fallback path', async () => {
 
   globalThis.fetch = async () => makeHtmlResponse(html);
 
-  const result = await webRead('https://example.com/minimal');
+  const result = await read('https://example.com/minimal');
 
   assert.ok(result.elements, 'should have elements in fallback');
 
@@ -131,7 +145,7 @@ test('webRead emits finalized truncation metadata for over-budget article elemen
 
   globalThis.fetch = async () => makeHtmlResponse(html);
 
-  const result = await webRead('https://example.com/long');
+  const result = await read('https://example.com/long');
 
   assert.equal(result.elements?.length, MAX_ELEMENTS);
   assert.equal(result.truncatedElements, true);
@@ -156,7 +170,7 @@ test('webRead extracts structured elements before applying content length caps',
 
   globalThis.fetch = async () => makeHtmlResponse(html);
 
-  const result = await webRead('https://example.com/capped');
+  const result = await read('https://example.com/capped');
 
   assert.ok(result.content.endsWith('... [truncated]'));
   assert.ok(
@@ -172,7 +186,7 @@ test('webRead elements are absent when content is unreadable', async () => {
 
   globalThis.fetch = async () => makeHtmlResponse(html);
 
-  await assert.rejects(async () => webRead('https://example.com/empty'));
+  await assert.rejects(async () => read('https://example.com/empty'));
 });
 
 test('webRead degrades gracefully when element extraction throws', async () => {
@@ -190,7 +204,7 @@ test('webRead degrades gracefully when element extraction throws', async () => {
   // We can't easily make extractElementsFromHtml throw, but we verify the
   // graceful-degradation path exists by confirming the function doesn't
   // crash and returns a valid result.
-  const result = await webRead('https://example.com/normal');
+  const result = await read('https://example.com/normal');
 
   assert.ok(result.elements === undefined || Array.isArray(result.elements));
   assert.equal(result.extractionMethod, 'readability');
@@ -216,7 +230,7 @@ test('webRead finalizes article elements and preserves relative image URL resolu
 
   globalThis.fetch = async () => makeHtmlResponse(html);
 
-  const result = await webRead('https://example.com/large-structured-article');
+  const result = await read('https://example.com/large-structured-article');
 
   assert.equal(result.elements?.length, MAX_ELEMENTS);
   assert.equal(result.truncatedElements, true);

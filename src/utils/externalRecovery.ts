@@ -1,5 +1,11 @@
 import { logger } from '../logger.js';
-import { assertSafeUrl, safeResponseText } from '../httpGuards.js';
+import { assertSafeUrl, safeFetch, type SafeFetchResult } from '../httpGuards.js';
+
+type RecoveryFetch = (
+  url: string,
+  init?: RequestInit,
+  options?: { timeoutMs?: number; maxBytes?: number },
+) => Promise<SafeFetchResult>;
 
 export interface RecoveryResult {
   content: string | null;
@@ -11,19 +17,20 @@ export interface RecoveryResult {
  * Attempt to recover a page from the Wayback Machine CDX API.
  * Returns the most recent snapshot's extracted HTML content.
  */
-async function attemptWaybackRecovery(url: string): Promise<RecoveryResult> {
+async function attemptWaybackRecovery(
+  url: string,
+  fetchSafe: RecoveryFetch = safeFetch,
+): Promise<RecoveryResult> {
   try {
     const cdxUrl = `https://web.archive.org/cdx/search/cdx?url=${encodeURIComponent(url)}&output=json&limit=1&sort=reverse`;
 
-    const cdxResp = await fetch(cdxUrl, {
-      signal: AbortSignal.timeout(10_000),
-    });
+    const cdxResp = await fetchSafe(cdxUrl, {}, { timeoutMs: 10_000, maxBytes: 5_000_000 });
 
-    if (!cdxResp.ok) {
+    if (cdxResp.status < 200 || cdxResp.status >= 300) {
       return { content: null, source: null, error: `CDX API returned ${String(cdxResp.status)}` };
     }
 
-    const cdxData = (await cdxResp.json()) as unknown;
+    const cdxData = JSON.parse(new TextDecoder().decode(cdxResp.body)) as unknown;
     if (!Array.isArray(cdxData) || cdxData.length < 2) {
       return { content: null, source: null, error: 'No snapshots in Wayback Machine' };
     }
@@ -38,11 +45,13 @@ async function attemptWaybackRecovery(url: string): Promise<RecoveryResult> {
     const timestamp = snapshot[tsIdx];
     const snapshotUrl = `https://web.archive.org/web/${timestamp}id_/${url}`;
 
-    const snapshotResp = await fetch(snapshotUrl, {
-      signal: AbortSignal.timeout(15_000),
-    });
+    const snapshotResp = await fetchSafe(
+      snapshotUrl,
+      {},
+      { timeoutMs: 15_000, maxBytes: 5_000_000 },
+    );
 
-    if (!snapshotResp.ok) {
+    if (snapshotResp.status < 200 || snapshotResp.status >= 300) {
       return {
         content: null,
         source: null,
@@ -50,7 +59,7 @@ async function attemptWaybackRecovery(url: string): Promise<RecoveryResult> {
       };
     }
 
-    const html = await safeResponseText(snapshotResp, snapshotUrl, 5_000_000);
+    const html = new TextDecoder().decode(snapshotResp.body);
     if (html.length < 100) {
       return { content: null, source: null, error: 'Snapshot too short' };
     }
@@ -65,19 +74,20 @@ async function attemptWaybackRecovery(url: string): Promise<RecoveryResult> {
 /**
  * Attempt to recover a page from Google Web Cache.
  */
-async function attemptGoogleCacheRecovery(url: string): Promise<RecoveryResult> {
+async function attemptGoogleCacheRecovery(
+  url: string,
+  fetchSafe: RecoveryFetch = safeFetch,
+): Promise<RecoveryResult> {
   try {
     const cacheUrl = `https://webcache.googleusercontent.com/search?q=cache:${encodeURIComponent(url)}`;
 
-    const resp = await fetch(cacheUrl, {
-      signal: AbortSignal.timeout(15_000),
-    });
+    const resp = await fetchSafe(cacheUrl, {}, { timeoutMs: 15_000, maxBytes: 5_000_000 });
 
-    if (!resp.ok) {
+    if (resp.status < 200 || resp.status >= 300) {
       return { content: null, source: null, error: `Google Cache returned ${String(resp.status)}` };
     }
 
-    const html = await safeResponseText(resp, cacheUrl, 5_000_000);
+    const html = new TextDecoder().decode(resp.body);
 
     if (html.length < 100) {
       return { content: null, source: null, error: 'Cache response too short' };
@@ -132,8 +142,11 @@ function stripGoogleCacheBanner(html: string): string {
  * Attempt external recovery: try Wayback first, then Google Cache.
  * Returns the first successful result.
  */
-export async function attemptExternalRecovery(url: string): Promise<RecoveryResult> {
-  logger.info({ url }, 'externalRecovery: attempting recovery');
+export async function attemptExternalRecovery(
+  url: string,
+  fetchSafe: RecoveryFetch = safeFetch,
+): Promise<RecoveryResult> {
+  logger.info({ urlLength: url.length }, 'externalRecovery: attempting recovery');
 
   // Validate URL before making any external calls
   try {
@@ -142,25 +155,25 @@ export async function attemptExternalRecovery(url: string): Promise<RecoveryResu
     return { content: null, source: null, error: 'Unsafe URL for recovery' };
   }
 
-  const wayback = await attemptWaybackRecovery(url);
+  const wayback = await attemptWaybackRecovery(url, fetchSafe);
   if (wayback.content !== null) {
-    logger.info({ url, source: 'wayback' }, 'externalRecovery: recovered from Wayback Machine');
+    logger.info({ source: 'wayback' }, 'externalRecovery: recovered from Wayback Machine');
     return wayback;
   }
 
   logger.debug(
-    { url, error: wayback.error },
+    { errorCode: wayback.error ? 'wayback_failed' : 'unknown' },
     'externalRecovery: Wayback failed, trying Google Cache',
   );
 
-  const cache = await attemptGoogleCacheRecovery(url);
+  const cache = await attemptGoogleCacheRecovery(url, fetchSafe);
   if (cache.content !== null) {
-    logger.info({ url, source: 'google-cache' }, 'externalRecovery: recovered from Google Cache');
+    logger.info({ source: 'google-cache' }, 'externalRecovery: recovered from Google Cache');
     return cache;
   }
 
   logger.warn(
-    { url, waybackError: wayback.error, cacheError: cache.error },
+    { errorCode: 'recovery_sources_failed' },
     'externalRecovery: all recovery sources failed',
   );
   return {

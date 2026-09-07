@@ -20,12 +20,11 @@
 
 import { Readability } from '@mozilla/readability';
 import { JSDOM } from 'jsdom';
-import { assertSafeUrl } from '../httpGuards.js';
+import { assertSafeUrl, safeFetch, type SafeFetchResult } from '../httpGuards.js';
 import { logger } from '../logger.js';
 import { loadConfig, type SearchConfig } from '../config.js';
 import { getUserAgent } from '../version.js';
-import { parsePdf } from './documentParsers/pdf.js';
-import { parseOffice } from './documentParsers/office.js';
+import { runDocumentParser } from './documentParsers/boundary.js';
 import { describeVisuals } from './documentParsers/vlm.js';
 import type { ParsedDocument } from './documentParsers/types.js';
 import { documentFallbackUrls } from './documentUtils.js';
@@ -101,6 +100,7 @@ const IMAGE_EXTENSIONS = new Set([
  * today, so the cap is a module-level constant.
  */
 const MAX_DOCUMENT_BYTES = 10 * 1024 * 1024;
+const MAX_PARSER_OUTPUT_BYTES = 2 * 1024 * 1024;
 
 // ── Result types ───────────────────────────────────────────────────────────
 
@@ -211,22 +211,33 @@ function htmlToMarkdown(html: string, url: string): { markdown: string; title: s
  * immediately on Content-Length, or aborted mid-stream once accumulated bytes
  * exceed the cap).
  */
-async function tryFetchHtml(url: string, timeoutMs: number): Promise<string | null> {
+export type DocumentFetch = (
+  url: string,
+  init?: RequestInit,
+  options?: { timeoutMs?: number; maxBytes?: number; signal?: AbortSignal },
+) => Promise<SafeFetchResult>;
+
+async function tryFetchHtml(
+  url: string,
+  timeoutMs: number,
+  fetchSafe: DocumentFetch = safeFetch,
+): Promise<string | null> {
   try {
     assertSafeUrl(url);
-    const response = await fetch(url, {
-      signal: AbortSignal.timeout(timeoutMs),
-      headers: {
-        'User-Agent': getUserAgent(),
-        Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+    const response = await fetchSafe(
+      url,
+      {
+        headers: {
+          'User-Agent': getUserAgent(),
+          Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        },
       },
-    });
-    if (!response.ok) return null;
+      { timeoutMs, maxBytes: MAX_DOCUMENT_BYTES },
+    );
+    if (response.status < 200 || response.status >= 300) return null;
     const contentType = response.headers.get('content-type') ?? '';
     if (!contentType.includes('text/html')) return null;
-    if (contentLengthExceedsLimit(response, url)) return null;
-    const html = await readCappedBody(response, url);
-    if (html === null) return null;
+    const html = new TextDecoder().decode(response.body);
     return html.trim().length === 0 ? null : html;
   } catch {
     return null;
@@ -237,20 +248,21 @@ async function tryFetchHtml(url: string, timeoutMs: number): Promise<string | nu
  * Fetch raw bytes of a binary document as a bounded stream. Returns null on
  * any failure/empty/oversized body (see MAX_DOCUMENT_BYTES).
  */
-async function tryFetchBytes(url: string, timeoutMs: number): Promise<ArrayBuffer | null> {
+async function tryFetchBytes(
+  url: string,
+  timeoutMs: number,
+  fetchSafe: DocumentFetch = safeFetch,
+): Promise<ArrayBuffer | null> {
   try {
     assertSafeUrl(url);
-    const response = await fetch(url, {
-      signal: AbortSignal.timeout(timeoutMs),
-      headers: {
-        'User-Agent': getUserAgent(),
-        Accept: 'application/octet-stream,*/*',
-      },
-    });
-    if (!response.ok) return null;
-    if (contentLengthExceedsLimit(response, url)) return null;
-    const bytes = await readCappedBytes(response, url);
-    return bytes === null || bytes.byteLength === 0 ? null : bytes;
+    const response = await fetchSafe(
+      url,
+      { headers: { 'User-Agent': getUserAgent(), Accept: 'application/octet-stream,*/*' } },
+      { timeoutMs, maxBytes: MAX_DOCUMENT_BYTES },
+    );
+    if (response.status < 200 || response.status >= 300 || response.body.byteLength === 0)
+      return null;
+    return response.body.slice().buffer;
   } catch {
     return null;
   }
@@ -259,14 +271,14 @@ async function tryFetchBytes(url: string, timeoutMs: number): Promise<ArrayBuffe
 /**
  * Reject up front when the response advertises a Content-Length over the cap.
  */
-function contentLengthExceedsLimit(response: Response, url: string): boolean {
+export function contentLengthExceedsLimit(response: Response, _url: string): boolean {
   const contentLength = response.headers.get('content-length');
   if (contentLength === null) return false;
   const len = Number.parseInt(contentLength, 10);
   if (Number.isNaN(len)) return false;
   if (len > MAX_DOCUMENT_BYTES) {
     logger.debug(
-      { url, length: len, max: MAX_DOCUMENT_BYTES },
+      { length: len, max: MAX_DOCUMENT_BYTES },
       'documentExtraction: response too large (Content-Length)',
     );
     return true;
@@ -278,7 +290,7 @@ function contentLengthExceedsLimit(response: Response, url: string): boolean {
  * Read a response body as text, aborting once accumulated bytes exceed
  * MAX_DOCUMENT_BYTES. Returns null on overflow.
  */
-async function readCappedBody(response: Response, url: string): Promise<string | null> {
+export async function readCappedBody(response: Response, _url: string): Promise<string | null> {
   const reader = response.body?.getReader();
   if (!reader) {
     // No stream available (e.g. mocked Response): fall back with a post-hoc cap.
@@ -295,10 +307,7 @@ async function readCappedBody(response: Response, url: string): Promise<string |
       reader.cancel().catch(() => {
         /* discard */
       });
-      logger.debug(
-        { url, max: MAX_DOCUMENT_BYTES },
-        'documentExtraction: response exceeded size cap',
-      );
+      logger.debug({ max: MAX_DOCUMENT_BYTES }, 'documentExtraction: response exceeded size cap');
       return null;
     }
     chunks.push(value);
@@ -316,7 +325,10 @@ async function readCappedBody(response: Response, url: string): Promise<string |
  * Read a response body as bytes, aborting once accumulated bytes exceed
  * MAX_DOCUMENT_BYTES. Returns null on overflow.
  */
-async function readCappedBytes(response: Response, url: string): Promise<ArrayBuffer | null> {
+export async function readCappedBytes(
+  response: Response,
+  _url: string,
+): Promise<ArrayBuffer | null> {
   const reader = response.body?.getReader();
   if (!reader) {
     const buffer = await response.arrayBuffer();
@@ -332,10 +344,7 @@ async function readCappedBytes(response: Response, url: string): Promise<ArrayBu
       reader.cancel().catch(() => {
         /* discard */
       });
-      logger.debug(
-        { url, max: MAX_DOCUMENT_BYTES },
-        'documentExtraction: response exceeded size cap',
-      );
+      logger.debug({ max: MAX_DOCUMENT_BYTES }, 'documentExtraction: response exceeded size cap');
       return null;
     }
     chunks.push(value);
@@ -355,24 +364,28 @@ async function extractTextDocument(
   url: string,
   timeoutMs: number,
   warnings: string[],
+  fetchSafe: DocumentFetch = safeFetch,
 ): Promise<DocumentExtractionResult> {
   try {
-    const response = await fetch(url, {
-      signal: AbortSignal.timeout(timeoutMs),
-      headers: {
-        Accept: 'text/plain, text/markdown, text/csv, application/json, application/xml, */*',
+    const response = await fetchSafe(
+      url,
+      {
+        headers: {
+          Accept: 'text/plain, text/markdown, text/csv, application/json, application/xml, */*',
+        },
       },
-    });
+      { timeoutMs, maxBytes: MAX_DOCUMENT_BYTES },
+    );
 
-    if (!response.ok) {
+    if (response.status < 200 || response.status >= 300) {
       const msg = `HTTP ${String(response.status)} ${response.statusText}`;
       warnings.push(msg);
-      logger.warn({ url, status: response.status }, 'documentExtraction: fetch failed');
+      logger.warn({ status: response.status }, 'documentExtraction: fetch failed');
       return { markdown: '', title: '', success: false, unsupported: false, warnings };
     }
 
     const contentType = response.headers.get('content-type') ?? '';
-    const text = await response.text();
+    const text = new TextDecoder().decode(response.body);
 
     if (text.length === 0) {
       warnings.push('Document returned empty content');
@@ -382,7 +395,7 @@ async function extractTextDocument(
     const markdown = wrapAsMarkdown(text, url);
     const ext = getExtension(url);
     logger.info(
-      { url, contentType, bytes: text.length, ext },
+      { contentType, bytes: Buffer.byteLength(text), ext },
       'documentExtraction: extracted text document',
     );
 
@@ -396,7 +409,7 @@ async function extractTextDocument(
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     warnings.push(msg);
-    logger.warn({ url, err: msg }, 'documentExtraction: fetch/convert failed');
+    logger.warn({ errorCode: 'fetch_convert_failed' }, 'documentExtraction: fetch/convert failed');
     return { markdown: '', title: '', success: false, unsupported: false, warnings };
   }
 }
@@ -421,6 +434,7 @@ async function extractBinaryDocument(
   timeoutMs: number,
   warnings: string[],
   config: SearchConfig,
+  fetchSafe: DocumentFetch = safeFetch,
 ): Promise<DocumentExtractionResult> {
   const deadline = Date.now() + timeoutMs;
   const remainingBudget = (): number => Math.max(0, deadline - Date.now());
@@ -430,19 +444,25 @@ async function extractBinaryDocument(
   if (!IMAGE_EXTENSIONS.has(ext)) {
     for (const candidate of documentFallbackUrls(url)) {
       if (isBinaryExtension(candidate)) continue; // only HTML-looking candidates
-      const html = await tryFetchHtml(candidate, remainingBudget());
+      const html = await tryFetchHtml(candidate, remainingBudget(), fetchSafe);
       if (html === null) {
-        logger.debug({ url, candidate }, 'documentExtraction: HTML fallback candidate unavailable');
+        logger.debug(
+          { candidateLength: candidate.length },
+          'documentExtraction: HTML fallback candidate unavailable',
+        );
         continue;
       }
       const { markdown, title } = htmlToMarkdown(html, candidate);
       if (markdown.length > 0) {
         warnings.push(`Extracted content from HTML fallback: ${candidate}`);
-        logger.info({ url, candidate }, 'documentExtraction: extracted via HTML fallback tier');
+        logger.info(
+          { candidateLength: candidate.length },
+          'documentExtraction: extracted via HTML fallback tier',
+        );
         return { markdown, title, success: true, unsupported: false, warnings, images: [] };
       }
       logger.debug(
-        { url, candidate },
+        { urlLength: url.length, candidateLength: candidate.length },
         'documentExtraction: HTML fallback candidate yielded no readable content',
       );
     }
@@ -452,12 +472,15 @@ async function extractBinaryDocument(
 
   // Tier b. PDF.
   if (ext === '.pdf') {
-    const bytes = await tryFetchBytes(url, remainingBudget());
+    const bytes = await tryFetchBytes(url, remainingBudget(), fetchSafe);
     if (bytes !== null) {
-      const parsed = await parsePdf(bytes);
+      const parsed = await runDocumentParser('pdf', new Uint8Array(bytes), undefined, {
+        timeoutMs: Math.max(1, remainingBudget()),
+        maxOutputBytes: MAX_PARSER_OUTPUT_BYTES,
+      });
       warnings.push(...parsed.warnings);
       if (parsed.markdown.trim().length > 0) {
-        logger.info({ url }, 'documentExtraction: extracted PDF document');
+        logger.info({ format: 'pdf' }, 'documentExtraction: extracted PDF document');
         // Include extracted tables as markdown pipe tables, appended once to
         // avoid duplicating content already emitted by the text tier.
         let markdown = parsed.markdown;
@@ -494,12 +517,15 @@ async function extractBinaryDocument(
 
   // Tier c. Office.
   if (OFFICE_EXTENSIONS.has(ext)) {
-    const bytes = await tryFetchBytes(url, remainingBudget());
+    const bytes = await tryFetchBytes(url, remainingBudget(), fetchSafe);
     if (bytes !== null) {
-      const parsed = await parseOffice(bytes, ext, undefined, { timeoutMs: remainingBudget() });
+      const parsed = await runDocumentParser('office', new Uint8Array(bytes), ext, {
+        timeoutMs: Math.max(1, remainingBudget()),
+        maxOutputBytes: MAX_PARSER_OUTPUT_BYTES,
+      });
       warnings.push(...parsed.warnings);
       if (parsed.markdown.trim().length > 0) {
-        logger.info({ url, ext }, 'documentExtraction: extracted office document');
+        logger.info({ format: ext }, 'documentExtraction: extracted office document');
         return {
           markdown: parsed.markdown,
           title: parsed.title,
@@ -514,7 +540,7 @@ async function extractBinaryDocument(
 
   // Tier d. Nothing usable — keep the URL unsupported so downstream
   // Crawl4AI/Wayback fallbacks still run.
-  warnings.push(`No document content could be extracted from ${url}`);
+  warnings.push('No document content could be extracted from document URL');
   return { markdown: '', title: '', success: false, unsupported: true, warnings };
 }
 
@@ -537,7 +563,7 @@ async function extractBinaryDocument(
  */
 export async function extractDocumentUrl(
   url: string,
-  options?: { timeoutMs?: number; config?: SearchConfig },
+  options?: { timeoutMs?: number; config?: SearchConfig; fetchSafe?: DocumentFetch },
 ): Promise<DocumentExtractionResult> {
   const warnings: string[] = [];
 
@@ -546,7 +572,7 @@ export async function extractDocumentUrl(
     assertSafeUrl(url);
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    logger.warn({ url, err: msg }, 'documentExtraction: unsafe URL');
+    logger.warn({ errorCode: 'unsafe_url' }, 'documentExtraction: unsafe URL');
     return { markdown: '', title: '', success: false, unsupported: true, warnings: [msg] };
   }
 
@@ -559,17 +585,24 @@ export async function extractDocumentUrl(
 
   // Text document — fetch and convert
   if (isTextExtension(url)) {
-    return extractTextDocument(url, options?.timeoutMs ?? 30_000, warnings);
+    return extractTextDocument(url, options?.timeoutMs ?? 30_000, warnings, options?.fetchSafe);
   }
 
   // Binary document — config-gated tiered pipeline
   const config = options?.config ?? loadConfig();
   if (!config.documentParsing.enabled) {
-    logger.debug({ url, ext }, 'documentExtraction: binary format, unsupported');
+    logger.debug({ ext }, 'documentExtraction: binary format, unsupported');
     return { markdown: '', title: '', success: false, unsupported: true, warnings };
   }
 
-  return extractBinaryDocument(url, ext, options?.timeoutMs ?? 30_000, warnings, config);
+  return extractBinaryDocument(
+    url,
+    ext,
+    options?.timeoutMs ?? 30_000,
+    warnings,
+    config,
+    options?.fetchSafe,
+  );
 }
 
 /**
@@ -580,9 +613,9 @@ export async function extractDocumentUrl(
  */
 export async function extractHtmlPage(
   url: string,
-  options?: { timeoutMs?: number },
+  options?: { timeoutMs?: number; fetchSafe?: DocumentFetch },
 ): Promise<{ markdown: string; title: string; rawHtml: string } | null> {
-  const html = await tryFetchHtml(url, options?.timeoutMs ?? 30_000);
+  const html = await tryFetchHtml(url, options?.timeoutMs ?? 30_000, options?.fetchSafe);
   if (html === null) return null;
   const { markdown, title } = htmlToMarkdown(html, url);
   if (markdown.trim().length === 0) return null;

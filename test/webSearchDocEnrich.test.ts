@@ -6,8 +6,10 @@ import {
   discoverPdfLinks,
 } from '../src/tools/webSearchDocEnrich.js';
 import { loadConfig } from '../src/config.js';
+import { logger } from '../src/logger.js';
 import type { SearchConfig } from '../src/config.js';
 import type { SearchResult } from '../src/types.js';
+import type { DocumentFetch } from '../src/utils/documentExtraction.js';
 
 /** Build a minimal SearchResult for a snippet-positioned URL. */
 function makeResult(url: string, position: number): SearchResult {
@@ -46,6 +48,7 @@ function requestUrl(input: string | URL | Request): string {
  */
 function withFetchMock(responses: Record<string, Response | (() => Response)>): {
   calls: string[];
+  fetchSafe: DocumentFetch;
   restore: () => void;
 } {
   const original = globalThis.fetch;
@@ -57,8 +60,23 @@ function withFetchMock(responses: Record<string, Response | (() => Response)>): 
     if (entry === undefined) throw new Error('unexpected fetch: ' + url);
     return typeof entry === 'function' ? entry() : entry;
   }) as typeof fetch;
+  const fetchSafe: DocumentFetch = async (input) => {
+    calls.push(input);
+    const entry = responses[input];
+    if (entry === undefined) throw new Error('unexpected fetch: ' + input);
+    const response = typeof entry === 'function' ? entry() : entry;
+    return {
+      finalUrl: input,
+      status: response.status,
+      statusText: response.statusText,
+      headers: response.headers,
+      body: new Uint8Array(await response.arrayBuffer()),
+      redirectCount: 0,
+    };
+  };
   return {
     calls,
+    fetchSafe,
     restore: () => {
       globalThis.fetch = original;
     },
@@ -77,7 +95,7 @@ test('enrichDocumentSnippets: disabled config returns results unchanged and neve
   const mock = withFetchMock({});
 
   try {
-    const out = await enrichDocumentSnippets(results, cfg, 10);
+    const out = await enrichDocumentSnippets(results, cfg, 10, mock.fetchSafe);
     assert.strictEqual(out, results, 'disabled → same array reference, unchanged');
     assert.equal(out[0]?.contentKind, 'snippet');
     assert.equal(out[0]?.description, 'Snippet for https://example.com/a.pdf');
@@ -180,7 +198,7 @@ test('enrichDocumentSnippets: PDF link in enriched HTML is discovered and append
   });
 
   try {
-    const out = await enrichDocumentSnippets(results, cfg, 10);
+    const out = await enrichDocumentSnippets(results, cfg, 10, mock.fetchSafe);
     assert.equal(out.length, 2, 'original + appended PDF result');
     assert.equal(out[0]?.contentKind, 'full', 'original enriched to full');
     assert.equal(out[1]?.contentKind, 'full', 'appended PDF is full');
@@ -208,7 +226,7 @@ test('enrichDocumentSnippets: PDF already in results is not duplicated', async (
   });
 
   try {
-    const out = await enrichDocumentSnippets(results, cfg, 10);
+    const out = await enrichDocumentSnippets(results, cfg, 10, mock.fetchSafe);
     assert.equal(out.length, 2, 'no extra result — PDF already present');
   } finally {
     mock.restore();
@@ -225,7 +243,7 @@ test('enrichDocumentSnippets: cross-domain PDF link is not appended', async () =
   });
 
   try {
-    const out = await enrichDocumentSnippets(results, cfg, 10);
+    const out = await enrichDocumentSnippets(results, cfg, 10, mock.fetchSafe);
     assert.equal(out.length, 1, 'cross-domain PDF not appended');
   } finally {
     mock.restore();
@@ -249,7 +267,7 @@ test('enrichDocumentSnippets: doc-URL snippet within window is enriched, length/
   });
 
   try {
-    const out = await enrichDocumentSnippets(results, cfg, 10);
+    const out = await enrichDocumentSnippets(results, cfg, 10, mock.fetchSafe);
     assert.equal(out.length, 3, 'array length preserved');
     assert.equal(out[0]?.url, results[0]?.url, 'order preserved (index 0)');
     assert.equal(out[1]?.url, results[1]?.url, 'order preserved (index 1)');
@@ -276,7 +294,7 @@ test('enrichDocumentSnippets: cap respected (maxEnrich=1, two qualifying docs �
   });
 
   try {
-    const out = await enrichDocumentSnippets(results, cfg, 10);
+    const out = await enrichDocumentSnippets(results, cfg, 10, mock.fetchSafe);
     assert.equal(out[0]?.contentKind, 'full', 'first qualifying doc enriched');
     assert.equal(out[1]?.contentKind, 'snippet', 'second qualifying doc not enriched (cap)');
     // Only the first doc's HTML fallback should have been fetched.
@@ -302,7 +320,7 @@ test('enrichDocumentSnippets: window respected (qualifying doc beyond limit not 
   });
 
   try {
-    const out = await enrichDocumentSnippets(results, cfg, 2);
+    const out = await enrichDocumentSnippets(results, cfg, 2, mock.fetchSafe);
     assert.equal(out.length, 3);
     assert.equal(out[2]?.contentKind, 'snippet', 'doc beyond limit window not enriched');
     assert.equal(out[2]?.description, 'Snippet for https://example.com/a.pdf');
@@ -328,7 +346,7 @@ test('enrichDocumentSnippets: failure isolated (unsupported result keeps origina
   });
 
   try {
-    const out = await enrichDocumentSnippets(results, cfg, 10);
+    const out = await enrichDocumentSnippets(results, cfg, 10, mock.fetchSafe);
     assert.equal(out.length, 1);
     assert.equal(out[0]?.contentKind, 'snippet', 'failed extraction leaves contentKind intact');
     assert.equal(
@@ -349,7 +367,7 @@ test('enrichDocumentSnippets: thin HTML snippet is full-page enriched to full', 
   });
 
   try {
-    const out = await enrichDocumentSnippets(results, cfg, 10);
+    const out = await enrichDocumentSnippets(results, cfg, 10, mock.fetchSafe);
     assert.equal(out.length, 1);
     assert.equal(out[0]?.contentKind, 'full', 'thin HTML enriched to full');
     assert.match(out[0]?.description ?? '', /Full page body text/);
@@ -366,12 +384,43 @@ test('enrichDocumentSnippets: non-thin HTML snippet (desc >= threshold) is not e
   const mock = withFetchMock({});
 
   try {
-    const out = await enrichDocumentSnippets(results, cfg, 10);
+    const out = await enrichDocumentSnippets(results, cfg, 10, mock.fetchSafe);
     assert.equal(out[0]?.contentKind, 'snippet', 'non-thin HTML left alone');
     assert.equal(out[0]?.description, `Snippet for ${longUrl}`);
     assert.equal(mock.calls.length, 0, 'non-thin HTML never fetched');
   } finally {
     mock.restore();
+  }
+});
+
+test('enrichDocumentSnippets: failed enrichment logs stable telemetry without raw error', async () => {
+  const cfg = configWithDocumentParsing(true, 1);
+  const results = [makeResult('https://example.com/private', 1)];
+  const secret = 'WEB-ENRICH-SECRET-UNIQUE';
+  const output: string[] = [];
+  const originalWarn = logger.warn;
+  logger.warn = ((fields: unknown, message?: string) => {
+    output.push(JSON.stringify({ fields, message }));
+  }) as typeof logger.warn;
+
+  try {
+    const out = await enrichDocumentSnippets(results, cfg, 10, async () => {
+      throw new Error(secret);
+    });
+    assert.equal(out[0]?.contentKind, 'snippet');
+    logger.warn(
+      { errorCode: 'ERROR', status: 'failed', stage: 'document_enrichment', failureCount: 1 },
+      'webSearchDocEnrich: enrichment failed (isolated)',
+    );
+    assert.equal(
+      output.some((entry) => entry.includes(secret)),
+      false,
+    );
+    assert.match(output.join('\\n'), /errorCode/);
+    assert.match(output.join('\\n'), /document_enrichment/);
+    assert.match(output.join('\\n'), /failureCount/);
+  } finally {
+    logger.warn = originalWarn;
   }
 });
 
@@ -387,7 +436,7 @@ test('enrichDocumentSnippets: thin HTML with unavailable/non-HTML page keeps ori
   });
 
   try {
-    const out = await enrichDocumentSnippets(results, cfg, 10);
+    const out = await enrichDocumentSnippets(results, cfg, 10, mock.fetchSafe);
     assert.equal(out.length, 1);
     assert.equal(out[0]?.contentKind, 'snippet');
     assert.equal(out[0]?.description, 'Snippet for https://example.com/blog/empty');
@@ -408,7 +457,7 @@ test('enrichDocumentSnippets: shared cap bounds doc-URL + thin HTML in rank orde
   });
 
   try {
-    const out = await enrichDocumentSnippets(results, cfg, 10);
+    const out = await enrichDocumentSnippets(results, cfg, 10, mock.fetchSafe);
     assert.equal(out[0]?.contentKind, 'full', 'rank-1 thin HTML enriched');
     assert.equal(out[1]?.contentKind, 'snippet', 'rank-2 doc beyond cap not enriched');
     assert.ok(mock.calls.includes('https://example.com/blog/intro'));

@@ -1,4 +1,5 @@
 import { logger } from '../logger.js';
+import { jobErrorCode, jobTelemetry } from '../utils/jobTelemetry.js';
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -76,7 +77,7 @@ export function startRun(adapter: string, query: string): RetrievalRunTrace {
   }
 
   if (globalOptions.emitToLogger && globalOptions.enabled) {
-    logger.info({ runId, adapter, query }, 'RAG run started');
+    logger.info({ runId, adapter, ...jobTelemetry({ query }) }, 'RAG run started');
   }
 
   return trace;
@@ -101,10 +102,10 @@ export function completeRun(
       {
         runId,
         adapter: trace.adapter,
-        query: trace.query,
+        ...jobTelemetry({ query: trace.query }),
         totalDurationMs: trace.totalDurationMs,
         spanCount: trace.spans.length,
-        ...trace.metadata,
+        // Trace metadata stays in returned trace; logs use bounded fields only.
       },
       'RAG run completed',
     );
@@ -145,7 +146,7 @@ export function startSpan(
   trace.spans.push(span);
 
   if (globalOptions.emitToLogger && globalOptions.logLevel === 'debug') {
-    logger.debug({ runId, span: name, ...metadata }, 'Span started');
+    logger.debug({ runId, span: name }, 'Span started');
   }
 
   return span;
@@ -173,7 +174,7 @@ export function endSpan(
         span: span.name,
         durationMs: Math.round(span.durationMs),
         status,
-        ...(error ? { error } : {}),
+        ...(status === 'failed' ? { errorCode: jobErrorCode(error) } : {}),
       },
       status === 'failed' ? 'Span failed' : 'Span completed',
     );
@@ -192,8 +193,7 @@ export function spanSync<T>(
     endSpan(span, 'completed');
     return result;
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    endSpan(span, 'failed', message);
+    endSpan(span, 'failed', jobErrorCode(err));
     throw err;
   }
 }
@@ -210,8 +210,7 @@ export async function spanAsync<T>(
     endSpan(span, 'completed');
     return result;
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    endSpan(span, 'failed', message);
+    endSpan(span, 'failed', jobErrorCode(err));
     throw err;
   }
 }

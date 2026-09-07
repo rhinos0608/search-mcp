@@ -1,9 +1,10 @@
 import { z } from 'zod/v4';
 import Parser from 'rss-parser';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { assertSafeUrl, safeResponseText } from '../../httpGuards.js';
+import { assertSafeUrl, safeFetch } from '../../httpGuards.js';
 import { getUserAgent } from '../../version.js';
 import { logger } from '../../logger.js';
+import { jobErrorCode } from '../../utils/jobTelemetry.js';
 import { makeResult, errorResponse, successResponse } from '../response.js';
 
 const MAX_FEEDS = 20;
@@ -62,18 +63,21 @@ function normalizeEntry(item: Parser.Item): RssEntry {
 
 async function fetchFeed(url: string, limit: number): Promise<RssFeedResult> {
   assertSafeUrl(url);
-  const res = await fetch(url, {
-    headers: {
-      Accept:
-        'application/rss+xml, application/atom+xml, application/xml, text/xml;q=0.9, */*;q=0.8',
-      'User-Agent': getUserAgent('rss'),
+  const res = await safeFetch(
+    url,
+    {
+      headers: {
+        Accept:
+          'application/rss+xml, application/atom+xml, application/xml, text/xml;q=0.9, */*;q=0.8',
+        'User-Agent': getUserAgent('rss'),
+      },
     },
-    signal: AbortSignal.timeout(15_000),
-  });
-  if (!res.ok) {
+    { timeoutMs: 15_000, maxBytes: 5_000_000 },
+  );
+  if (res.status < 200 || res.status >= 300) {
     throw new Error(`Feed fetch failed with HTTP ${String(res.status)}`);
   }
-  const text = await safeResponseText(res, url);
+  const text = new TextDecoder().decode(res.body);
   const feed = await parser.parseString(text);
   return {
     title: feed.title ?? null,
@@ -185,7 +189,7 @@ export function registerRssTool(server: McpServer): void {
         };
         return successResponse(makeResult('rss', result, Date.now() - start));
       } catch (err: unknown) {
-        logger.error({ err, tool: 'rss', action }, 'Tool failed');
+        logger.error({ errorCode: jobErrorCode(err), tool: 'rss', action }, 'Tool failed');
         return errorResponse(err, 'rss');
       }
     },

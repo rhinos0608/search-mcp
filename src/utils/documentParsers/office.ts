@@ -32,7 +32,16 @@ function validateZipArchive(input: Uint8Array | ArrayBuffer): string | null {
 
   const view = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
   const totalEntries = view.getUint16(eocdOffset + 10, true);
+  const centralDirectorySize = view.getUint32(eocdOffset + 12, true);
   const cdOffset = view.getUint32(eocdOffset + 16, true);
+
+  // ZIP64 values cannot be safely inspected by this bounded 32-bit scanner.
+  if (totalEntries === 0xffff || centralDirectorySize === 0xffffffff || cdOffset === 0xffffffff) {
+    return 'ZIP64 archives are not supported.';
+  }
+  if (cdOffset > eocdOffset || centralDirectorySize > eocdOffset - cdOffset) {
+    return 'ZIP central directory is outside archive bounds.';
+  }
 
   if (totalEntries > MAX_ZIP_ENTRIES) {
     return `ZIP entry count ${String(totalEntries)} exceeds limit ${String(MAX_ZIP_ENTRIES)}.`;
@@ -66,7 +75,10 @@ function validateZipArchive(input: Uint8Array | ArrayBuffer): string | null {
       return `Cumulative uncompressed size exceeds limit ${String(MAX_ZIP_UNCOMPRESSED)}.`;
     }
 
-    if (compressedSize > 0 && uncompressedSize / compressedSize > MAX_ZIP_COMPRESSION_RATIO) {
+    if (
+      (compressedSize === 0 && uncompressedSize > 0) ||
+      (compressedSize > 0 && uncompressedSize / compressedSize > MAX_ZIP_COMPRESSION_RATIO)
+    ) {
       return `Per-entry compression ratio ${(uncompressedSize / compressedSize).toFixed(1)} exceeds limit ${String(MAX_ZIP_COMPRESSION_RATIO)}.`;
     }
 

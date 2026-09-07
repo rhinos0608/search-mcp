@@ -18,12 +18,7 @@ export function enableFetchMock() {
   fetchMocked = true;
   globalThis.fetch = (async (input: RequestInfo | URL, _init?: RequestInit) => {
     const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
-    // Log the blocked call but return empty JSON so search functions degrade gracefully
-    console.warn(`[TEST MOCK] Blocked outbound HTTP: ${url.slice(0, 200)}`);
-    return new Response('{}', {
-      status: 200,
-      headers: { 'content-type': 'application/json' },
-    });
+    throw new Error(`Unexpected outbound HTTP in test: ${url}`);
   }) as typeof fetch;
 }
 

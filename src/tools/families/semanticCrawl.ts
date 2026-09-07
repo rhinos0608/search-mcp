@@ -32,6 +32,8 @@ import { createProgressReporter } from '../progress.js';
 import { registerFamily, type FamilyDefinition } from '../registry.js';
 import { wrapResponse } from '../response.js';
 
+const MAX_TELEMETRY_LENGTH = 4096;
+
 // ── Action schemas (discriminated on "action") ──────────────────────────────
 
 const crawlSchema = z.object({
@@ -220,8 +222,9 @@ async function handleCrawl(args: CrawlArgs, cfg: SearchConfig, extra: unknown) {
     {
       tool: 'semantic_crawl',
       sourceType: args.source.type,
-      query: args.query,
-      queryCount: args.queries?.length,
+      queryLength:
+        args.query === undefined ? undefined : Math.min(args.query.length, MAX_TELEMETRY_LENGTH),
+      queryCount: args.queries === undefined ? 0 : Math.min(args.queries.length, 100),
       topK: args.topK,
     },
     'Tool invoked',
@@ -270,7 +273,10 @@ async function handleCrawl(args: CrawlArgs, cfg: SearchConfig, extra: unknown) {
     warnings.push(...documentResult.warnings);
     if (documentResult.success && documentResult.markdown.trim().length > 0) {
       logger.info(
-        { tool: 'semantic_crawl', url: typedSource.url },
+        {
+          tool: 'semantic_crawl',
+          urlLength: Math.min(typedSource.url.length, MAX_TELEMETRY_LENGTH),
+        },
         'Document URL extracted in-process',
       );
       const article: import('../../types.js').ArticleResult = {

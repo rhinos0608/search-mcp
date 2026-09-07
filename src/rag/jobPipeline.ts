@@ -13,6 +13,7 @@ import {
   graphHealth,
 } from '../utils/jobGraphDb.js';
 import { logger } from '../logger.js';
+import { jobErrorCode } from '../utils/jobTelemetry.js';
 import { webSearch } from '../tools/webSearch.js';
 import { webCrawl } from '../tools/webCrawl.js';
 import { loadConfig } from '../config.js';
@@ -184,7 +185,7 @@ export class JobPipeline {
    */
   async discover(params: JobSpyAcquisitionParams): Promise<RawJobRecord[]> {
     logger.info(
-      { tool: 'job_pipeline', stage: 'discovery', query: params.query },
+      { tool: 'job_pipeline', stage: 'discovery', queryLength: params.query.length },
       'Starting discovery',
     );
 
@@ -208,7 +209,12 @@ export class JobPipeline {
       }
     } catch (err) {
       logger.error(
-        { tool: 'job_pipeline', stage: 'discovery', source: 'jobspy', err },
+        {
+          tool: 'job_pipeline',
+          stage: 'discovery',
+          source: 'jobspy',
+          errorCode: jobErrorCode(err),
+        },
         'JobSpy discovery failed, falling back',
       );
     }
@@ -265,7 +271,12 @@ export class JobPipeline {
    */
   normalize(records: RawJobRecord[], _query: string): PipelineJobRecord[] {
     logger.info(
-      { tool: 'job_pipeline', stage: 'normalization', inputCount: records.length, query: _query },
+      {
+        tool: 'job_pipeline',
+        stage: 'normalization',
+        inputCount: records.length,
+        queryLength: _query.length,
+      },
       'Starting normalization',
     );
 
@@ -492,7 +503,11 @@ export class JobPipeline {
           return record;
         } catch (err) {
           logger.warn(
-            { tool: 'job_pipeline', url: record.jobUrl, err },
+            {
+              tool: 'job_pipeline',
+              stage: 'enrichment',
+              errorCode: jobErrorCode(err),
+            },
             'Enrichment crawl failed for record',
           );
           return record;
@@ -526,8 +541,10 @@ export class JobPipeline {
         try {
           results[index] = await fn(items[index] as T);
         } catch (err: unknown) {
-          const reason = err instanceof Error ? err.message : String(err);
-          logger.warn({ err: reason, index }, 'concurrencyLimitedMap: item failed');
+          logger.warn(
+            { stage: 'concurrency', index, errorCode: jobErrorCode(err) },
+            'concurrencyLimitedMap: item failed',
+          );
         }
       }
     }
@@ -670,7 +687,7 @@ export class JobPipeline {
           });
         } catch (err) {
           logger.warn(
-            { tool: 'job_pipeline', jobUrl: record.jobUrl, err },
+            { tool: 'job_pipeline', stage: 'persistence', errorCode: jobErrorCode(err) },
             'Failed to insert final ranked job into graph',
           );
         }

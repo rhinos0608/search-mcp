@@ -30,6 +30,7 @@ import { coerceNumericString, coerceArgs } from './normalize.js';
 import { applyIntentFilter } from '../utils/intentFilter.js';
 import type { IntentFilterResult } from '../utils/intentFilter.js';
 import { toolStats } from './stats.js';
+import { jobErrorCode } from '../utils/jobTelemetry.js';
 
 // ── Input normalization ─────────────────────────────────────────────────────
 
@@ -417,7 +418,10 @@ export function registerFamily(
         return successResponse(full);
       } catch (err: unknown) {
         toolStats.recordError(`${family.name}.${actionName}`);
-        logger.error({ err, tool: family.name, action: actionName }, 'Action failed');
+        logger.error(
+          { errorCode: jobErrorCode(err), tool: family.name, action: actionName },
+          'Action failed',
+        );
         return errorResponse(err, `${family.name}.${actionName}`);
       }
     },

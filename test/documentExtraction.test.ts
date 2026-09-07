@@ -1,6 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { extractDocumentUrl } from '../src/utils/documentExtraction.js';
+import {
+  extractDocumentUrl as extractDocumentUrlImpl,
+  type DocumentFetch,
+} from '../src/utils/documentExtraction.js';
 import { isDocumentUrl } from '../src/utils/documentUtils.js';
 import { loadConfig } from '../src/config.js';
 
@@ -33,6 +36,20 @@ function buildPdf(text: string): ArrayBuffer {
   pdf += `trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${xrefStart}\n%%EOF\n`;
   return new TextEncoder().encode(pdf).buffer;
 }
+
+const fetchSafe: DocumentFetch = async (url) => {
+  const response = await globalThis.fetch(url);
+  return {
+    finalUrl: url,
+    status: response.status,
+    statusText: response.statusText,
+    headers: response.headers,
+    body: new Uint8Array(await response.arrayBuffer()),
+    redirectCount: 0,
+  };
+};
+const extractDocumentUrl = (url: string, options?: Parameters<typeof extractDocumentUrlImpl>[1]) =>
+  extractDocumentUrlImpl(url, { ...options, fetchSafe });
 
 function requestUrl(input: string | URL | Request): string {
   if (typeof input === 'string') return input;

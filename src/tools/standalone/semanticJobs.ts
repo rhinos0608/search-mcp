@@ -11,6 +11,7 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { SearchConfig } from '../../config.js';
 import { logger } from '../../logger.js';
 import { DEFAULT_SEMANTIC_MAX_BYTES } from '../../semanticLimits.js';
+import { jobErrorCode, jobTelemetry } from '../../utils/jobTelemetry.js';
 import { semanticJobs } from '../semanticJobs.js';
 import { makeResult, errorResponse, successResponse } from '../response.js';
 
@@ -110,7 +111,10 @@ export function registerSemanticJobs(server: McpServer, cfg: SearchConfig): void
       useJobSpy,
       enforceConstraints,
     }) => {
-      logger.info({ tool: 'semantic_jobs', query, maxPages, topK }, 'Tool invoked');
+      logger.info(
+        { tool: 'semantic_jobs', ...jobTelemetry({ query }), maxPages, topK },
+        'Tool invoked',
+      );
       const start = Date.now();
       try {
         const data = await semanticJobs({
@@ -163,7 +167,10 @@ export function registerSemanticJobs(server: McpServer, cfg: SearchConfig): void
         );
         return successResponse(result);
       } catch (err: unknown) {
-        logger.error({ err, tool: 'semantic_jobs' }, 'Tool failed');
+        logger.error(
+          { tool: 'semantic_jobs', stage: 'tool', errorCode: jobErrorCode(err) },
+          'Tool failed',
+        );
         return errorResponse(err, 'semantic_jobs');
       }
     },

@@ -8,9 +8,10 @@
  */
 
 import { logger } from '../logger.js';
-import { assertSafeUrl, safeResponseText } from '../httpGuards.js';
+import { assertSafeUrl, safeFetch } from '../httpGuards.js';
 import { parseSitemap, isSitemapIndex } from '../utils/sitemap.js';
 import { getUserAgent } from '../version.js';
+import { jobErrorCode, jobTelemetry } from '../utils/jobTelemetry.js';
 import type { SearchResult } from '../types.js';
 import type { CrawlPageResult, SemanticCrawlSource } from '../types.js';
 import type { CorpusSpider } from './types.js';
@@ -50,39 +51,46 @@ export class SitemapSpider implements CorpusSpider {
     const seedUrl = source.url;
     assertSafeUrl(seedUrl);
 
-    const response = await fetch(seedUrl, {
-      headers: { 'User-Agent': getUserAgent() },
-      signal: AbortSignal.timeout(30_000),
-    });
-
-    if (!response.ok) {
+    const response = await safeFetch(
+      seedUrl,
+      { headers: { 'User-Agent': getUserAgent() } },
+      { timeoutMs: 30_000, maxBytes: 10_000_000 },
+    );
+    if (response.status < 200 || response.status >= 300)
       throw new Error(`Sitemap fetch failed: HTTP ${String(response.status)} for ${seedUrl}`);
-    }
-
-    const xml = await safeResponseText(response, seedUrl);
+    const xml = new TextDecoder().decode(response.body);
     let sitemapUrls = parseSitemap(xml);
 
     // If it's a sitemap index, fetch sub-sitemaps for page URLs
     if (isSitemapIndex(xml) && sitemapUrls.length > 0) {
       logger.info(
-        { sitemapUrl: seedUrl, subSitemaps: sitemapUrls.length },
+        { subSitemaps: sitemapUrls.length },
         'Sitemap is an index; fetching sub-sitemaps',
       );
       const pageUrls: string[] = [];
       for (const subUrl of sitemapUrls.slice(0, 10)) {
         try {
           assertSafeUrl(subUrl);
-          const subResponse = await fetch(subUrl, {
-            headers: { 'User-Agent': getUserAgent() },
-            signal: AbortSignal.timeout(30_000),
-          });
-          if (subResponse.ok) {
-            const subXml = await safeResponseText(subResponse, subUrl);
+          const subResponse = await safeFetch(
+            subUrl,
+            { headers: { 'User-Agent': getUserAgent() } },
+            { timeoutMs: 30_000, maxBytes: 10_000_000 },
+          );
+          if (subResponse.status >= 200 && subResponse.status < 300) {
+            const subXml = new TextDecoder().decode(subResponse.body);
             const subUrls = parseSitemap(subXml);
             pageUrls.push(...subUrls);
           }
         } catch (err) {
-          logger.warn({ err, subUrl }, 'Failed to fetch sub-sitemap');
+          logger.warn(
+            {
+              errorCode: jobErrorCode(err),
+              status: 'failed',
+              stage: 'sub_sitemap_fetch',
+              failureCount: 1,
+            },
+            'Failed to fetch sub-sitemap',
+          );
         }
       }
       sitemapUrls = pageUrls;
@@ -120,7 +128,10 @@ export class SearchSpider implements CorpusSpider {
 
     const urls = searchResults.map((r) => r.url).filter((url) => url.length > 0);
 
-    logger.info({ query: source.query, urlsFound: urls.length }, 'Search spider discovered URLs');
+    logger.info(
+      { ...jobTelemetry({ query: source.query }), urlsFound: urls.length },
+      'Search spider discovered URLs',
+    );
 
     return urls;
   }
@@ -237,7 +248,7 @@ function filterByPathPrefix(
   try {
     seedPath = new URL(seedUrl).pathname;
   } catch {
-    logger.warn({ url: seedUrl }, 'filterByPathPrefix: invalid seed URL');
+    logger.warn('filterByPathPrefix: invalid seed URL');
     return pages;
   }
 
@@ -250,7 +261,7 @@ function filterByPathPrefix(
     try {
       pagePath = new URL(page.url).pathname;
     } catch {
-      logger.warn({ url: page.url }, 'filterByPathPrefix: malformed page URL');
+      logger.warn('filterByPathPrefix: malformed page URL');
       continue;
     }
     if (pagePath === seedPath || pagePath.startsWith(prefix)) {
@@ -261,7 +272,10 @@ function filterByPathPrefix(
   }
 
   if (dropped > 0) {
-    logger.info({ dropped, seedPath }, 'filterByPathPrefix: dropped pages outside seed path');
+    logger.info(
+      { dropped, seedPathLength: Math.min(seedPath.length, 4096) },
+      'filterByPathPrefix: dropped pages outside seed path',
+    );
   }
 
   return kept;

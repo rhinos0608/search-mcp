@@ -1,6 +1,7 @@
 import { logger } from '../logger.js';
 import { unavailableError } from '../errors.js';
-import { assertSafeUrl } from '../httpGuards.js';
+import { jobErrorCode } from '../utils/jobTelemetry.js';
+import { assertSafeUrl, safeFetch } from '../httpGuards.js';
 import { webCrawl, type WebCrawlOptions } from './webCrawl.js';
 import { webSearch } from './webSearch.js';
 import { chunkMarkdown } from '../chunking.js';
@@ -300,7 +301,10 @@ export async function retrieveSemanticChunks(
   // Soft lexical constraint (IDF-weighted token coverage)
   const lexicalResult = applySoftLexicalConstraint(coherent, opts.query, chunks);
   if (lexicalResult.warning) {
-    logger.warn(lexicalResult.warning);
+    logger.warn(
+      { warningLength: lexicalResult.warning.length },
+      'Soft lexical constraint produced warning',
+    );
   }
   if (lexicalResult.filtered.length < coherent.length) {
     logger.info(
@@ -583,7 +587,10 @@ export async function embedAndRank(
   // 9. Soft lexical constraint (IDF-weighted token coverage)
   const lexicalResult = applySoftLexicalConstraint(coherent, opts.query, chunks);
   if (lexicalResult.warning) {
-    logger.warn(lexicalResult.warning);
+    logger.warn(
+      { warningLength: lexicalResult.warning.length },
+      'Soft lexical constraint produced warning',
+    );
   }
   if (lexicalResult.filtered.length < coherent.length) {
     logger.info(
@@ -637,7 +644,10 @@ export async function embedAndRank(
       }
       logger.info({ topK: opts.topK, candidates: rerankCount }, 'Cross-encoder re-ranking applied');
     } catch (err) {
-      logger.warn({ err }, 'Cross-encoder re-ranking failed, falling back to bi-encoder ranking');
+      logger.warn(
+        { errorCode: jobErrorCode(err) },
+        'Cross-encoder re-ranking failed, falling back to bi-encoder ranking',
+      );
       topChunks = candidates.slice(0, opts.topK);
     }
   } else {
@@ -695,7 +705,10 @@ export async function applyReranking(
       };
     });
   } catch (err) {
-    logger.warn({ err }, 'Cross-encoder re-ranking failed, falling back to bi-encoder ranking');
+    logger.warn(
+      { errorCode: jobErrorCode(err) },
+      'Cross-encoder re-ranking failed, falling back to bi-encoder ranking',
+    );
     return candidates.slice(0, topK);
   }
 }
@@ -749,15 +762,15 @@ export function filterSafeUrls(urls: string[], trustConfig?: DomainTrustConfig):
 
       const trust = evaluateDomainTrust(u, trustOptions);
       if (trust.tier === 'blocked') {
-        logger.warn({ url: u, trust }, 'semantic_crawl: dropping blocked adapter URL');
+        logger.warn({ trustTier: trust.tier }, 'semantic_crawl: dropping blocked adapter URL');
         continue;
       }
       if (trust.tier === 'suspicious') {
-        logger.warn({ url: u, trust }, 'semantic_crawl: suspicious adapter URL');
+        logger.warn({ trustTier: trust.tier }, 'semantic_crawl: suspicious adapter URL');
       }
       safe.push(u);
     } catch {
-      logger.warn({ url: u }, 'semantic_crawl: dropping unsafe adapter URL');
+      logger.warn({ errorCode: 'ERROR' }, 'semantic_crawl: dropping unsafe adapter URL');
     }
   }
   return safe;
@@ -842,7 +855,7 @@ export function filterByPathPrefix(
   try {
     seedPath = new URL(seedUrl).pathname;
   } catch {
-    logger.warn({ url: seedUrl }, 'semantic_crawl: invalid seed URL; skipping path filter');
+    logger.warn({ errorCode: 'ERROR' }, 'semantic_crawl: invalid seed URL; skipping path filter');
     return { kept: pages, droppedCount: 0, malformedCount: 0, droppedUrls: [] };
   }
   const prefix = seedPath.endsWith('/') ? seedPath : `${seedPath}/`;
@@ -855,7 +868,7 @@ export function filterByPathPrefix(
     try {
       pagePath = new URL(page.url).pathname;
     } catch {
-      logger.warn({ url: page.url }, 'semantic_crawl: dropping page with malformed URL');
+      logger.warn({ errorCode: 'ERROR' }, 'semantic_crawl: dropping page with malformed URL');
       malformed++;
       droppedUrls.push(page.url);
       continue;
@@ -869,7 +882,7 @@ export function filterByPathPrefix(
   }
   if (dropped > 0 || malformed > 0) {
     logger.info(
-      { dropped, malformed, seedPath },
+      { dropped, malformed },
       'semantic_crawl: dropped pages outside seed path or with malformed URLs',
     );
   }
@@ -1026,7 +1039,7 @@ export async function crawlSeeds(
         }
         // binary or failed — fall through to Crawl4AI
         logger.debug(
-          { seedUrl, unsupported: docResult.unsupported },
+          { unsupported: docResult.unsupported, seedLength: seedUrl.length },
           'semantic_crawl: document URL extraction skipped or failed, falling back to Crawl4AI',
         );
       }
@@ -1082,13 +1095,16 @@ export async function crawlSeeds(
               }
             } catch (fallbackErr: unknown) {
               logger.warn(
-                { err: fallbackErr, seedUrl, fallbackUrl },
+                { errorCode: jobErrorCode(fallbackErr) },
                 'semantic_crawl: document fallback crawl failed',
               );
             }
           }
         }
-        logger.warn({ err, seedUrl }, 'semantic_crawl: seed crawl failed');
+        logger.warn(
+          { errorCode: jobErrorCode(err), seedLength: seedUrl.length },
+          'semantic_crawl: seed crawl failed',
+        );
         return { seedUrl, result: undefined, error: err };
       }
     },
@@ -1141,7 +1157,7 @@ export async function crawlSeeds(
     }
     if (pages.length > perSeedPages) {
       logger.warn(
-        { requested: perSeedPages, received: pages.length, seedUrl: entry.seedUrl },
+        { requested: perSeedPages, received: pages.length },
         'semantic_crawl: crawl4ai returned more pages than requested; truncating client-side',
       );
       pages = pages.slice(0, perSeedPages);
@@ -1288,10 +1304,7 @@ export function pagesToCorpus(
     // will have the consent wall's content but still report the 4xx status.
     if (page.statusCode !== null && page.statusCode >= 400 && page.statusCode < 500) {
       droppedErrorPages++;
-      logger.debug(
-        { url: page.url, statusCode: page.statusCode },
-        'Dropping page with 4xx status code',
-      );
+      logger.debug({ statusCode: page.statusCode }, 'Dropping page with 4xx status code');
       continue;
     }
 
@@ -1300,7 +1313,7 @@ export function pagesToCorpus(
     // chunks that lexically match many queries.
     if (isConsentWallRedirect(page.url, page.markdown)) {
       droppedBannerPages++;
-      logger.debug({ url: page.url }, 'Dropping page that redirected to consent wall');
+      logger.debug({ status: 'dropped' }, 'Dropping page that redirected to consent wall');
       continue;
     }
 
@@ -1622,37 +1635,39 @@ export async function semanticCrawl(
     case 'sitemap': {
       seedUrl = opts.source.url;
       assertSafeUrl(seedUrl);
-      const response = await fetch(seedUrl, {
-        headers: { 'User-Agent': getUserAgent() },
-        signal: AbortSignal.timeout(30_000),
-      });
-      if (!response.ok) {
+      const response = await safeFetch(
+        seedUrl,
+        { headers: { 'User-Agent': getUserAgent() } },
+        { timeoutMs: 30_000, maxBytes: 10_000_000 },
+      );
+      if (response.status < 200 || response.status >= 300) {
         throw new Error(`Sitemap fetch failed: HTTP ${String(response.status)} for ${seedUrl}`);
       }
-      const xml = await response.text();
+      const xml = new TextDecoder().decode(response.body);
       let sitemapUrls = parseSitemap(xml);
 
       // If it's a sitemap index, fetch sub-sitemaps for page URLs
       if (isSitemapIndex(xml) && sitemapUrls.length > 0) {
         logger.info(
-          { sitemapUrl: seedUrl, subSitemaps: sitemapUrls.length },
+          { subSitemaps: sitemapUrls.length },
           'Sitemap is an index; fetching sub-sitemaps',
         );
         const pageUrls: string[] = [];
         for (const subUrl of sitemapUrls.slice(0, 10)) {
           try {
             assertSafeUrl(subUrl);
-            const subResponse = await fetch(subUrl, {
-              headers: { 'User-Agent': getUserAgent() },
-              signal: AbortSignal.timeout(30_000),
-            });
-            if (subResponse.ok) {
-              const subXml = await subResponse.text();
+            const subResponse = await safeFetch(
+              subUrl,
+              { headers: { 'User-Agent': getUserAgent() } },
+              { timeoutMs: 30_000, maxBytes: 10_000_000 },
+            );
+            if (subResponse.status >= 200 && subResponse.status < 300) {
+              const subXml = new TextDecoder().decode(subResponse.body);
               const subUrls = parseSitemap(subXml);
               pageUrls.push(...subUrls);
             }
           } catch (err) {
-            logger.warn({ err, subUrl }, 'Failed to fetch sub-sitemap');
+            logger.warn({ errorCode: jobErrorCode(err) }, 'Failed to fetch sub-sitemap');
           }
         }
         sitemapUrls = pageUrls;
@@ -1691,7 +1706,6 @@ export async function semanticCrawl(
       }
       logger.info(
         {
-          sitemapUrl: seedUrl,
           urlsFound: sitemapUrls.length,
           urlsUsed: selectedUrls.length,
         },
@@ -1751,7 +1765,7 @@ export async function semanticCrawl(
       const safeUrls = filterSafeUrls(searchUrls, opts.domainTrust).slice(0, opts.maxPages);
       logger.info(
         {
-          searchQuery: opts.source.query,
+          queryLength: opts.source.query.length,
           urlsFound: searchUrls.length,
           urlsUsed: safeUrls.length,
         },
@@ -1908,7 +1922,7 @@ export async function semanticCrawl(
       const ctxMsg =
         'useContextualEmbeddings was requested but is not supported for cached corpora. The corpus was built with the embeddings from the original crawl. Re-crawl with the original source type to apply contextual embeddings.';
       crawlWarnings.push(ctxMsg);
-      logger.warn({ corpusId: opts.source.corpusId }, ctxMsg);
+      logger.warn({ sourceType: opts.source.type }, ctxMsg);
     }
 
     const topChunks = await retrieveSemanticChunks(corpusChunks, {

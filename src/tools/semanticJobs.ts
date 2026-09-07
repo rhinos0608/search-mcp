@@ -1,5 +1,6 @@
 import { loadConfig } from '../config.js';
 import { logger } from '../logger.js';
+import { jobErrorCode, jobTelemetry } from '../utils/jobTelemetry.js';
 import {
   DEFAULT_SEMANTIC_MAX_BYTES,
   applySemanticByteBudget,
@@ -98,7 +99,7 @@ export async function semanticJobs(
     if (opts.location?.[0] !== undefined) {
       if (opts.location.length > 1) {
         logger.warn(
-          { locations: opts.location },
+          { locationCount: opts.location.length },
           'semantic_jobs: JobSpy only supports a single location; using the first entry.',
         );
       }
@@ -193,7 +194,10 @@ export async function semanticJobs(
   const addJobSuffix = opts.addJobSuffix !== false;
   const query = buildSearchQuery(opts.query, constraints, addJobSuffix);
 
-  logger.info({ tool: 'semantic_jobs', query, maxPages, topK }, 'Starting semantic job search');
+  logger.info(
+    { tool: 'semantic_jobs', ...jobTelemetry({ query, location: opts.location }), maxPages, topK },
+    'Starting semantic job search',
+  );
 
   const searchFn = deps.search ?? defaultSearch;
   const crawlFn = deps.crawl ?? defaultCrawl;
@@ -209,8 +213,8 @@ export async function semanticJobs(
       logger.warn(
         {
           tool: 'semantic_jobs',
-          originalQuery: query,
-          constrained: serpQuality.constrainedQuery,
+          queryLength: query.length,
+          constrainedLength: serpQuality.constrainedQuery.length,
           reasons: serpQuality.reasons,
         },
         'SERP quality check failed; retrying with constrained query',
@@ -222,7 +226,7 @@ export async function semanticJobs(
   if (searchResults.length === 0 && constraints.location !== undefined) {
     const looseQuery = buildSearchQuery(opts.query, {}, addJobSuffix);
     logger.info(
-      { tool: 'semantic_jobs', originalQuery: query, looseQuery },
+      { tool: 'semantic_jobs', queryLength: query.length, looseQueryLength: looseQuery.length },
       'Zero results with constrained query; retrying with location-agnostic query',
     );
     searchResults = await searchFn(looseQuery, maxPages);
@@ -288,7 +292,15 @@ export async function processJobSearchResults(
   for (const page of crawledPages) {
     if (!page.success) {
       warnings.push(`Crawl failed for "${page.url}": ${page.error ?? 'unknown crawl failure'}`);
-      logger.warn({ url: page.url, err: page.error }, 'semantic_jobs crawl failed');
+      logger.warn(
+        {
+          tool: 'semantic_jobs',
+          stage: 'crawl',
+          status: 'failed',
+          errorCode: 'CRAWL_FAILED',
+        },
+        'semantic_jobs crawl failed',
+      );
     }
   }
 
@@ -310,7 +322,7 @@ export async function processJobSearchResults(
     if (!isJobPage) {
       _pageIntentSkipped++;
       logger.debug(
-        { url: page.url, textLen: pageText.length },
+        { tool: 'semantic_jobs', stage: 'page_intent', textLength: pageText.length },
         'Skipped non-job page before extraction',
       );
       continue;
@@ -631,8 +643,10 @@ async function concurrencyLimitedMap<T, R>(
       try {
         results[index] = await fn(items[index] as T);
       } catch (err: unknown) {
-        const reason = err instanceof Error ? err.message : String(err);
-        logger.warn({ err: reason, index }, 'concurrencyLimitedMap: item failed');
+        logger.warn(
+          { tool: 'semantic_jobs', stage: 'concurrency', index, errorCode: jobErrorCode(err) },
+          'concurrencyLimitedMap: item failed',
+        );
       }
     }
   }
@@ -664,16 +678,22 @@ async function crawlWithRetry(
       });
       return { url, page: result.pages[0] };
     } catch (err) {
-      lastError = err instanceof Error ? err.message : String(err);
+      lastError = jobErrorCode(err);
       if (attempt < maxRetries) {
         const delay = RETRY_BASE_DELAY_MS * 2 ** attempt;
-        logger.debug({ url, attempt, delay, err: lastError }, 'Crawl attempt failed, retrying');
+        logger.debug(
+          { tool: 'semantic_jobs', stage: 'crawl', attempt, delay, errorCode: lastError },
+          'Crawl attempt failed, retrying',
+        );
         await sleep(delay);
       }
     }
   }
 
-  logger.warn({ url, err: lastError, maxRetries }, 'Crawl failed after all retries');
+  logger.warn(
+    { tool: 'semantic_jobs', stage: 'crawl', errorCode: lastError ?? 'CRAWL_FAILED', maxRetries },
+    'Crawl failed after all retries',
+  );
   return {
     url,
     page: {

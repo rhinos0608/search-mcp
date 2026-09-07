@@ -1,7 +1,8 @@
 import { Readability } from '@mozilla/readability';
 import { JSDOM } from 'jsdom';
 import { logger } from '../logger.js';
-import { assertSafeUrl, safeResponseText, TRUNCATED_MARKER } from '../httpGuards.js';
+import { assertSafeUrl, safeFetch, TRUNCATED_MARKER } from '../httpGuards.js';
+import type { DocumentFetch } from '../utils/documentExtraction.js';
 import { parseError } from '../errors.js';
 import { ToolCache, cacheKey } from '../cache.js';
 import { retryWithBackoff } from '../retry.js';
@@ -68,13 +69,16 @@ function fallbackExtract(document: Document): { content: string; textContent: st
  * Note: extractionConfig is not supported in the Readability fallback path.
  * When crawl4ai is configured, server.ts forwards extractionConfig to webCrawl.
  */
-export async function webRead(url: string): Promise<ArticleResult> {
+export async function webRead(
+  url: string,
+  options?: { fetchSafe?: DocumentFetch },
+): Promise<ArticleResult> {
   assertSafeUrl(url);
 
   const key = cacheKey('web-read', url);
   const cached = cache.get(key);
   if (cached !== null) {
-    logger.debug({ url }, 'Web read cache hit');
+    logger.debug({ urlLength: url.length }, 'Web read cache hit');
     return cached;
   }
 
@@ -87,20 +91,21 @@ export async function webRead(url: string): Promise<ArticleResult> {
   try {
     const response = await retryWithBackoff(
       () =>
-        fetch(url, {
-          headers: {
-            'User-Agent':
-              'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
-            Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-            'Accept-Language': 'en-US,en;q=0.9',
+        (options?.fetchSafe ?? safeFetch)(
+          url,
+          {
+            headers: {
+              'User-Agent': 'Mozilla/5.0 (compatible; search-mcp)',
+              Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+              'Accept-Language': 'en-US,en;q=0.9',
+            },
           },
-          signal: controller.signal,
-          redirect: 'follow',
-        }),
+          { signal: controller.signal, timeoutMs: 30_000, maxBytes: 50_000_000 },
+        ),
       { label: 'web-read', maxAttempts: 2 },
     );
 
-    if (!response.ok) {
+    if (response.status < 200 || response.status >= 300) {
       throw new Error(`HTTP ${String(response.status)} ${response.statusText} fetching "${url}"`);
     }
 
@@ -109,7 +114,7 @@ export async function webRead(url: string): Promise<ArticleResult> {
       throw new Error(`URL "${url}" returned non-HTML content type: ${contentType}`);
     }
 
-    html = await safeResponseText(response, url);
+    html = new TextDecoder().decode(response.body);
   } catch (err) {
     const error = err instanceof Error ? err : new Error(String(err));
     if (error.name === 'AbortError') {
@@ -207,7 +212,11 @@ export async function webRead(url: string): Promise<ArticleResult> {
       }
 
       logger.debug(
-        { url, title: result.title, textContentLength: result.textContent.length },
+        {
+          urlLength: url.length,
+          title: result.title,
+          textContentLength: result.textContent.length,
+        },
         'Web read complete (fallback)',
       );
 
@@ -225,7 +234,7 @@ export async function webRead(url: string): Promise<ArticleResult> {
   }
 
   logger.debug(
-    { url, title: result.title, textContentLength: result.textContent.length },
+    { urlLength: url.length, title: result.title, textContentLength: result.textContent.length },
     'Web read complete',
   );
 
