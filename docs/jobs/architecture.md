@@ -49,6 +49,7 @@ One source failure does not fail a run. Coverage reports `succeeded`, `partial`,
 | `src/jobs/profile/`                     | secure ingestion, extraction, fingerprinting, minimization                 |
 | `src/jobs/acquisition/`                 | adapters, registry, coordinator, budgets, outcomes                         |
 | `src/jobs/acquisition/policy/`          | independent versioned SourcePolicy registry                                |
+| `src/jobs/acquisition/sourceClass/`     | source-class registry, capability classification                           |
 | `src/jobs/acquisition/adapters/`        | JobSpy, ATS, government, crawl/search implementations                      |
 | `src/jobs/extraction/`                  | structured/unstructured extraction and projections                         |
 | `src/jobs/enrichment/`                  | listing, attachment, framework, employer enrichment                        |
@@ -129,6 +130,6 @@ Checkpoints: A (Waves 0–4) verifies shared controls, canonical multi-source re
 | Python JobSpy sidecar                                       | delete candidate after deployment/package proof                            |
 | fixtures/evaluation                                         | retain and freeze baseline before tuning                                   |
 
-See [ADR index](adr/index.md), [research ledger](research-ledger.md), [source coverage](source-coverage.md), and [implementation graph](implementation-graph.md).
+See [ADR index](adr/index.md) (includes ADR-021 source-class registry, ADR-022 MCP surface narrow supersede), [research ledger](research-ledger.md), [source coverage](source-coverage.md), and [implementation graph](implementation-graph.md).
 
 Implementation and offline closure evidence: [Wave 3 acquisition closure evidence](wave-3-acquisition-closure-evidence.md).

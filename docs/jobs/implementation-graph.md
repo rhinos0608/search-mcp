@@ -47,6 +47,7 @@ graph LR
 | --------------------------------- | ---------------------------- | ---------------------------- |
 | W3-A acquisition contracts        | W0, W1                       | W3-B, W3-C, W3-D, W3-E, W3-F |
 | W3-B edge policy coordinator      | W3-A, SourcePolicy skeleton  | W3-G, direct-call gating     |
+| W3-C1 source-class registry       | W3-B                         | W3-C, source classification  |
 | W3-C adapter registry             | W3-A                         | W3-G                         |
 | W3-D indexed providers            | W3-A, W3-B, W3-C             | W3-G                         |
 | W3-E JobSpy adapter               | W3-A, W3-B, W3-C             | W3-G                         |

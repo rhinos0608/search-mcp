@@ -22,5 +22,7 @@ Authoritative decisions are summarized in [architecture](../architecture.md). Fu
 - [ADR-018 Evaluation](ADR-018-evaluation.md)
 - [ADR-019 Retention](ADR-019-retention.md)
 - [ADR-020 Gate decisions](ADR-020-gate-decisions.md)
+- [ADR-021 Source-class registry](ADR-021-source-class-registry.md)
+- [ADR-022 MCP surface narrow supersede](ADR-022-mcp-surface-supersede.md)
 
-Status convention: Approved decisions are frozen; ADR-009 property is approved but mechanism is deferred; ADR-019 is deferred. Source-access gates remain unresolved where noted in `source-coverage.md`.
+Status convention: Approved decisions are frozen; ADR-009 property is approved but mechanism is chosen-but-unactivated (only `MemoryKeyProvider`, no production profile persist until ADR-019 activation); ADR-019 is deferred. ADR-022 narrowly supersedes ADR-020 D16 for additive jobs MCP tools only. Source-access gates remain unresolved where noted in `source-coverage.md`.
