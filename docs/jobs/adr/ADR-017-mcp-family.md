@@ -8,4 +8,4 @@ Provide strongly typed `jobs_search` plus one compact `jobs` family with outer `
 
 ## Consequences and verification
 
-Descriptions stay out of base schema; compatibility `semantic_jobs` remains registered with additive metadata. Generated docs/tests must match schemas.
+Descriptions stay out of base schema; `jobs_search` and `jobs` are sole jobs MCP surfaces. Generated docs/tests must match schemas. ADR-026 records removal of unpublished legacy semantic jobs.

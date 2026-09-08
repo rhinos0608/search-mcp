@@ -7,10 +7,10 @@
 | Release          | Status         | Notes                                                                                                                                                            |
 | ---------------- | -------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **V3.0.0**       | ✅ Done        | RAG pipeline extraction, YouTube/Reddit adapters                                                                                                                 |
-| **V3.0.5**       | ✅ Done        | Job adapter MVP, `semantic_jobs` tool                                                                                                                            |
+| **V3.0.5**       | ✅ Historical  | Legacy job adapter MVP (removed; see ADR-026)                                                                                                                    |
 | **V3.1 Phase 1** | ✅ Done        | SQLite corpus cache, Exa neural search                                                                                                                           |
 | **V3.1.0 Code**  | ✅ Done        | Tree-sitter adapter, GitHub guardrails, `semantic_github_code`                                                                                                   |
-| **V3.1.1**       | ✅ Done        | Crawl reliability patch: HTML threading for `semantic_jobs`, timeout scaling for `web_crawl`, `semantic_crawl` size guard                                        |
+| **V3.1.1**       | ✅ Historical  | Crawl reliability patch for legacy jobs, timeout scaling for `web_crawl`, `semantic_crawl` size guard                                                            |
 | **V3.1.5**       | ✅ Done        | document extraction integration, code review fixes across RAG pipeline                                                                                           |
 | **V3.2.0**       | ✅ In progress | Domain adapters (Stack Overflow, HN, academic, news), full job pipeline, `semantic_search`, constraint ranking, dedup, distribution packaging _(parallel track)_ |
 | **V3.3.0**       | ✅ Done        | Kill chain extraction, contextual embeddings, render recovery                                                                                                    |

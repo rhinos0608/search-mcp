@@ -24,7 +24,6 @@ Core invariants:
 
 ```text
 MCP client → jobs_search / jobs family
-semantic_jobs → compatibility mapper → jobs_search
 profile or inline content → bounded intent planner
 intent → locale/domain packs + independent SourcePolicy
 policy → additive parallel adapters/manual import
@@ -40,32 +39,31 @@ One source failure does not fail a run. Coverage reports `succeeded`, `partial`,
 
 ## Module boundaries
 
-| Path                                    | Ownership                                                                  |
-| --------------------------------------- | -------------------------------------------------------------------------- |
-| `src/jobs/domain/`                      | IDs, canonical schemas, evidence, claims, flags, lifecycle, identity types |
-| `src/jobs/packs/`                       | pack contracts, validation, registry, versioning                           |
-| `src/jobs/packs/locales/au-nsw-sydney/` | geography, salary, classifications, terminology                            |
-| `src/jobs/packs/domains/`               | role topology, transfer, requirement interpretation                        |
-| `src/jobs/profile/`                     | secure ingestion, extraction, fingerprinting, minimization                 |
-| `src/jobs/acquisition/`                 | adapters, registry, coordinator, budgets, outcomes                         |
-| `src/jobs/acquisition/policy/`          | independent versioned SourcePolicy registry                                |
-| `src/jobs/acquisition/sourceClass/`     | source-class registry, capability classification                           |
-| `src/jobs/acquisition/adapters/`        | JobSpy, ATS, government, crawl/search implementations                      |
-| `src/jobs/extraction/`                  | structured/unstructured extraction and projections                         |
-| `src/jobs/enrichment/`                  | listing, attachment, framework, employer enrichment                        |
-| `src/jobs/identity/`                    | features, clustering, reversible decisions                                 |
-| `src/jobs/persistence/`                 | SQLite repositories, migrations, lifecycle/run/profile storage             |
-| `src/jobs/retrieval/`                   | fielded BM25, role-family, semantic retrieval, candidate union             |
-| `src/jobs/assessment/`                  | requirement matching, capability transfer, fit, flags                      |
-| `src/jobs/ranking/`                     | transforms, grouped policy, utility, coverage, confidence, diversity       |
-| `src/jobs/reasoning/`                   | packets, submissions, optional provider, fallback                          |
-| `src/jobs/feedback/`                    | interactions and bounded learned residual                                  |
-| `src/jobs/evaluation/`                  | frozen corpora, labels, metrics, manifests, gates                          |
-| `src/jobs/orchestration/`               | run state machine and cost budgets                                         |
-| `src/tools/standalone/jobsSearch.ts`    | high-level MCP tool                                                        |
-| `src/tools/families/jobs.ts`            | compact composable family                                                  |
-| `src/tools/standalone/semanticJobs.ts`  | compatibility wrapper                                                      |
-| `docs/jobs/`                            | architecture, ADRs, schemas, source matrix, migration, evaluation          |
+| Path                                    | Ownership                                                                                                                              |
+| --------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| `src/jobs/domain/`                      | IDs, canonical schemas, evidence, claims, flags, lifecycle, identity types                                                             |
+| `src/jobs/packs/`                       | pack contracts, validation, registry, versioning                                                                                       |
+| `src/jobs/packs/locales/au-nsw-sydney/` | geography, salary, classifications, terminology                                                                                        |
+| `src/jobs/packs/domains/`               | role topology, transfer, requirement interpretation                                                                                    |
+| `src/jobs/profile/`                     | secure ingestion, extraction, fingerprinting, minimization                                                                             |
+| `src/jobs/acquisition/`                 | adapters, registry, coordinator, budgets, outcomes                                                                                     |
+| `src/jobs/acquisition/policy/`          | independent versioned SourcePolicy registry                                                                                            |
+| `src/jobs/acquisition/sourceClass/`     | source-class registry, capability classification                                                                                       |
+| `src/jobs/acquisition/adapters/`        | In-process JobSpy behind injected port; ATS, government, crawl/search implementations (boards default empty; policy evidence required) |
+| `src/jobs/extraction/`                  | structured/unstructured extraction and projections                                                                                     |
+| `src/jobs/enrichment/`                  | listing, attachment, framework, employer enrichment                                                                                    |
+| `src/jobs/identity/`                    | features, clustering, reversible decisions                                                                                             |
+| `src/jobs/persistence/`                 | SQLite repositories, migrations, lifecycle/run/profile storage                                                                         |
+| `src/jobs/retrieval/`                   | fielded BM25, role-family, semantic retrieval, candidate union                                                                         |
+| `src/jobs/assessment/`                  | requirement matching, capability transfer, fit, flags                                                                                  |
+| `src/jobs/ranking/`                     | transforms, grouped policy, utility, coverage, confidence, diversity                                                                   |
+| `src/jobs/reasoning/`                   | packets, submissions, optional provider, fallback                                                                                      |
+| `src/jobs/feedback/`                    | interactions and bounded learned residual                                                                                              |
+| `src/jobs/evaluation/`                  | frozen corpora, labels, metrics, manifests, gates                                                                                      |
+| `src/jobs/orchestration/`               | run state machine and cost budgets                                                                                                     |
+| `src/tools/standalone/jobsSearch.ts`    | high-level MCP tool                                                                                                                    |
+| `src/tools/families/jobs.ts`            | compact composable family                                                                                                              |
+| `docs/jobs/`                            | architecture, ADRs, schemas, source matrix, migration, evaluation                                                                      |
 
 Dependency direction: domain is foundational; packs and domain services depend on it; orchestration depends on services; MCP tools depend on orchestration. Adapters depend on acquisition contracts and SourcePolicy, never define policy. Packs never import adapters. Domain never imports persistence, MCP, LLM, or locale data. Reasoners receive bounded redacted packets only.
 
@@ -95,11 +93,11 @@ Reasoning packets contain bounded candidate summaries, ambiguous questions, evid
 
 `jobs.sqlite` holds migrations, postings, listings, observations, memberships, evidence, claims/resolutions, requirements, locations, identity decisions/clusters, snapshots/diffs, lifecycle events, runs/slices/candidates/results, enrichment cache, source health, and policy revisions. `profiles.sqlite` must remain separate. SQLCipher whole-DB encryption and OS keychain storage are selected but currently inactive; activation is blocked by retention work (ADR-019) and production key-provider implementation.
 
-Migration default: create schema → backfill legacy postings as low-confidence legacy listings/observations → shadow pipeline → compare → cut over → retain compatibility projection → legacy read-only → zero-read/mutation soak → delete only with explicit approval. No default dual-write. Dual-write requires concrete mutation-consumer proof, reconciliation/idempotency/conflict/monitoring/exit plan, and approval. SQLite requires WAL, foreign keys, busy timeout, bounded transactions, integrity checks, checksums, backup, resumable backfill, no destructive down migration, and `synchronous=FULL` until recovery evidence supports change.
+Migration default for future schema changes remains expand → verify → switch → contract. The unpublished legacy semantic jobs pipeline was explicitly removed; standalone legacy comparison benchmarks are deferred. No default dual-write. Dual-write requires concrete mutation-consumer proof, reconciliation/idempotency/conflict/monitoring/exit plan, and approval. SQLite requires WAL, foreign keys, busy timeout, bounded transactions, integrity checks, checksums, backup, resumable backfill, no destructive down migration, and `synchronous=FULL` until recovery evidence supports change.
 
 ## MCP surface and compatibility
 
-Approved surfaces: high-level `jobs_search`, compact `jobs` family (`capabilities`, `describe_action`, profile actions, `import_listing`, planning/discovery/enrichment/reasoning/finalization/run/posting/feedback/saved actions), and retained `semantic_jobs` compatibility wrapper. Outer family schema is compact `action` plus bounded request; selected action validates strict internal schema. Existing compatibility output remains stable during documented migration; new metadata is additive; removal requires consumer notice and zero/accepted usage evidence.
+Approved surfaces: high-level `jobs_search` and compact `jobs` family (`search`, `capabilities`, `describe_action`). Outer family schema is compact `action` plus bounded request; selected action validates strict internal schema. Acquisition uses policy-gated in-process JobSpy only when explicitly enabled.
 
 ## Security and policy
 
@@ -111,24 +109,20 @@ Encryption property is approved (separate encrypted profile store, key separatio
 
 ## Authorization, waves, and checkpoints
 
-Wave 0 (PII-safe telemetry, safe fetch, parser/network budgets, SourcePolicy skeleton), Wave 1 (IDs/evidence/claims, listing/observation, canonical posting/intent, reversible identity contract, pack contracts, legacy mapper), Wave 3 indexed discovery/acquisition, and bounded non-persistent Wave 2A are authorized. Wave 0 precedes source expansion. W2A and W3 may proceed concurrently. Wave 2B profile persistence is blocked by retention work (ADR-019) and inactive encryption activation (SQLCipher + OS keychain selected, production key-provider not implemented). Wave 7 production persistence, Wave 10 packet persistence, Wave 12 debug persistence, and ambiguous source enablement retain settlement gates. Existing persistence and `query_log` gates remain unchanged.
+Wave 0 (PII-safe telemetry, safe fetch, parser/network budgets, SourcePolicy skeleton), Wave 1 (IDs/evidence/claims, listing/observation, canonical posting/intent, reversible identity contract, pack contracts), Wave 3 indexed discovery/acquisition, and bounded non-persistent Wave 2A are authorized. Wave 0 precedes source expansion. W2A and W3 may proceed concurrently. Wave 2B profile persistence is blocked by retention work (ADR-019) and inactive encryption activation (SQLCipher + OS keychain selected, production key-provider not implemented). Wave 7 production persistence, Wave 10 packet persistence, Wave 12 debug persistence, and ambiguous source enablement retain settlement gates. Existing persistence and `query_log` gates remain unchanged.
 
 Checkpoints: A (Waves 0–4) verifies shared controls, canonical multi-source records, immutable observations, independent policy, manual import, and generic core. B (5–7) verifies evidence-backed extraction, queryable fields, conflicts, merge/split, lifecycle, and migration comparison. C (8–10) verifies fixed-budget recall, stable BM25, missing-data semantics, grouped scores, standalone parity, and bounded host changes. D (11–14) verifies learning precedence, MCP progressive actions, compatibility, settled retention/encryption, no unexplained machinery, and no unresolved P0/P1 findings.
 
 ## Disposition
 
-| Component                                                   | Disposition                                                                |
-| ----------------------------------------------------------- | -------------------------------------------------------------------------- |
-| `src/rag/adapters/job.ts`                                   | retain/refactor into projections, claims, evidence                         |
-| document extraction/parsers                                 | retain; harden behind constrained worker                                   |
-| `src/rag/bm25.ts`, `src/rag/embedding.ts`, generic pipeline | retain generic; job retrieval versions integration                         |
-| JobSpy client/pipeline/ranking/dedup                        | refactor/replace incrementally behind compatibility                        |
-| quality checks                                              | split: retain junk/bot/page intent; retire hardcoded locale/role rejection |
-| graph DB                                                    | migrate, read-only after cutover                                           |
-| semantic jobs tools                                         | retain as compatibility mapper/deprecation path                            |
-| source metadata/instrumentation/http guards                 | refactor/extend; remove PII and harden before adapters                     |
-| Python JobSpy sidecar                                       | delete candidate after deployment/package proof                            |
-| fixtures/evaluation                                         | retain and freeze baseline before tuning                                   |
+| Component                                                   | Disposition                                            |
+| ----------------------------------------------------------- | ------------------------------------------------------ |
+| document extraction/parsers                                 | retain; harden behind constrained worker               |
+| `src/rag/bm25.ts`, `src/rag/embedding.ts`, generic pipeline | retain generic; job retrieval versions integration     |
+| In-process JobSpy acquisition adapter                       | retain behind independent policy and capability gates  |
+| source metadata/instrumentation/http guards                 | refactor/extend; remove PII and harden before adapters |
+| Python JobSpy sidecar                                       | removed; no deployment path                            |
+| fixtures/evaluation                                         | retain and freeze baseline before tuning               |
 
 See [ADR index](adr/index.md) (includes ADR-021 source-class registry, ADR-022 MCP surface narrow supersede), [research ledger](research-ledger.md), [source coverage](source-coverage.md), and [implementation graph](implementation-graph.md).
 

@@ -39,7 +39,7 @@ This is not an OS sandbox. Child-process termination is a resource and failure b
 
 Deployment must supply controls absent from portable application code:
 
-- run server, browser automation, Crawl4AI, embedding, and JobSpy sidecars as separate principals/containers where possible;
+- run server, browser automation, Crawl4AI, embedding, and JobSpy integrations as separate principals/containers where possible; JobSpy is now in-process `jobspy-js`, not a Python sidecar;
 - deny egress by default (`egress_denied`) for parser/profile workers, then allow only required operator endpoints;
 - apply CPU and wall-clock limits, native-memory/container memory limits, process and file-descriptor limits;
 - mount only required filesystem paths read-only where possible; keep profiles and credentials outside the server's default `$HOME` capability;
@@ -50,9 +50,10 @@ These are deployment requirements, not claims that Node.js currently enforces th
 
 ## Residual risks and owners
 
-| Risk                                            | Current position                                               | Owner / settlement                                     |
-| ----------------------------------------------- | -------------------------------------------------------------- | ------------------------------------------------------ |
-| Parser native memory and network access         | Not isolated by application                                    | Deployment owner; hardened parser capability in Wave 2 |
-| Browser or Crawl4AI escape/egress               | Separate process boundary required; not covered by `safeFetch` | Deployment/security owner                              |
-| Profile encryption and retention                | Mechanism and values unresolved                                | Jobs architecture owner; encryption/retention ADR      |
-| Source-policy enforcement in legacy acquisition | Skeleton exists, legacy JobSpy is not wired to it              | Acquisition owner; Wave 3 coordinator                  |
+| Risk                                    | Current position                                                                               | Owner / settlement                                     |
+| --------------------------------------- | ---------------------------------------------------------------------------------------------- | ------------------------------------------------------ |
+| Parser native memory and network access | Not isolated by application                                                                    | Deployment owner; hardened parser capability in Wave 2 |
+| Browser or Crawl4AI escape/egress       | Separate process boundary required; not covered by `safeFetch`                                 | Deployment/security owner                              |
+| Profile encryption and retention        | Mechanism and values unresolved                                                                | Jobs architecture owner; encryption/retention ADR      |
+| JobSpy third-party client cancellation  | `jobspy-js` receives composed AbortSignal where supported; client compliance is not guaranteed | Acquisition owner; monitor upstream behavior           |
+| Historical acquisition paths            | Deleted Python JobSpy sidecar and legacy RAG JobSpy modules are not runtime paths              | Documentation/archive only                             |

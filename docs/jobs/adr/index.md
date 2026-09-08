@@ -23,6 +23,10 @@ Authoritative decisions are summarized in [architecture](../architecture.md). Fu
 - [ADR-019 Retention](ADR-019-retention.md)
 - [ADR-020 Gate decisions](ADR-020-gate-decisions.md)
 - [ADR-021 Source-class registry](ADR-021-source-class-registry.md)
-- [ADR-022 MCP surface narrow supersede](ADR-022-mcp-surface-supersede.md)
+- [ADR-022 MCP surface narrow supersede (superseded)](ADR-022-mcp-surface-supersede.md)
+- [ADR-023 Evaluation target and gate applicability](ADR-023-evaluation-target-gates.md)
+- [ADR-024 JobSpy acquisition boundary](ADR-024-jobspy-boundary.md)
+- [ADR-025 Bounded contact metadata persistence](ADR-025-contact-metadata.md)
+- [ADR-026 Unpublished legacy removal](ADR-026-unpublished-legacy-removal.md)
 
-Status convention: Approved decisions are frozen; ADR-009 property is approved but mechanism is chosen-but-unactivated (only `MemoryKeyProvider`, no production profile persist until ADR-019 activation); ADR-019 is deferred. ADR-022 narrowly supersedes ADR-020 D16 for additive jobs MCP tools only. Source-access gates remain unresolved where noted in `source-coverage.md`.
+Status convention: Approved decisions are frozen; ADR-023 distinguishes product completion from legacy cutover; ADR-024 keeps in-process JobSpy fail-closed by default; ADR-025 defines schema v2 contact metadata; ADR-026 records explicit unpublished legacy removal and deferred standalone comparison benchmarks. ADR-022 is superseded. ADR-009 property is approved but mechanism is chosen-but-unactivated (only `MemoryKeyProvider`, no production profile persist until ADR-019 activation); ADR-019 is deferred. Source-access gates remain unresolved where noted in `source-coverage.md`.

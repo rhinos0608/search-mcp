@@ -268,8 +268,6 @@ sidecar/
   openai-embedding-proxy/  # OpenAI-compatible proxy to embedding sidecar
     main.py
     Dockerfile
-  jobspy/             # Python FastAPI job scraping
-    main.py           # FastAPI app, POST /search, auth middleware
 ```
 
 ### Embedding sidecar (`sidecar/embedding/main.py`)
@@ -281,12 +279,9 @@ sidecar/
 - Model loaded at startup via lifespan handler
 - Auth: optional `Authorization: Bearer {apiToken}`
 
-### JobSpy sidecar (`sidecar/jobspy/main.py`)
+### JobSpy acquisition
 
-- FastAPI app with `POST /search` endpoint
-- Auth via `X-API-Key` header
-- Rate limiting in-memory
-- Request/Response via Pydantic models
+Jobs use in-process `jobspy-js` behind the policy-gated acquisition adapter. No Python JobSpy sidecar is deployed.
 
 ### How sidecars are called from Node.js
 

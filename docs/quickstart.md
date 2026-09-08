@@ -299,7 +299,8 @@ docker compose up -d
 | `reddit_comments`      | Fetch comment trees                     |
 | `academic_search`      | Search ArXiv + Semantic Scholar         |
 | `hackernews_search`    | Search HN stories                       |
-| `semantic_jobs`        | Extract structured job listings         |
+| `jobs_search`          | Policy-gated structured job search      |
+| `jobs`                 | Composable job search family            |
 | `health_check`         | Verify server status                    |
 
 ## Next Steps

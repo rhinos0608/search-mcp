@@ -60,21 +60,21 @@ W3 acquisition contracts, edge policy coordination, indexed adapters, JobSpy/man
 
 ## Exact dependency matrix
 
-| Package                    | Dependencies       | Closure output                                        |
-| -------------------------- | ------------------ | ----------------------------------------------------- |
-| W3-A contracts             | W0, W1             | versioned acquisition/provenance contracts            |
-| W3-B policy coordinator    | W3-A, SourcePolicy | edge decisions; zero-call direct gating               |
-| W3-C adapter registry      | W3-A               | deterministic capability lookup                       |
-| W3-D indexed providers     | W3-A–C             | bounded provider-attributed candidates                |
-| W3-E JobSpy                | W3-A–C             | explicit-board structured acquisition                 |
-| W3-F manual import         | W3-A, W3-B         | zero-network content import unless fetch edge permits |
-| W3-G additive coordinator  | W3-B–F             | independent slices, budgets, failure isolation        |
-| W3-H destination fetch     | W3-G, safeFetch    | separately captured destination evidence              |
-| W3-I semantic_jobs shadow  | W3-G               | comparison evidence; no cutover                       |
-| W3-J evaluation/docs       | W3-G–I             | offline closure evidence                              |
-| W2A-P1 contracts           | W0, W1             | minimized request input                               |
-| W2A-P2/P3 reader/minimizer | W2A-P1             | bounded in-memory profile data                        |
-| W2A-P4 service             | W2A-P1–P3          | request-scoped orchestration; zero persistence        |
+| Package                                         | Dependencies       | Closure output                                        |
+| ----------------------------------------------- | ------------------ | ----------------------------------------------------- |
+| W3-A contracts                                  | W0, W1             | versioned acquisition/provenance contracts            |
+| W3-B policy coordinator                         | W3-A, SourcePolicy | edge decisions; zero-call direct gating               |
+| W3-C adapter registry                           | W3-A               | deterministic capability lookup                       |
+| W3-D indexed providers                          | W3-A–C             | bounded provider-attributed candidates                |
+| W3-E JobSpy                                     | W3-A–C             | explicit-board structured acquisition                 |
+| W3-F manual import                              | W3-A, W3-B         | zero-network content import unless fetch edge permits |
+| W3-G additive coordinator                       | W3-B–F             | independent slices, budgets, failure isolation        |
+| W3-H destination fetch                          | W3-G, safeFetch    | separately captured destination evidence              |
+| W3-I semantic_jobs shadow (historical; deleted) | W3-G               | superseded comparison evidence; no live path          |
+| W3-J evaluation/docs                            | W3-G–I             | offline closure evidence                              |
+| W2A-P1 contracts                                | W0, W1             | minimized request input                               |
+| W2A-P2/P3 reader/minimizer                      | W2A-P1             | bounded in-memory profile data                        |
+| W2A-P4 service                                  | W2A-P1–P3          | request-scoped orchestration; zero persistence        |
 
 ## Closure matrix
 

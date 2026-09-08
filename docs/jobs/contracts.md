@@ -37,7 +37,7 @@ Policy states: `permitted`, `blocked`, `requires_configuration`, `requires_revie
 
 Unknown sources/modes resolve to `not_supported`; non-`permitted` decisions do not invoke the supplied operation. Policy snapshots and decisions preserve revision, evidence references, review date, and optional notes. Source policy is independent from adapter capability.
 
-Current limit: this source-policy skeleton is **not wired to legacy JobSpy**. Do not claim legacy JobSpy calls are policy-enforced. Coordinator wiring is Wave 3 work.
+JobSpy direct acquisition is in-process behind injected `scrapeJobs`; default boards are empty and execution requires independently reviewed policy evidence. Python sidecar is removed.
 
 ## Process telemetry privacy boundary
 
@@ -53,7 +53,7 @@ Deployment, not portable Node code, must provide:
 - CPU and wall-clock limits;
 - native/container memory, process, and file-descriptor limits;
 - narrow read-only filesystem mounts and no broad `$HOME` mount;
-- separate principals for server, browser, Crawl4AI, embedding, and JobSpy sidecars;
+- separate principals for server, browser, Crawl4AI, and embedding sidecars;
 - negative tests proving blocked egress, resource termination, filesystem traversal/symlink rejection, and oversized parser input/output.
 
 Browser and Crawl4AI are separate principals and separate network boundaries. `safeFetch` semantics do not cover them.
@@ -67,7 +67,6 @@ Commands below are exact focused checks. `npm test -- ...` compiles source/tests
 | `npm test -- test/httpGuards.safeFetch.test.ts test/safeFetchCallers.test.ts test/wave0Safety.test.ts`                                      | safe-fetch methods, DNS/redirect/deadline/size/header controls, caller inventory, Wave 0 safety integration                                      |
 | `npm test -- test/documentParsers/boundary.test.ts`                                                                                         | child-process launch, pre-abort, timeout, abort, output overflow, UTF-8 cap, JSON/image envelope cap, malformed protocol, exact capability tuple |
 | `npm test -- test/jobs/sourcePolicy.test.ts`                                                                                                | policy clone/freeze, immutable decisions, fail-closed unknowns, zero calls for blocked decision                                                  |
-| `npm test -- test/jobs/compat.test.ts`                                                                                                      | legacy mapper additive projection, provenance/loss reporting, stable identity and conservative omissions                                         |
 | `npm run typecheck`                                                                                                                         | TypeScript production and test type safety                                                                                                       |
 | `npm test -- test/jobTelemetryPrivacy.test.ts test/spiderTelemetryPrivacy.test.ts test/semanticCrawl.test.ts test/safeFetchCallers.test.ts` | process telemetry privacy, semantic-crawl behavior, and safe-fetch caller inventory                                                              |
 | `npx prettier --check docs/jobs`                                                                                                            | documentation formatting                                                                                                                         |

@@ -43,22 +43,22 @@ graph LR
 
 ## Exact dependency matrix
 
-| Package                           | Requires                     | Enables                      |
-| --------------------------------- | ---------------------------- | ---------------------------- |
-| W3-A acquisition contracts        | W0, W1                       | W3-B, W3-C, W3-D, W3-E, W3-F |
-| W3-B edge policy coordinator      | W3-A, SourcePolicy skeleton  | W3-G, direct-call gating     |
-| W3-C1 source-class registry       | W3-B                         | W3-C, source classification  |
-| W3-C adapter registry             | W3-A                         | W3-G                         |
-| W3-D indexed providers            | W3-A, W3-B, W3-C             | W3-G                         |
-| W3-E JobSpy adapter               | W3-A, W3-B, W3-C             | W3-G                         |
-| W3-F manual import                | W3-A, W3-B                   | W3-G                         |
-| W3-G additive coordinator/budgets | W3-B, W3-C, W3-D, W3-E, W3-F | W3-H, W3-I, W3-J             |
-| W3-H destination enrichment       | W3-G, safeFetch              | later extraction/enrichment  |
-| W3-I semantic_jobs shadow         | W3-G                         | migration evidence only      |
-| W2A-P1 contracts                  | W0, W1                       | W2A-P2, W2A-P3, W2A-P4       |
-| W2A-P2 reader                     | W2A-P1                       | W2A-P4                       |
-| W2A-P3 minimizer                  | W2A-P1                       | W2A-P4                       |
-| W2A-P4 request-scoped service     | W2A-P1, W2A-P2, W2A-P3       | bounded profile use          |
+| Package                                         | Requires                     | Enables                               |
+| ----------------------------------------------- | ---------------------------- | ------------------------------------- |
+| W3-A acquisition contracts                      | W0, W1                       | W3-B, W3-C, W3-D, W3-E, W3-F          |
+| W3-B edge policy coordinator                    | W3-A, SourcePolicy skeleton  | W3-G, direct-call gating              |
+| W3-C1 source-class registry                     | W3-B                         | W3-C, source classification           |
+| W3-C adapter registry                           | W3-A                         | W3-G                                  |
+| W3-D indexed providers                          | W3-A, W3-B, W3-C             | W3-G                                  |
+| W3-E JobSpy adapter                             | W3-A, W3-B, W3-C             | W3-G                                  |
+| W3-F manual import                              | W3-A, W3-B                   | W3-G                                  |
+| W3-G additive coordinator/budgets               | W3-B, W3-C, W3-D, W3-E, W3-F | W3-H, W3-I, W3-J                      |
+| W3-H destination enrichment                     | W3-G, safeFetch              | later extraction/enrichment           |
+| W3-I semantic_jobs shadow (historical; deleted) | W3-G                         | migration evidence only; no live path |
+| W2A-P1 contracts                                | W0, W1                       | W2A-P2, W2A-P3, W2A-P4                |
+| W2A-P2 reader                                   | W2A-P1                       | W2A-P4                                |
+| W2A-P3 minimizer                                | W2A-P1                       | W2A-P4                                |
+| W2A-P4 request-scoped service                   | W2A-P1, W2A-P2, W2A-P3       | bounded profile use                   |
 
 ## Closure matrix (required evidence; not implementation claims)
 

@@ -4,14 +4,14 @@
 
 ## Assets and trust boundaries
 
-| Asset                                   | Threat actor / path                                  | Boundary and required control                                                                                               |
-| --------------------------------------- | ---------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
-| Internal network and metadata endpoints | Caller-controlled URL, redirect, DNS rebinding       | `safeFetch` validates URL and resolved addresses on every hop; public mode rejects private/reserved and mixed answers       |
-| Server credentials and host filesystem  | Profile path, parser input, extracted content        | Trusted roots/configured grants, canonicalization, containment, symlink checks, size/type checks; no default `$HOME` access |
-| Parser process and host resources       | Malformed PDF/Office input, parser/native dependency | Disposable child, V8 heap cap, timeout, abort, bounded input/output, malformed-protocol rejection                           |
-| Browser session and cookies             | Arbitrary web page or browser automation action      | Dedicated browser principal, restricted mounts/credentials, deployment egress and resource limits                           |
-| Crawl4AI and embedding/JobSpy sidecars  | Compromised or malformed sidecar traffic             | Separate principals, explicit operator endpoint configuration, deployment network policy                                    |
-| Source acquisition legality/policy      | Adapter bypass or accidental automation              | Versioned SourcePolicy coordinator; unknown/blocked states fail closed                                                      |
+| Asset                                                     | Threat actor / path                                  | Boundary and required control                                                                                               |
+| --------------------------------------------------------- | ---------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
+| Internal network and metadata endpoints                   | Caller-controlled URL, redirect, DNS rebinding       | `safeFetch` validates URL and resolved addresses on every hop; public mode rejects private/reserved and mixed answers       |
+| Server credentials and host filesystem                    | Profile path, parser input, extracted content        | Trusted roots/configured grants, canonicalization, containment, symlink checks, size/type checks; no default `$HOME` access |
+| Parser process and host resources                         | Malformed PDF/Office input, parser/native dependency | Disposable child, V8 heap cap, timeout, abort, bounded input/output, malformed-protocol rejection                           |
+| Browser session and cookies                               | Arbitrary web page or browser automation action      | Dedicated browser principal, restricted mounts/credentials, deployment egress and resource limits                           |
+| Crawl4AI and embedding sidecars; in-process JobSpy client | Compromised or malformed sidecar traffic             | Separate principals, explicit operator endpoint configuration, deployment network policy                                    |
+| Source acquisition legality/policy                        | Adapter bypass or accidental automation              | Versioned SourcePolicy coordinator; unknown/blocked states fail closed                                                      |
 
 ## Implemented controls
 
@@ -35,7 +35,7 @@ Child-process isolation and V8 heap limits do not claim OS sandboxing, network d
 
 ### Source policy
 
-`SourcePolicyRegistry` clones/freezes policies, preserves revision/evidence/date metadata, returns `not_supported` for unknown source or mode, and `runIfPermitted` makes zero operation calls for blocked or non-permitted decisions. This is a skeleton only. It is **not wired to the legacy JobSpy path**. Source-policy coordination and enforcement belong to Wave 3; no current documentation should imply that legacy JobSpy is policy-gated.
+`SourcePolicyRegistry` clones/freezes policies, preserves revision/evidence/date metadata, returns `not_supported` for unknown source or mode, and coordinator execution revalidates JobSpy edges before calling in-process `jobspy-js`. `jobspy-js` receives caller cancellation plus adapter timeout, but upstream cancellation compliance is a residual limitation. Historical Python JobSpy sidecar and legacy RAG JobSpy paths were deleted and are not runtime paths.
 
 ### Process telemetry privacy
 
@@ -56,10 +56,10 @@ Parser promises settle only after child `close`; spawn errors reject after close
 
 ## Residual risk owners
 
-| Residual risk                                         | Owner               | Gate                                               |
-| ----------------------------------------------------- | ------------------- | -------------------------------------------------- |
-| OS egress, CPU, native-memory, filesystem enforcement | Deployment/security | Required before hostile document/profile workloads |
-| Parser hardening and binary profile enablement        | Jobs platform       | Wave 2                                             |
-| Legacy JobSpy policy wiring                           | Acquisition         | Wave 3                                             |
-| Profile encryption and retention                      | Jobs architecture   | Pending ADR settlement                             |
-| Corpus `query_log` raw query retention                | Jobs architecture   | Privacy/retention gate before broader persistence  |
+| Residual risk                                         | Owner               | Gate                                                |
+| ----------------------------------------------------- | ------------------- | --------------------------------------------------- |
+| OS egress, CPU, native-memory, filesystem enforcement | Deployment/security | Required before hostile document/profile workloads  |
+| Parser hardening and binary profile enablement        | Jobs platform       | Wave 2                                              |
+| `jobspy-js` cancellation compliance                   | Acquisition         | Upstream behavior; classify aborted coverage safely |
+| Profile encryption and retention                      | Jobs architecture   | Pending ADR settlement                              |
+| Corpus `query_log` raw query retention                | Jobs architecture   | Privacy/retention gate before broader persistence   |
