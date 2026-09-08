@@ -12,7 +12,10 @@ function sha256hex(input: string): string {
 }
 
 const MIGRATION_VERSION = JOBS_SQLITE_SCHEMA_VERSION;
+const V1_VERSION = 1;
+const V2_DDL = 'ALTER TABLE postings ADD COLUMN contact_metadata TEXT NULL;';
 const V1_CHECKSUM = sha256hex(JOBS_V1_DDL);
+const V2_CHECKSUM = sha256hex(V2_DDL);
 
 // ---------------------------------------------------------------------------
 // Migration runner
@@ -23,45 +26,50 @@ const V1_CHECKSUM = sha256hex(JOBS_V1_DDL);
  * migration, no silent version overwrite.
  */
 export function applyJobsMigrations(db: JobsDatabase): MigrationResult {
-  // Bootstrap migration table
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS schema_migrations (
-      version INTEGER PRIMARY KEY,
-      name TEXT NOT NULL,
-      checksum TEXT NOT NULL,
-      applied_at TEXT NOT NULL
-    );
-  `);
-
-  const existing = db
-    .prepare('SELECT version, checksum FROM schema_migrations WHERE version = ?')
-    .get(MIGRATION_VERSION) as { version: number; checksum: string } | undefined;
-
-  if (existing) {
-    if (existing.checksum !== V1_CHECKSUM) {
+  db.exec(
+    `CREATE TABLE IF NOT EXISTS schema_migrations (version INTEGER PRIMARY KEY, name TEXT NOT NULL, checksum TEXT NOT NULL, applied_at TEXT NOT NULL);`,
+  );
+  let applied = false;
+  db.exec('BEGIN IMMEDIATE');
+  try {
+    const rows = db
+      .prepare('SELECT version, checksum FROM schema_migrations ORDER BY version')
+      .all() as { version: number; checksum: string }[];
+    const versions = new Set(rows.map((row) => row.version));
+    if (rows.some((row) => row.version > MIGRATION_VERSION || row.version < 1))
+      throw new JobsStoreError(JobsStoreErrorCode.SCHEMA_INCOMPATIBLE, 'invalid schema version');
+    const v1 = rows.find((row) => row.version === V1_VERSION);
+    const v2 = rows.find((row) => row.version === MIGRATION_VERSION);
+    if (v1 && v1.checksum !== V1_CHECKSUM)
       throw new JobsStoreError(JobsStoreErrorCode.SCHEMA_INCOMPATIBLE, 'schema checksum mismatch');
+    if (v2 && v2.checksum !== V2_CHECKSUM)
+      throw new JobsStoreError(JobsStoreErrorCode.SCHEMA_INCOMPATIBLE, 'schema checksum mismatch');
+    if (!v1 && versions.has(MIGRATION_VERSION))
+      throw new JobsStoreError(JobsStoreErrorCode.SCHEMA_INCOMPATIBLE, 'schema version gap');
+    if (!v1) {
+      db.exec(JOBS_V1_DDL);
+      db.prepare(
+        'INSERT INTO schema_migrations (version, name, checksum, applied_at) VALUES (?, ?, ?, ?)',
+      ).run(V1_VERSION, 'v1-create-jobs', V1_CHECKSUM, new Date().toISOString());
+      applied = true;
     }
-    return { applied: false, version: MIGRATION_VERSION };
+    if (!v2) {
+      db.exec(V2_DDL);
+      db.prepare(
+        'INSERT INTO schema_migrations (version, name, checksum, applied_at) VALUES (?, ?, ?, ?)',
+      ).run(MIGRATION_VERSION, 'v2-contact-metadata', V2_CHECKSUM, new Date().toISOString());
+      applied = true;
+    }
+    db.exec('COMMIT');
+    return { applied, version: MIGRATION_VERSION };
+  } catch (error) {
+    try {
+      db.exec('ROLLBACK');
+    } catch {
+      /* preserve migration error */
+    }
+    throw error;
   }
-
-  // Check no future migration has run
-  const maxVersion = db.prepare('SELECT MAX(version) AS v FROM schema_migrations').get() as
-    | { v: number | null }
-    | undefined;
-  if (maxVersion && maxVersion.v !== null && maxVersion.v > MIGRATION_VERSION) {
-    throw new JobsStoreError(
-      JobsStoreErrorCode.SCHEMA_INCOMPATIBLE,
-      'future schema version present',
-    );
-  }
-
-  // Apply v1 DDL
-  db.exec(JOBS_V1_DDL);
-  db.prepare(
-    'INSERT INTO schema_migrations (version, name, checksum, applied_at) VALUES (?, ?, ?, ?)',
-  ).run(MIGRATION_VERSION, 'v1-create-jobs', V1_CHECKSUM, new Date().toISOString());
-
-  return { applied: true, version: MIGRATION_VERSION };
 }
 
 export { V1_CHECKSUM, MIGRATION_VERSION };

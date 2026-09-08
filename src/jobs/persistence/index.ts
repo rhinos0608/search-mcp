@@ -6,6 +6,8 @@ export {
 } from './contracts.js';
 export type {
   JobsDatabase,
+  JobsTransactionFactory,
+  JobsTransactionFn,
   JobsDatabasePath,
   JobsDatabaseOpener,
   JobsStore,

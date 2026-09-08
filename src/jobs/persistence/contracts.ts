@@ -12,7 +12,7 @@ import type {
 } from '../domain/index.js';
 
 export const PERSISTENCE_CONTRACT_VERSION = '1.0.0' as const;
-export const JOBS_SQLITE_SCHEMA_VERSION = 1 as const;
+export const JOBS_SQLITE_SCHEMA_VERSION = 2 as const;
 
 export const JobsStoreErrorCode = {
   VALIDATION_ERROR: 'VALIDATION_ERROR',
@@ -37,6 +37,18 @@ export class JobsStoreError extends Error {
   }
 }
 
+export interface JobsTransactionFn {
+  (...args: never[]): unknown;
+  immediate: (...args: never[]) => unknown;
+  deferred: (...args: never[]) => unknown;
+  exclusive: (...args: never[]) => unknown;
+}
+
+// Factory detached from the Database object so no receiver is needed;
+// better-sqlite3's transaction is already bound to its Database instance
+// (open.ts wraps raw.transaction.bind(raw)). No `this` involved.
+export type JobsTransactionFactory = (fn: (...args: never[]) => unknown) => JobsTransactionFn;
+
 export interface JobsDatabase {
   prepare(source: string): {
     run(...params: unknown[]): unknown;
@@ -46,6 +58,14 @@ export interface JobsDatabase {
   exec(source: string): this;
   pragma(source: string, options?: { simple?: boolean }): unknown;
   close(): this;
+  /**
+   * Synchronous native transaction factory (better-sqlite3 semantics).
+   * `transaction(fn).immediate()` runs fn in BEGIN IMMEDIATE; nested calls
+   * reuse the outer transaction via savepoints; throw rolls back.
+   * Implementations without native support omit this; store falls back to
+   * exec-based BEGIN/COMMIT/ROLLBACK.
+   */
+  transaction?: JobsTransactionFactory;
 }
 
 export type JobsDatabasePath = string;

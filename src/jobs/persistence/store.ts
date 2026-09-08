@@ -22,6 +22,95 @@ import {
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Any = any;
 
+// Native transaction runner: uses better-sqlite3 `db.transaction(fn)` when
+// available (savepoint-safe nesting), else falls back to exec-based
+// BEGIN IMMEDIATE/COMMIT/ROLLBACK. Always runs fn synchronously.
+function runImmediate(db: JobsDatabase, fn: () => void): void {
+  const factory: JobsDatabase['transaction'] = db.transaction;
+  if (factory !== undefined) {
+    // The Database instance owns `transaction`; call it as a method so the
+    // native implementation keeps its receiver (unbound-method safe).
+    const runner = db.transaction?.(fn);
+    runner?.immediate();
+    return;
+  }
+  db.exec('BEGIN IMMEDIATE');
+  try {
+    fn();
+    db.exec('COMMIT');
+  } catch (err) {
+    try {
+      db.exec('ROLLBACK');
+    } catch {
+      /* rollback best-effort; original error below is authoritative */
+    }
+    throw err;
+  }
+}
+
+// Nontransactional identity-row insert shared by append and supersede so
+// both run inside exactly one transaction (supersede adds its UPDATE).
+interface IdentityDecisionLike {
+  outcome: string;
+  featureContributions: { feature: string; contribution: number; evidenceRefs: string[] }[];
+  decisionId: string;
+  subjectObservationIds: string[];
+  subjectListingIds: string[];
+  confidence: number;
+  resolverVersion: string;
+  createdAt: string;
+  supersededBy?: string | undefined;
+  contradictoryEvidenceRefs: string[];
+}
+
+// Nontransactional by design: the CALLER owns the transaction (append or
+// supersede wraps this in runImmediate). Never call outside runImmediate.
+function insertIdentityDecisionRow(db: JobsDatabase, decision: IdentityDecisionLike): void {
+  if (decision.outcome === 'same_posting' || decision.outcome === 'probable_cluster') {
+    const names = decision.featureContributions.map((f) => f.feature);
+    if (
+      names.length === 0 ||
+      names.every((n: string) => n === 'organisation_normalized' || n === 'title_normalized')
+    )
+      throw new JobsStoreError(
+        JobsStoreErrorCode.IDENTITY_MERGE_FORBIDDEN,
+        'same_posting/probable_cluster requires strong or corroborating features beyond org+title',
+      );
+  }
+  db.prepare(
+    'INSERT INTO identity_decisions (decision_id, outcome, confidence, resolver_version, created_at, superseded_by) VALUES (?, ?, ?, ?, ?, ?)',
+  ).run(
+    decision.decisionId,
+    decision.outcome,
+    decision.confidence,
+    decision.resolverVersion,
+    decision.createdAt,
+    decision.supersededBy ?? null,
+  );
+  const insO = db.prepare(
+    'INSERT INTO identity_decision_observations (decision_id, observation_id) VALUES (?, ?)',
+  );
+  for (const obsId of decision.subjectObservationIds) insO.run(decision.decisionId, obsId);
+  const insL = db.prepare(
+    'INSERT INTO identity_decision_listings (decision_id, source_listing_id) VALUES (?, ?)',
+  );
+  for (const lid of decision.subjectListingIds) insL.run(decision.decisionId, lid);
+  const insF = db.prepare(
+    'INSERT INTO identity_decision_features (decision_id, feature, contribution) VALUES (?, ?, ?)',
+  );
+  const insFE = db.prepare(
+    'INSERT INTO identity_decision_feature_evidence (decision_id, feature, evidence_id) VALUES (?, ?, ?)',
+  );
+  for (const fc of decision.featureContributions) {
+    insF.run(decision.decisionId, fc.feature, fc.contribution);
+    for (const evId of fc.evidenceRefs) insFE.run(decision.decisionId, fc.feature, evId);
+  }
+  const insC = db.prepare(
+    'INSERT INTO identity_decision_contradictions (decision_id, evidence_id) VALUES (?, ?)',
+  );
+  for (const evId of decision.contradictoryEvidenceRefs) insC.run(decision.decisionId, evId);
+}
+
 export function createJobsStore(db: JobsDatabase): JobsStore {
   const migrationResult = applyJobsMigrations(db);
   const schemaVersion = migrationResult.version;
@@ -31,16 +120,14 @@ export function createJobsStore(db: JobsDatabase): JobsStore {
     schemaVersion,
 
     upsertListing(listing) {
-      const existing = db
-        .prepare('SELECT source_listing_id FROM listings WHERE source_listing_id = ?')
-        .get(listing.sourceListingId);
-      if (existing) {
+      runImmediate(db, () => {
         db.prepare(
-          'UPDATE listings SET last_seen_at = ?, current_observation_id = ? WHERE source_listing_id = ?',
-        ).run(listing.lastSeenAt, listing.currentObservationId, listing.sourceListingId);
-      } else {
-        db.prepare(
-          'INSERT INTO listings (source_listing_id, adapter_id, external_id, canonical_url, first_seen_at, last_seen_at, current_observation_id) VALUES (?, ?, ?, ?, ?, ?, ?)',
+          `INSERT INTO listings
+          (source_listing_id, adapter_id, external_id, canonical_url, first_seen_at, last_seen_at, current_observation_id)
+          VALUES (?, ?, ?, ?, ?, ?, ?)
+          ON CONFLICT(source_listing_id) DO UPDATE SET
+            last_seen_at = excluded.last_seen_at,
+            current_observation_id = excluded.current_observation_id`,
         ).run(
           listing.sourceListingId,
           listing.adapterId,
@@ -50,37 +137,42 @@ export function createJobsStore(db: JobsDatabase): JobsStore {
           listing.lastSeenAt,
           listing.currentObservationId,
         );
-      }
+      });
     },
 
     insertObservation(observation) {
-      const existing = db
-        .prepare('SELECT observation_id FROM observations WHERE observation_id = ?')
-        .get(observation.observationId);
-      if (existing)
-        throw new JobsStoreError(
-          JobsStoreErrorCode.OBSERVATION_IMMUTABLE,
-          'observation already exists',
+      // Row + evidence-ref rows must land together: a failing ref insert
+      // (e.g. NULL evidence_id) must not strand the observation row, which
+      // would block retry behind OBSERVATION_IMMUTABLE.
+      runImmediate(db, () => {
+        const existing = db
+          .prepare('SELECT observation_id FROM observations WHERE observation_id = ?')
+          .get(observation.observationId);
+        if (existing)
+          throw new JobsStoreError(
+            JobsStoreErrorCode.OBSERVATION_IMMUTABLE,
+            'observation already exists',
+          );
+        db.prepare(
+          'INSERT INTO observations (observation_id, source_listing_id, fetched_at, content_hash, payload_ref, extraction_version, adapter_version, fetch_outcome, source_confidence_json, immutable) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        ).run(
+          observation.observationId,
+          observation.sourceListingId,
+          observation.fetchedAt,
+          observation.contentHash,
+          observation.payloadRef ?? null,
+          observation.extractionVersion,
+          observation.adapterVersion,
+          observation.fetchOutcome,
+          JSON.stringify(observation.sourceConfidence),
+          1,
         );
-      db.prepare(
-        'INSERT INTO observations (observation_id, source_listing_id, fetched_at, content_hash, payload_ref, extraction_version, adapter_version, fetch_outcome, source_confidence_json, immutable) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-      ).run(
-        observation.observationId,
-        observation.sourceListingId,
-        observation.fetchedAt,
-        observation.contentHash,
-        observation.payloadRef ?? null,
-        observation.extractionVersion,
-        observation.adapterVersion,
-        observation.fetchOutcome,
-        JSON.stringify(observation.sourceConfidence),
-        1,
-      );
-      const insRef = db.prepare(
-        'INSERT INTO observation_evidence_refs (observation_id, evidence_id, ordinal) VALUES (?, ?, ?)',
-      );
-      for (let i = 0; i < observation.evidenceRefs.length; i++)
-        insRef.run(observation.observationId, observation.evidenceRefs[i], i);
+        const insRef = db.prepare(
+          'INSERT INTO observation_evidence_refs (observation_id, evidence_id, ordinal) VALUES (?, ?, ?)',
+        );
+        for (let i = 0; i < observation.evidenceRefs.length; i++)
+          insRef.run(observation.observationId, observation.evidenceRefs[i], i);
+      });
     },
 
     getListing(id) {
@@ -102,104 +194,114 @@ export function createJobsStore(db: JobsDatabase): JobsStore {
 
     putPostingProjection(posting) {
       const p = posting as JobPosting;
-      deletePostingChildren(db, p.postingId);
-      db.prepare(
-        `INSERT INTO postings (posting_id, schema_version, canonical_revision, title, normalized_title, organisation, organisation_unit, sector, industry, work_mode, employment_type, hours_fte, seniority, posted_at, closing_at, start_at, apply_url, description, vacancy_count, security_clearance, work_rights, targeted_position, verification_state, lifecycle_state, confidence, identity_decision_revision) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(posting_id) DO UPDATE SET schema_version=excluded.schema_version, canonical_revision=excluded.canonical_revision, title=excluded.title, normalized_title=excluded.normalized_title, organisation=excluded.organisation, organisation_unit=excluded.organisation_unit, sector=excluded.sector, industry=excluded.industry, work_mode=excluded.work_mode, employment_type=excluded.employment_type, hours_fte=excluded.hours_fte, seniority=excluded.seniority, posted_at=excluded.posted_at, closing_at=excluded.closing_at, start_at=excluded.start_at, apply_url=excluded.apply_url, description=excluded.description, vacancy_count=excluded.vacancy_count, security_clearance=excluded.security_clearance, work_rights=excluded.work_rights, targeted_position=excluded.targeted_position, verification_state=excluded.verification_state, lifecycle_state=excluded.lifecycle_state, confidence=excluded.confidence, identity_decision_revision=excluded.identity_decision_revision`,
-      ).run(
-        p.postingId,
-        p.schemaVersion,
-        p.canonicalRevision,
-        p.title,
-        p.normalizedTitle,
-        p.organisation,
-        p.organisationUnit ?? null,
-        p.sector ?? null,
-        p.industry ?? null,
-        p.workMode,
-        p.employmentType,
-        p.hoursFte ?? null,
-        p.seniority ?? null,
-        p.postedAt ?? null,
-        p.closingAt ?? null,
-        p.startAt ?? null,
-        p.applyUrl ?? null,
-        p.description,
-        p.vacancyCount ?? null,
-        p.securityClearance ?? null,
-        p.workRights ?? null,
-        p.targetedPosition === true ? 1 : p.targetedPosition === false ? 0 : null,
-        p.verificationState,
-        p.lifecycleState,
-        p.confidence,
-        p.identityDecisionRevision,
-      );
-      const insF = db.prepare(
-        'INSERT INTO posting_role_families (posting_id, family, confidence) VALUES (?, ?, ?)',
-      );
-      for (const f of p.roleFamilies) insF.run(p.postingId, f.family, f.confidence);
-      const insU = db.prepare('INSERT INTO posting_listing_urls (posting_id, url) VALUES (?, ?)');
-      for (const url of p.listingUrls) insU.run(p.postingId, url);
-      const insR = db.prepare(
-        'INSERT INTO posting_responsibilities (posting_id, ordinal, text) VALUES (?, ?, ?)',
-      );
-      for (let i = 0; i < p.responsibilities.length; i++)
-        insR.run(p.postingId, i, p.responsibilities[i]);
-      const insD = db.prepare(
-        'INSERT INTO posting_desirable (posting_id, ordinal, text) VALUES (?, ?, ?)',
-      );
-      for (let i = 0; i < p.desirableCriteria.length; i++)
-        insD.run(p.postingId, i, p.desirableCriteria[i]);
-      const insA = db.prepare(
-        'INSERT INTO posting_application_requirements (posting_id, ordinal, text) VALUES (?, ?, ?)',
-      );
-      for (let i = 0; i < p.applicationRequirements.length; i++)
-        insA.run(p.postingId, i, p.applicationRequirements[i]);
-      const insS = db.prepare(
-        'INSERT INTO posting_selection_questions (posting_id, ordinal, text) VALUES (?, ?, ?)',
-      );
-      for (let i = 0; i < p.selectionQuestions.length; i++)
-        insS.run(p.postingId, i, p.selectionQuestions[i]);
-      const insL = db.prepare(
-        'INSERT INTO posting_licences (posting_id, ordinal, text) VALUES (?, ?, ?)',
-      );
-      for (let i = 0; i < p.licencesChecksRegistration.length; i++)
-        insL.run(p.postingId, i, p.licencesChecksRegistration[i]);
-      const insFl = db.prepare('INSERT INTO posting_flags (posting_id, flag) VALUES (?, ?)');
-      for (const flag of p.flags) insFl.run(p.postingId, flag);
-      const insC = db.prepare(
-        'INSERT INTO posting_caveats (posting_id, ordinal, text) VALUES (?, ?, ?)',
-      );
-      for (let i = 0; i < p.caveats.length; i++) insC.run(p.postingId, i, p.caveats[i]);
-      if (p.fieldEvidenceLinks) {
-        const insFE = db.prepare(
-          'INSERT INTO posting_field_evidence (posting_id, field_path, evidence_id) VALUES (?, ?, ?)',
-        );
-        for (const link of p.fieldEvidenceLinks)
-          for (const evId of link.evidenceRefs) insFE.run(p.postingId, link.fieldPath, evId);
-      }
-      const insSal = db.prepare(
-        'INSERT INTO posting_salaries (posting_id, ordinal, min, max, currency, unit, period, raw) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-      );
-      for (let i = 0; i < p.salaries.length; i++) {
-        const s = p.salaries[i]!;
-        insSal.run(
+      // All-or-nothing: delete+reinsert of posting children must not leave
+      // a half-replaced projection if a later child insert throws.
+      runImmediate(db, () => {
+        deletePostingChildren(db, p.postingId);
+        db.prepare(
+          `INSERT INTO postings (posting_id, schema_version, canonical_revision, title, normalized_title, organisation, organisation_unit, sector, industry, work_mode, employment_type, hours_fte, seniority, posted_at, closing_at, start_at, apply_url, description, vacancy_count, security_clearance, work_rights, targeted_position, contact_metadata, verification_state, lifecycle_state, confidence, identity_decision_revision) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(posting_id) DO UPDATE SET schema_version=excluded.schema_version, canonical_revision=excluded.canonical_revision, title=excluded.title, normalized_title=excluded.normalized_title, organisation=excluded.organisation, organisation_unit=excluded.organisation_unit, sector=excluded.sector, industry=excluded.industry, work_mode=excluded.work_mode, employment_type=excluded.employment_type, hours_fte=excluded.hours_fte, seniority=excluded.seniority, posted_at=excluded.posted_at, closing_at=excluded.closing_at, start_at=excluded.start_at, apply_url=excluded.apply_url, description=excluded.description, vacancy_count=excluded.vacancy_count, security_clearance=excluded.security_clearance, work_rights=excluded.work_rights, targeted_position=excluded.targeted_position, contact_metadata=excluded.contact_metadata, verification_state=excluded.verification_state, lifecycle_state=excluded.lifecycle_state, confidence=excluded.confidence, identity_decision_revision=excluded.identity_decision_revision`,
+        ).run(
           p.postingId,
-          i,
-          s.min ?? null,
-          s.max ?? null,
-          s.currency,
-          s.unit,
-          s.period,
-          s.raw,
+          p.schemaVersion,
+          p.canonicalRevision,
+          p.title,
+          p.normalizedTitle,
+          p.organisation,
+          p.organisationUnit ?? null,
+          p.sector ?? null,
+          p.industry ?? null,
+          p.workMode,
+          p.employmentType,
+          p.hoursFte ?? null,
+          p.seniority ?? null,
+          p.postedAt ?? null,
+          p.closingAt ?? null,
+          p.startAt ?? null,
+          p.applyUrl ?? null,
+          p.description,
+          p.vacancyCount ?? null,
+          p.securityClearance ?? null,
+          p.workRights ?? null,
+          p.targetedPosition === true ? 1 : p.targetedPosition === false ? 0 : null,
+          p.contactMetadata === undefined ? null : JSON.stringify(p.contactMetadata),
+          p.verificationState,
+          p.lifecycleState,
+          p.confidence,
+          p.identityDecisionRevision,
         );
-      }
-      const insCl = db.prepare(
-        'INSERT INTO posting_classifications (posting_id, ordinal, scheme, value, level) VALUES (?, ?, ?, ?, ?)',
-      );
-      for (let i = 0; i < p.classifications.length; i++) {
-        const c = p.classifications[i]!;
-        insCl.run(p.postingId, i, c.scheme, c.value, c.level ?? null);
-      }
+        const insF = db.prepare(
+          'INSERT INTO posting_role_families (posting_id, family, confidence) VALUES (?, ?, ?)',
+        );
+        const seenFamilies = new Set<string>();
+        for (const f of p.roleFamilies) {
+          if (seenFamilies.has(f.family)) continue;
+          seenFamilies.add(f.family);
+          insF.run(p.postingId, f.family, f.confidence);
+        }
+        const insU = db.prepare('INSERT INTO posting_listing_urls (posting_id, url) VALUES (?, ?)');
+        for (const url of p.listingUrls) insU.run(p.postingId, url);
+        const insR = db.prepare(
+          'INSERT INTO posting_responsibilities (posting_id, ordinal, text) VALUES (?, ?, ?)',
+        );
+        for (let i = 0; i < p.responsibilities.length; i++)
+          insR.run(p.postingId, i, p.responsibilities[i]);
+        const insD = db.prepare(
+          'INSERT INTO posting_desirable (posting_id, ordinal, text) VALUES (?, ?, ?)',
+        );
+        for (let i = 0; i < p.desirableCriteria.length; i++)
+          insD.run(p.postingId, i, p.desirableCriteria[i]);
+        const insA = db.prepare(
+          'INSERT INTO posting_application_requirements (posting_id, ordinal, text) VALUES (?, ?, ?)',
+        );
+        for (let i = 0; i < p.applicationRequirements.length; i++)
+          insA.run(p.postingId, i, p.applicationRequirements[i]);
+        const insS = db.prepare(
+          'INSERT INTO posting_selection_questions (posting_id, ordinal, text) VALUES (?, ?, ?)',
+        );
+        for (let i = 0; i < p.selectionQuestions.length; i++)
+          insS.run(p.postingId, i, p.selectionQuestions[i]);
+        const insL = db.prepare(
+          'INSERT INTO posting_licences (posting_id, ordinal, text) VALUES (?, ?, ?)',
+        );
+        for (let i = 0; i < p.licencesChecksRegistration.length; i++)
+          insL.run(p.postingId, i, p.licencesChecksRegistration[i]);
+        const insFl = db.prepare('INSERT INTO posting_flags (posting_id, flag) VALUES (?, ?)');
+        for (const flag of p.flags) insFl.run(p.postingId, flag);
+        const insC = db.prepare(
+          'INSERT INTO posting_caveats (posting_id, ordinal, text) VALUES (?, ?, ?)',
+        );
+        for (let i = 0; i < p.caveats.length; i++) insC.run(p.postingId, i, p.caveats[i]);
+        if (p.fieldEvidenceLinks) {
+          const insFE = db.prepare(
+            'INSERT INTO posting_field_evidence (posting_id, field_path, evidence_id) VALUES (?, ?, ?)',
+          );
+          for (const link of p.fieldEvidenceLinks)
+            for (const evId of link.evidenceRefs) insFE.run(p.postingId, link.fieldPath, evId);
+        }
+        const insSal = db.prepare(
+          'INSERT INTO posting_salaries (posting_id, ordinal, min, max, currency, unit, period, raw) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+        );
+        for (let i = 0; i < p.salaries.length; i++) {
+          const s = p.salaries[i]!;
+          insSal.run(
+            p.postingId,
+            i,
+            s.min ?? null,
+            s.max ?? null,
+            s.currency,
+            s.unit,
+            s.period,
+            s.raw,
+          );
+        }
+        const insCl = db.prepare(
+          'INSERT INTO posting_classifications (posting_id, ordinal, scheme, value, level) VALUES (?, ?, ?, ?, ?)',
+        );
+        for (let i = 0; i < p.classifications.length; i++) {
+          const c = p.classifications[i]!;
+          insCl.run(p.postingId, i, c.scheme, c.value, c.level ?? null);
+        }
+      });
     },
 
     getPosting(id) {
@@ -215,232 +317,281 @@ export function createJobsStore(db: JobsDatabase): JobsStore {
     },
 
     setMemberships(postingId, listingIds, decisionId) {
-      db.prepare('DELETE FROM memberships WHERE posting_id = ?').run(postingId);
-      const ins = db.prepare(
-        'INSERT INTO memberships (posting_id, source_listing_id, identity_decision_id) VALUES (?, ?, ?)',
-      );
-      for (const lid of listingIds) ins.run(postingId, lid, decisionId);
+      // Replace-all must be atomic: partial membership set corrupts identity links.
+      runImmediate(db, () => {
+        for (const lid of listingIds) {
+          if (
+            !db
+              .prepare(
+                'SELECT 1 FROM identity_decision_listings WHERE decision_id = ? AND source_listing_id = ?',
+              )
+              .get(decisionId, lid)
+          )
+            throw new JobsStoreError(
+              JobsStoreErrorCode.VALIDATION_ERROR,
+              `membership listing is not authorized by identity decision: ${lid}`,
+            );
+        }
+        db.prepare('DELETE FROM memberships WHERE posting_id = ?').run(postingId);
+        const ins = db.prepare(
+          'INSERT INTO memberships (posting_id, source_listing_id, identity_decision_id) VALUES (?, ?, ?)',
+        );
+        for (const lid of listingIds) ins.run(postingId, lid, decisionId);
+      });
     },
 
     putEvidence(rows) {
-      const ins = db.prepare(
-        'INSERT INTO evidence (evidence_id, subject_type, subject_id, field_path, kind, observation_id, document_fingerprint, json_pointer, bounded_excerpt, source_url, captured_at, effective_at, extractor_version, confidence, retention_class) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-      );
-      for (const row of rows) {
-        if (row.subjectType === 'profile')
-          throw new JobsStoreError(
-            JobsStoreErrorCode.PROFILE_EVIDENCE_FORBIDDEN,
-            'profile evidence belongs in profiles.sqlite',
-          );
-        ins.run(
-          row.evidenceId,
-          row.subjectType,
-          row.subjectId,
-          row.fieldPath ?? null,
-          row.kind,
-          row.observationId ?? null,
-          row.documentFingerprint ?? null,
-          row.jsonPointer ?? null,
-          row.boundedExcerpt ?? null,
-          row.sourceUrl ?? null,
-          row.capturedAt,
-          row.effectiveAt ?? null,
-          row.extractorVersion ?? null,
-          row.confidence,
-          row.retentionClass,
+      runImmediate(db, () => {
+        const ins = db.prepare(
+          'INSERT INTO evidence (evidence_id, subject_type, subject_id, field_path, kind, observation_id, document_fingerprint, json_pointer, bounded_excerpt, source_url, captured_at, effective_at, extractor_version, confidence, retention_class) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
         );
-      }
+        for (const row of rows) {
+          if (row.subjectType === 'profile')
+            throw new JobsStoreError(
+              JobsStoreErrorCode.PROFILE_EVIDENCE_FORBIDDEN,
+              'profile evidence belongs in profiles.sqlite',
+            );
+          ins.run(
+            row.evidenceId,
+            row.subjectType,
+            row.subjectId,
+            row.fieldPath ?? null,
+            row.kind,
+            row.observationId ?? null,
+            row.documentFingerprint ?? null,
+            row.jsonPointer ?? null,
+            row.boundedExcerpt ?? null,
+            row.sourceUrl ?? null,
+            row.capturedAt,
+            row.effectiveAt ?? null,
+            row.extractorVersion ?? null,
+            row.confidence,
+            row.retentionClass,
+          );
+        }
+      });
     },
 
     putClaimCandidates(postingId, fieldPath, candidates) {
-      const insC = db.prepare(
-        'INSERT INTO claim_candidates (candidate_id, posting_id, field_path, value_json, confidence, origin, method, provenance_component, provenance_version, provenance_model, provenance_prompt_version, produced_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-      );
-      const insE = db.prepare(
-        'INSERT INTO claim_candidate_evidence (candidate_id, evidence_id) VALUES (?, ?)',
-      );
-      for (const c of candidates) {
-        insC.run(
-          c.candidateId,
-          postingId,
-          fieldPath,
-          JSON.stringify(c.value),
-          c.confidence,
-          c.origin,
-          c.method,
-          c.provenance.component,
-          c.provenance.version,
-          c.provenance.model ?? null,
-          c.provenance.promptVersion ?? null,
-          c.provenance.producedAt,
+      runImmediate(db, () => {
+        const insC = db.prepare(
+          'INSERT INTO claim_candidates (candidate_id, posting_id, field_path, value_json, confidence, origin, method, provenance_component, provenance_version, provenance_model, provenance_prompt_version, produced_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
         );
-        for (const evId of c.evidenceRefs) insE.run(c.candidateId, evId);
-      }
+        const insE = db.prepare(
+          'INSERT INTO claim_candidate_evidence (candidate_id, evidence_id) VALUES (?, ?)',
+        );
+        for (const c of candidates) {
+          insC.run(
+            c.candidateId,
+            postingId,
+            fieldPath,
+            JSON.stringify(c.value),
+            c.confidence,
+            c.origin,
+            c.method,
+            c.provenance.component,
+            c.provenance.version,
+            c.provenance.model ?? null,
+            c.provenance.promptVersion ?? null,
+            c.provenance.producedAt,
+          );
+          for (const evId of c.evidenceRefs) insE.run(c.candidateId, evId);
+        }
+      });
     },
 
     putClaimResolution(postingId, fieldPath, resolved) {
-      if (resolved.state !== 'unresolved' && resolved.selected.origin === 'model_derived') {
-        const observed = db
-          .prepare(
-            "SELECT value_json FROM claim_candidates WHERE posting_id = ? AND field_path = ? AND origin = 'observed'",
-          )
-          .all(postingId, fieldPath) as { value_json: string }[];
-        if (observed.length > 0) {
-          const sv = JSON.stringify(resolved.selected.value);
-          if (observed.some((o) => o.value_json !== sv) && resolved.state !== 'conflicting')
-            throw new JobsStoreError(
-              JobsStoreErrorCode.OBSERVATION_IMMUTABLE,
-              'model_derived cannot overwrite observed claim',
-            );
+      // Retry-safe: resolution rows are keyed (posting_id, field_path) and
+      // candidate rows by candidate_id; replace instead of failing on PK.
+      runImmediate(db, () => {
+        // Upsert candidates inline (retry-safe) instead of delegating to the
+        // plain-INSERT putClaimCandidates, whose frozen contract is unchanged.
+        const upsertCandidate = db.prepare(
+          'INSERT INTO claim_candidates (candidate_id, posting_id, field_path, value_json, confidence, origin, method, provenance_component, provenance_version, provenance_model, provenance_prompt_version, produced_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(candidate_id) DO UPDATE SET posting_id=excluded.posting_id, field_path=excluded.field_path, value_json=excluded.value_json, confidence=excluded.confidence, origin=excluded.origin, method=excluded.method, provenance_component=excluded.provenance_component, provenance_version=excluded.provenance_version, provenance_model=excluded.provenance_model, provenance_prompt_version=excluded.provenance_prompt_version, produced_at=excluded.produced_at',
+        );
+        const linkCandidateEvidence = db.prepare(
+          'INSERT INTO claim_candidate_evidence (candidate_id, evidence_id) VALUES (?, ?) ON CONFLICT(candidate_id, evidence_id) DO NOTHING',
+        );
+        interface UpsertCandidateRecord {
+          candidateId: string;
+          value: unknown;
+          confidence: number;
+          origin: string;
+          method: string;
+          provenance: {
+            component: string;
+            version: string;
+            model?: string | undefined;
+            promptVersion?: string | undefined;
+            producedAt: string;
+          };
+          evidenceRefs: readonly string[];
         }
-      }
-      if (resolved.state !== 'unresolved') {
-        this.putClaimCandidates(postingId, fieldPath, [resolved.selected]);
-      }
-      for (const alt of resolved.alternatives) this.putClaimCandidates(postingId, fieldPath, [alt]);
-      db.prepare(
-        'INSERT INTO claim_resolutions (posting_id, field_path, state, selected_candidate_id) VALUES (?, ?, ?, ?)',
-      ).run(
-        postingId,
-        fieldPath,
-        resolved.state,
-        resolved.state === 'unresolved' ? null : resolved.selected.candidateId,
-      );
-      const insA = db.prepare(
-        'INSERT INTO claim_resolution_alternatives (posting_id, field_path, candidate_id) VALUES (?, ?, ?)',
-      );
-      for (const alt of resolved.alternatives) insA.run(postingId, fieldPath, alt.candidateId);
+        const upsertOne = (c: UpsertCandidateRecord) => {
+          upsertCandidate.run(
+            c.candidateId,
+            postingId,
+            fieldPath,
+            JSON.stringify(c.value),
+            c.confidence,
+            c.origin,
+            c.method,
+            c.provenance.component,
+            c.provenance.version,
+            c.provenance.model ?? null,
+            c.provenance.promptVersion ?? null,
+            c.provenance.producedAt,
+          );
+          for (const evId of c.evidenceRefs) linkCandidateEvidence.run(c.candidateId, evId);
+        };
+        if (resolved.state !== 'unresolved') {
+          upsertOne(resolved.selected as UpsertCandidateRecord);
+        }
+        for (const alt of resolved.alternatives) upsertOne(alt as UpsertCandidateRecord);
+        if (resolved.state !== 'unresolved' && resolved.selected.origin === 'model_derived') {
+          const observed = db
+            .prepare(
+              "SELECT value_json FROM claim_candidates WHERE posting_id = ? AND field_path = ? AND origin = 'observed'",
+            )
+            .all(postingId, fieldPath) as { value_json: string }[];
+          if (observed.length > 0) {
+            const sv = JSON.stringify(resolved.selected.value);
+            if (observed.some((o) => o.value_json !== sv))
+              throw new JobsStoreError(
+                JobsStoreErrorCode.OBSERVATION_IMMUTABLE,
+                'model_derived cannot overwrite observed claim',
+              );
+          }
+        }
+        // Alternatives are replacement state, not append-only history.
+        db.prepare(
+          'DELETE FROM claim_resolution_alternatives WHERE posting_id = ? AND field_path = ?',
+        ).run(postingId, fieldPath);
+        db.prepare(
+          'INSERT INTO claim_resolutions (posting_id, field_path, state, selected_candidate_id) VALUES (?, ?, ?, ?) ON CONFLICT(posting_id, field_path) DO UPDATE SET state=excluded.state, selected_candidate_id=excluded.selected_candidate_id',
+        ).run(
+          postingId,
+          fieldPath,
+          resolved.state,
+          resolved.state === 'unresolved' ? null : resolved.selected.candidateId,
+        );
+        const insA = db.prepare(
+          'INSERT INTO claim_resolution_alternatives (posting_id, field_path, candidate_id) VALUES (?, ?, ?) ON CONFLICT(posting_id, field_path, candidate_id) DO NOTHING',
+        );
+        for (const alt of resolved.alternatives) insA.run(postingId, fieldPath, alt.candidateId);
+      });
     },
 
     putRequirements(postingId, requirements) {
-      db.prepare('DELETE FROM requirement_evidence WHERE posting_id = ?').run(postingId);
-      db.prepare('DELETE FROM requirements WHERE posting_id = ?').run(postingId);
-      const ins = db.prepare(
-        'INSERT INTO requirements (posting_id, ordinal, raw_text, category, force, semantic_capability, years_min, years_max, years_unit, qualification, licence, clearance, registration, confidence, interpretation_provenance) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-      );
-      const insE = db.prepare(
-        'INSERT INTO requirement_evidence (posting_id, ordinal, evidence_id) VALUES (?, ?, ?)',
-      );
-      for (let i = 0; i < requirements.length; i++) {
-        const r = requirements[i]!;
-        ins.run(
-          postingId,
-          i,
-          r.rawText,
-          r.category,
-          r.force,
-          r.semanticCapability ?? null,
-          r.years?.min ?? null,
-          r.years?.max ?? null,
-          r.years?.unit ?? null,
-          r.qualification ?? null,
-          r.licence ?? null,
-          r.clearance ?? null,
-          r.registration ?? null,
-          r.confidence,
-          r.interpretationProvenance,
+      // Replace-all must be atomic: a failing row must not leave half the set.
+      runImmediate(db, () => {
+        db.prepare('DELETE FROM requirement_evidence WHERE posting_id = ?').run(postingId);
+        db.prepare('DELETE FROM requirements WHERE posting_id = ?').run(postingId);
+        const ins = db.prepare(
+          'INSERT INTO requirements (posting_id, ordinal, raw_text, category, force, semantic_capability, years_min, years_max, years_unit, qualification, licence, clearance, registration, confidence, interpretation_provenance) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
         );
-        for (const evId of r.evidenceRefs) insE.run(postingId, i, evId);
-      }
+        const insE = db.prepare(
+          'INSERT INTO requirement_evidence (posting_id, ordinal, evidence_id) VALUES (?, ?, ?)',
+        );
+        for (let i = 0; i < requirements.length; i++) {
+          const r = requirements[i]!;
+          ins.run(
+            postingId,
+            i,
+            r.rawText,
+            r.category,
+            r.force,
+            r.semanticCapability ?? null,
+            r.years?.min ?? null,
+            r.years?.max ?? null,
+            r.years?.unit ?? null,
+            r.qualification ?? null,
+            r.licence ?? null,
+            r.clearance ?? null,
+            r.registration ?? null,
+            r.confidence,
+            r.interpretationProvenance,
+          );
+          for (const evId of r.evidenceRefs) insE.run(postingId, i, evId);
+        }
+      });
     },
 
     putLocations(postingId, locations) {
-      db.prepare('DELETE FROM locations WHERE posting_id = ?').run(postingId);
-      const ins = db.prepare(
-        'INSERT INTO locations (posting_id, ordinal, country, region, city, postcode, latitude, longitude, remote_eligible) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
-      );
-      for (let i = 0; i < locations.length; i++) {
-        const loc = locations[i]!;
-        ins.run(
-          postingId,
-          i,
-          loc.country ?? null,
-          loc.region ?? null,
-          loc.city ?? null,
-          loc.postcode ?? null,
-          loc.latitude ?? null,
-          loc.longitude ?? null,
-          loc.remoteEligible === true ? 1 : loc.remoteEligible === false ? 0 : null,
+      // Replace-all must be atomic.
+      runImmediate(db, () => {
+        db.prepare('DELETE FROM locations WHERE posting_id = ?').run(postingId);
+        const ins = db.prepare(
+          'INSERT INTO locations (posting_id, ordinal, country, region, city, postcode, latitude, longitude, remote_eligible) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
         );
-      }
+        for (let i = 0; i < locations.length; i++) {
+          const loc = locations[i]!;
+          ins.run(
+            postingId,
+            i,
+            loc.country ?? null,
+            loc.region ?? null,
+            loc.city ?? null,
+            loc.postcode ?? null,
+            loc.latitude ?? null,
+            loc.longitude ?? null,
+            loc.remoteEligible === true ? 1 : loc.remoteEligible === false ? 0 : null,
+          );
+        }
+      });
     },
 
     appendIdentityDecision(decision) {
-      if (decision.outcome === 'same_posting' || decision.outcome === 'probable_cluster') {
-        const names = decision.featureContributions.map((f) => f.feature);
-        if (
-          names.length > 0 &&
-          names.every((n) => n === 'organisation_normalized' || n === 'title_normalized')
-        )
-          throw new JobsStoreError(
-            JobsStoreErrorCode.IDENTITY_MERGE_FORBIDDEN,
-            'same_posting/probable_cluster requires strong or corroborating features beyond org+title',
-          );
-      }
-      db.prepare(
-        'INSERT INTO identity_decisions (decision_id, outcome, confidence, resolver_version, created_at, superseded_by) VALUES (?, ?, ?, ?, ?, ?)',
-      ).run(
-        decision.decisionId,
-        decision.outcome,
-        decision.confidence,
-        decision.resolverVersion,
-        decision.createdAt,
-        decision.supersededBy ?? null,
-      );
-      const insO = db.prepare(
-        'INSERT INTO identity_decision_observations (decision_id, observation_id) VALUES (?, ?)',
-      );
-      for (const obsId of decision.subjectObservationIds) insO.run(decision.decisionId, obsId);
-      const insL = db.prepare(
-        'INSERT INTO identity_decision_listings (decision_id, source_listing_id) VALUES (?, ?)',
-      );
-      for (const lid of decision.subjectListingIds) insL.run(decision.decisionId, lid);
-      const insF = db.prepare(
-        'INSERT INTO identity_decision_features (decision_id, feature, contribution) VALUES (?, ?, ?)',
-      );
-      const insFE = db.prepare(
-        'INSERT INTO identity_decision_feature_evidence (decision_id, feature, evidence_id) VALUES (?, ?, ?)',
-      );
-      for (const fc of decision.featureContributions) {
-        insF.run(decision.decisionId, fc.feature, fc.contribution);
-        for (const evId of fc.evidenceRefs) insFE.run(decision.decisionId, fc.feature, evId);
-      }
-      const insC = db.prepare(
-        'INSERT INTO identity_decision_contradictions (decision_id, evidence_id) VALUES (?, ?)',
-      );
-      for (const evId of decision.contradictoryEvidenceRefs) insC.run(decision.decisionId, evId);
+      // Multi-table append (decision + 4 relation groups) must be atomic:
+      // a partial decision row would corrupt identity lineage irreversibly.
+      // Shared helper keeps append and supersede inside exactly one transaction.
+      runImmediate(db, () => {
+        insertIdentityDecisionRow(db, decision);
+      });
     },
 
     supersedeIdentityDecision(priorId, next) {
-      this.appendIdentityDecision(next);
-      db.prepare('UPDATE identity_decisions SET superseded_by = ? WHERE decision_id = ?').run(
-        next.decisionId,
-        priorId,
-      );
+      // Single transaction: next-row insert + conditional prior link.
+      // The UPDATE only touches an UNSUPERSEDED prior; zero rows means
+      // missing or already-superseded and the whole supersession rolls back.
+      runImmediate(db, () => {
+        insertIdentityDecisionRow(db, next);
+        const info = db
+          .prepare(
+            'UPDATE identity_decisions SET superseded_by = ? WHERE decision_id = ? AND superseded_by IS NULL',
+          )
+          .run(next.decisionId, priorId) as unknown as { changes: number };
+        if (info.changes !== 1) {
+          throw new JobsStoreError(
+            JobsStoreErrorCode.VALIDATION_ERROR,
+            'supersede requires exactly one unsuperseded prior decision',
+          );
+        }
+      });
     },
 
     listIdentityHistory(opts) {
       if (opts.postingId)
         return db
           .prepare(
-            'SELECT d.* FROM identity_decisions d JOIN identity_decision_listings dl ON dl.decision_id = d.decision_id JOIN memberships m ON m.source_listing_id = dl.source_listing_id AND m.posting_id = ? ORDER BY d.created_at ASC',
+            'SELECT DISTINCT d.* FROM identity_decisions d JOIN memberships m ON m.identity_decision_id = d.decision_id WHERE m.posting_id = ? ORDER BY d.created_at ASC',
           )
           .all(opts.postingId)
-          .map(rowToIdentityDecision) as Any;
+          .map((r) => rowToIdentityDecision(r as Record<string, unknown>, db)) as Any;
       if (opts.observationId)
         return db
           .prepare(
             'SELECT d.* FROM identity_decisions d JOIN identity_decision_observations dio ON dio.decision_id = d.decision_id WHERE dio.observation_id = ? ORDER BY d.created_at ASC',
           )
           .all(opts.observationId)
-          .map(rowToIdentityDecision) as Any;
+          .map((r) => rowToIdentityDecision(r as Record<string, unknown>, db)) as Any;
       if (opts.listingId)
         return db
           .prepare(
             'SELECT d.* FROM identity_decisions d JOIN identity_decision_listings dl ON dl.decision_id = d.decision_id WHERE dl.source_listing_id = ? ORDER BY d.created_at ASC',
           )
           .all(opts.listingId)
-          .map(rowToIdentityDecision) as Any;
+          .map((r) => rowToIdentityDecision(r as Record<string, unknown>, db)) as Any;
       return [];
     },
 
@@ -450,28 +601,32 @@ export function createJobsStore(db: JobsDatabase): JobsStore {
           'SELECT * FROM identity_decisions WHERE superseded_by IS NULL ORDER BY created_at ASC',
         )
         .all()
-        .map(rowToIdentityDecision) as Any;
+        .map((r) => rowToIdentityDecision(r as Record<string, unknown>, db)) as Any;
     },
 
     putIdentityClusterProjection(clusters) {
-      db.exec('DELETE FROM identity_cluster_decisions');
-      db.exec('DELETE FROM identity_cluster_members');
-      db.exec('DELETE FROM identity_clusters');
-      const insC = db.prepare(
-        'INSERT INTO identity_clusters (cluster_id, kind, revision, posting_id) VALUES (?, ?, ?, ?)',
-      );
-      const insM = db.prepare(
-        'INSERT INTO identity_cluster_members (cluster_id, observation_id, source_listing_id) VALUES (?, ?, ?)',
-      );
-      const insD = db.prepare(
-        'INSERT INTO identity_cluster_decisions (cluster_id, decision_id) VALUES (?, ?)',
-      );
-      for (const cl of clusters) {
-        insC.run(cl.clusterId, cl.kind, cl.revision, (cl as Any).postingId ?? null);
-        for (const m of (cl as Any).members ?? [])
-          insM.run(cl.clusterId, m.observationId, m.sourceListingId);
-        for (const d of (cl as Any).decisionIds ?? []) insD.run(cl.clusterId, d);
-      }
+      // Rebuild-all must be atomic: wipe+reinsert partially persisted would
+      // destroy the rebuildable projection with no source of truth left.
+      runImmediate(db, () => {
+        db.exec('DELETE FROM identity_cluster_decisions');
+        db.exec('DELETE FROM identity_cluster_members');
+        db.exec('DELETE FROM identity_clusters');
+        const insC = db.prepare(
+          'INSERT INTO identity_clusters (cluster_id, kind, revision, posting_id) VALUES (?, ?, ?, ?)',
+        );
+        const insM = db.prepare(
+          'INSERT INTO identity_cluster_members (cluster_id, observation_id, source_listing_id) VALUES (?, ?, ?)',
+        );
+        const insD = db.prepare(
+          'INSERT INTO identity_cluster_decisions (cluster_id, decision_id) VALUES (?, ?)',
+        );
+        for (const cl of clusters) {
+          insC.run(cl.clusterId, cl.kind, cl.revision, (cl as Any).postingId ?? null);
+          for (const m of (cl as Any).members ?? [])
+            insM.run(cl.clusterId, m.observationId, m.sourceListingId);
+          for (const d of (cl as Any).decisionIds ?? []) insD.run(cl.clusterId, d);
+        }
+      });
     },
 
     insertSnapshot(s) {
@@ -503,29 +658,60 @@ export function createJobsStore(db: JobsDatabase): JobsStore {
 
     appendLifecycleEvent(event) {
       const parsed = LifecycleEventSchema.parse(event);
-      db.prepare(
-        'INSERT INTO lifecycle_events (event_id, posting_id, type, occurred_at, from_state, to_state, source) VALUES (?, ?, ?, ?, ?, ?, ?)',
-      ).run(
-        parsed.eventId,
-        parsed.postingId,
-        parsed.type,
-        parsed.occurredAt,
-        parsed.fromState ?? null,
-        parsed.toState ?? null,
-        parsed.source,
-      );
-      const insE = db.prepare(
-        'INSERT INTO lifecycle_event_evidence (event_id, evidence_id) VALUES (?, ?)',
-      );
-      for (const evId of parsed.evidenceRefs) insE.run(parsed.eventId, evId);
-      if (parsed.toState)
-        db.prepare('UPDATE postings SET lifecycle_state = ? WHERE posting_id = ?').run(
-          parsed.toState,
+      // Validate persisted state inside transaction to reject stale writers.
+      runImmediate(db, () => {
+        const current = db
+          .prepare('SELECT lifecycle_state FROM postings WHERE posting_id = ?')
+          .get(parsed.postingId) as { lifecycle_state?: unknown } | undefined;
+        if (typeof current?.lifecycle_state !== 'string')
+          throw new JobsStoreError(
+            JobsStoreErrorCode.LIFECYCLE_ILLEGAL,
+            'lifecycle transition requires persisted posting state',
+          );
+        if (parsed.fromState !== undefined && current.lifecycle_state !== parsed.fromState)
+          throw new JobsStoreError(
+            JobsStoreErrorCode.LIFECYCLE_ILLEGAL,
+            `stale lifecycle transition: expected ${parsed.fromState}, got ${current.lifecycle_state}`,
+          );
+        const eventToPersist = LifecycleEventSchema.parse({
+          ...parsed,
+          fromState: current.lifecycle_state,
+        });
+        db.prepare(
+          'INSERT INTO lifecycle_events (event_id, posting_id, type, occurred_at, from_state, to_state, source) VALUES (?, ?, ?, ?, ?, ?, ?)',
+        ).run(
+          parsed.eventId,
           parsed.postingId,
+          parsed.type,
+          parsed.occurredAt,
+          eventToPersist.fromState,
+          eventToPersist.toState ?? null,
+          eventToPersist.source,
         );
+        const insE = db.prepare(
+          'INSERT INTO lifecycle_event_evidence (event_id, evidence_id) VALUES (?, ?)',
+        );
+        for (const evId of eventToPersist.evidenceRefs) insE.run(eventToPersist.eventId, evId);
+        if (eventToPersist.toState)
+          db.prepare('UPDATE postings SET lifecycle_state = ? WHERE posting_id = ?').run(
+            eventToPersist.toState,
+            eventToPersist.postingId,
+          );
+      });
     },
 
     getLifecycleHistory(postingId) {
+      const evByEvent = db
+        .prepare(
+          'SELECT event_id, evidence_id FROM lifecycle_event_evidence WHERE event_id IN (SELECT event_id FROM lifecycle_events WHERE posting_id = ?)',
+        )
+        .all(postingId) as { event_id: string; evidence_id: string }[];
+      const refsByEvent = new Map<string, string[]>();
+      for (const row of evByEvent) {
+        const list = refsByEvent.get(row.event_id) ?? [];
+        list.push(row.evidence_id);
+        refsByEvent.set(row.event_id, list);
+      }
       return db
         .prepare('SELECT * FROM lifecycle_events WHERE posting_id = ? ORDER BY occurred_at ASC')
         .all(postingId)
@@ -538,7 +724,7 @@ export function createJobsStore(db: JobsDatabase): JobsStore {
             occurredAt: row['occurred_at'] as string,
             fromState: row['from_state'] as Any,
             toState: row['to_state'] as Any,
-            evidenceRefs: [] as string[],
+            evidenceRefs: refsByEvent.get(row['event_id'] as string) ?? [],
             source: row['source'] as string,
           } as Any;
         });

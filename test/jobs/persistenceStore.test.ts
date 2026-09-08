@@ -196,6 +196,22 @@ test('listObservations order', () => {
   assert.equal((obs[1] as Any).observationId, 'obs-1');
 });
 
+test('putPostingProjection deterministically deduplicates role families', () => {
+  const store = freshStore();
+  store.putPostingProjection(
+    makePosting({
+      roleFamilies: [
+        { family: 'engineering', confidence: 0.8, evidenceRefs: [] },
+        { family: 'engineering', confidence: 0.4, evidenceRefs: [] },
+      ],
+    }),
+  );
+  const got = store.getPosting('posting-1') as Any;
+  assert.deepEqual(got.roleFamilies, [
+    { family: 'engineering', confidence: 0.8, evidenceRefs: [] },
+  ]);
+});
+
 test('putPostingProjection and getPosting', () => {
   const store = freshStore();
   store.putPostingProjection(makePosting());

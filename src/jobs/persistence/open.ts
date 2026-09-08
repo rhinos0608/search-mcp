@@ -22,7 +22,8 @@ export function registerJobsDatabaseOpener(opener: (dbPath: string) => JobsDatab
 
 async function getDefaultOpener(): Promise<(dbPath: string) => JobsDatabase> {
   const Database = (await import('better-sqlite3')).default;
-  return (dbPath: string) => new Database(dbPath);
+  // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion
+  return (dbPath: string) => new Database(dbPath) as unknown as JobsDatabase;
 }
 
 // ---------------------------------------------------------------------------
