@@ -53,6 +53,7 @@ export interface FrozenDocument {
   capturedAt: Instant;
   asOf: Instant;
   fixturePath: string;
+  immutable?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -202,24 +203,110 @@ export interface SuiteMetrics {
 // ---------------------------------------------------------------------------
 
 export type GateSeverity = 'P0' | 'P1' | 'P2';
-
 export interface GateFinding {
   gateId: string;
-  checkpoint: 'A' | 'B' | 'C' | 'D' | 'D17';
+  checkpoint: 'A' | 'B' | 'C' | 'D';
   passed: boolean;
   severity: GateSeverity;
   code: string;
   detail: string;
 }
 
+// Checkpoint A evidence is additive: unknown keys are ignored so future
+// checkpoints can extend without breaking the A-gate contract.
+// Every predicate-bearing evidence list is REQUIRED: P0/P1 gates fail when
+// the list is absent or empty, so missing evidence can never pass vacuously.
 export interface CheckpointEvidence {
   ObservabilitySnapshot?: unknown[];
+  /** Frozen docs under test must carry `immutable: true`. Required. */
+  frozenDocuments?: readonly { immutable?: unknown }[];
+  /** No locale default may assert required authority. Required. */
+  localeDefaults?: readonly { packId?: unknown; requiredAuthority?: unknown }[];
+  /** Full telemetry fixtures (whole object scanned, not just .payload). */
+  telemetryFixtures?: readonly unknown[];
+  /** Per-edge policy decisions proving adapters do not define policy. */
+  policyEdges?: readonly {
+    edgeId?: unknown;
+    decidedBy?: unknown;
+    adapterDefined?: unknown;
+    state?: unknown;
+  }[];
+  /** Manual-import url_only runs proving content_required without fetch. */
+  manualImportRuns?: readonly {
+    contentKind?: unknown;
+    fetchPermitted?: unknown;
+    status?: unknown;
+    fetched?: unknown;
+  }[];
+  /** Posting projections proving multi-source records. */
+  multiSourcePostings?: readonly { sourceListingIds?: unknown }[];
+  // --- Checkpoint B/C evidence (REQUIRED lists; absent/empty fails) ---
+  /** Extraction claim checks: { claimId, hasEvidenceRefs, origin }. */
+  extractionClaims?: readonly {
+    claimId?: unknown;
+    hasEvidenceRefs?: unknown;
+    origin?: unknown;
+  }[];
+  /** Relational projection rows present: { projection, present }. */
+  projectionRows?: readonly { projection?: unknown; present?: unknown }[];
+  /** Conflict checks: { state, alternativesPreserved }. */
+  conflictCases?: readonly { state?: unknown; alternativesPreserved?: unknown }[];
+  /** Identity merge/split probes: { scenario, merged }. */
+  identityProbes?: readonly { scenario?: unknown; merged?: unknown }[];
+  /** Lifecycle transition probes: { from, to, allowed }. */
+  lifecycleProbes?: readonly { from?: unknown; to?: unknown; allowed?: unknown }[];
+  /** Suite metric snapshots: { suiteId, fixedBudgetRecall, computedAtBudget }. */
+  recallSnapshots?: readonly {
+    suiteId?: unknown;
+    fixedBudgetRecall?: unknown;
+    computedAtBudget?: unknown;
+  }[];
+  /** BM25 determinism probes: { queryId, firstScore, secondScore }. */
+  bm25Probes?: readonly {
+    queryId?: unknown;
+    firstScore?: unknown;
+    secondScore?: unknown;
+  }[];
+  /** Missing-data probes: { scenario, usedNeutralPrior, redistributed }. */
+  missingDataProbes?: readonly {
+    scenario?: unknown;
+    usedNeutralPrior?: unknown;
+    redistributed?: unknown;
+  }[];
+  /** Grouped-score outputs: { dimensions, rrfInUtility }. */
+  groupedOutputs?: readonly { dimensions?: unknown; rrfInUtility?: unknown }[];
+  /** Standalone parity runs: { deterministic, reasoningDisabled, complete }. */
+  standaloneRuns?: readonly {
+    deterministic?: unknown;
+    reasoningDisabled?: unknown;
+    complete?: unknown;
+  }[];
+  /** Host packet checks: { bounded }. */
+  hostPackets?: readonly { bounded?: unknown }[];
+  // --- Checkpoint D evidence (REQUIRED lists; absent/empty fails) ---
+  /** Precedence proofs: { scenario, explicitWins }. */
+  precedenceProofs?: readonly { scenario?: unknown; explicitWins?: unknown }[];
+  /** MCP family actions (absent until MCP surface lands): { compact, bounded }. */
+  mcpActions?: readonly { compact?: unknown; bounded?: unknown }[];
+  /** Module inventory: { module, inArchitectureTable }. */
+  moduleInventory?: readonly { module?: unknown; inArchitectureTable?: unknown }[];
+  /** Positive proof that product profile handling is request-scoped and nonpersistent. */
+  profilePersistenceEvidence?: {
+    /** Positive verified attestation that inactive profile persistence is not active. */
+    inactiveProfileAttestation?: unknown;
+    noProductionStoreWiring?: unknown;
+    noWriteAction?: unknown;
+    requestScopedOnly?: unknown;
+    zeroPersistence?: unknown;
+    reusableHandle?: unknown;
+  };
 }
 
 export interface QualityGateReport {
   schemaVersion: typeof EVALUATION_CONTRACT_VERSION;
   checkpoint: 'A' | 'B' | 'C' | 'D';
   passed: boolean;
+  gateApplicability: Record<string, 'applicable' | 'not_applicable'>;
   findings: GateFinding[];
   suiteMetrics: SuiteMetrics[];
   integrityFailures: number;

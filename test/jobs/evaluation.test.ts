@@ -381,7 +381,7 @@ test('evaluateQualityGates returns all findings', () => {
   assert.ok(report.findings.length > 0);
 });
 
-test('D.retention_encryption is not_applicable (passing)', () => {
+test('D.retention_encryption is deferred per ADR-019 (explicit fail, never pass)', () => {
   const report = evaluateQualityGates({
     checkpoint: 'D',
     corpora: [],
@@ -390,27 +390,47 @@ test('D.retention_encryption is not_applicable (passing)', () => {
   });
   const retFinding = report.findings.find((f) => f.gateId === 'D.retention_encryption');
   assert.ok(retFinding);
-  assert.ok(retFinding.passed);
+  assert.ok(!retFinding.passed);
+  assert.ok(/deferred per ADR-019/.test(retFinding.detail));
 });
 
-test('D17.success_rate fails below threshold', () => {
+test('D.success_rate fails below threshold', () => {
   const report = evaluateQualityGates({
     checkpoint: 'D',
     corpora: [],
     metrics: [],
     runIntegrity: { integrityFailures: 0, policyFailures: 0, successRate: 0.9 },
   });
-  const srFinding = report.findings.find((f) => f.gateId === 'D17.success_rate');
+  const srFinding = report.findings.find((f) => f.gateId === 'D.success_rate');
   assert.ok(srFinding);
   assert.ok(!srFinding.passed);
 });
 
-test('evaluateQualityGates checkpoint B lifecycle gate passes', () => {
+test('evaluateQualityGates checkpoint B lifecycle gate passes with probe evidence', () => {
   const report = evaluateQualityGates({
     checkpoint: 'B',
     corpora: [],
     metrics: [],
     runIntegrity: { integrityFailures: 0, policyFailures: 0, successRate: 1 },
+    extras: {
+      extractionClaims: [{ claimId: 'c1', hasEvidenceRefs: true, origin: 'observed' }],
+      projectionRows: [
+        { projection: 'title', present: true },
+        { projection: 'organisation', present: true },
+        { projection: 'location', present: true },
+        { projection: 'salary', present: true },
+        { projection: 'lifecycle', present: true },
+      ],
+      conflictCases: [{ state: 'conflicting', alternativesPreserved: true }],
+      identityProbes: [
+        { scenario: 'org_title_only', merged: false },
+        { scenario: 'strong_match', merged: true },
+      ],
+      lifecycleProbes: [
+        { from: 'disappeared', to: 'confirmed_closed', allowed: false },
+        { from: 'active', to: 'probably_closed', allowed: true },
+      ],
+    },
   });
   const lifecycle = report.findings.find((f) => f.gateId === 'B.lifecycle');
   assert.ok(lifecycle);
