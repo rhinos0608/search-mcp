@@ -573,6 +573,7 @@ export async function enrichDestinationFetches(
       }
 
       let fetched: SafeFetchResult | undefined;
+      let requestedRemainingBytes = 0;
       try {
         const execution = await executeIfPolicyPermitted(edge, async () => {
           // logical request + reserved attempt consumed immediately before safeFetch
@@ -582,6 +583,7 @@ export async function enrichDestinationFetches(
           const elapsedNow = Math.max(0, readMonotonic() - startMs);
           const remainingMs = budget.milliseconds - elapsedNow;
           const remainingBytes = budget.bytes - consumed.bytes;
+          requestedRemainingBytes = remainingBytes;
           const res = await deps.safeFetch(
             prov.destination.canonicalUrl,
             {
@@ -659,9 +661,7 @@ export async function enrichDestinationFetches(
         failFetch('fetch_failed');
         continue;
       }
-      if (
-        responseBytes > Math.min(FETCH_MAX_BYTES_CAP, budget.bytes - consumed.bytes + responseBytes)
-      ) {
+      if (responseBytes > requestedRemainingBytes || responseBytes > FETCH_MAX_BYTES_CAP) {
         failFetch('fetch_failed');
         continue;
       }

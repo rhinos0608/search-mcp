@@ -28,7 +28,7 @@ export class SourcePolicyRegistry {
       const copy = clonePolicy(policy);
       this.policies.set(copy.sourceId, deepFreeze(copy));
     }
-    this.edgePolicies = [...edgePolicies];
+    this.edgePolicies = deepFreeze(edgePolicies.map((edge) => deepFreeze(structuredClone(edge))));
   }
 
   get(sourceId: string): SourcePolicy | undefined {

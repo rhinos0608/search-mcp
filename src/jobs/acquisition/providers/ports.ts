@@ -12,7 +12,7 @@ import { exaSearch } from '../../../tools/exaSearch.js';
 import { duckduckgoSearch } from '../../../tools/duckduckgoSearch.js';
 import { ollamaSearch } from '../../../tools/ollamaSearch.js';
 import { tavilySearch } from '../../../tools/tavilySearch.js';
-import { codexSearch } from '../../../tools/codexSearch.js';
+import { codexSearch, codexConfigured } from '../../../tools/codexSearch.js';
 import type { SearchResult } from '../../../types.js';
 
 export type IndexedSafeSearch = 'strict' | 'moderate' | 'off';
@@ -117,10 +117,36 @@ export const INDEXED_PROVIDER_DEFINITIONS: readonly IndexedProviderDefinition[] 
   },
 ] as const;
 
+export function indexedProviderConfigured(
+  config: SearchConfig,
+  backend: SearchBackend,
+  env: NodeJS.ProcessEnv = process.env,
+): boolean {
+  switch (backend) {
+    case 'brave':
+      return (config.brave.apiKey ?? '').length > 0;
+    case 'searxng':
+      return config.searxng.baseUrl.length > 0;
+    case 'exa':
+      return (config.exa.apiKey ?? '').length > 0;
+    case 'duckduckgo':
+      return true;
+    case 'ollama-search':
+      return config.ollamaSearch.baseUrl.length > 0;
+    case 'tavily':
+      return (config.tavily.apiKey ?? '').length > 0;
+    case 'codex':
+      return codexConfigured(env);
+  }
+}
+
 export function createDefaultIndexedProviderPorts(
   config: SearchConfig,
+  env: NodeJS.ProcessEnv = process.env,
 ): readonly IndexedProviderPort[] {
-  return INDEXED_PROVIDER_DEFINITIONS.map((def) => {
+  return INDEXED_PROVIDER_DEFINITIONS.filter((def) =>
+    indexedProviderConfigured(config, def.backend, env),
+  ).map((def) => {
     const search = async (
       input: Readonly<{
         query: string;

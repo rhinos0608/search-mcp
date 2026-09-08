@@ -59,19 +59,26 @@ function isPrivateIPv4(hostname: string): boolean {
   );
 }
 
+function decodeEmbeddedIPv4(address: string): string | undefined {
+  const normalized = address.toLowerCase().replace(/^\[|\]$/g, '');
+  const match = /^::(?:ffff:)?(.+)$/.exec(normalized);
+  if (!match) return undefined;
+  const tail = match[1] ?? '';
+  if (tail.includes('.')) return parseLegacyIPv4(tail) === undefined ? undefined : tail;
+  const hex = /^([0-9a-f]{1,4}):([0-9a-f]{1,4})$/.exec(tail);
+  if (!hex) return undefined;
+  const hi = Number.parseInt(hex[1] ?? '', 16);
+  const lo = Number.parseInt(hex[2] ?? '', 16);
+  if (!Number.isInteger(hi) || !Number.isInteger(lo)) return undefined;
+  return [(hi >>> 8) & 255, hi & 255, (lo >>> 8) & 255, lo & 255].join('.');
+}
+
 function isPrivateOrReservedAddress(address: string): boolean {
   const normalized = address.toLowerCase().replace(/^\[|\]$/g, '');
   if (isPrivateIPv4(normalized)) return true;
+  const embedded = decodeEmbeddedIPv4(normalized);
+  if (embedded !== undefined && isPrivateIPv4(embedded)) return true;
   if (net.isIP(normalized) !== 6) return false;
-  const mapped = /^::ffff:(.+)$/.exec(normalized);
-  if (mapped) {
-    const tail = mapped[1] ?? '';
-    const hex = /^([0-9a-f]{1,4}):([0-9a-f]{1,4})$/.exec(tail);
-    const hi = hex ? Number.parseInt(hex[1] ?? '0', 16) : 0;
-    const lo = hex ? Number.parseInt(hex[2] ?? '0', 16) : 0;
-    const ipv4 = hex ? [(hi >>> 8) & 255, hi & 255, (lo >>> 8) & 255, lo & 255].join('.') : tail;
-    return isPrivateIPv4(ipv4);
-  }
   return (
     normalized === '::' ||
     normalized === '::1' ||

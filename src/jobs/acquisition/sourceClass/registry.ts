@@ -160,9 +160,37 @@ export class SourceClassRegistry {
     for (const binding of entry.bindings) {
       let state: SourceEdgePolicy['state'] = 'not_supported';
 
+      // A binding may execute only on a rung explicitly declared by source.
+      if (!entry.rungs.includes(binding.rung)) {
+        policies.push(
+          deepFreeze({
+            sourceId: entry.sourceId,
+            targetKind: entry.targetKind,
+            actor: { ...binding.actor },
+            operation: binding.operation,
+            route: binding.route,
+            state,
+            revision: sourcePolicyRevision(JSON.stringify(entry), [state]),
+            evidenceRefs,
+            reviewedAt: entry.reviewedAt,
+          }),
+        );
+        continue;
+      }
+
+      // Destination fetch requires both global and per-source declarations.
+      if (
+        binding.operation === 'automatedFetch' &&
+        (!context.destinationFetchEnabled || !entry.localAuthorization.destinationFetchEnabled)
+      ) {
+        state = 'requires_configuration';
+      }
+
       // Step 2: exact blocked/not_supported binding or mode override wins immediately
       if (binding.stateOverride === 'blocked' || binding.stateOverride === 'not_supported') {
         state = binding.stateOverride;
+      } else if (state === 'requires_configuration') {
+        // A disabled destination-fetch flag is fail-closed and cannot be lifted.
       } else {
         // Step 3: missing adapter capability → not_supported
         if (

@@ -166,7 +166,7 @@ test('all seven definitions validate governance and table', () => {
   }
 });
 
-test('createDefaultIndexedProviderPorts returns seven ports with bounded_cache governance', async () => {
+test('createDefaultIndexedProviderPorts filters unavailable ports and preserves governance', async () => {
   const cfg = {
     brave: { apiKey: 'b' },
     searxng: { baseUrl: 'https://searxng.test' },
@@ -176,7 +176,11 @@ test('createDefaultIndexedProviderPorts returns seven ports with bounded_cache g
     ollamaSearch: { baseUrl: '', apiKey: '' },
   } as unknown as import('../../src/config.js').SearchConfig;
   const ports = createDefaultIndexedProviderPorts(cfg);
-  assert.equal(ports.length, 7);
+  assert.ok(ports.length === 5 || ports.length === 6);
+  assert.deepEqual(
+    ports.map((p) => p.backend).filter((b) => b !== 'codex'),
+    ['brave', 'searxng', 'exa', 'duckduckgo', 'tavily'],
+  );
   for (const p of ports) {
     assert.equal(p.maxDurationMs, 70000);
     ProviderGovernanceSchema.parse(p.governance);

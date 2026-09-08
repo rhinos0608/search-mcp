@@ -1,26 +1,35 @@
+import { z } from 'zod/v4';
+
 export const SOURCE_POLICY_VERSION = '0.1.0';
 
-export type SourcePolicyMode =
-  | 'automatedSearch'
-  | 'automatedFetch'
-  | 'userSuppliedContent'
-  | 'manualImport'
-  | 'employerApi';
-export type SourcePolicyState =
-  | 'permitted'
-  | 'blocked'
-  | 'requires_configuration'
-  | 'requires_review'
-  | 'not_supported';
+export const SourcePolicyModeSchema = z.enum([
+  'automatedSearch',
+  'automatedFetch',
+  'userSuppliedContent',
+  'manualImport',
+  'employerApi',
+]);
+export type SourcePolicyMode = z.infer<typeof SourcePolicyModeSchema>;
 
-export interface SourcePolicy {
-  sourceId: string;
-  revision: string;
-  modes: Record<SourcePolicyMode, SourcePolicyState>;
-  evidenceRefs: string[];
-  reviewedAt: string;
-  notes?: string;
-}
+export const SourcePolicyStateSchema = z.enum([
+  'permitted',
+  'blocked',
+  'requires_configuration',
+  'requires_review',
+  'not_supported',
+]);
+export type SourcePolicyState = z.infer<typeof SourcePolicyStateSchema>;
+
+export const SourcePolicySchema = z.object({
+  sourceId: z.string().min(1),
+  revision: z.string().min(1),
+  modes: z.record(SourcePolicyModeSchema, SourcePolicyStateSchema),
+  evidenceRefs: z.array(z.string()),
+  reviewedAt: z.string().min(1),
+  notes: z.string().optional(),
+});
+
+export type SourcePolicy = z.infer<typeof SourcePolicySchema>;
 
 export interface PolicyDecision {
   sourceId: string;

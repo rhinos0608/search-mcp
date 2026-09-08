@@ -14,6 +14,7 @@ import {
   type JobSpyScrapeResult,
 } from '../../src/jobs/acquisition/adapters/jobspy.js';
 import { AdapterCapabilityRegistry } from '../../src/jobs/acquisition/adapterRegistry.js';
+import { SourcePolicyRegistry } from '../../src/jobs/acquisition/policy/registry.js';
 import { ADAPTER_CAPABILITY_CONTRACT_VERSION } from '../../src/jobs/acquisition/adapterCapability.js';
 import {
   ACQUISITION_CONTRACT_VERSION,
@@ -82,7 +83,25 @@ function makeDeps(
   registry: AdapterCapabilityRegistry,
   fn: (params: Record<string, unknown>) => Promise<JobSpyScrapeResult>,
 ) {
-  return { capabilityRegistry: registry, scrapeJobs: fn };
+  return {
+    capabilityRegistry: registry,
+    policyRegistry: new SourcePolicyRegistry(
+      JOBSPY_BOARDS.map((sourceId) => ({
+        sourceId,
+        revision: 'rev-1',
+        modes: {
+          automatedSearch: 'permitted' as const,
+          automatedFetch: 'not_supported' as const,
+          userSuppliedContent: 'permitted' as const,
+          manualImport: 'permitted' as const,
+          employerApi: 'not_supported' as const,
+        },
+        evidenceRefs: [],
+        reviewedAt: '2026-01-01T00:00:00.000Z',
+      })),
+    ),
+    scrapeJobs: fn,
+  };
 }
 
 function flatRecord(overrides: Partial<Record<string, unknown>> = {}): Record<string, unknown> {
@@ -122,10 +141,7 @@ test('JOBSPY_BOARDS exact ordered list', () => {
 });
 
 test('DEFAULT_JOBSPY_BOARDS exact', () => {
-  assert.deepEqual(
-    [...DEFAULT_JOBSPY_BOARDS],
-    ['linkedin', 'indeed', 'glassdoor', 'zip_recruiter'],
-  );
+  assert.deepEqual([...DEFAULT_JOBSPY_BOARDS], []);
 });
 
 test('JOBSPY_CAPABILITY exact triple automatedSearch/direct/board', () => {

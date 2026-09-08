@@ -10,6 +10,7 @@ import {
   type AdapterCapability,
 } from '../adapterCapability.js';
 import type { AdapterCapabilityRegistry } from '../adapterRegistry.js';
+import type { SourcePolicyRegistry } from '../policy/registry.js';
 import {
   ACQUISITION_CONTRACT_VERSION,
   AcquisitionPolicyEdgeSchema,
@@ -23,7 +24,17 @@ import { executeIfPolicyPermitted } from '../policy/edgeCoordinator.js';
 import { SourceListingSchema, SourceObservationSchema } from '../../domain/source.js';
 import { validationError } from '../../../errors.js';
 import { InstantSchema } from '../../domain/ids.js';
-import type { FlatJobRecord } from '../../../utils/jobspyClient.js';
+export interface FlatJobRecord {
+  id?: string;
+  site: string;
+  job_url: string;
+  job_url_direct?: string;
+  title: string;
+  company?: string;
+  location?: string;
+  description?: string;
+  [key: string]: unknown;
+}
 import type { ScrapeJobsParams } from 'jobspy-js';
 
 export const JOBSPY_ADAPTER_ID = 'jobspy' as const;
@@ -43,7 +54,8 @@ export const JOBSPY_BOARDS = [
 
 export type JobSpyBoard = (typeof JOBSPY_BOARDS)[number];
 
-export const DEFAULT_JOBSPY_BOARDS = ['linkedin', 'indeed', 'glassdoor', 'zip_recruiter'] as const;
+// No boards are authorized by default. Operators must provide explicit policy evidence.
+export const DEFAULT_JOBSPY_BOARDS = [] as const;
 
 const JOBSPY_BOARD_SET = new Set<string>(JOBSPY_BOARDS as readonly string[]);
 
@@ -59,6 +71,8 @@ export interface JobSpyBoardRequest {
   board: JobSpyBoard;
   executionEdge: AcquisitionPolicyEdge;
   capturedAt: string;
+  /** Caller cancellation is composed with adapter timeout. */
+  abortSignal?: AbortSignal;
   filters?: {
     location?: string;
     isRemote?: boolean;
@@ -88,7 +102,9 @@ export interface JobSpyScrapeResult {
 
 export interface JobSpyAdapterDeps {
   capabilityRegistry: AdapterCapabilityRegistry;
-  scrapeJobs: (params: ScrapeJobsParams) => Promise<JobSpyScrapeResult>;
+  /** Coordinator-owned policy authority for execution-edge revalidation. */
+  policyRegistry: SourcePolicyRegistry;
+  scrapeJobs: (params: ScrapeJobsParams, signal?: AbortSignal) => Promise<JobSpyScrapeResult>;
   monotonicNow?: () => number;
 }
 
@@ -208,6 +224,7 @@ export async function runJobSpyBoard(
     throw validationError('invalid execution edge');
   }
   // exact edge fields
+  const canonicalBoardId = `board:${board}`;
   if (
     executionEdge.actor.kind !== 'adapter' ||
     executionEdge.actor.namespace !== 'adapter' ||
@@ -215,7 +232,8 @@ export async function runJobSpyBoard(
     executionEdge.operation !== 'automatedSearch' ||
     executionEdge.route !== 'direct' ||
     executionEdge.target.kind !== 'board' ||
-    executionEdge.target.sourceId !== board ||
+    (executionEdge.target.sourceId !== canonicalBoardId &&
+      executionEdge.target.sourceId !== board) ||
     executionEdge.effect !== 'authorized_operation' ||
     executionEdge.schemaVersion !== ACQUISITION_CONTRACT_VERSION
   ) {
@@ -232,6 +250,43 @@ export async function runJobSpyBoard(
   if (!deps || typeof deps.scrapeJobs !== 'function') throw validationError('missing scrapeJobs');
   if (!deps.capabilityRegistry || typeof deps.capabilityRegistry.supports !== 'function')
     throw validationError('missing capability registry');
+
+  if (!deps.policyRegistry || typeof deps.policyRegistry.decideEdge !== 'function') {
+    const dur = Math.max(0, monotonicNow() - startMs);
+    return makeCapabilityMissingResult(slice, executionEdge, dur);
+  }
+  const actor = { kind: 'adapter' as const, namespace: 'adapter', id: JOBSPY_ADAPTER_ID };
+  const canonicalDecision = deps.policyRegistry.decideEdge(
+    canonicalBoardId,
+    actor,
+    'automatedSearch',
+    'direct',
+    'board',
+  );
+  // Accept legacy bare-board policy only for direct adapter callers; coordinator
+  // always emits canonical board:<name> targets.
+  const authorized =
+    canonicalDecision.state === 'not_supported'
+      ? deps.policyRegistry.decideEdge(board, actor, 'automatedSearch', 'direct', 'board')
+      : canonicalDecision;
+  if (authorized.state !== executionEdge.state) {
+    const dur = Math.max(0, monotonicNow() - startMs);
+    return executionEdge.state === 'permitted'
+      ? makeCapabilityMissingResult(slice, executionEdge, dur)
+      : makeNonPermittedResult(slice, executionEdge, dur);
+  }
+  if (
+    authorized.revision !== executionEdge.revision ||
+    authorized.evidenceRefs.length !== executionEdge.evidenceRefs.length ||
+    authorized.evidenceRefs.some((ref, index) => ref !== executionEdge.evidenceRefs[index])
+  ) {
+    const dur = Math.max(0, monotonicNow() - startMs);
+    return makeCapabilityMissingResult(slice, executionEdge, dur);
+  }
+  if (authorized.state !== 'permitted') {
+    const dur = Math.max(0, monotonicNow() - startMs);
+    return makeNonPermittedResult(slice, executionEdge, dur);
+  }
 
   // capability check (zero calls if missing)
   const hasCapability = deps.capabilityRegistry.supports(JOBSPY_ADAPTER_ID, {
@@ -287,9 +342,30 @@ export async function runJobSpyBoard(
   // Execute via executeIfPolicyPermitted to respect gate (already probed, but reuse)
   let scrapeResult: JobSpyScrapeResult;
   try {
-    const exec = await executeIfPolicyPermitted(executionEdge, async () =>
-      deps.scrapeJobs(params as unknown as ScrapeJobsParams),
-    );
+    const timeoutMs = Math.max(1, Math.min(slice.budget.milliseconds, 30_000));
+    const exec = await executeIfPolicyPermitted(executionEdge, () => {
+      const controller = new AbortController();
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const callerSignal = request.abortSignal;
+      const onCallerAbort = (): void => {
+        controller.abort(callerSignal?.reason);
+      };
+      if (callerSignal?.aborted) controller.abort(callerSignal.reason);
+      else callerSignal?.addEventListener('abort', onCallerAbort, { once: true });
+      const boundedScrape = new Promise<JobSpyScrapeResult>((resolve, reject) => {
+        timer = setTimeout(() => {
+          controller.abort(new Error('JOBSPY_TIMEOUT'));
+          reject(new Error('JOBSPY_TIMEOUT'));
+        }, timeoutMs);
+        void deps
+          .scrapeJobs(params as unknown as ScrapeJobsParams, controller.signal)
+          .then(resolve, reject);
+      });
+      return boundedScrape.finally(() => {
+        if (timer !== undefined) clearTimeout(timer);
+        callerSignal?.removeEventListener('abort', onCallerAbort);
+      });
+    });
     if (exec.status !== 'executed') {
       const dur = Math.max(0, monotonicNow() - startMs);
       return makeNonPermittedResult(slice, exec.edge, dur);
@@ -308,7 +384,7 @@ export async function runJobSpyBoard(
       bytesUsed: 0,
       durationMs: dur,
       policyEdgeRefs: [executionEdge.edgeId],
-      errorCode: 'ERROR',
+      errorCode: request.abortSignal?.aborted ? 'ABORTED' : 'ERROR',
     };
     const result: AcquisitionSliceResult = {
       schemaVersion: ACQUISITION_CONTRACT_VERSION,
@@ -515,7 +591,6 @@ export async function runJobSpyBoard(
     // Build candidate provenance
     const destination = chosenMeta
       ? {
-          rawUrl: chosenMeta.rawUrl,
           canonicalUrl: chosenMeta.canonicalUrl,
           normalizedHost: chosenMeta.normalizedHost,
         }

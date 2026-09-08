@@ -16,6 +16,8 @@ export const SEEK_SOURCE_ID = 'board:seek' as const;
  * Build the frozen SEEK source-class entry.
  * Idempotent: always produces the same entry given the same inputs.
  */
+const SEEK_REVIEWED_AT = '2025-01-01T00:00:00.000Z';
+
 export function buildSeekEntry(): SourceRegistryEntry {
   return {
     schemaVersion: '1.0.0',
@@ -50,7 +52,7 @@ export function buildSeekEntry(): SourceRegistryEntry {
       riskyModesEnabled: [],
     },
     evidenceRefs: [],
-    reviewedAt: new Date().toISOString(),
+    reviewedAt: SEEK_REVIEWED_AT,
     modeOverrides: {
       automatedSearch: 'blocked',
       automatedFetch: 'blocked',
@@ -99,7 +101,7 @@ export function buildSeekManualEntry(
       riskyModesEnabled: [],
     },
     evidenceRefs: [],
-    reviewedAt: new Date().toISOString(),
+    reviewedAt: SEEK_REVIEWED_AT,
   };
 }
 

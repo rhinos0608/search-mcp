@@ -171,7 +171,10 @@ export interface AcquisitionRunDeps {
   policyRegistry: SourcePolicyRegistry;
   capabilityRegistry: AdapterCapabilityRegistry;
   ports: readonly IndexedProviderPort[];
-  scrapeJobs: (params: Record<string, unknown>) => Promise<JobSpyScrapeResult>;
+  scrapeJobs: (
+    params: Record<string, unknown>,
+    signal?: AbortSignal,
+  ) => Promise<JobSpyScrapeResult>;
   monotonicNow?: () => number;
 }
 
@@ -502,11 +505,22 @@ export async function runAcquisition(
           actor: { kind: 'adapter' as const, namespace: 'adapter', id: 'jobspy' },
           operation: 'automatedSearch' as const,
           route: 'direct' as const,
-          target: { kind: 'board' as const, sourceId: item.board },
+          target: { kind: 'board' as const, sourceId: `board:${item.board}` },
         };
-        const edge = resolveExecutionPolicyEdge(deps.policyRegistry as never, req as never, {
+        let edge = resolveExecutionPolicyEdge(deps.policyRegistry as never, req as never, {
           decidedAt: parsedOptions.capturedAt,
         });
+        // Legacy direct callers may still register bare board IDs; canonical
+        // board:<name> remains emitted by this coordinator.
+        if (edge.state === 'not_supported') {
+          const legacyReq = { ...req, target: { kind: 'board' as const, sourceId: item.board } };
+          const legacyEdge = resolveExecutionPolicyEdge(
+            deps.policyRegistry as never,
+            legacyReq as never,
+            { decidedAt: parsedOptions.capturedAt },
+          );
+          if (legacyEdge.state !== 'not_supported') edge = legacyEdge;
+        }
         resolvedEdges = [edge];
         const result = await runJobSpyBoard(
           {
@@ -514,10 +528,12 @@ export async function runAcquisition(
             board: item.board as never,
             executionEdge: edge,
             capturedAt: parsedOptions.capturedAt,
-            filters: item.filters as never,
+            ...(parsedOptions.abortSignal ? { abortSignal: parsedOptions.abortSignal } : {}),
+            ...(item.filters ? { filters: item.filters as never } : {}),
           },
           {
             capabilityRegistry: deps.capabilityRegistry as never,
+            policyRegistry: deps.policyRegistry,
             scrapeJobs: deps.scrapeJobs as never,
             monotonicNow,
           },
@@ -525,6 +541,7 @@ export async function runAcquisition(
         const parsed = AcquisitionSliceResultSchema.safeParse(result);
         if (!parsed.success) throw new Error('slice parse failed');
         sliceResult = parsed.data;
+        if (parsedOptions.abortSignal?.aborted) seenAborted = true;
       } else {
         adapterIdForFabrication = 'manual';
         const target = item.publisherTarget ?? { kind: 'adapter' as const, sourceId: 'manual' };
@@ -640,7 +657,7 @@ export async function runAcquisition(
               route: prior.route,
               target: prior.target,
             };
-            const decidedAt = new Date(monotonicNow()).toISOString();
+            const decidedAt = parsedOptions.capturedAt;
             const recheckEdge = resolveExecutionPolicyEdge(
               deps.policyRegistry as never,
               recheckReq as never,

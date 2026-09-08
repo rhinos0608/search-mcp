@@ -190,6 +190,7 @@ test('single indexed slice edge exact and byte-intact', async () => {
       capabilityRegistry: caps,
       ports,
       scrapeJobs: async () => ({ jobs: [], totalScraped: 0, newCount: 0 }) as unknown as never,
+      monotonicNow: () => 0,
     },
   );
   assert.equal(result.slices.length, 1);
