@@ -33,3 +33,13 @@ export type {
   JobRun,
   ObservabilitySnapshot,
 } from './types.js';
+export { executeJobsSearch, JOBS_SEARCH_VERSION, JobsSearchError } from './search.js';
+export { JOBS_SEARCH_CONTRACT_VERSION } from './searchContracts.js';
+export type {
+  JobsSearchCandidate,
+  JobsSearchCoverageOutcome,
+  JobsSearchDeps,
+  JobsSearchEvidenceState,
+  JobsSearchRequest,
+  JobsSearchResult,
+} from './searchContracts.js';

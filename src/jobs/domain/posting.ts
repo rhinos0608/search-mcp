@@ -148,7 +148,13 @@ export const JobPostingSchema = z
     licencesChecksRegistration: z.array(z.string().min(1)),
     workRights: z.string().min(1).optional(),
     targetedPosition: z.boolean().optional(),
-    contactMetadata: z.record(z.string(), z.string()).optional(),
+    contactMetadata: z
+      .record(z.string().min(1).max(128), z.string().max(2048))
+      .refine(
+        (value) => Object.keys(value).length <= 32,
+        'contact metadata exceeds maximum entries',
+      )
+      .optional(),
     verificationState: z.enum(['unverified', 'partially_verified', 'verified']),
     lifecycleState: z.enum([
       'discovered',
