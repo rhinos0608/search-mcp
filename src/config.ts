@@ -289,14 +289,6 @@ export const FEATURE_REQUIREMENTS: Record<string, FeatureRequirement> = {
     isConfigured: (cfg) =>
       cfg.crawl4ai.baseUrl.length > 0 && cfg.embeddingSidecar.baseUrl.length > 0,
   },
-  semantic_jobs: {
-    required: ['EMBEDDING_SIDECAR_BASE_URL', 'EXA_API_KEY or BRAVE_API_KEY or SEARXNG_BASE_URL'],
-    isConfigured: (cfg) =>
-      cfg.embeddingSidecar.baseUrl.length > 0 &&
-      ((cfg.exa.apiKey ?? '').length > 0 ||
-        (cfg.brave.apiKey ?? '').length > 0 ||
-        cfg.searxng.baseUrl.length > 0),
-  },
   browser: {
     required: ['BROWSER_ENABLED=true'],
     isConfigured: (cfg) => cfg.browser.enabled,

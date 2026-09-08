@@ -23,9 +23,6 @@ interface RegisteredToolEntry {
 /** All expected tool names. Families are single-entry, per-action tools are gone. */
 const STANDALONE_TOOLS = new Set(['web_search', 'health_check']);
 
-/** Tools that require specific config and may not be registered in default env. */
-const GATED_STANDALONE_TOOLS = new Set(['semantic_jobs']);
-
 const FAMILY_TOOLS = new Map<string, string[]>([
   [
     'github',
@@ -247,20 +244,10 @@ for (const toolName of STANDALONE_TOOLS) {
   });
 }
 
-for (const toolName of GATED_STANDALONE_TOOLS) {
-  test(`gated standalone tool "${toolName}" is either registered or gated (not leaked per-action)`, () => {
-    const server = createServer(loadConfig()).server;
-    const tools = getAllRegisteredTools(server);
-    // Gated tools may or may not be registered depending on env, but they should
-    // never have leaked per-action variants.
-    if (toolName in tools) {
-      assert.ok(true, `${toolName} is registered (config present)`);
-    } else {
-      // Not registered due to gating — fine
-      assert.ok(true, `${toolName} is gated (config missing)`);
-    }
-  });
-}
+test('deleted legacy semantic_jobs tool is never registered', () => {
+  const tools = getAllRegisteredTools(createServer(loadConfig()).server);
+  assert.equal('semantic_jobs' in tools, false);
+});
 
 // ── Full tool list sanity check ─────────────────────────────────────────────
 

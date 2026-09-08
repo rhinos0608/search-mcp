@@ -71,7 +71,6 @@ export interface ConstraintEvaluation {
 export type AdapterType =
   | 'text'
   | 'code'
-  | 'job'
   | 'transcript'
   | 'conversation'
   | 'github'

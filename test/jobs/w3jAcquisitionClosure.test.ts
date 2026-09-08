@@ -44,12 +44,6 @@ import {
   enrichDestinationFetches as barrelEnrichDestinationFetches,
 } from '../../src/jobs/acquisition/index.js';
 import {
-  SEMANTIC_JOBS_SHADOW_VERSION,
-  SemanticJobsShadowResultSchema,
-  runSemanticJobsShadow,
-  type SemanticJobsShadowPlanItem,
-} from '../../src/jobs/compat/semanticJobsShadow.js';
-import {
   executeIfPolicyPermitted,
   resolveExecutionPolicyEdge,
   resolveInformationalPolicyEdge,
@@ -57,7 +51,7 @@ import {
 import { acquiredContentHash } from '../../src/jobs/acquisition/adapterSupport.js';
 import type { SourcePolicy } from '../../src/jobs/acquisition/policy/sourcePolicy.js';
 import type { SafeFetchOptions, SafeFetchResult } from '../../src/httpGuards.js';
-import type { FlatJobRecord, JobSpyAcquisitionParams } from '../../src/utils/jobspyClient.js';
+import type { FlatJobRecord } from '../../src/jobs/acquisition/adapters/jobspy.js';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -341,7 +335,6 @@ function candidateAttempts(
 // ---------------------------------------------------------------------------
 
 const SHARED_JOB_URL = 'https://jobs.example.com/a';
-const OTHER_JOB_URL = 'https://jobs.example.com/b';
 
 function flatRecord(overrides: Partial<FlatJobRecord> & { site: string }): FlatJobRecord {
   return {
@@ -400,71 +393,6 @@ function makeJobspyDeps(overrides: {
 }
 
 // ---------------------------------------------------------------------------
-// W3-I fixtures
-// ---------------------------------------------------------------------------
-
-const SHADOW_QUERY = 'Sydney rocket scientist';
-
-function makeShadowSlice(sliceId: string): AcquisitionSlice {
-  return makeSlice({
-    sliceId,
-    adapterIds: ['jobspy'],
-    query: SHADOW_QUERY,
-    reason: 'shadow comparison',
-  });
-}
-
-function makeShadowPlan(boards: readonly JobSpyBoard[]): SemanticJobsShadowPlanItem[] {
-  return boards.map((board, i) => ({
-    kind: 'jobspy' as const,
-    slice: makeShadowSlice(`slice-${String(i)}`),
-    board,
-    filters: { resultsWanted: 5, hoursOld: 48 },
-  }));
-}
-
-function makeShadowDeps(overrides: {
-  legacyRecords?: FlatJobRecord[];
-  legacyThrows?: Error;
-  coordinatorJobs?: Record<string, FlatJobRecord[]>;
-}) {
-  const legacyCalls: JobSpyAcquisitionParams[] = [];
-  const scrapeCalls: string[] = [];
-  const deps = {
-    policyRegistry: makeRegistries(seekPolicy(), policy('linkedin'), [
-      policy('indeed'),
-      policy('zip_recruiter'),
-      policy('glassdoor'),
-    ]),
-    capabilityRegistry: new AdapterCapabilityRegistry([JOBSPY_CAPABILITY]),
-    scrapeJobs: async (params: Record<string, unknown>) => {
-      const site = (params.site_name as string[])[0] ?? '';
-      scrapeCalls.push(site);
-      const jobs = overrides.coordinatorJobs?.[site] ?? [];
-      return { jobs, totalScraped: jobs.length, newCount: jobs.length } as never;
-    },
-    searchJobSpy: async (params: JobSpyAcquisitionParams) => {
-      legacyCalls.push(params);
-      if (overrides.legacyThrows) throw overrides.legacyThrows;
-      return overrides.legacyRecords ?? [];
-    },
-    // deterministic injected monotonic clock
-    monotonicNow: () => 0,
-  };
-  return { deps, legacyCalls, scrapeCalls };
-}
-
-function shadowRequest(plan: SemanticJobsShadowPlanItem[], abortSignal?: AbortSignal) {
-  return {
-    runId: 'run-1',
-    capturedAt: CAPTURED_AT,
-    budget: { ...BUDGET },
-    plan,
-    ...(abortSignal !== undefined ? { abortSignal } : {}),
-  };
-}
-
-// ---------------------------------------------------------------------------
 // Table-driven aggregate cases
 // ---------------------------------------------------------------------------
 
@@ -474,7 +402,7 @@ interface ClosureCase {
   readonly run: () => Promise<void> | void;
 }
 
-const CASES: readonly ClosureCase[] = [
+export const CASES: readonly ClosureCase[] = [
   {
     id: 1,
     name: 'provider permission remains separate from publisher search/fetch',
@@ -1007,64 +935,7 @@ const CASES: readonly ClosureCase[] = [
   },
   {
     id: 12,
-    name: 'W3-I comparison is one legacy multi-site call, aggregate-only, non-persistent, no cutover',
-    run: async () => {
-      const plan = makeShadowPlan(['linkedin', 'indeed', 'zip_recruiter', 'glassdoor']);
-      const { deps, legacyCalls, scrapeCalls } = makeShadowDeps({
-        legacyRecords: [
-          flatRecord({ site: 'linkedin', id: 'l1', job_url: SHARED_JOB_URL, title: 'Legacy A' }),
-          flatRecord({ site: 'indeed', id: 'i1', job_url: SHARED_JOB_URL, title: 'Legacy B' }),
-          flatRecord({ site: 'monster', id: 'm1', job_url: OTHER_JOB_URL, title: 'Off-plan' }),
-        ],
-        coordinatorJobs: {
-          linkedin: [flatRecord({ site: 'linkedin', id: 'cl1', job_url: SHARED_JOB_URL })],
-          indeed: [flatRecord({ site: 'indeed', id: 'ci1', job_url: OTHER_JOB_URL })],
-        },
-      });
-      const result = await runSemanticJobsShadow(shadowRequest(plan), deps);
-      assert.equal(result.schemaVersion, SEMANTIC_JOBS_SHADOW_VERSION);
-      assert.equal(result.status, 'completed');
-      // exactly one legacy multi-site call covering all four plan boards
-      assert.equal(legacyCalls.length, 1);
-      assert.deepEqual(legacyCalls[0]!.sites, ['linkedin', 'indeed', 'zip_recruiter', 'glassdoor']);
-      assert.equal(legacyCalls[0]!.query, SHADOW_QUERY);
-      assert.equal(result.legacy.callCount, 1);
-      // legacy path never scrapes and the coordinator path never reuses searchJobSpy
-      assert.deepEqual(scrapeCalls, ['linkedin', 'indeed', 'zip_recruiter', 'glassdoor']);
-      // aggregate-only: unplanned-board record counted but excluded
-      assert.equal(result.legacy.recordCount, 3);
-      assert.equal(result.legacy.keyedCount, 2);
-      assert.equal(result.legacy.unplannedBoardCount, 1);
-      // aggregate Jaccard over internal canonical-URL keys: {A} vs {A,B}
-      assert.deepEqual(result.comparison, {
-        status: 'computed',
-        key: 'canonical_url_sha256',
-        shared: 1,
-        legacyOnly: 0,
-        coordinatorOnly: 1,
-        union: 2,
-        jaccardMillis: 500,
-      });
-      // board rows follow plan order with aggregate counts only
-      assert.deepEqual(
-        result.boards.map((b) => b.board),
-        ['linkedin', 'indeed', 'zip_recruiter', 'glassdoor'],
-      );
-      // aggregate-only and non-persistent: no query, URL, title, company, or hash escapes
-      const serialized = JSON.stringify(result);
-      assert.equal(serialized.includes(SHADOW_QUERY), false);
-      assert.equal(serialized.includes(SHARED_JOB_URL), false);
-      assert.equal(serialized.includes(OTHER_JOB_URL), false);
-      assert.equal(serialized.includes('Legacy A'), false);
-      assert.equal(serialized.includes('Off-plan'), false);
-      assert.equal(/[0-9a-f]{64}/.test(serialized), false);
-      // no cutover surface: strict schema parse admits only the frozen aggregate shape
-      SemanticJobsShadowResultSchema.parse(result);
-    },
-  },
-  {
-    id: 13,
-    name: 'H/I abort and work budgets remain bounded',
+    name: 'H abort and work budgets remain bounded',
     run: async () => {
       // H abort: first fetch aborts the controller and throws; no further candidates run
       {
@@ -1103,27 +974,11 @@ const CASES: readonly ClosureCase[] = [
         assert.equal(result.status, 'budget_exhausted');
         assert.ok(result.budgetConsumed.candidates <= 2);
       }
-      // I pre-abort: zero legacy calls, zero coordinator scrapes, comparison not computed
-      {
-        const plan = makeShadowPlan(['linkedin', 'indeed']);
-        const controller = new AbortController();
-        controller.abort();
-        const { deps, legacyCalls, scrapeCalls } = makeShadowDeps({});
-        const result = await runSemanticJobsShadow(shadowRequest(plan, controller.signal), deps);
-        assert.equal(result.status, 'aborted');
-        assert.equal(legacyCalls.length, 0);
-        assert.equal(scrapeCalls.length, 0);
-        assert.equal(result.legacy.status, 'aborted');
-        assert.equal(result.legacy.callCount, 0);
-        assert.equal(result.coordinator.status, 'not_run');
-        assert.deepEqual(result.comparison, { status: 'not_computed', reason: 'aborted' });
-        SemanticJobsShadowResultSchema.parse(result);
-      }
     },
   },
   {
-    id: 14,
-    name: 'full H and I outputs pass exported schemas',
+    id: 13,
+    name: 'full H outputs pass exported schemas',
     run: async () => {
       // H: full successful enrichment parses through the additive barrel export
       {
@@ -1136,24 +991,6 @@ const CASES: readonly ClosureCase[] = [
         const parsed = BarrelDestinationFetchEnrichmentResultSchema.parse(result);
         assert.equal(parsed.schemaVersion, '1.0.0');
         assert.equal(parsed.run.slices[0]!.candidates[0]!.state, 'destination_fetched');
-      }
-      // I: full completed shadow parses through the exported schema
-      {
-        const plan = makeShadowPlan(['linkedin', 'indeed']);
-        const { deps } = makeShadowDeps({
-          legacyRecords: [flatRecord({ site: 'linkedin', id: 'l1', job_url: SHARED_JOB_URL })],
-          coordinatorJobs: {
-            linkedin: [flatRecord({ site: 'linkedin', id: 'cl1', job_url: SHARED_JOB_URL })],
-          },
-        });
-        const result = await runSemanticJobsShadow(shadowRequest(plan), deps);
-        assert.equal(result.status, 'completed');
-        const parsed = SemanticJobsShadowResultSchema.parse(result);
-        assert.equal(parsed.schemaVersion, SEMANTIC_JOBS_SHADOW_VERSION);
-        assert.equal(parsed.comparison.status, 'computed');
-        if (parsed.comparison.status === 'computed') {
-          assert.equal(parsed.comparison.jaccardMillis, 1000);
-        }
       }
     },
   },

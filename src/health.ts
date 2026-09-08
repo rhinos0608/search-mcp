@@ -16,7 +16,6 @@ import { getTracker, type RateLimitedBackend } from './rateLimit.js';
 import { safeResponseText, safeResponseJson } from './httpGuards.js';
 import { logger } from './logger.js';
 import { getUserAgent } from './version.js';
-import { jobSpyHealth } from './utils/jobspyClient.js';
 import { youtubeCapabilities } from './tools/families/youtube.js';
 import { redditCapabilities } from './tools/families/reddit.js';
 import { gitHubCapabilities } from './tools/families/github.js';
@@ -77,15 +76,6 @@ const GATED_TOOLS: Record<string, GateRule> = {
     check: (cfg) => cfg.crawl4ai.baseUrl.length > 0,
     remediation:
       'Set CRAWL4AI_BASE_URL to point at a running crawl4ai sidecar (e.g. http://localhost:11235). Run: docker run -d -p 11235:11235 unclecode/crawl4ai:latest',
-  },
-  semantic_jobs: {
-    check: (cfg) =>
-      cfg.embeddingSidecar.baseUrl.length > 0 &&
-      ((cfg.exa.apiKey ?? '').length > 0 ||
-        (cfg.brave.apiKey ?? '').length > 0 ||
-        cfg.searxng.baseUrl.length > 0),
-    remediation:
-      'Set EMBEDDING_SIDECAR_BASE_URL and a search backend (EXA_API_KEY, BRAVE_API_KEY, or SEARXNG_BASE_URL) to use semantic_jobs.',
   },
   browser: {
     check: (cfg) => cfg.browser.enabled,
@@ -265,7 +255,6 @@ function webSearchBackendRemediation(backend: SearchBackend): string {
 const FEATURE_BY_TOOL: Record<string, keyof typeof import('./config.js').FEATURE_REQUIREMENTS> = {
   web_crawl: 'web_crawl',
   semantic_crawl: 'semantic_crawl',
-  semantic_jobs: 'semantic_jobs',
   browser: 'browser',
   web_search: 'web_search_keyed_backends',
   reddit_oauth: 'reddit_oauth',
@@ -448,27 +437,6 @@ export function configHealth(cfg: SearchConfig): Record<string, ToolHealth> {
   }
 
   return report;
-}
-
-async function jobSpyProbe(): Promise<ToolHealth> {
-  try {
-    const ok = await jobSpyHealth();
-    if (ok) {
-      return { status: 'healthy', message: 'JobSpy library functional and reachable.' };
-    }
-  } catch (err) {
-    return {
-      status: 'degraded',
-      message: `JobSpy health probe failed: ${err instanceof Error ? err.message : String(err)}`,
-      remediation: 'Check network connectivity or if job boards are blocking requests.',
-    };
-  }
-
-  return {
-    status: 'degraded',
-    message: 'JobSpy health probe failed.',
-    remediation: 'Check network connectivity or if job boards are blocking requests.',
-  };
 }
 
 function redditOAuthHealth(cfg: SearchConfig): ToolHealth {
@@ -954,9 +922,6 @@ export async function runHealthProbes(cfg: SearchConfig): Promise<HealthReport> 
     tools.web_crawl_extraction = extractionHealth;
     tools.semantic_crawl_extraction = extractionHealth;
   }
-
-  // JobSpy synthesized probe
-  tools.jobspy = await jobSpyProbe();
 
   // Browser probe — config-only, no network check in v1 (launched on-demand)
   if (cfg.browser.enabled) {
