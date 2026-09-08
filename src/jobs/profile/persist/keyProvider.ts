@@ -15,6 +15,12 @@ export class MemoryKeyProvider implements ProfileKeyProvider {
     this.#key = key;
   }
 
+  async writeIfAbsent(key: Uint8Array): Promise<boolean> {
+    if (this.#key) return false;
+    this.#key = key;
+    return true;
+  }
+
   async delete(): Promise<void> {
     this.#key = undefined;
   }

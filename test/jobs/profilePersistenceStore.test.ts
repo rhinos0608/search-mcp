@@ -169,6 +169,23 @@ test('save rejects non-minimized result', async () => {
   await rm(dir, { recursive: true, force: true });
 });
 
+test('save rejects malformed minimization result with validation error', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'w2b-test-'));
+  const { store } = await makeStore(dir);
+  await assert.rejects(
+    () =>
+      store.saveAdoptedProfile({
+        election: true,
+        expectedRevision: null,
+        result: { status: 'minimized', draft: null } as never,
+      }),
+    (err: ProfileStoreError) =>
+      err.code === 'VALIDATION_ERROR' && err.message === 'invalid_minimization_result',
+  );
+  store.close();
+  await rm(dir, { recursive: true, force: true });
+});
+
 test('save rejects unapproved term', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'w2b-test-'));
   const { store } = await makeStore(dir);
@@ -473,6 +490,52 @@ test('no real keychain access in ordinary unit tests', async () => {
   assert.equal(key.length, 32);
   await kp.delete();
   assert.equal(await kp.read(), undefined);
+});
+
+test('delete on absent store does not create DB or key', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'w2b-test-'));
+  const { store, kp } = await makeStore(dir);
+  const deleted = await store.deleteAdoptedProfile({
+    election: true,
+    expectedRevision:
+      'profile-revision:0000000000000000000000000000000000000000000000000000000000000000',
+  });
+  assert.equal(deleted, false);
+  assert.equal(await kp.read(), undefined);
+  await assert.rejects(() => readFile(join(dir, 'profiles.sqlite')));
+  store.close();
+  await rm(dir, { recursive: true, force: true });
+});
+
+test('failed first open cleans newly created DB artifacts and key', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'w2b-test-'));
+  const kp = new MemoryKeyProvider();
+  const store = createProfileStore({
+    databasePath: join(dir, 'profiles.sqlite'),
+    keyProvider: kp,
+    databaseOpener: {
+      open(databasePath: string): ProfileDatabase {
+        const db = new Database(databasePath);
+        db.exec('CREATE TABLE partial_write (value TEXT)');
+        db.close();
+        throw new Error('injected_open_failure');
+      },
+    },
+    allowedTermRefs: ALLOWED_TERM_REFS,
+  });
+  await assert.rejects(
+    () =>
+      store.saveAdoptedProfile({
+        election: true,
+        expectedRevision: null,
+        result: minimizationResult([], []),
+      }),
+    /injected_open_failure/u,
+  );
+  assert.equal(await kp.read(), undefined);
+  await assert.rejects(() => readFile(join(dir, 'profiles.sqlite')));
+  store.close();
+  await rm(dir, { recursive: true, force: true });
 });
 
 test('deleteAdoptedProfile rejects non-true election', async () => {

@@ -161,43 +161,48 @@ export interface MigrationResult {
  * migration, no silent version overwrite.
  */
 export function applyMigrations(db: ProfileDatabase): MigrationResult {
-  // Ensure migration table exists first (bootstrap)
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS schema_migrations (
-      version INTEGER PRIMARY KEY,
-      name TEXT NOT NULL,
-      checksum TEXT NOT NULL,
-      applied_at TEXT NOT NULL
-    );
-  `);
+  db.exec('BEGIN IMMEDIATE');
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS schema_migrations (
+        version INTEGER PRIMARY KEY,
+        name TEXT NOT NULL,
+        checksum TEXT NOT NULL,
+        applied_at TEXT NOT NULL
+      );
+    `);
 
-  const existing = db
-    .prepare('SELECT version, checksum FROM schema_migrations WHERE version = ?')
-    .get(MIGRATION_VERSION) as { version: number; checksum: string } | undefined;
+    const existing = db
+      .prepare('SELECT version, checksum FROM schema_migrations WHERE version = ?')
+      .get(MIGRATION_VERSION) as { version: number; checksum: string } | undefined;
 
-  if (existing) {
-    // Verify checksum
-    if (existing.checksum !== V1_CHECKSUM) {
+    if (existing) {
+      if (existing.checksum !== V1_CHECKSUM) throw new Error('SCHEMA_INCOMPATIBLE');
+      db.exec('COMMIT');
+      return { applied: false, version: MIGRATION_VERSION };
+    }
+
+    const maxVersion = db.prepare('SELECT MAX(version) AS v FROM schema_migrations').get() as
+      | { v: number | null }
+      | undefined;
+    if (maxVersion && maxVersion.v !== null && maxVersion.v > MIGRATION_VERSION) {
       throw new Error('SCHEMA_INCOMPATIBLE');
     }
-    return { applied: false, version: MIGRATION_VERSION };
+
+    db.exec(V1_DDL);
+    db.prepare(
+      'INSERT INTO schema_migrations (version, name, checksum, applied_at) VALUES (?, ?, ?, ?)',
+    ).run(MIGRATION_VERSION, 'v1-create-profiles', V1_CHECKSUM, new Date().toISOString());
+    db.exec('COMMIT');
+    return { applied: true, version: MIGRATION_VERSION };
+  } catch (err) {
+    try {
+      db.exec('ROLLBACK');
+    } catch {
+      // Preserve original migration error.
+    }
+    throw err;
   }
-
-  // Check no future migration has run
-  const maxVersion = db.prepare('SELECT MAX(version) AS v FROM schema_migrations').get() as
-    | { v: number | null }
-    | undefined;
-  if (maxVersion && maxVersion.v !== null && maxVersion.v > MIGRATION_VERSION) {
-    throw new Error('SCHEMA_INCOMPATIBLE');
-  }
-
-  // Apply v1
-  db.exec(V1_DDL);
-  db.prepare(
-    'INSERT INTO schema_migrations (version, name, checksum, applied_at) VALUES (?, ?, ?, ?)',
-  ).run(MIGRATION_VERSION, 'v1-create-profiles', V1_CHECKSUM, new Date().toISOString());
-
-  return { applied: true, version: MIGRATION_VERSION };
 }
 
 export { V1_CHECKSUM, MIGRATION_VERSION, V1_DDL };

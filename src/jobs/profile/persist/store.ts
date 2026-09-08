@@ -15,6 +15,7 @@ import {
   type ResetProfileStoreInput,
   type SaveAdoptedProfileInput,
 } from './contracts.js';
+import { ProfileMinimizationResultSchema } from '../contracts.js';
 import { correctionId, factId, preferenceId, packetId, provenanceId, revisionId } from './ids.js';
 import { applyMigrations } from './migrations.js';
 
@@ -190,6 +191,17 @@ export function createProfileStore(deps: ProfileStoreDeps): ProfileStore {
     return db;
   };
 
+  const removeDatabaseArtifacts = async (): Promise<void> => {
+    const fs = await import('node:fs/promises');
+    for (const suffix of ['', '-wal', '-shm']) {
+      try {
+        await fs.unlink(deps.databasePath + suffix);
+      } catch (err: unknown) {
+        if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
+      }
+    }
+  };
+
   /** Open existing DB for read-only operations. Do not create on first-time state. */
   const initForRead = async (): Promise<void> => {
     if (db) return;
@@ -205,7 +217,7 @@ export function createProfileStore(deps: ProfileStoreDeps): ProfileStore {
   };
 
   /** Open or create DB for write operations. Generates key on first save. */
-  const initForWrite = async (): Promise<void> => {
+  const initializeForWrite = async (): Promise<void> => {
     if (db) return;
     const key = await deps.keyProvider.read();
     const dbExists = await fsExists(deps.databasePath);
@@ -219,9 +231,28 @@ export function createProfileStore(deps: ProfileStoreDeps): ProfileStore {
           return k;
         });
       const newKey = generateKey();
-      await deps.keyProvider.write(newKey);
-      db = deps.databaseOpener.open(deps.databasePath, newKey);
-      applyMigrations(db);
+      try {
+        const claimed = deps.keyProvider.writeIfAbsent
+          ? await deps.keyProvider.writeIfAbsent(newKey)
+          : (await deps.keyProvider.write(newKey), true);
+        if (!claimed) {
+          const existingKey = await deps.keyProvider.read();
+          if (!existingKey) throw new ProfileStoreError('DATABASE_LOCKED', 'key_claim_lost');
+          db = deps.databaseOpener.open(deps.databasePath, existingKey);
+          applyMigrations(db);
+          return;
+        }
+        db = deps.databaseOpener.open(deps.databasePath, newKey);
+        applyMigrations(db);
+      } catch (err) {
+        if (db) {
+          db.close();
+          db = undefined;
+        }
+        await removeDatabaseArtifacts();
+        await deps.keyProvider.delete();
+        throw err;
+      }
       return;
     }
 
@@ -230,6 +261,14 @@ export function createProfileStore(deps: ProfileStoreDeps): ProfileStore {
 
     db = deps.databaseOpener.open(deps.databasePath, key);
     applyMigrations(db);
+  };
+
+  let writeInitialization: Promise<void> | undefined;
+  const initForWrite = async (): Promise<void> => {
+    writeInitialization ??= initializeForWrite().finally(() => {
+      writeInitialization = undefined;
+    });
+    await writeInitialization;
   };
 
   // ---------------------------------------------------------------------------
@@ -247,7 +286,11 @@ export function createProfileStore(deps: ProfileStoreDeps): ProfileStore {
   ): Promise<AdoptedProfileSnapshot> => {
     assertElection(input);
 
-    const { result } = input;
+    const parsedResult = ProfileMinimizationResultSchema.safeParse(input.result);
+    if (!parsedResult.success) {
+      throw new ProfileStoreError('VALIDATION_ERROR', 'invalid_minimization_result');
+    }
+    const result = parsedResult.data;
     if (result.status !== 'minimized') {
       throw new ProfileStoreError('VALIDATION_ERROR', 'minimized_result_required');
     }
@@ -303,6 +346,10 @@ export function createProfileStore(deps: ProfileStoreDeps): ProfileStore {
 
     for (const correction of input.corrections ?? []) {
       if (correction.kind === 'fact') {
+        validateFact(correction.prior, deps.allowedTermRefs);
+        if (correction.replacement !== undefined) {
+          validateFact(correction.replacement, deps.allowedTermRefs);
+        }
         const priorFid = factId(
           correction.prior as { kind: string; packId: string; packVersion: string; termId: string },
         );
@@ -324,6 +371,10 @@ export function createProfileStore(deps: ProfileStoreDeps): ProfileStore {
           replacementFactId: replacementFid,
         });
       } else {
+        validatePreference(correction.prior, deps.allowedTermRefs);
+        if (correction.replacement !== undefined) {
+          validatePreference(correction.replacement, deps.allowedTermRefs);
+        }
         const priorPid = preferenceId(correction.prior);
         const replacementPid = correction.replacement ? preferenceId(correction.replacement) : null;
         const cid = correctionId('preference', priorPid, replacementPid);
@@ -339,10 +390,24 @@ export function createProfileStore(deps: ProfileStoreDeps): ProfileStore {
     const revId = revisionId(factIdsList, prefIdsList, correctionIdsList);
     const provId = provenanceId(LOCAL_PROFILE_ID, revId);
     const ts = new Date().toISOString();
+    const freshWrite =
+      !db && !(await deps.keyProvider.read()) && !(await fsExists(deps.databasePath));
+
+    const cleanupFreshWrite = async (): Promise<void> => {
+      if (!freshWrite) return;
+      if (db) {
+        db.close();
+        db = undefined;
+      }
+      await removeDatabaseArtifacts();
+      await deps.keyProvider.delete();
+    };
 
     await initForWrite();
     const d = ensureDb();
 
+    // Serialize revision check and write against concurrent processes.
+    d.exec('BEGIN IMMEDIATE');
     // Optimistic revision check — null is the explicit initial revision
     {
       const current = d
@@ -350,6 +415,8 @@ export function createProfileStore(deps: ProfileStoreDeps): ProfileStore {
         .get(LOCAL_PROFILE_ID);
       const storedRevision = current?.current_revision_id ?? null;
       if (storedRevision !== input.expectedRevision) {
+        d.exec('ROLLBACK');
+        await cleanupFreshWrite();
         throw new ProfileStoreError('REVISION_CONFLICT', 'revision_conflict');
       }
     }
@@ -501,8 +568,15 @@ export function createProfileStore(deps: ProfileStoreDeps): ProfileStore {
       }
 
       d.exec('RELEASE SAVEPOINT w2b_save');
+      d.exec('COMMIT');
     } catch (err) {
-      d.exec('ROLLBACK TO SAVEPOINT w2b_save');
+      try {
+        d.exec('ROLLBACK TO SAVEPOINT w2b_save');
+      } finally {
+        d.exec('RELEASE SAVEPOINT w2b_save');
+        d.exec('ROLLBACK');
+      }
+      await cleanupFreshWrite();
       throw err;
     }
 
@@ -513,24 +587,42 @@ export function createProfileStore(deps: ProfileStoreDeps): ProfileStore {
 
   const deleteAdoptedProfile = async (input: DeleteAdoptedProfileInput): Promise<boolean> => {
     assertElection(input);
-    await initForWrite();
+    await initForRead();
+    if (!db) return false;
     const d = ensureDb();
 
+    d.exec('BEGIN IMMEDIATE');
     const profile = d
       .prepare('SELECT current_revision_id FROM profiles WHERE profile_id = ?')
       .get(LOCAL_PROFILE_ID);
 
-    if (!profile?.current_revision_id) return false;
+    if (!profile?.current_revision_id) {
+      d.exec('ROLLBACK');
+      return false;
+    }
     if (profile.current_revision_id !== input.expectedRevision) {
+      d.exec('ROLLBACK');
       throw new ProfileStoreError('REVISION_CONFLICT', 'revision_conflict');
     }
 
     d.exec('SAVEPOINT w2b_delete');
     try {
-      d.prepare('DELETE FROM profiles WHERE profile_id = ?').run(LOCAL_PROFILE_ID);
+      d.prepare('DELETE FROM profiles WHERE profile_id = ? AND current_revision_id = ?').run(
+        LOCAL_PROFILE_ID,
+        input.expectedRevision,
+      );
+      const deleted = d.prepare('SELECT changes() AS count').get();
+      if (deleted?.count !== 1)
+        throw new ProfileStoreError('REVISION_CONFLICT', 'revision_conflict');
       d.exec('RELEASE SAVEPOINT w2b_delete');
+      d.exec('COMMIT');
     } catch (err) {
-      d.exec('ROLLBACK TO SAVEPOINT w2b_delete');
+      try {
+        d.exec('ROLLBACK TO SAVEPOINT w2b_delete');
+      } finally {
+        d.exec('RELEASE SAVEPOINT w2b_delete');
+        d.exec('ROLLBACK');
+      }
       throw err;
     }
 
@@ -545,14 +637,7 @@ export function createProfileStore(deps: ProfileStoreDeps): ProfileStore {
     }
     closed = false;
 
-    const fs = await import('node:fs/promises');
-    for (const suffix of ['', '-wal', '-shm']) {
-      try {
-        await fs.unlink(deps.databasePath + suffix);
-      } catch {
-        // File may not exist
-      }
-    }
+    await removeDatabaseArtifacts();
     await deps.keyProvider.delete();
   };
 

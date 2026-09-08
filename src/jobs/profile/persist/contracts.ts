@@ -173,6 +173,8 @@ export interface ProfileDatabase {
 export interface ProfileKeyProvider {
   read(): Promise<Uint8Array | undefined>;
   write(key: Uint8Array): Promise<void>;
+  /** Atomic first-writer-wins operation for process-shared providers. */
+  writeIfAbsent?(key: Uint8Array): Promise<boolean>;
   delete(): Promise<void>;
 }
 
