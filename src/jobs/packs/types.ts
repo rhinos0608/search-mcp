@@ -9,6 +9,16 @@ const version = z
   );
 const isoDate = z.iso.date();
 
+/** Generic single-word role tokens requiring an expansion guard. Single
+source for the pack refinement; the NSW pack's guards must cover all five. */
+export const GENERIC_EXPANSION_TOKENS: ReadonlySet<string> = new Set([
+  'officer',
+  'analyst',
+  'assistant',
+  'support',
+  'clerk',
+]);
+
 export const PackAttributionSchema = z
   .object({
     author: nonEmpty,
@@ -106,7 +116,34 @@ export const LocalePackSchema = z
           message: `unknown geography parent: ${node.parentId}`,
         });
       }
+      if (node.parentId === node.id) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['geography', index, 'parentId'],
+          message: `geography parent cycle: ${node.id} references itself`,
+        });
+      }
     });
+    // Parent-chain cycle detection (A→B→A): walk each chain with visited set.
+    {
+      const parentOf = new Map(pack.geography.map((n) => [n.id, n.parentId]));
+      pack.geography.forEach((node, index) => {
+        const seen = new Set<string>([node.id]);
+        let cursor = node.parentId;
+        while (cursor !== undefined) {
+          if (seen.has(cursor)) {
+            ctx.addIssue({
+              code: 'custom',
+              path: ['geography', index, 'parentId'],
+              message: `geography parent cycle involving: ${cursor}`,
+            });
+            break;
+          }
+          seen.add(cursor);
+          cursor = parentOf.get(cursor);
+        }
+      });
+    }
     const classificationIds = new Set<string>();
     pack.classificationSchemes.forEach((scheme, index) => {
       if (classificationIds.has(scheme.id)) {
@@ -203,7 +240,7 @@ export const DomainPackSchema = z
         });
     });
     const guarded = new Set(pack.expansionGuards.map((guard) => guard.token.toLocaleLowerCase()));
-    const generic = new Set(['officer', 'analyst', 'assistant', 'support', 'clerk']);
+    const generic = GENERIC_EXPANSION_TOKENS;
     pack.roleNodes.forEach((node, index) => {
       [node.label, ...node.aliases].forEach((name) => {
         name

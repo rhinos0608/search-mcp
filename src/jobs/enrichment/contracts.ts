@@ -205,126 +205,37 @@ export const ClassificationMappingResultSchema = z
   })
   .strict();
 
-// ── LocalePack / DomainPack inline schemas (match packs/types.ts shapes) ────
+// ── LocalePack / DomainPack: canonical packs/types schemas (single source) ────
+// Re-exported — never redefined — so semver/refinement cannot diverge.
+export {
+  PackAttributionSchema,
+  GeographyNodeSchema,
+  SalaryConventionSchema,
+  ClassificationSchemeSchema,
+  RuleMetadataSchema,
+  LocalePackSchema,
+  RoleNodeSchema,
+  RoleEdgeSchema,
+  ExpansionGuardSchema,
+  DomainPackSchema,
+  type PackAttribution,
+  type ValidationFixtureRef,
+  type RuleMetadata,
+  type LocalePack,
+  type RoleNode,
+  type RoleEdge,
+  type ExpansionGuard,
+  type DomainPack,
+} from '../packs/types.js';
+import {
+  LocalePackSchema as CanonicalLocalePackSchema,
+  DomainPackSchema as CanonicalDomainPackSchema,
+} from '../packs/types.js';
 
-const nonEmpty = z.string().trim().min(1);
-
-export const PackAttributionSchema = z
-  .object({
-    author: nonEmpty,
-    license: nonEmpty,
-    source: nonEmpty.optional(),
-  })
-  .strict();
-
-export const GeographyNodeSchema = z
-  .object({
-    id: nonEmpty,
-    name: nonEmpty,
-    kind: z.enum(['country', 'state', 'region', 'city', 'postcode', 'lga', 'health_district']),
-    parentId: nonEmpty.optional(),
-    aliases: z.array(nonEmpty).default([]),
-  })
-  .strict();
-
-export const SalaryConventionSchema = z
-  .object({
-    currency: nonEmpty,
-    period: z.enum(['hour', 'day', 'week', 'year']),
-    includesSuperannuation: z.boolean().optional(),
-    notes: nonEmpty.optional(),
-  })
-  .strict();
-
-export const ClassificationSchemeSchema = z
-  .object({
-    id: nonEmpty,
-    name: nonEmpty,
-    version: nonEmpty.optional(),
-    values: z.array(nonEmpty).default([]),
-  })
-  .strict();
-
-export const RuleMetadataSchema = z
-  .object({
-    ruleId: nonEmpty,
-    version: nonEmpty,
-    deterministic: z.literal(true),
-    description: nonEmpty,
-  })
-  .strict();
-
-export const LocalePackSchema = z
-  .object({
-    kind: z.literal('locale'),
-    id: nonEmpty,
-    version: nonEmpty,
-    effectiveFrom: z.iso.date(),
-    effectiveTo: z.iso.date().optional(),
-    attribution: PackAttributionSchema,
-    geography: z.array(GeographyNodeSchema),
-    salaryConventions: z.array(SalaryConventionSchema),
-    classificationSchemes: z.array(ClassificationSchemeSchema),
-    eligibilityTerminology: z.record(nonEmpty, nonEmpty),
-    sourceRegistryContributions: z.array(nonEmpty).default([]),
-    normalizationRules: z.array(RuleMetadataSchema),
-    evaluationFixtures: z
-      .array(z.object({ id: nonEmpty, path: nonEmpty, description: nonEmpty.optional() }).strict())
-      .default([]),
-  })
-  .strict();
-
-export const RoleNodeSchema = z
-  .object({
-    id: nonEmpty,
-    label: nonEmpty,
-    aliases: z.array(nonEmpty).default([]),
-    capabilities: z.array(nonEmpty).default([]),
-  })
-  .strict();
-
-export const RoleEdgeSchema = z
-  .object({
-    from: nonEmpty,
-    to: nonEmpty,
-    type: z.enum([
-      'equivalent_title',
-      'adjacent',
-      'capability_transfer',
-      'prerequisite',
-      'false_friend',
-    ]),
-    evidence: z.array(nonEmpty).min(1),
-    rule: RuleMetadataSchema,
-  })
-  .strict();
-
-export const ExpansionGuardSchema = z
-  .object({
-    token: nonEmpty,
-    requiresContext: z.array(nonEmpty).min(1),
-  })
-  .strict();
-
-export const DomainPackSchema = z
-  .object({
-    kind: z.literal('domain'),
-    id: nonEmpty,
-    version: nonEmpty,
-    effectiveFrom: z.iso.date(),
-    effectiveTo: z.iso.date().optional(),
-    attribution: PackAttributionSchema,
-    roleNodes: z.array(RoleNodeSchema),
-    edges: z.array(RoleEdgeSchema),
-    capabilityVocabulary: z.array(nonEmpty),
-    requirementTerminology: z.record(nonEmpty, nonEmpty),
-    expansionGuards: z.array(ExpansionGuardSchema),
-    evidenceCitations: z.array(nonEmpty).min(1),
-    evaluationFixtures: z
-      .array(z.object({ id: nonEmpty, path: nonEmpty, description: nonEmpty.optional() }).strict())
-      .default([]),
-  })
-  .strict();
+// Re-exported canonical schemas under local names for structural use below.
+// These are the SAME object identities as packs/types (no redefinition).
+const LocalePackSchema = CanonicalLocalePackSchema;
+const DomainPackSchema = CanonicalDomainPackSchema;
 
 // ── Request ──────────────────────────────────────────────────────────────────
 
@@ -378,6 +289,3 @@ export type ExtractedFieldSnapshot = z.infer<typeof ExtractedFieldSnapshotSchema
 export type VerifiedEmployerRecord = z.infer<typeof VerifiedEmployerRecordSchema>;
 export type VerifiedEmployerCatalog = z.infer<typeof VerifiedEmployerCatalogSchema>;
 export type QualitySignal = z.infer<typeof QualitySignalSchema>;
-export type LocalePack = z.infer<typeof LocalePackSchema>;
-export type DomainPack = z.infer<typeof DomainPackSchema>;
-export type RoleEdge = z.infer<typeof RoleEdgeSchema>;
