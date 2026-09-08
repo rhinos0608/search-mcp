@@ -16,7 +16,7 @@ import { getVersion } from './version.js';
 import { registerWebSearch } from './tools/standalone/webSearch.js';
 import { registerWebCrawl } from './tools/standalone/webCrawl.js';
 import { registerSemanticCrawlFamily } from './tools/families/semanticCrawl.js';
-import { registerSemanticJobs } from './tools/standalone/semanticJobs.js';
+import { registerJobsSearch } from './tools/standalone/jobsSearch.js';
 import { registerHealthCheck } from './tools/standalone/healthCheck.js';
 import { registerRssTool } from './tools/standalone/rss.js';
 
@@ -28,6 +28,7 @@ import { registerPackagesTool } from './tools/families/packages.js';
 import { registerResearchTool } from './tools/families/research.js';
 import { registerBrowserTool } from './tools/families/browser.js';
 import { registerAgenticBrowseTool } from './tools/families/agenticBrowse.js';
+import { registerJobsTool } from './tools/families/jobs.js';
 
 export function createServer(
   cfg: SearchConfig,
@@ -55,8 +56,9 @@ export function createServer(
   registerWebCrawl(server, cfg);
   registerRssTool(server);
 
-  // Gated standalone tools
-  if (!gated.has('semantic_jobs')) registerSemanticJobs(server, cfg);
+  // Jobs product surface: standalone + family.
+  registerJobsSearch(server, cfg);
+  registerJobsTool(server, cfg);
   // semantic_crawl is now a family tool with crawl/list_corpora/inspect_corpus actions.
   // The crawl action requires Crawl4AI + embedding; list_corpora/inspect_corpus are always available.
   registerSemanticCrawlFamily(server, cfg);
