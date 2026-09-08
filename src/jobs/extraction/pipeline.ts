@@ -27,11 +27,13 @@ import {
 } from './ids.js';
 import { extractScrub } from './scrub.js';
 import { extractJsonLdJobPosting } from './structured.js';
+import { LocationSchema, SalaryIntervalSchema } from '../domain/posting.js';
 import {
   extractTitleFromText,
   extractOrganisationFromText,
   extractWorkModeFromText,
   extractEmploymentTypeFromText,
+  extractSalaryFromText,
   normalizeTitle,
 } from './normalize.js';
 
@@ -280,6 +282,10 @@ export async function extractObservation(
 
   const primaryText = scrubbedPayloads.map((p) => p.scrubbed).join('\n');
 
+  // Manual provenance priority: user_supplied_content maps to user_supplied
+  // origin everywhere (JSON-LD structured + unstructured text), never observed.
+  const structuredOrigin =
+    captureKind === 'manual_content' ? ('user_supplied' as const) : ('observed' as const);
   // JSON-LD extraction
   for (const sp of scrubbedPayloads) {
     try {
@@ -293,8 +299,28 @@ export async function extractObservation(
             value: extracted.value,
             evidenceId: extracted.evidenceId,
             method: extracted.method,
-            origin: 'observed',
+            origin: structuredOrigin,
             confidence: METHOD_CONFIDENCE[extracted.method],
+          });
+        }
+        if (ldResult.location) {
+          fields.set('location', {
+            fieldPath: 'location',
+            value: ldResult.location.value,
+            evidenceId: ldResult.location.evidenceId,
+            method: ldResult.location.method,
+            origin: structuredOrigin,
+            confidence: METHOD_CONFIDENCE[ldResult.location.method],
+          });
+        }
+        if (ldResult.salary) {
+          fields.set('salary', {
+            fieldPath: 'salary',
+            value: ldResult.salary.value,
+            evidenceId: ldResult.salary.evidenceId,
+            method: ldResult.salary.method,
+            origin: structuredOrigin,
+            confidence: METHOD_CONFIDENCE[ldResult.salary.method],
           });
         }
       }
@@ -303,19 +329,17 @@ export async function extractObservation(
     }
   }
 
-  // Unstructured extraction
-  const unstructuredFields = extractFromText(primaryText, obs.observationId, 'observed');
+  // Unstructured extraction: manual user_supplied_content maps to user_supplied
+  // origin, never observed (provenance priority). All other captures observe.
+  const textOrigin =
+    captureKind === 'manual_content' ? ('user_supplied' as const) : ('observed' as const);
+  const unstructuredFields = extractFromText(primaryText, obs.observationId, textOrigin);
   for (const uf of unstructuredFields) {
     if (!fields.has(uf.fieldPath)) {
       fields.set(uf.fieldPath, uf);
     } else {
       const existing = fields.get(uf.fieldPath);
-      if (
-        existing &&
-        existing.value !== uf.value &&
-        existing.origin === 'observed' &&
-        uf.origin === 'observed'
-      ) {
+      if (existing && existing.value !== uf.value) {
         warnings.push('structured_unstructured_conflict');
       }
     }
@@ -378,6 +402,73 @@ export async function extractObservation(
     hotFields.lifecycleState = 'discovered';
   }
 
+  // Structured location: validate JSON-LD location object against LocationSchema.
+  // Invalid shapes are dropped with a warning, never coerced with defaults.
+  function parseProjectionLocations(fieldMap: Map<string, ExtractedField>): {
+    locations: ExtractionProjection['locations'];
+    warnings: ExtractionWarning[];
+  } {
+    const out: ExtractionProjection['locations'] = [];
+    const warns: ExtractionWarning[] = [];
+    const locField = fieldMap.get('location');
+    if (locField) {
+      const parsed = LocationSchema.safeParse(locField.value);
+      if (parsed.success) {
+        out.push(parsed.data);
+      } else {
+        warns.push('structured_unstructured_conflict');
+      }
+    }
+    return { locations: out, warnings: warns };
+  }
+
+  // Structured + unstructured salary: JSON-LD salary with explicit currency,
+  // else existing unstructured extractor only when it resolves explicit
+  // currency (bare $ stays unresolved → no salary row, salary_parse_failed).
+  function parseProjectionSalaries(
+    fieldMap: Map<string, ExtractedField>,
+    text: string,
+  ): { salaries: ExtractionProjection['salaries']; warnings: ExtractionWarning[] } {
+    const out: ExtractionProjection['salaries'] = [];
+    const warns: ExtractionWarning[] = [];
+    const salField = fieldMap.get('salary');
+    if (salField) {
+      const parsed = SalaryIntervalSchema.safeParse(salField.value);
+      if (parsed.success) {
+        out.push(parsed.data);
+        return { salaries: out, warnings: warns };
+      }
+      warns.push('salary_parse_failed');
+      return { salaries: out, warnings: warns };
+    }
+    const found = extractSalaryFromText(text);
+    if (found?.currency) {
+      const parsed = SalaryIntervalSchema.safeParse({
+        ...(found.min !== undefined ? { min: found.min } : {}),
+        ...(found.max !== undefined ? { max: found.max } : {}),
+        currency: found.currency,
+        unit: found.unit,
+        period: 'stated',
+        raw: found.raw,
+      });
+      if (parsed.success) {
+        out.push(parsed.data);
+      } else {
+        warns.push('salary_parse_failed');
+      }
+    } else if (found) {
+      warns.push('salary_parse_failed');
+    }
+    return { salaries: out, warnings: warns };
+  }
+
+  // Structured location/salary: parse JSON-LD results into projection arrays
+  // with schema validation; unstructured salary via existing extractor only
+  // when currency is explicit (no locale default).
+  const parsedLocations = parseProjectionLocations(fields);
+  const parsedSalaries = parseProjectionSalaries(fields, primaryText);
+  warnings.push(...parsedLocations.warnings, ...parsedSalaries.warnings);
+
   // Coverage
   let coverage: ExtractionResult['projection']['coverage'] = 'succeeded';
   if (!hotFields.title && !hotFields.organisation && !hotFields.description) {
@@ -418,7 +509,6 @@ export async function extractObservation(
   // Build projection
   const projectionIdVal = extractionProjectionId(obs.observationId, obs.contentHash);
   const runIdVal = extractionRunId(obs.observationId, obs.contentHash, adapterKind, captureKind);
-
   const projection: ExtractionProjection = {
     schemaVersion: EXTRACTION_CONTRACT_VERSION,
     projectionId: projectionIdVal,
@@ -429,8 +519,8 @@ export async function extractObservation(
     sourceListingId: listing.sourceListingId,
     contentHash: obs.contentHash,
     fields: hotFields,
-    locations: [],
-    salaries: [],
+    locations: parsedLocations.locations,
+    salaries: parsedSalaries.salaries,
     classifications: [],
     roleFamilies: [],
     requirements: [],

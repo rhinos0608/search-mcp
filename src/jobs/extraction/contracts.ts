@@ -260,7 +260,13 @@ export type ExtractionHotFields = z.infer<typeof ExtractionHotFieldsSchema>;
 
 // ── Extracted requirement ──────────────────────────────────────────────
 
-import { RequirementSchema } from '../domain/posting.js';
+import {
+  ClassificationSchema,
+  JobFlagSchema,
+  LocationSchema,
+  RequirementSchema,
+  SalaryIntervalSchema,
+} from '../domain/posting.js';
 
 export const ExtractedRequirementSchema = z
   .object({
@@ -294,9 +300,9 @@ export const ExtractionProjectionSchema = z
     sourceListingId: SourceListingIdSchema,
     contentHash: z.string().min(1),
     fields: ExtractionHotFieldsSchema,
-    locations: z.array(z.custom<unknown>()).max(16),
-    salaries: z.array(z.custom<unknown>()).max(8),
-    classifications: z.array(z.custom<unknown>()).max(16),
+    locations: z.array(LocationSchema).max(16),
+    salaries: z.array(SalaryIntervalSchema).max(8),
+    classifications: z.array(ClassificationSchema).max(16),
     roleFamilies: z
       .array(
         z
@@ -323,7 +329,7 @@ export const ExtractionProjectionSchema = z
           .strict(),
       )
       .max(128),
-    flags: z.array(z.custom<string>()).max(16),
+    flags: z.array(JobFlagSchema).max(16),
     warnings: z.array(ExtractionWarningSchema).max(32),
     scrub: ExtractionScrubSummarySchema,
     coverage: ExtractionCoverageSchema,

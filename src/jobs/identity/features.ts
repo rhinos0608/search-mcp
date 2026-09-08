@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import type { IdentityFeatureName, IdentityFeatureVector, IdentitySubject } from './contracts.js';
 import type { EvidenceRef } from '../domain/ids.js';
 
@@ -142,14 +143,11 @@ export function extractIdentityFeatures(subject: IdentitySubject): IdentityFeatu
 function simhash64(text: string): string {
   const normalized = text.normalize('NFKC').toLowerCase().replace(/\s+/gu, ' ').trim();
   const bits = new Int32Array(64);
-  for (let i = 0; i < normalized.length; i++) {
-    const byte = normalized.charCodeAt(i) & 0xff;
-    for (let j = 0; j < 8; j++) {
-      if (byte & (1 << j)) {
-        bits[j] = (bits[j] ?? 0) + 1;
-      } else {
-        bits[j] = (bits[j] ?? 0) - 1;
-      }
+  for (const token of normalized.split(' ')) {
+    const digest = createHash('sha256').update(token, 'utf8').digest();
+    for (let j = 0; j < 64; j++) {
+      const set = ((digest[j >> 3] ?? 0) & (1 << (j & 7))) !== 0;
+      bits[j] = (bits[j] ?? 0) + (set ? 1 : -1);
     }
   }
   let hash = 0n;

@@ -145,6 +145,16 @@ function scoreLocationPreference(posting: JobPosting, intent: SearchIntent): Com
   const intentCities = new Set(intent.locations.map((l) => l.city?.toLowerCase()).filter(Boolean));
 
   const postingLocations = posting.locations;
+  const hasKnownLocation = postingLocations.some(
+    (loc) =>
+      loc.city !== undefined ||
+      loc.region !== undefined ||
+      loc.country !== undefined ||
+      loc.postcode !== undefined ||
+      loc.remoteEligible !== undefined,
+  );
+  // Missing geography is absence of evidence, not a mismatch.
+  if (!hasKnownLocation) return neutralComponent('locationPreference');
   for (const loc of postingLocations) {
     if (loc.remoteEligible && intent.locations.some((il) => il.remoteEligible)) {
       return evidentiaryComponent('locationPreference', 0.9, posting.evidenceRefs, 0.8);
@@ -162,7 +172,8 @@ function scoreLocationPreference(posting: JobPosting, intent: SearchIntent): Com
 
 function scoreWorkModePreference(posting: JobPosting, intent: SearchIntent): ComponentScore {
   if (intent.workModes.length === 0) return neutralComponent('workModePreference');
-  if (intent.workModes.includes('unknown')) return neutralComponent('workModePreference');
+  if (intent.workModes.includes('unknown') || posting.workMode === 'unknown')
+    return neutralComponent('workModePreference');
 
   if (intent.workModes.includes(posting.workMode)) {
     return evidentiaryComponent('workModePreference', 0.9, posting.evidenceRefs, 0.8);
@@ -174,8 +185,48 @@ function scoreCompensationPreference(posting: JobPosting, intent: SearchIntent):
   if (intent.compensation.length === 0) return neutralComponent('compensationPreference');
   if (posting.salaries.length === 0) return neutralComponent('compensationPreference');
 
-  // Overlap comparison not implemented — stay neutral until a real check exists.
-  return neutralComponent('compensationPreference');
+  // Observed salary + explicit preference overlap only. Units must match and
+  // currency must be explicit on both sides; unknown currency never overlaps
+  // (honest neutral, never a fabricated default).
+  let best = 0;
+  let matched = false;
+  for (const pref of intent.compensation) {
+    const prefCurrency = pref.currency.trim();
+    if (prefCurrency.length !== 3) continue;
+    for (const sal of posting.salaries) {
+      const salCurrency = sal.currency.trim();
+      if (salCurrency.length !== 3) continue;
+      if (salCurrency.toUpperCase() !== prefCurrency.toUpperCase()) continue;
+      if (sal.unit !== pref.unit) continue;
+      const overlap = intervalOverlap(sal.min, sal.max, pref.min, pref.max);
+      if (overlap !== null && overlap > 0) {
+        matched = true;
+        best = Math.max(best, overlap);
+      }
+    }
+  }
+  if (!matched) return neutralComponent('compensationPreference');
+  return evidentiaryComponent('compensationPreference', best, posting.evidenceRefs, 0.7);
+}
+
+/** Fractional overlap of the smaller interval covered by the intersection. */
+function intervalOverlap(
+  aMin: number | undefined,
+  aMax: number | undefined,
+  bMin: number | undefined,
+  bMax: number | undefined,
+): number | null {
+  const lo = Math.max(aMin ?? Number.NEGATIVE_INFINITY, bMin ?? Number.NEGATIVE_INFINITY);
+  const hi = Math.min(aMax ?? Number.POSITIVE_INFINITY, bMax ?? Number.POSITIVE_INFINITY);
+  if (hi < lo) return 0;
+  const spanA = aMin !== undefined && aMax !== undefined ? aMax - aMin : Number.POSITIVE_INFINITY;
+  const spanB = bMin !== undefined && bMax !== undefined ? bMax - bMin : Number.POSITIVE_INFINITY;
+  if (spanA <= 0 || spanB <= 0) return 1;
+  if (!Number.isFinite(spanA) && !Number.isFinite(spanB)) return 1;
+  const intersection = hi - lo;
+  const span = Math.min(spanA, spanB);
+  if (!Number.isFinite(intersection)) return 1;
+  return Math.max(0, Math.min(1, intersection / span));
 }
 
 // ---------------------------------------------------------------------------
@@ -346,9 +397,19 @@ function evaluateEligibility(posting: JobPosting, intent: SearchIntent): Eligibi
     });
   }
 
-  // Gate: employment type match
+  // Gate: employment type match. Unknown values are retained unless the
+  // caller explicitly requests exclusion of unknown evidence.
   if (intent.employmentTypes.length > 0 && !intent.employmentTypes.includes('unknown')) {
-    if (!intent.employmentTypes.includes(posting.employmentType)) {
+    if (posting.employmentType === 'unknown') {
+      if (intent.unknownPolicy === 'exclude') {
+        gates.push({
+          gateId: 'employment_type_match',
+          status: 'ineligible',
+          reason: 'employment type unknown and unknownPolicy=exclude',
+          evidenceRefs: posting.evidenceRefs,
+        });
+      }
+    } else if (!intent.employmentTypes.includes(posting.employmentType)) {
       gates.push({
         gateId: 'employment_type_match',
         status: 'ineligible',
@@ -360,6 +421,37 @@ function evaluateEligibility(posting: JobPosting, intent: SearchIntent): Eligibi
         gateId: 'employment_type_match',
         status: 'eligible',
         reason: 'employment type matches request',
+        evidenceRefs: posting.evidenceRefs,
+      });
+    }
+  }
+
+  if (intent.unknownPolicy === 'exclude') {
+    const unknownLocation = posting.locations.every(
+      (loc) =>
+        loc.city === undefined &&
+        loc.region === undefined &&
+        loc.country === undefined &&
+        loc.postcode === undefined &&
+        loc.remoteEligible === undefined,
+    );
+    if (intent.locations.length > 0 && unknownLocation) {
+      gates.push({
+        gateId: 'location_match',
+        status: 'ineligible',
+        reason: 'location unknown and unknownPolicy=exclude',
+        evidenceRefs: posting.evidenceRefs,
+      });
+    }
+    if (
+      intent.workModes.length > 0 &&
+      !intent.workModes.includes('unknown') &&
+      posting.workMode === 'unknown'
+    ) {
+      gates.push({
+        gateId: 'work_mode_match',
+        status: 'ineligible',
+        reason: 'work mode unknown and unknownPolicy=exclude',
         evidenceRefs: posting.evidenceRefs,
       });
     }

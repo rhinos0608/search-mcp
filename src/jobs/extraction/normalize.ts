@@ -165,7 +165,7 @@ const SALARY_SINGLE_PATTERN =
 
 export function extractSalaryFromText(
   text: string,
-): { min?: number; max?: number; currency: string; unit: string; raw: string } | undefined {
+): { min?: number; max?: number; currency?: string; unit: string; raw: string } | undefined {
   const rangeMatch = SALARY_PATTERN.exec(text);
   if (rangeMatch) {
     const raw = rangeMatch[0];
@@ -176,18 +176,20 @@ export function extractSalaryFromText(
     const min = parseFloat(minStr.replace(/,/g, ''));
     const max = parseFloat(maxStr.replace(/,/g, ''));
     if (!Number.isNaN(min) && !Number.isNaN(max) && min <= max) {
+      const currency = extractCurrency(raw);
       return {
         min,
         max,
-        currency: extractCurrency(raw),
+        ...(currency !== undefined ? { currency } : {}),
         unit: normalizeSalaryUnit(unitStr),
         raw: raw.trim(),
       };
     }
     // min>max → return raw span only for fallback
     if (!Number.isNaN(min) && !Number.isNaN(max)) {
+      const currency = extractCurrency(raw);
       return {
-        currency: extractCurrency(raw),
+        ...(currency !== undefined ? { currency } : {}),
         unit: normalizeSalaryUnit(unitStr),
         raw: raw.trim(),
       };
@@ -201,10 +203,11 @@ export function extractSalaryFromText(
     if (!valStr || !unitStr) return undefined;
     const value = parseFloat(valStr.replace(/,/g, ''));
     if (!Number.isNaN(value)) {
+      const currency = extractCurrency(raw);
       return {
         min: value,
         max: value,
-        currency: extractCurrency(raw),
+        ...(currency !== undefined ? { currency } : {}),
         unit: normalizeSalaryUnit(unitStr),
         raw: raw.trim(),
       };
@@ -213,12 +216,14 @@ export function extractSalaryFromText(
   return undefined;
 }
 
-function extractCurrency(match: string): string {
-  if (/\bAUD\b/i.test(match) || match.endsWith('')) return 'AUD';
+// Generic core: only explicit currency tokens resolve. Bare `$` is ambiguous
+// (USD/AUD/CAD/MXN/...) so currency stays unresolved rather than defaulting.
+function extractCurrency(match: string): string | undefined {
   if (/\bUSD\b/i.test(match)) return 'USD';
   if (/\bGBP\b/i.test(match) || match.includes('£')) return 'GBP';
   if (/\bEUR\b/i.test(match) || match.includes('€')) return 'EUR';
-  return 'AUD';
+  if (/\bAUD\b/i.test(match)) return 'AUD';
+  return undefined;
 }
 
 function normalizeSalaryUnit(raw: string): string {

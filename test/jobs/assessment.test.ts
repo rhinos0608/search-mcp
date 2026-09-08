@@ -767,3 +767,33 @@ test('evidence quality summary counts refs', () => {
   assert.equal(result.evidenceQualitySummary.uniqueEvidenceRefs, 2);
   assert.equal(result.evidenceQualitySummary.coverageRatio, (1 + 0 + 2 / 3 + 1 + 1 + 0) / 6);
 });
+
+test('open-ended compensation intervals overlap as unbounded', () => {
+  const posting = makePosting({
+    salaries: [
+      { min: 100000, currency: 'AUD', unit: 'year', period: 'stated', raw: 'AUD 100000+ per year' },
+    ],
+  });
+  const result = assessCandidate({
+    posting,
+    intent: makeIntent({
+      compensation: [
+        {
+          max: 120000,
+          currency: 'AUD',
+          unit: 'year',
+          period: 'stated',
+          raw: 'up to AUD 120000 per year',
+        },
+      ],
+    }),
+  });
+  const group = result.groups.find((candidate) => candidate.group === 'preferenceFit');
+  assert.ok(group);
+  const compensation = group.components.find(
+    (component) => component.dimension === 'compensationPreference',
+  );
+  assert.ok(compensation);
+  assert.equal(compensation.hasEvidence, true);
+  assert.ok(compensation.score > 0);
+});
