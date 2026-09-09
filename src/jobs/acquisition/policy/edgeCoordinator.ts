@@ -49,6 +49,8 @@ const CAVEAT_ORDER: readonly AcquisitionCaveat[] = [
   'stale_index_possible',
   'content_required',
   'unverified_manual_content',
+  'sought_via_destination_class',
+  'aggregate_search_page',
 ];
 const CAVEAT_ORDER_INDEX = new Map<string, number>(CAVEAT_ORDER.map((v, i) => [v, i]));
 

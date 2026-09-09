@@ -45,6 +45,8 @@ export const AuthorizationEvidenceKindSchema = z.enum([
   'published_access_terms',
   'observed_access_requirement',
   'capability_classification',
+  /** Operator-listed board; not a legal holding. Board scraping still requires per-board operator review. */
+  'operator_configured_board_search',
 ]);
 export type AuthorizationEvidenceKind = z.infer<typeof AuthorizationEvidenceKindSchema>;
 
@@ -62,6 +64,41 @@ export const AuthorizationEvidenceSchema = z
     capturedAt: z.iso.datetime({ offset: true }),
     citationRef: z.string().max(2048).optional(),
     contentHash: sha256Ref.optional(),
+    documentTitle: z.string().trim().min(1).max(256).optional(),
+    effectiveAt: z.iso.datetime({ offset: true }).optional(),
+    reviewedAt: z.iso.datetime({ offset: true }).optional(),
+    reviewerId: z.string().trim().min(1).max(64).optional(),
+    conclusion: z
+      .enum([
+        'direct_automated_access_blocked',
+        'indexed_provider_operator_authorized',
+        'insufficient_public_basis',
+        /** Operator-listed board; not a legal holding. Board scraping still requires per-board operator review. */
+        'operator_configured_board_search',
+      ])
+      .optional(),
+    appliesTo: z
+      .object({
+        sourceId: z.string().min(1).max(256),
+        operation: z.enum([
+          'automatedSearch',
+          'automatedFetch',
+          'userSuppliedContent',
+          'manualImport',
+          'employerApi',
+        ]),
+        route: z.enum(['direct', 'indexed', 'user_supplied']),
+        targetKind: z.enum(['discovery_provider', 'publisher', 'board', 'adapter', 'ats_tenant']),
+        policyMode: z.enum([
+          'automatedSearch',
+          'automatedFetch',
+          'userSuppliedContent',
+          'manualImport',
+          'employerApi',
+        ]),
+      })
+      .strict()
+      .optional(),
   })
   .strict()
   .superRefine((v, ctx) => {

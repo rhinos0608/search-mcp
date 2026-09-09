@@ -96,6 +96,119 @@ describe('checkpoint D MCP surface', () => {
     assert.match(res.text, /Test engineer/);
   });
 
+  test('public candidate output carries listingUrl locator and bounded facts, no evidence text', async () => {
+    const cfg = { ...loadConfig(), brave: { apiKey: 'test-key' } };
+    const baseDeps = buildJobsMcpDeps(cfg);
+    const def = INDEXED_PROVIDER_DEFINITIONS.find((d) => d.providerId === 'search-provider:brave');
+    assert.ok(def);
+    const deps = {
+      ...baseDeps,
+      ports: [
+        {
+          backend: def.backend,
+          adapterId: def.adapterId,
+          providerId: def.providerId,
+          governance: def.governance,
+          maxDurationMs: def.maxDurationMs,
+          search: async () => [
+            {
+              title: 'Test engineer',
+              url: 'https://example.test/job/424242',
+              description: 'indexed snippet',
+              position: 1,
+              domain: 'example.test',
+              source: 'brave',
+              age: null,
+              ageKind: 'unknown',
+              extraSnippet: null,
+              deepLinks: null,
+              contentKind: 'snippet',
+              generatedSummary: null,
+            },
+          ],
+        },
+      ],
+      providerIds: [def.providerId],
+      jobspyBoards: [],
+    } as typeof baseDeps;
+    const server = testServer();
+    registerJobsSearch(server, cfg, deps);
+    const res = await callTool(server, 'jobs_search', { query: 'engineer', useJobSpy: false });
+    assert.ok(!res.isError, res.text);
+    const envelope = JSON.parse(res.text) as {
+      data: {
+        candidates: {
+          listingUrl?: string;
+          location?: string;
+          salaryText?: string;
+          description?: string;
+          caveats: string[];
+        }[];
+      };
+      meta: { warnings?: string[] };
+    };
+    const payload = { candidates: envelope.data.candidates, warnings: envelope.meta.warnings };
+    const first = payload.candidates[0];
+    assert.ok(first);
+    assert.equal(first.listingUrl, 'https://example.test/job/424242');
+    // Bounded public facts only: no indexed placeholder description, no
+    // evidence refs text, aggregate pages absent entirely.
+    assert.equal(first.description, undefined);
+    assert.ok(!JSON.stringify(payload).includes('Indexed snippet only'));
+    assert.ok(
+      payload.warnings === undefined ||
+        !payload.warnings.some((w) => w.startsWith('aggregate_page_withheld')),
+    );
+  });
+
+  test('jobspy_unconfigured warning surfaces when useJobSpy requested with zero boards', async () => {
+    const cfg = { ...loadConfig(), brave: { apiKey: 'test-key' } };
+    const baseDeps = buildJobsMcpDeps(cfg);
+    const def = INDEXED_PROVIDER_DEFINITIONS.find((d) => d.providerId === 'search-provider:brave');
+    assert.ok(def);
+    const deps = {
+      ...baseDeps,
+      ports: [
+        {
+          backend: def.backend,
+          adapterId: def.adapterId,
+          providerId: def.providerId,
+          governance: def.governance,
+          maxDurationMs: def.maxDurationMs,
+          search: async () => [
+            {
+              title: 'Test engineer',
+              url: 'https://example.test/job/424242',
+              description: 'indexed snippet',
+              position: 1,
+              domain: 'example.test',
+              source: 'brave',
+              age: null,
+              ageKind: 'unknown',
+              extraSnippet: null,
+              deepLinks: null,
+              contentKind: 'snippet',
+              generatedSummary: null,
+            },
+          ],
+        },
+      ],
+      providerIds: [def.providerId],
+      jobspyBoards: [],
+    } as typeof baseDeps;
+    const server = testServer();
+    registerJobsSearch(server, cfg, deps);
+    const res = await callTool(server, 'jobs_search', { query: 'engineer' });
+    assert.ok(!res.isError, res.text);
+    const envelope = JSON.parse(res.text) as { meta: { warnings?: string[] } };
+    assert.ok(
+      envelope.meta.warnings?.includes(
+        'jobspy_unconfigured: useJobSpy requested but no boards authorized',
+      ),
+      JSON.stringify(envelope.meta.warnings),
+    );
+  });
+
   test('useJobSpy:false does not treat disabled boards as available', async () => {
     const server = testServer();
     registerJobsSearch(server, loadConfig(), { providerIds: [], jobspyBoards: [] } as never);

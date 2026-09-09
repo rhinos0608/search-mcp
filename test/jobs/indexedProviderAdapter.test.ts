@@ -137,16 +137,21 @@ test('INDEXED_PROVIDER_ADAPTER_VERSION is 1.0.0', () => {
 // definitions validate
 test('all seven definitions validate governance and table', () => {
   assert.equal(INDEXED_PROVIDER_DEFINITIONS.length, 7);
-  const expected: Array<{ backend: string; summary: boolean; strict: boolean; attempts: number }> =
-    [
-      { backend: 'brave', summary: false, strict: true, attempts: 3 },
-      { backend: 'searxng', summary: false, strict: true, attempts: 2 },
-      { backend: 'exa', summary: true, strict: true, attempts: 3 },
-      { backend: 'duckduckgo', summary: false, strict: true, attempts: 2 },
-      { backend: 'ollama-search', summary: false, strict: false, attempts: 2 },
-      { backend: 'tavily', summary: true, strict: false, attempts: 3 },
-      { backend: 'codex', summary: false, strict: false, attempts: 3 },
-    ];
+  const expected: Array<{
+    backend: string;
+    summary: boolean;
+    strict: boolean;
+    attempts: number;
+    maxResults: number;
+  }> = [
+    { backend: 'brave', summary: false, strict: true, attempts: 3, maxResults: 20 },
+    { backend: 'searxng', summary: false, strict: true, attempts: 2, maxResults: 20 },
+    { backend: 'exa', summary: true, strict: true, attempts: 3, maxResults: 50 },
+    { backend: 'duckduckgo', summary: false, strict: true, attempts: 2, maxResults: 20 },
+    { backend: 'ollama-search', summary: false, strict: false, attempts: 2, maxResults: 20 },
+    { backend: 'tavily', summary: true, strict: false, attempts: 3, maxResults: 20 },
+    { backend: 'codex', summary: false, strict: false, attempts: 3, maxResults: 20 },
+  ];
   for (const exp of expected) {
     const def = INDEXED_PROVIDER_DEFINITIONS.find((d) => d.backend === exp.backend);
     assert.ok(def, `missing ${exp.backend}`);
@@ -160,7 +165,7 @@ test('all seven definitions validate governance and table', () => {
     assert.equal(gov.supportsUrlAttributedSummary, exp.summary);
     assert.equal(gov.supportsStrictSafeSearch, exp.strict);
     assert.equal(gov.maxAttempts, exp.attempts);
-    assert.equal(gov.maxResultsPerRequest, 20);
+    assert.equal(gov.maxResultsPerRequest, exp.maxResults);
     assert.equal(gov.mode, 'automatedSearch');
     assert.equal(gov.queryHandling, 'raw');
   }
@@ -184,6 +189,94 @@ test('createDefaultIndexedProviderPorts filters unavailable ports and preserves 
   for (const p of ports) {
     assert.equal(p.maxDurationMs, 70000);
     ProviderGovernanceSchema.parse(p.governance);
+  }
+});
+
+test('Exa domain-filter search maps highlights then truncated text', async () => {
+  const originalFetch = globalThis.fetch;
+  const bodies: unknown[] = [];
+  globalThis.fetch = (async (_input, init) => {
+    bodies.push(JSON.parse(String(init?.body)));
+    return new Response(
+      JSON.stringify({
+        results: [
+          {
+            title: 'SEEK job',
+            url: 'https://www.seek.com.au/job/1',
+            highlights: ['first highlight', 'second highlight'],
+            text: 'should not be used when highlights exist',
+          },
+          {
+            title: 'No highlights',
+            url: 'https://www.seek.com.au/job/2',
+            highlights: [],
+            text: `${'x'.repeat(3000)}`,
+          },
+        ],
+      }),
+      { status: 200, headers: { 'content-type': 'application/json' } },
+    );
+  }) as typeof fetch;
+  try {
+    const cfg = {
+      brave: { apiKey: '' },
+      searxng: { baseUrl: '' },
+      exa: { apiKey: 'e' },
+      tavily: { apiKey: '' },
+      duckduckgo: { region: 'us-en', safeSearch: 'moderate' },
+      ollamaSearch: { baseUrl: '', apiKey: '' },
+    } as unknown as import('../../src/config.js').SearchConfig;
+    const ports = createDefaultIndexedProviderPorts(cfg);
+    const exa = ports.find((p) => p.backend === 'exa');
+    assert.ok(exa);
+    const results = await exa.search({
+      query: 'engineer',
+      limit: 10,
+      safeSearch: 'moderate',
+      aiSummary: 'no',
+      includeDomains: ['seek.com.au'],
+    });
+    assert.equal(results[0]?.description, 'first highlight\n\nsecond highlight');
+    assert.ok((results[1]?.description.length ?? 0) <= 2560);
+    assert.ok(results[1]?.description.startsWith('x'));
+    const body = bodies[0] as { contents?: { highlights?: { maxCharacters?: number } } };
+    assert.equal(body.contents?.highlights?.maxCharacters, 2560);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('Tavily enrichUrls uses caller query, not hardcoded job listing', async () => {
+  const originalFetch = globalThis.fetch;
+  const bodies: unknown[] = [];
+  globalThis.fetch = (async (_input, init) => {
+    bodies.push(JSON.parse(String(init?.body)));
+    return new Response(JSON.stringify({ results: [] }), {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    });
+  }) as typeof fetch;
+  try {
+    const cfg = {
+      brave: { apiKey: '' },
+      searxng: { baseUrl: '' },
+      exa: { apiKey: '' },
+      tavily: { apiKey: 't' },
+      duckduckgo: { region: 'us-en', safeSearch: 'moderate' },
+      ollamaSearch: { baseUrl: '', apiKey: '' },
+    } as unknown as import('../../src/config.js').SearchConfig;
+    const ports = createDefaultIndexedProviderPorts(cfg);
+    const tavily = ports.find((p) => p.backend === 'tavily');
+    assert.ok(tavily?.enrichUrls);
+    await tavily.enrichUrls({
+      urls: ['https://example.test/job/1'],
+      mode: 'summary',
+      query: 'engineer melbourne',
+    });
+    const body = bodies[0] as { query?: string };
+    assert.equal(body.query, 'engineer melbourne');
+  } finally {
+    globalThis.fetch = originalFetch;
   }
 });
 
@@ -958,4 +1051,179 @@ test('failure after provider invocation reports 1 logicalRequestsUsed and maxAtt
   assert.equal(res.sliceResult.coverage[0]!.state, 'failed');
   assert.equal(res.sliceResult.coverage[0]!.logicalRequestsUsed, 1);
   assert.equal(res.sliceResult.coverage[0]!.attemptsReserved, port.governance.maxAttempts);
+});
+
+test('destination-class SEEK edges do not set publisher', async () => {
+  const captured: unknown[] = [];
+  const port = mockPort({
+    searchFn: async (input) => {
+      captured.push(input);
+      return [validResult('https://www.seek.com.au/job/1')];
+    },
+  });
+  const slice = makeSlice();
+  const edge = makeExecutionEdge(port);
+  const info = makeInfoEdge({ kind: 'board', sourceId: 'board:seek' }, 'blocked');
+  const res = await runIndexedProvider(
+    {
+      slice,
+      executionEdge: edge,
+      informationalEdges: [info],
+      safeSearch: 'moderate',
+      capturedAt: '2026-01-02T00:00:00.000Z',
+      destinationClass: { sourceId: 'board:seek', targetKind: 'board' },
+      includeDomains: ['seek.com.au', 'www.seek.com.au', 'au.seek.com'],
+    },
+    { capabilityRegistry: registryWith(port), port },
+  );
+  const cand = res.sliceResult.candidates[0]!;
+  const prov = cand.provenance as unknown as {
+    publisher?: unknown;
+    soughtVia?: { sourceId: string; basis: string };
+  };
+  assert.equal(prov.publisher, undefined);
+  assert.deepEqual(prov.soughtVia, {
+    sourceId: 'board:seek',
+    targetKind: 'board',
+    basis: 'slice_intent',
+  });
+  assert.ok(cand.caveats.includes('sought_via_destination_class'));
+  const input = captured[0] as { includeDomains?: string[]; limit: number };
+  assert.deepEqual(input.includeDomains, ['seek.com.au', 'www.seek.com.au', 'au.seek.com']);
+});
+
+test('unambiguous non-class publisher still inferred beside destination class', async () => {
+  const port = mockPort({ searchFn: async () => [validResult('https://example.test/a')] });
+  const slice = makeSlice();
+  const edge = makeExecutionEdge(port);
+  const pub = makeInfoEdge({ kind: 'publisher', sourceId: 'publisher:acme' }, 'blocked');
+  const seek = makeInfoEdge({ kind: 'board', sourceId: 'board:seek' }, 'blocked');
+  const res = await runIndexedProvider(
+    {
+      slice,
+      executionEdge: edge,
+      informationalEdges: [pub, seek],
+      safeSearch: 'moderate',
+      capturedAt: '2026-01-02T00:00:00.000Z',
+      destinationClass: { sourceId: 'board:seek', targetKind: 'board' },
+    },
+    { capabilityRegistry: registryWith(port), port },
+  );
+  const prov = res.sliceResult.candidates[0]!.provenance as unknown as {
+    publisher?: { sourceId: string };
+  };
+  assert.deepEqual(prov.publisher, { kind: 'publisher', sourceId: 'publisher:acme' });
+});
+
+test('maxResultsPerRequest is honored instead of universal 20 clamp', async () => {
+  const seen: number[] = [];
+  const exa = INDEXED_PROVIDER_DEFINITIONS.find((d) => d.backend === 'exa')!;
+  const port = mockPort({
+    backend: exa.backend as never,
+    adapterId: exa.adapterId,
+    providerId: exa.providerId,
+    governance: exa.governance,
+    searchFn: async (input) => {
+      seen.push(input.limit);
+      return Array.from({ length: input.limit }, (_, i) =>
+        validResult(`https://example.test/job/${String(i)}`, { position: i + 1 }),
+      );
+    },
+  });
+  const slice = makeSlice({
+    budget: {
+      logicalRequests: 5,
+      reservedAttempts: 5,
+      candidates: 50,
+      bytes: 100000,
+      milliseconds: 70000,
+    },
+  });
+  const res = await runIndexedProvider(
+    {
+      slice,
+      executionEdge: makeExecutionEdge(port),
+      safeSearch: 'moderate',
+      capturedAt: '2026-01-02T00:00:00.000Z',
+    },
+    { capabilityRegistry: registryWith(port), port },
+  );
+  assert.deepEqual(seen, [50]);
+  assert.equal(res.sliceResult.candidates.length, 50);
+});
+
+// F2: aggregate pages are skipped at mapping (not merely caveated) so they
+// never consume candidateCap; posting URLs survive with provenance intact.
+test('aggregate search pages are skipped at mapping with a bounded warning', async () => {
+  const port = mockPort({
+    searchFn: async () => [
+      validResult('https://www.seek.com.au/jobs?keywords=plumber'),
+      validResult('https://example.test/blog/how-to-interview'),
+      validResult('https://www.seek.com.au/job/78901234'),
+      validResult('https://example.test/job/424242'),
+    ],
+  });
+  const slice = makeSlice();
+  const edge = makeExecutionEdge(port, 'permitted');
+  const res = await runIndexedProvider(
+    { slice, executionEdge: edge, safeSearch: 'moderate', capturedAt: new Date().toISOString() },
+    { capabilityRegistry: registryWith(port), port },
+  );
+  const urls = res.sliceResult.candidates.map(
+    (c) =>
+      (c.provenance as unknown as { destination?: { canonicalUrl?: string } }).destination
+        ?.canonicalUrl,
+  );
+  assert.deepEqual(urls.sort(), [
+    'https://example.test/job/424242',
+    'https://www.seek.com.au/job/78901234',
+  ]);
+  assert.ok(res.sliceResult.warnings.includes('aggregate_search_page_skipped'));
+  assert.equal(
+    res.sliceResult.warnings.filter((w) => w === 'aggregate_search_page_skipped').length,
+    1,
+    'one bounded warning, not per-URL flood',
+  );
+});
+
+test('SEEK class slice: posting URL keeps sought_via_destination_class, SERP withheld', async () => {
+  const port = mockPort({
+    searchFn: async () => [
+      validResult('https://www.seek.com.au/jobs?keywords=officer'),
+      validResult('https://www.seek.com.au/job/78901234'),
+    ],
+  });
+  const slice = makeSlice();
+  const edge = makeExecutionEdge(port, 'permitted');
+  const res = await runIndexedProvider(
+    {
+      slice,
+      executionEdge: edge,
+      safeSearch: 'moderate',
+      capturedAt: new Date().toISOString(),
+      destinationClass: { sourceId: 'board:seek', targetKind: 'board' },
+    },
+    { capabilityRegistry: registryWith(port), port },
+  );
+  const seekers = res.sliceResult.candidates.filter((c) =>
+    JSON.stringify(c.provenance).includes('seek.com.au'),
+  );
+  assert.equal(seekers.length, 1);
+  const posting = seekers[0]!;
+  assert.equal(
+    (
+      posting.provenance as unknown as {
+        soughtVia?: { sourceId: string };
+        destination?: { canonicalUrl?: string };
+      }
+    ).soughtVia?.sourceId,
+    'board:seek',
+  );
+  assert.equal(
+    (posting.provenance as unknown as { destination?: { canonicalUrl?: string } }).destination
+      ?.canonicalUrl,
+    'https://www.seek.com.au/job/78901234',
+  );
+  assert.ok(posting.caveats.includes('sought_via_destination_class'));
+  assert.ok(res.sliceResult.warnings.includes('aggregate_search_page_skipped'));
 });

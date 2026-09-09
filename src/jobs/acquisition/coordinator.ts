@@ -87,6 +87,14 @@ export const IndexedSlicePlanItemSchema = z
     safeSearch: SafeSearchSchema,
     aiSummary: SummaryModeSchema.optional(),
     informationalEdges: z.array(AcquisitionPolicyEdgeSchema).max(99).optional(),
+    destinationClass: z
+      .object({
+        sourceId: text256,
+        targetKind: z.enum(['board', 'publisher', 'ats_tenant']),
+      })
+      .strict()
+      .optional(),
+    includeDomains: z.array(z.string().trim().min(1).max(253)).max(8).optional(),
   })
   .strict();
 export type IndexedSlicePlanItem = z.infer<typeof IndexedSlicePlanItemSchema>;
@@ -96,6 +104,8 @@ export const JobSpySlicePlanItemSchema = z
     kind: z.literal('jobspy'),
     slice: AcquisitionSliceSchema,
     board: JobSpyBoardSchema,
+    /** Operator opt-in: fetch descriptions on boards that support it (cost). */
+    fetchDescription: z.boolean().optional(),
     filters: z
       .object({
         location: z.string().max(512).optional(),
@@ -483,6 +493,9 @@ export async function runAcquisition(
         if (item.informationalEdges !== undefined)
           indexedReq.informationalEdges = item.informationalEdges;
         if (item.aiSummary !== undefined) indexedReq.aiSummary = item.aiSummary;
+        if (item.destinationClass !== undefined)
+          indexedReq.destinationClass = item.destinationClass;
+        if (item.includeDomains !== undefined) indexedReq.includeDomains = item.includeDomains;
         const result = await runIndexedProvider(indexedReq as never, {
           capabilityRegistry: deps.capabilityRegistry as never,
           port: port as never,
@@ -528,6 +541,7 @@ export async function runAcquisition(
             board: item.board as never,
             executionEdge: edge,
             capturedAt: parsedOptions.capturedAt,
+            ...(item.fetchDescription === true ? { fetchDescription: true } : {}),
             ...(parsedOptions.abortSignal ? { abortSignal: parsedOptions.abortSignal } : {}),
             ...(item.filters ? { filters: item.filters as never } : {}),
           },
@@ -760,6 +774,10 @@ export async function runAcquisition(
 
     slices.push(sliceResult);
     consumeCoverage(sliceResult.coverage);
+    // Nothing disappears silently: fold slice warnings into run warnings.
+    for (const w of sliceResult.warnings) {
+      if (!warnings.includes(w)) warnings.push(w);
+    }
   }
 
   // cross-slice dedup annotation-only

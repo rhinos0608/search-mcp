@@ -8,17 +8,22 @@
  *
  * SEEK never added to JOBSPY_BOARDS. Global destination flag cannot lift blocks.
  */
-import type { SourceRegistryEntry } from './contracts.js';
+import type { AcquisitionPolicyEdge } from '../contracts.js';
+import type { AuthorizationEvidence, SourceRegistryEntry } from './contracts.js';
 
 export const SEEK_SOURCE_ID = 'board:seek' as const;
 
-/**
- * Build the frozen SEEK source-class entry.
- * Idempotent: always produces the same entry given the same inputs.
- */
+/** Test-path fallback only. Live MCP composition must supply reviewed evidence. */
 const SEEK_REVIEWED_AT = '2025-01-01T00:00:00.000Z';
 
-export function buildSeekEntry(): SourceRegistryEntry {
+/**
+ * Build the frozen SEEK source-class entry.
+ * Tests may omit evidence (empty refs). Live jobsDeps must pass reviewed records.
+ */
+export function buildSeekEntry(
+  evidence: readonly AuthorizationEvidence[] = [],
+): SourceRegistryEntry {
+  const reviewedAt = evidence[0]?.reviewedAt ?? SEEK_REVIEWED_AT;
   return {
     schemaVersion: '1.0.0',
     sourceId: SEEK_SOURCE_ID,
@@ -51,8 +56,8 @@ export function buildSeekEntry(): SourceRegistryEntry {
       destinationFetchEnabled: false,
       riskyModesEnabled: [],
     },
-    evidenceRefs: [],
-    reviewedAt: SEEK_REVIEWED_AT,
+    evidenceRefs: evidence.map((e) => e.evidenceId),
+    reviewedAt,
     modeOverrides: {
       automatedSearch: 'blocked',
       automatedFetch: 'blocked',
@@ -61,6 +66,37 @@ export function buildSeekEntry(): SourceRegistryEntry {
       manualImport: 'not_supported',
     },
   };
+}
+
+/**
+ * Synthesize informational SEEK edges from modeOverrides without decideEdge
+ * provider-actor match. Never authorizes. State stays blocked.
+ */
+export function informationalSeekEdgesFromEntry(
+  seekEntry: SourceRegistryEntry,
+  actor: { kind: 'provider'; namespace: 'search-provider'; id: string },
+  _capturedAt: string,
+): AcquisitionPolicyEdge[] {
+  const ops = ['automatedSearch', 'automatedFetch'] as const;
+  const edges: AcquisitionPolicyEdge[] = [];
+  for (const operation of ops) {
+    const mode = seekEntry.modeOverrides?.[operation];
+    if (mode !== 'blocked') continue;
+    edges.push({
+      edgeId: `info:${actor.id}:${SEEK_SOURCE_ID}:${operation}` as AcquisitionPolicyEdge['edgeId'],
+      schemaVersion: '1.0.0',
+      actor,
+      operation,
+      route: 'direct',
+      target: { kind: 'board', sourceId: SEEK_SOURCE_ID },
+      state: 'blocked',
+      effect: 'informational_capability',
+      revision: 'seek-source-class/1.0.0',
+      evidenceRefs: [...seekEntry.evidenceRefs],
+      reviewedAt: seekEntry.reviewedAt,
+    });
+  }
+  return edges;
 }
 
 /**

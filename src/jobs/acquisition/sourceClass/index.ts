@@ -39,6 +39,7 @@ export {
   buildSeekEntry,
   buildSeekManualEntry,
   buildSeekAuthorizedUserBindings,
+  informationalSeekEdgesFromEntry,
 } from './seek.js';
 
 export { AtsTenantRegistry } from './atsTenants.js';

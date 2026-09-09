@@ -52,6 +52,7 @@ import type { IdentitySubject } from '../identity/index.js';
 import type { IdentityDecision } from '../domain/identity.js';
 import type { IdentityDecisionId } from '../domain/ids.js';
 import { runRetrieval } from '../retrieval/pipeline.js';
+import { applyIndexedEnrichment } from './indexedEnrichment.js';
 import { RETRIEVAL_CONTRACT_VERSION } from '../retrieval/contracts.js';
 import {
   ASSESSMENT_CONTRACT_VERSION,
@@ -68,6 +69,7 @@ import { buildReasoningPacket } from '../reasoning/packet.js';
 import { createIdempotencyStore } from '../reasoning/submit.js';
 import { runOptionalReasoning } from '../reasoning/run.js';
 import { validationError } from '../../errors.js';
+import { classifyListingUrl } from '../acquisition/listingHeuristics.js';
 import {
   JOBS_SEARCH_CONTRACT_VERSION,
   JobsSearchError,
@@ -103,6 +105,7 @@ interface AssembledCandidate {
   extractionWarnings: string[];
   identityDecision: IdentityDecision | null;
   identityConfidence: number;
+  sliceOrdinal: number;
 }
 
 function evidenceOrigin(kind: string): 'observed' | 'indexed' | 'user_supplied' {
@@ -188,6 +191,16 @@ function postingFromExtraction(
   if (!first) return { posting: null, warnings: ['no_observation_envelope'] };
   const fields = (extraction?.projection.fields ?? {}) as Record<string, unknown>;
   const asText = (v: unknown): string | null => (typeof v === 'string' && v.length > 0 ? v : null);
+  // Posting locator URLs: canonical listing URL (credential-free) plus apply
+  // URL when extraction observed one. listingUrl is a locator, not evidence text.
+  const firstCanonicalUrl = first.listing.canonicalUrl;
+  const listingUrls = [
+    ...new Set(
+      [firstCanonicalUrl, asText(fields.applyUrl)].filter(
+        (u): u is string => typeof u === 'string' && u.length > 0,
+      ),
+    ),
+  ];
   // Adopt every extracted hot field; fall back to placeholders only when the
   // extractor produced nothing (placeholders keep JobPostingSchema satisfied).
   const title = asText(fields.title) ?? 'Untitled posting';
@@ -244,7 +257,7 @@ function postingFromExtraction(
     ...(typeof fields.postedAt === 'string' ? { postedAt: fields.postedAt } : {}),
     ...(typeof fields.closingAt === 'string' ? { closingAt: fields.closingAt } : {}),
     ...(typeof fields.applyUrl === 'string' ? { applyUrl: fields.applyUrl } : {}),
-    listingUrls: [],
+    listingUrls,
     description,
     responsibilities: [],
     requirements: [],
@@ -361,6 +374,15 @@ export async function executeJobsSearch(
       scrapeJobs: deps.scrapeJobs,
       ...(request.monotonicNow !== undefined ? { monotonicNow: request.monotonicNow } : {}),
     });
+    const enrichCap = Math.min(10, intent.budgets.enrichment);
+    const enriched = await applyIndexedEnrichment(acquisition, deps.ports, intent.query, enrichCap);
+    acquisition = enriched.run;
+    if (enriched.warnings.length > 0) {
+      acquisition = {
+        ...acquisition,
+        warnings: [...acquisition.warnings, ...enriched.warnings].slice(0, 100),
+      };
+    }
   } catch (err) {
     if (err instanceof JobsSearchError) throw err;
     throw new JobsSearchError(
@@ -395,6 +417,7 @@ export async function executeJobsSearch(
     for (const edge of slice.policyEdges) {
       if (
         edge.route === 'direct' &&
+        edge.effect === 'authorized_operation' &&
         (edge.target.sourceId === 'board:seek' || edge.target.sourceId === 'seek')
       ) {
         directSeekCalls += 1;
@@ -458,6 +481,7 @@ export async function executeJobsSearch(
         extractionWarnings: [],
         identityDecision: null,
         identityConfidence: 0,
+        sliceOrdinal: request.plan.findIndex((item) => item.slice.sliceId === cand.sliceId),
       });
     }
   }
@@ -484,12 +508,34 @@ export async function executeJobsSearch(
       throw new JobsSearchError('DEADLINE_EXCEEDED', 'acquisition deadline exceeded');
     if (acquisition.status === 'budget_exhausted')
       throw new JobsSearchError('BUDGET_EXHAUSTED', 'acquisition budget exhausted');
+    // Aggregate pages skipped at mapping never become candidates; when that
+    // leaves zero candidates the warning would otherwise vanish with the
+    // result. Thread it onto the error so callers see why (never silent).
+    const aggregateSkipWarnings = acquisition.warnings.filter(
+      (w) => w === 'aggregate_search_page_skipped',
+    );
+    if (aggregateSkipWarnings.length > 0) {
+      throw new JobsSearchError(
+        'NO_CANDIDATES',
+        `acquisition produced zero candidates (${String(aggregateSkipWarnings.length)} aggregate_search_page_skipped warning recorded)`,
+        aggregateSkipWarnings,
+      );
+    }
     throw new JobsSearchError('NO_CANDIDATES', 'acquisition produced zero candidates');
   }
   checkDeadline('post-assembly');
 
   // ----- extraction where permitted (observation-backed + manual only) -----
-  for (const a of assembled) {
+  const extractable = assembled
+    .filter((a) => a.envelopes.length > 0)
+    .sort((a, b) => {
+      if (a.sliceOrdinal !== b.sliceOrdinal) return a.sliceOrdinal - b.sliceOrdinal;
+      const idA = a.acquisitionCandidate.candidateId;
+      const idB = b.acquisitionCandidate.candidateId;
+      return idA < idB ? -1 : idA > idB ? 1 : 0;
+    })
+    .slice(0, 20);
+  for (const a of extractable) {
     if (a.envelopes.length === 0) continue; // indexed-only: no extraction, no fabrication
     const env = a.envelopes[0];
     if (!env) continue;
@@ -539,6 +585,11 @@ export async function executeJobsSearch(
       a.extractionWarnings.push(...warnings);
     } else {
       // Indexed-only: thin posting from hints only, explicit caveats, no observation ids
+      const destinationUrl = (
+        a.acquisitionCandidate.provenance as unknown as {
+          destination?: { canonicalUrl?: string };
+        }
+      ).destination?.canonicalUrl;
       const candidatePosting = {
         postingId: `posting:${a.acquisitionCandidate.candidateId}`,
         schemaVersion: '1.0.0',
@@ -552,7 +603,7 @@ export async function executeJobsSearch(
         employmentType: 'unknown',
         salaries: [],
         classifications: [],
-        listingUrls: [],
+        listingUrls: destinationUrl !== undefined ? [destinationUrl] : [],
         description: 'Indexed snippet only; no observation fetched.',
         responsibilities: [],
         requirements: [],
@@ -932,6 +983,22 @@ export async function executeJobsSearch(
         warnings.push(`withheld_error:${u.key}:missing posting projection`);
         return null;
       }
+      // Aggregate pages are discovery artifacts, not postings. Withhold the
+      // unit with an explicit warning (never silent; never NO_CANDIDATES —
+      // that error means true zero acquisition, not all-withheld).
+      const unitAggregate = u.members.some((m) => {
+        if (m.acquisitionCandidate.caveats.includes('aggregate_search_page')) return true;
+        const dest = (
+          m.acquisitionCandidate.provenance as unknown as {
+            destination?: { canonicalUrl?: string };
+          }
+        ).destination?.canonicalUrl;
+        return dest !== undefined && classifyListingUrl(dest) === 'aggregate';
+      });
+      if (unitAggregate) {
+        warnings.push(`aggregate_page_withheld:${u.key}`);
+        return null;
+      }
       const retrievalMeta = retrievalById.get(u.key);
       // Learned residual -> personalAdaptation delta; explicit keys excluded inside.
       const familySlug = (posting.roleFamilies[0]?.family ?? 'unknown')
@@ -1219,14 +1286,16 @@ export async function executeJobsSearch(
         textBm25Score: retrievalMeta?.channelScores.text_bm25 ?? null,
       },
       flags: [...rc.flags, ...u.extractionWarnings].slice(0, 16),
-      caveats:
-        unitState === 'indexed_only'
+      caveats: [
+        ...(unitState === 'indexed_only'
           ? ['indexed_only: snippet-backed; upgrade requires authoritative fetch']
           : unitState === 'user_supplied'
             ? ['user_supplied: unverified manual content']
             : unitState === 'mixed_upgradeable'
               ? mergedSuffix
-              : [...mergedSuffix],
+              : [...mergedSuffix]),
+        ...new Set(u.members.flatMap((m) => m.acquisitionCandidate.caveats)),
+      ].slice(0, 16),
       evidenceRefs: [
         ...new Set([
           ...u.evidenceRefs,
@@ -1240,6 +1309,46 @@ export async function executeJobsSearch(
       observationIds: u.observationIds.slice(0, 16),
       title: unitPostingVal.title,
       organisation: unitPostingVal.organisation,
+      // Provenance locator fields: additive, omitted when absent.
+      // listingUrl = canonical posting URL (apply/inspect locator, never
+      // evidence text). description placeholder is never copied to output.
+      ...(() => {
+        const envelopeUrls = u.members.flatMap((m) =>
+          m.envelopes
+            .map((e) => e.listing.canonicalUrl)
+            .filter((x): x is string => typeof x === 'string' && x.length > 0),
+        );
+        const destinationUrls = u.members.flatMap((m) => {
+          const dest = (
+            m.acquisitionCandidate.provenance as unknown as {
+              destination?: { canonicalUrl?: string };
+            }
+          ).destination?.canonicalUrl;
+          return dest !== undefined ? [dest] : [];
+        });
+        const listingUrl = unitPostingVal.listingUrls[0] ?? envelopeUrls[0] ?? destinationUrls[0];
+        const applyUrl = unitPostingVal.applyUrl;
+        const loc = unitPostingVal.locations.find(
+          (l) => l.city !== undefined || l.region !== undefined || l.country !== undefined,
+        );
+        const location = loc
+          ? [loc.city, loc.region, loc.country].filter((p) => p !== undefined).join(', ')
+          : undefined;
+        const salaryText = unitPostingVal.salaries[0]?.raw;
+        const rawDescription = unitPostingVal.description;
+        const description =
+          rawDescription === 'Indexed snippet only; no observation fetched.' ||
+          rawDescription === 'No description available.'
+            ? undefined
+            : rawDescription.slice(0, 2048);
+        return {
+          ...(listingUrl !== undefined ? { listingUrl } : {}),
+          ...(applyUrl !== undefined ? { applyUrl } : {}),
+          ...(location !== undefined && location.length > 0 ? { location } : {}),
+          ...(salaryText !== undefined ? { salaryText } : {}),
+          ...(description !== undefined ? { description } : {}),
+        };
+      })(),
       ...(u.identityDecision?.decisionId !== undefined
         ? { identityDecisionId: u.identityDecision.decisionId }
         : {}),

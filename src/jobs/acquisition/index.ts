@@ -162,7 +162,9 @@ export {
   buildSeekEntry,
   buildSeekManualEntry,
   buildSeekAuthorizedUserBindings,
+  informationalSeekEdgesFromEntry,
 } from './sourceClass/index.js';
+export { SEEK_DESTINATION_CLASS, supportsIndexedDomainFilter } from './destinationClass.js';
 
 export { AtsTenantRegistry } from './sourceClass/index.js';
 

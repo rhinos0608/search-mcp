@@ -23,6 +23,8 @@ const caveat = z.enum([
   'stale_index_possible',
   'content_required',
   'unverified_manual_content',
+  'sought_via_destination_class',
+  'aggregate_search_page',
 ]);
 export const AcquisitionCaveatSchema = caveat;
 export type AcquisitionCaveat = z.infer<typeof caveat>;
@@ -146,6 +148,14 @@ const indexedProvenance = z
       })
       .strict(),
     capturedAt: InstantSchema,
+    soughtVia: z
+      .object({
+        sourceId: text(256),
+        targetKind: z.enum(['board', 'publisher', 'ats_tenant']),
+        basis: z.literal('slice_intent'),
+      })
+      .strict()
+      .optional(),
   })
   .strict();
 

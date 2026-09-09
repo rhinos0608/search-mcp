@@ -22,6 +22,7 @@ import type { AdapterCapabilityRegistry } from '../adapterRegistry.js';
 import type { IndexedProviderPort, IndexedSafeSearch, IndexedSummaryMode } from './ports.js';
 import { validationError, isToolError } from '../../../errors.js';
 import { caveatsForInformationalEdges } from '../policy/edgeCoordinator.js';
+import { classifyListingUrl } from '../listingHeuristics.js';
 import { InstantSchema } from '../../domain/ids.js';
 import type { SearchResult } from '../../../types.js';
 
@@ -35,6 +36,8 @@ export interface IndexedProviderRequest {
   safeSearch: IndexedSafeSearch;
   aiSummary?: IndexedSummaryMode;
   capturedAt: string;
+  destinationClass?: { sourceId: string; targetKind: 'board' | 'publisher' | 'ats_tenant' };
+  includeDomains?: readonly string[];
 }
 
 export interface IndexedProviderDeps {
@@ -83,6 +86,7 @@ function capText(text: string): string {
 
 function inferPublisher(
   informationalEdges: readonly AcquisitionPolicyEdge[],
+  destinationClass?: { sourceId: string; targetKind: string },
 ): { kind: string; sourceId: string } | undefined {
   const candidates: { kind: string; sourceId: string }[] = [];
   for (const e of informationalEdges) {
@@ -94,6 +98,7 @@ function inferPublisher(
       e.target.kind !== 'ats_tenant'
     )
       continue;
+    if (e.target.sourceId === destinationClass?.sourceId) continue;
     candidates.push({ kind: e.target.kind, sourceId: e.target.sourceId });
   }
   if (candidates.length === 0) return undefined;
@@ -297,7 +302,11 @@ export async function runIndexedProvider(
   }
 
   // budget checks before call
-  if (slice.budget.milliseconds < port.maxDurationMs) {
+  const searchTimeoutMs =
+    typeof port.searchTimeoutMs === 'number' && port.searchTimeoutMs > 0
+      ? port.searchTimeoutMs
+      : Math.min(port.maxDurationMs, 25000);
+  if (slice.budget.milliseconds < searchTimeoutMs) {
     return buildResult('failed', 'unknown', [], [], [], 0, 0, 'BUDGET_EXHAUSTED', 0, 0);
   }
   if (slice.budget.reservedAttempts < governance.maxAttempts) {
@@ -312,8 +321,18 @@ export async function runIndexedProvider(
   const start = monotonicNow();
   let rawResults: readonly SearchResult[];
   try {
-    const limit = Math.min(20, slice.budget.candidates);
-    const res = await port.search({ query: slice.query, limit, safeSearch, aiSummary });
+    const limit = Math.min(governance.maxResultsPerRequest, slice.budget.candidates);
+    const searchInput: {
+      query: string;
+      limit: number;
+      safeSearch: IndexedSafeSearch;
+      aiSummary: IndexedSummaryMode;
+      includeDomains?: readonly string[];
+    } = { query: slice.query, limit, safeSearch, aiSummary };
+    if (request.includeDomains !== undefined && request.includeDomains.length > 0) {
+      searchInput.includeDomains = request.includeDomains;
+    }
+    const res = await port.search(searchInput);
     if (!Array.isArray(res)) throw new Error('invalid provider result');
     rawResults = res as readonly SearchResult[];
   } catch (err) {
@@ -347,9 +366,10 @@ export async function runIndexedProvider(
   const evidence: DiscoveryEvidence[] = [];
   const warnings: string[] = [];
   let malformedCount = 0;
+  let aggregateSkipped = 0;
   let bytesUsed = 0;
-  const candidateCap = Math.min(20, slice.budget.candidates);
-  const publisher = inferPublisher(informationalEdges);
+  const candidateCap = Math.min(governance.maxResultsPerRequest, slice.budget.candidates);
+  const publisher = inferPublisher(informationalEdges, request.destinationClass);
 
   // caveats base
   const baseCaveats: string[] = [
@@ -381,6 +401,12 @@ export async function runIndexedProvider(
     }
     const canonical = meta.canonicalUrl;
     if (seenCanonical.has(canonical)) continue;
+    // Aggregate pages are discovery artifacts, not candidates: skip at mapping
+    // so they never consume candidateCap (explicit warned, never silent).
+    if (classifyListingUrl(canonical) === 'aggregate') {
+      aggregateSkipped += 1;
+      continue;
+    }
     // bytes budget check: need to estimate before creating
     // we haven't created evidence yet, but we can check after creation
     // enforce unique
@@ -574,9 +600,16 @@ export async function runIndexedProvider(
       },
       capturedAt,
     };
-    // publisher only if unambiguous
+    // publisher only if unambiguous non-class informational target
     if (publisher) {
       provenance.publisher = { kind: publisher.kind, sourceId: publisher.sourceId };
+    }
+    if (request.destinationClass !== undefined) {
+      provenance.soughtVia = {
+        sourceId: request.destinationClass.sourceId,
+        targetKind: request.destinationClass.targetKind,
+        basis: 'slice_intent',
+      };
     }
 
     // titleHint handling
@@ -587,6 +620,12 @@ export async function runIndexedProvider(
     const candidateCaveats = [...baseCaveats];
     if (evidencesForCandidate.some((e) => e.kind === 'provider_generated_summary'))
       candidateCaveats.push('provider_generated_summary');
+    if (
+      request.destinationClass !== undefined &&
+      !candidateCaveats.includes('sought_via_destination_class')
+    ) {
+      candidateCaveats.push('sought_via_destination_class');
+    }
     for (const c of informationalCaveats) {
       if (!candidateCaveats.includes(c)) candidateCaveats.push(c);
     }
@@ -616,6 +655,9 @@ export async function runIndexedProvider(
 
   if (malformedCount > 0) {
     warnings.push(sanitizeWarning());
+  }
+  if (aggregateSkipped > 0) {
+    warnings.push('aggregate_search_page_skipped');
   }
 
   // determine coverage state

@@ -27,3 +27,5 @@ employerApi: not_supported
 Third-party provider authorization never grants direct SEEK search or fetch. Verify permitted provider + blocked SEEK yields provider calls and caveated indexed candidates, zero SEEK adapter calls, and zero destination fetch calls. Verify blocked direct modes produce zero direct network calls. Indexed snippets and provider-generated summaries remain provenance-bearing donor evidence, not publisher facts.
 
 Policy binds actor, operation, route, and target; it does not taint information objects. Any legal, confidentiality, or safety handling propagation requires separate explicit classification with cited basis, out of scope here.
+
+Live SEEK/provider/manual MCP composition requires non-empty reviewed evidence refs; empty live evidence is invalid at `buildJobsMcpDeps`. Internal only; no MCP evidence payload. `SOURCE_CLASS_CONTRACT_VERSION` remains `1.0.0`.

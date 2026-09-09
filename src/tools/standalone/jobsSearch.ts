@@ -19,8 +19,22 @@ import { jobErrorCode, jobTelemetry } from '../../utils/jobTelemetry.js';
 import { executeJobsSearch, JobsSearchError } from '../../jobs/orchestration/search.js';
 import { AU_NSW_SYDNEY_LOCALE_PACK } from '../../jobs/packs/auNswSydney.locale.js';
 import { NSW_PUBLIC_ADMIN_DOMAIN_PACK } from '../../jobs/packs/nswPublicAdmin.domain.js';
-import { buildJobsMcpDeps, type JobsMcpDependencies } from '../jobs/jobsDeps.js';
-import { buildPlan } from '../jobs/planBuilder.js';
+import {
+  buildJobsMcpDeps,
+  jobspyUnconfigured,
+  type JobsMcpDependencies,
+} from '../jobs/jobsDeps.js';
+import {
+  buildPlan,
+  deriveJobsRunBudget,
+  deriveStageBudgets,
+  supportingIndexedProviderCount,
+} from '../jobs/planBuilder.js';
+import {
+  buildSeekEntry,
+  informationalSeekEdgesFromEntry,
+} from '../../jobs/acquisition/sourceClass/seek.js';
+import { SEEK_POLICY_EVIDENCE } from '../../jobs/acquisition/sourceClass/evidence/livePolicyEvidence.js';
 import { mapPublicProfile, type PublicProfileInput } from '../jobs/profileMapping.js';
 
 const publicProfileSchema = z
@@ -140,7 +154,37 @@ export function registerJobsSearch(
                   throw new Error('profile requires sydney:true so terms can be pack-approved');
                 })()
             : undefined;
-        const plannedSlices = buildPlan(args, runId, deps.providerIds, deps.jobspyBoards);
+        const topK = args.topK ?? 10;
+        const stageBudgets = deriveStageBudgets(topK);
+        const seekEntry = buildSeekEntry(SEEK_POLICY_EVIDENCE);
+        const plannedSlices = buildPlan(
+          {
+            ...args,
+            jobspyFetchDescription: cfg.jobsAcquisition.jobspyFetchDescription,
+          },
+          runId,
+          deps.providerIds,
+          deps.jobspyBoards,
+          {
+            topK,
+            ports: deps.ports,
+            stageBudgets,
+            informationalEdgesFor: (sourceId, providerId) =>
+              sourceId === 'board:seek'
+                ? informationalSeekEdgesFromEntry(
+                    seekEntry,
+                    {
+                      kind: 'provider',
+                      namespace: 'search-provider',
+                      id: providerId,
+                    },
+                    capturedAt,
+                  )
+                : [],
+          },
+        );
+        const supporting = supportingIndexedProviderCount(deps.ports);
+        const runBudget = deriveJobsRunBudget(plannedSlices.length, supporting, stageBudgets);
         const data = await executeJobsSearch(
           {
             intent: {
@@ -159,13 +203,13 @@ export function registerJobsSearch(
               explorationBreadth: 'balanced',
               strictness: 'normal',
               unknownPolicy: 'include',
-              topK: args.topK ?? 10,
+              topK,
               budgets: {
-                requests: 10,
+                requests: runBudget.logicalRequests,
                 pages: 10,
                 bytes: 200000,
-                milliseconds: 60000,
-                enrichment: 0,
+                milliseconds: runBudget.milliseconds,
+                enrichment: stageBudgets.indexedEnrichment,
                 reasoning: 0,
               },
               evidenceRefs: [],
@@ -173,13 +217,7 @@ export function registerJobsSearch(
             plan: plannedSlices,
             runId,
             capturedAt,
-            budget: {
-              logicalRequests: 10,
-              reservedAttempts: 20,
-              candidates: 10,
-              bytes: 200000,
-              milliseconds: Math.min(300000, Math.max(70000, 70000 * plannedSlices.length)),
-            },
+            budget: runBudget,
             ...(sydney
               ? { localePack: AU_NSW_SYDNEY_LOCALE_PACK, domainPack: NSW_PUBLIC_ADMIN_DOMAIN_PACK }
               : {}),
@@ -207,8 +245,13 @@ export function registerJobsSearch(
               confidence: Math.round(c.confidence * 1000) / 1000,
               eligibility: c.eligibility,
               evidenceState: c.evidenceState,
-              // Bounded provenance distinguishes indexed discovery from observed
-              // publisher/adapter content without exposing raw URLs or evidence text.
+              // Posting locator (canonical, credential-free) + bounded
+              // posting facts. Evidence refs/text stay non-public.
+              ...(c.listingUrl !== undefined ? { listingUrl: c.listingUrl } : {}),
+              ...(c.applyUrl !== undefined ? { applyUrl: c.applyUrl } : {}),
+              ...(c.location !== undefined ? { location: c.location } : {}),
+              ...(c.salaryText !== undefined ? { salaryText: c.salaryText } : {}),
+              ...(c.description !== undefined ? { description: c.description } : {}),
               provenance: c.provenance.slice(0, 8),
               sourceListingIds: c.sourceListingIds.slice(0, 16),
               observationIds: c.observationIds.slice(0, 16),
@@ -219,7 +262,18 @@ export function registerJobsSearch(
             coverageOutcomes: data.coverageOutcomes,
           },
           Date.now() - start,
-          { ...(data.warnings.length > 0 ? { warnings: data.warnings } : {}) },
+          {
+            ...(jobspyUnconfigured(deps, args.useJobSpy) || data.warnings.length > 0
+              ? {
+                  warnings: [
+                    ...(jobspyUnconfigured(deps, args.useJobSpy)
+                      ? ['jobspy_unconfigured: useJobSpy requested but no boards authorized']
+                      : []),
+                    ...data.warnings,
+                  ],
+                }
+              : {}),
+          },
         );
         return successResponse(result);
       } catch (err: unknown) {

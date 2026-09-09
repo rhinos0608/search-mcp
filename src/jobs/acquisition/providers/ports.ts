@@ -14,9 +14,19 @@ import { ollamaSearch } from '../../../tools/ollamaSearch.js';
 import { tavilySearch } from '../../../tools/tavilySearch.js';
 import { codexSearch, codexConfigured } from '../../../tools/codexSearch.js';
 import type { SearchResult } from '../../../types.js';
+import { assertSafeUrl, safeResponseJson } from '../../../httpGuards.js';
+import { retryWithBackoff } from '../../../retry.js';
+import { ToolError, unavailableError } from '../../../errors.js';
+import { strArray, strField } from '../../../tools/providerFields.js';
 
 export type IndexedSafeSearch = 'strict' | 'moderate' | 'off';
 export type IndexedSummaryMode = 'no' | 'yes' | 'only';
+
+export interface IndexedUrlEnrichment {
+  readonly url: string;
+  readonly generatedSummary?: string;
+  readonly generatedSummaryProvider?: string;
+}
 
 export interface IndexedProviderPort {
   readonly backend: SearchBackend;
@@ -24,14 +34,23 @@ export interface IndexedProviderPort {
   readonly providerId: string;
   readonly governance: ProviderGovernance;
   readonly maxDurationMs: number;
+  readonly searchTimeoutMs?: number;
   search(
     input: Readonly<{
       query: string;
       limit: number;
       safeSearch: IndexedSafeSearch;
       aiSummary: IndexedSummaryMode;
+      includeDomains?: readonly string[];
     }>,
   ): Promise<readonly SearchResult[]>;
+  enrichUrls?(
+    input: Readonly<{
+      urls: readonly string[];
+      mode: 'summary';
+      query?: string;
+    }>,
+  ): Promise<readonly IndexedUrlEnrichment[]>;
 }
 
 export interface IndexedProviderDefinition {
@@ -48,6 +67,7 @@ function gov(
   summary: boolean,
   strict: boolean,
   attempts: number,
+  maxResultsPerRequest = 20,
 ): ProviderGovernance {
   return {
     schemaVersion: '1.0.0',
@@ -59,7 +79,7 @@ function gov(
     sendsQueryOffDevice: true,
     supportsUrlAttributedSummary: summary,
     supportsStrictSafeSearch: strict,
-    maxResultsPerRequest: 20,
+    maxResultsPerRequest,
     maxAttempts: attempts,
     evidenceRefs: [],
   };
@@ -84,7 +104,7 @@ export const INDEXED_PROVIDER_DEFINITIONS: readonly IndexedProviderDefinition[] 
     backend: 'exa',
     adapterId: 'indexed-provider:exa',
     providerId: 'search-provider:exa',
-    governance: gov('exa', 'search-provider:exa', true, true, 3),
+    governance: gov('exa', 'search-provider:exa', true, true, 3, 50),
     maxDurationMs: 70000,
   },
   {
@@ -140,6 +160,299 @@ export function indexedProviderConfigured(
   }
 }
 
+const EXA_SEARCH_URL = 'https://api.exa.ai/search';
+const EXA_CONTENTS_URL = 'https://api.exa.ai/contents';
+const TAVILY_SEARCH_URL = 'https://api.tavily.com/search';
+const TAVILY_EXTRACT_URL = 'https://api.tavily.com/extract';
+
+function capText(text: string): string {
+  return text.length > 8192 ? text.slice(0, 8192) : text;
+}
+
+const EXA_HIGHLIGHTS_MAX_CHARACTERS = 2560;
+
+function truncateExaSnippet(text: string, max: number): string {
+  if (text.length <= max) return text;
+  const budget = max - 1;
+  let head = text.slice(0, budget);
+  const space = head.lastIndexOf(' ');
+  if (space > 0) head = head.slice(0, space);
+  return `${head}…`;
+}
+
+function exaSnippetFromRecord(record: Record<string, unknown>): string {
+  const highlights = strArray(record.highlights);
+  if (highlights.length > 0) return highlights.join('\n\n');
+  return truncateExaSnippet(strField(record.text), EXA_HIGHLIGHTS_MAX_CHARACTERS);
+}
+
+async function exaSearchWithDomains(
+  query: string,
+  apiKey: string,
+  limit: number,
+  safeSearch: IndexedSafeSearch,
+  includeDomains: readonly string[],
+): Promise<readonly SearchResult[]> {
+  if (apiKey.length === 0) {
+    throw unavailableError('Exa search is not configured. Set EXA_API_KEY.', { backend: 'exa' });
+  }
+  assertSafeUrl(EXA_SEARCH_URL);
+  const body = {
+    query,
+    numResults: limit,
+    type: 'auto',
+    includeDomains: [...includeDomains],
+    ...(safeSearch === 'strict' ? { moderation: true } : {}),
+    contents: { highlights: { maxCharacters: EXA_HIGHLIGHTS_MAX_CHARACTERS } },
+  };
+  const response = await retryWithBackoff(
+    async () => {
+      const res = await fetch(EXA_SEARCH_URL, {
+        method: 'POST',
+        headers: {
+          Accept: 'application/json',
+          'Content-Type': 'application/json',
+          'x-api-key': apiKey,
+        },
+        body: JSON.stringify(body),
+        signal: AbortSignal.timeout(20_000),
+      });
+      if (res.status === 429) {
+        throw new ToolError('Exa Search API rate limit exceeded (429)', {
+          code: 'RATE_LIMIT',
+          retryable: false,
+          statusCode: 429,
+          backend: 'exa',
+        });
+      }
+      if (!res.ok) {
+        throw unavailableError(`Exa Search API returned ${String(res.status)}: ${res.statusText}`, {
+          statusCode: res.status,
+          backend: 'exa',
+        });
+      }
+      return res;
+    },
+    { label: 'exa-search-domains', maxAttempts: 3 },
+  );
+  const data = (await safeResponseJson(response, EXA_SEARCH_URL)) as { results?: unknown };
+  const mapped: SearchResult[] = [];
+  if (Array.isArray(data.results)) {
+    for (const result of data.results) {
+      if (mapped.length >= limit) break;
+      if (typeof result !== 'object' || result === null) continue;
+      const record = result as Record<string, unknown>;
+      const url = strField(record.url);
+      mapped.push({
+        title: strField(record.title),
+        url,
+        description: exaSnippetFromRecord(record),
+        position: mapped.length + 1,
+        domain: '',
+        source: 'exa',
+        age: null,
+        ageKind: 'unknown',
+        extraSnippet: null,
+        deepLinks: null,
+        contentKind: 'snippet',
+        generatedSummary: null,
+      });
+    }
+  }
+  return mapped;
+}
+
+async function tavilySearchWithDomains(
+  query: string,
+  apiKey: string,
+  limit: number,
+  safeSearch: IndexedSafeSearch,
+  includeDomains: readonly string[],
+): Promise<readonly SearchResult[]> {
+  if (apiKey.length === 0) {
+    throw unavailableError('Tavily search is not configured. Set TAVILY_API_KEY.', {
+      backend: 'tavily',
+    });
+  }
+  assertSafeUrl(TAVILY_SEARCH_URL);
+  const body = {
+    query,
+    max_results: Math.min(limit, 20),
+    search_depth: 'basic',
+    chunks_per_source: 3,
+    include_answer: false,
+    include_images: false,
+    include_domains: [...includeDomains],
+    topic: safeSearch === 'strict' ? 'news' : 'general',
+  };
+  const response = await retryWithBackoff(
+    async () => {
+      const res = await fetch(TAVILY_SEARCH_URL, {
+        method: 'POST',
+        headers: {
+          Accept: 'application/json',
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${apiKey}`,
+        },
+        body: JSON.stringify(body),
+        signal: AbortSignal.timeout(20_000),
+      });
+      if (res.status === 429) {
+        throw new ToolError('Tavily Search API rate limit exceeded (429)', {
+          code: 'RATE_LIMIT',
+          retryable: false,
+          statusCode: 429,
+          backend: 'tavily',
+        });
+      }
+      if (!res.ok) {
+        throw unavailableError(
+          `Tavily Search API returned ${String(res.status)}: ${res.statusText}`,
+          { statusCode: res.status, backend: 'tavily' },
+        );
+      }
+      return res;
+    },
+    { label: 'tavily-search-domains', maxAttempts: 3 },
+  );
+  const data = (await safeResponseJson(response, TAVILY_SEARCH_URL)) as { results?: unknown };
+  const mapped: SearchResult[] = [];
+  if (Array.isArray(data.results)) {
+    for (const result of data.results) {
+      if (mapped.length >= limit) break;
+      if (typeof result !== 'object' || result === null) continue;
+      const record = result as Record<string, unknown>;
+      const url = strField(record.url);
+      mapped.push({
+        title: strField(record.title),
+        url,
+        description: strField(record.content),
+        position: mapped.length + 1,
+        domain: '',
+        source: 'tavily',
+        age: null,
+        ageKind: 'unknown',
+        extraSnippet: null,
+        deepLinks: null,
+        contentKind: 'snippet',
+        generatedSummary: null,
+      });
+    }
+  }
+  return mapped;
+}
+
+async function exaEnrichUrls(
+  apiKey: string,
+  urls: readonly string[],
+): Promise<readonly IndexedUrlEnrichment[]> {
+  const capped = urls.slice(0, 10);
+  for (const url of capped) assertSafeUrl(url);
+  assertSafeUrl(EXA_CONTENTS_URL);
+  const response = await retryWithBackoff(
+    async () => {
+      const res = await fetch(EXA_CONTENTS_URL, {
+        method: 'POST',
+        headers: {
+          Accept: 'application/json',
+          'Content-Type': 'application/json',
+          'x-api-key': apiKey,
+        },
+        body: JSON.stringify({
+          urls: [...capped],
+          text: false,
+          highlights: false,
+          summary: true,
+        }),
+        signal: AbortSignal.timeout(20_000),
+      });
+      if (!res.ok) {
+        throw unavailableError(`Exa contents API returned ${String(res.status)}`, {
+          statusCode: res.status,
+          backend: 'exa',
+        });
+      }
+      return res;
+    },
+    { label: 'exa-contents', maxAttempts: 2 },
+  );
+  const data = (await safeResponseJson(response, EXA_CONTENTS_URL)) as { results?: unknown };
+  const out: IndexedUrlEnrichment[] = [];
+  if (!Array.isArray(data.results)) return out;
+  for (const result of data.results) {
+    if (typeof result !== 'object' || result === null) continue;
+    const record = result as Record<string, unknown>;
+    const url = strField(record.url);
+    const summary = strField(record.summary).trim();
+    if (url.length === 0) continue;
+    const item: { url: string; generatedSummary?: string; generatedSummaryProvider?: string } = {
+      url,
+    };
+    if (summary.length > 0) {
+      item.generatedSummary = capText(summary);
+      item.generatedSummaryProvider = 'exa';
+    }
+    out.push(item);
+  }
+  return out;
+}
+
+async function tavilyEnrichUrls(
+  apiKey: string,
+  urls: readonly string[],
+  query: string,
+): Promise<readonly IndexedUrlEnrichment[]> {
+  const capped = urls.slice(0, 10);
+  for (const url of capped) assertSafeUrl(url);
+  assertSafeUrl(TAVILY_EXTRACT_URL);
+  const response = await retryWithBackoff(
+    async () => {
+      const res = await fetch(TAVILY_EXTRACT_URL, {
+        method: 'POST',
+        headers: {
+          Accept: 'application/json',
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${apiKey}`,
+        },
+        body: JSON.stringify({
+          urls: [...capped],
+          query,
+          chunks_per_source: 3,
+          extract_depth: 'basic',
+        }),
+        signal: AbortSignal.timeout(20_000),
+      });
+      if (!res.ok) {
+        throw unavailableError(`Tavily extract API returned ${String(res.status)}`, {
+          statusCode: res.status,
+          backend: 'tavily',
+        });
+      }
+      return res;
+    },
+    { label: 'tavily-extract', maxAttempts: 2 },
+  );
+  const data = (await safeResponseJson(response, TAVILY_EXTRACT_URL)) as { results?: unknown };
+  const out: IndexedUrlEnrichment[] = [];
+  if (!Array.isArray(data.results)) return out;
+  for (const result of data.results) {
+    if (typeof result !== 'object' || result === null) continue;
+    const record = result as Record<string, unknown>;
+    const url = strField(record.url);
+    const raw = strField(record.raw_content).trim();
+    if (url.length === 0) continue;
+    const item: { url: string; generatedSummary?: string; generatedSummaryProvider?: string } = {
+      url,
+    };
+    if (raw.length > 0) {
+      item.generatedSummary = capText(raw);
+      item.generatedSummaryProvider = 'tavily';
+    }
+    out.push(item);
+  }
+  return out;
+}
+
 export function createDefaultIndexedProviderPorts(
   config: SearchConfig,
   env: NodeJS.ProcessEnv = process.env,
@@ -153,9 +466,11 @@ export function createDefaultIndexedProviderPorts(
         limit: number;
         safeSearch: IndexedSafeSearch;
         aiSummary: IndexedSummaryMode;
+        includeDomains?: readonly string[];
       }>,
     ): Promise<readonly SearchResult[]> => {
-      const clampedLimit = Math.min(input.limit, 20);
+      const clampedLimit = Math.min(input.limit, def.governance.maxResultsPerRequest);
+      const domains = input.includeDomains;
       switch (def.backend) {
         case 'brave':
           return braveSearch(
@@ -167,6 +482,15 @@ export function createDefaultIndexedProviderPorts(
         case 'searxng':
           return searxngSearch(input.query, config.searxng.baseUrl, clampedLimit, input.safeSearch);
         case 'exa':
+          if (domains !== undefined && domains.length > 0) {
+            return exaSearchWithDomains(
+              input.query,
+              config.exa.apiKey ?? '',
+              clampedLimit,
+              input.safeSearch,
+              domains,
+            );
+          }
           return exaSearch(
             input.query,
             config.exa.apiKey ?? '',
@@ -187,6 +511,15 @@ export function createDefaultIndexedProviderPorts(
           return ollamaSearch(input.query, clampedLimit, input.safeSearch, cfg);
         }
         case 'tavily':
+          if (domains !== undefined && domains.length > 0) {
+            return tavilySearchWithDomains(
+              input.query,
+              config.tavily.apiKey ?? '',
+              clampedLimit,
+              input.safeSearch,
+              domains,
+            );
+          }
           return tavilySearch(
             input.query,
             config.tavily.apiKey ?? '',
@@ -200,14 +533,33 @@ export function createDefaultIndexedProviderPorts(
           return [];
       }
     };
-    return {
+    const port: IndexedProviderPort = {
       backend: def.backend,
       adapterId: def.adapterId,
       providerId: def.providerId,
       governance: def.governance,
       maxDurationMs: def.maxDurationMs,
+      searchTimeoutMs: 20000,
       search,
     };
+    if (def.backend === 'exa') {
+      return {
+        ...port,
+        enrichUrls: async (input) => exaEnrichUrls(config.exa.apiKey ?? '', input.urls),
+      };
+    }
+    if (def.backend === 'tavily') {
+      return {
+        ...port,
+        enrichUrls: async (input) =>
+          tavilyEnrichUrls(
+            config.tavily.apiKey ?? '',
+            input.urls,
+            input.query !== undefined && input.query.length > 0 ? input.query : 'job listing',
+          ),
+      };
+    }
+    return port;
   });
 }
 

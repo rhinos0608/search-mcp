@@ -84,6 +84,16 @@ export const JobsSearchCandidateSchema = z
     identityDecisionId: z.string().min(1).optional(),
     /** Revision of identity decision used for this candidate (none when unavailable). */
     identityDecisionRevision: z.string().min(1),
+    /** Canonical, credential-free posting URL — an apply/inspect locator, never evidence text. */
+    listingUrl: z.url().max(8192).optional(),
+    /** Apply URL when extraction observed one. */
+    applyUrl: z.url().max(8192).optional(),
+    /** Bounded location label when extraction observed one. */
+    location: z.string().min(1).max(256).optional(),
+    /** Raw salary text when extraction resolved one. */
+    salaryText: z.string().min(1).max(256).optional(),
+    /** Bounded description; indexed placeholders are never copied here. */
+    description: z.string().min(1).max(2048).optional(),
   })
   .strict();
 export type JobsSearchCandidate = z.infer<typeof JobsSearchCandidateSchema>;
@@ -199,10 +209,13 @@ export type JobsSearchErrorCode = z.infer<typeof JobsSearchErrorCodeSchema>;
 
 export class JobsSearchError extends Error {
   readonly code: JobsSearchErrorCode;
-  constructor(code: JobsSearchErrorCode, message: string) {
+  /** Optional bounded acquisition warnings attached on the error path (additive). */
+  readonly warnings?: readonly string[];
+  constructor(code: JobsSearchErrorCode, message: string, warnings?: readonly string[]) {
     super(message);
     this.name = 'JobsSearchError';
     this.code = code;
+    if (warnings !== undefined) this.warnings = Object.freeze([...warnings]);
   }
 }
 

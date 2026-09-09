@@ -20,8 +20,18 @@ import { registerFamily, type FamilyDefinition } from '../registry.js';
 import { executeJobsSearch } from '../../jobs/orchestration/search.js';
 import { AU_NSW_SYDNEY_LOCALE_PACK } from '../../jobs/packs/auNswSydney.locale.js';
 import { NSW_PUBLIC_ADMIN_DOMAIN_PACK } from '../../jobs/packs/nswPublicAdmin.domain.js';
-import { buildJobsMcpDeps } from '../jobs/jobsDeps.js';
-import { buildPlan } from '../jobs/planBuilder.js';
+import { buildJobsMcpDeps, jobspyUnconfigured } from '../jobs/jobsDeps.js';
+import {
+  buildPlan,
+  deriveJobsRunBudget,
+  deriveStageBudgets,
+  supportingIndexedProviderCount,
+} from '../jobs/planBuilder.js';
+import {
+  buildSeekEntry,
+  informationalSeekEdgesFromEntry,
+} from '../../jobs/acquisition/sourceClass/seek.js';
+import { SEEK_POLICY_EVIDENCE } from '../../jobs/acquisition/sourceClass/evidence/livePolicyEvidence.js';
 import { mapPublicProfile } from '../jobs/profileMapping.js';
 
 const publicProfileSchema = z
@@ -118,10 +128,14 @@ const jobsFamily: FamilyDefinition = {
                   throw new Error('profile requires sydney:true so terms can be pack-approved');
                 })()
             : undefined;
+        const topK = a.topK;
+        const stageBudgets = deriveStageBudgets(topK);
+        const seekEntry = buildSeekEntry(SEEK_POLICY_EVIDENCE);
         const plannedSlices = buildPlan(
           {
             query: a.query,
             useJobSpy: a.useJobSpy,
+            jobspyFetchDescription: cfg.jobsAcquisition.jobspyFetchDescription,
             resultsWanted: 20,
             ...(a.location !== undefined ? { location: a.location } : {}),
             sydney,
@@ -129,7 +143,22 @@ const jobsFamily: FamilyDefinition = {
           runId,
           deps.providerIds,
           deps.jobspyBoards,
+          {
+            topK,
+            ports: deps.ports,
+            stageBudgets,
+            informationalEdgesFor: (sourceId, providerId) =>
+              sourceId === 'board:seek'
+                ? informationalSeekEdgesFromEntry(
+                    seekEntry,
+                    { kind: 'provider', namespace: 'search-provider', id: providerId },
+                    capturedAt,
+                  )
+                : [],
+          },
         );
+        const supporting = supportingIndexedProviderCount(deps.ports);
+        const runBudget = deriveJobsRunBudget(plannedSlices.length, supporting, stageBudgets);
         const data = await executeJobsSearch(
           {
             intent: {
@@ -146,13 +175,13 @@ const jobsFamily: FamilyDefinition = {
               explorationBreadth: 'balanced',
               strictness: 'normal',
               unknownPolicy: 'include',
-              topK: a.topK,
+              topK,
               budgets: {
-                requests: 10,
+                requests: runBudget.logicalRequests,
                 pages: 10,
                 bytes: 200000,
-                milliseconds: 60000,
-                enrichment: 0,
+                milliseconds: runBudget.milliseconds,
+                enrichment: stageBudgets.indexedEnrichment,
                 reasoning: 0,
               },
               evidenceRefs: [],
@@ -160,13 +189,7 @@ const jobsFamily: FamilyDefinition = {
             plan: plannedSlices,
             runId,
             capturedAt,
-            budget: {
-              logicalRequests: 10,
-              reservedAttempts: 20,
-              candidates: 10,
-              bytes: 200000,
-              milliseconds: Math.min(300000, Math.max(70000, 70000 * plannedSlices.length)),
-            },
+            budget: runBudget,
             ...(sydney
               ? { localePack: AU_NSW_SYDNEY_LOCALE_PACK, domainPack: NSW_PUBLIC_ADMIN_DOMAIN_PACK }
               : {}),
@@ -179,6 +202,7 @@ const jobsFamily: FamilyDefinition = {
           },
           deps,
         );
+        const unconfigured = jobspyUnconfigured(deps, a.useJobSpy);
         return {
           runId: data.runId,
           status: data.status,
@@ -192,6 +216,13 @@ const jobsFamily: FamilyDefinition = {
             confidence: Math.round(c.confidence * 1000) / 1000,
             eligibility: c.eligibility,
             evidenceState: c.evidenceState,
+            // Posting locator (canonical, credential-free) + bounded posting
+            // facts. Evidence refs/text stay non-public.
+            ...(c.listingUrl !== undefined ? { listingUrl: c.listingUrl } : {}),
+            ...(c.applyUrl !== undefined ? { applyUrl: c.applyUrl } : {}),
+            ...(c.location !== undefined ? { location: c.location } : {}),
+            ...(c.salaryText !== undefined ? { salaryText: c.salaryText } : {}),
+            ...(c.description !== undefined ? { description: c.description } : {}),
             flags: c.flags,
             caveats: c.caveats,
             provenance: c.provenance,
@@ -200,7 +231,16 @@ const jobsFamily: FamilyDefinition = {
           })),
           eligibilitySummary: data.eligibilitySummary,
           coverageOutcomes: data.coverageOutcomes,
-          ...(data.warnings.length > 0 ? { warnings: data.warnings } : {}),
+          ...(unconfigured || data.warnings.length > 0
+            ? {
+                warnings: [
+                  ...(unconfigured
+                    ? ['jobspy_unconfigured: useJobSpy requested but no boards authorized']
+                    : []),
+                  ...data.warnings,
+                ],
+              }
+            : {}),
         };
       },
       annotations: { readOnlyHint: true },

@@ -97,3 +97,11 @@ This amendment does not claim implementation, provider terms compliance beyond r
 See [ADR-011](adr/ADR-011-source-policy.md), [ADR-012](adr/ADR-012-seek-manual-import.md), [source coverage](source-coverage.md), and [implementation graph](implementation-graph.md).
 
 Implementation and offline closure evidence: [Wave 3 acquisition closure evidence](wave-3-acquisition-closure-evidence.md).
+
+## Destination-class indexed slices and selective enrichment (additive)
+
+`jobs_search` / `jobs.search` now emit provider-aware destination-class slices for Exa/Tavily (`includeDomains` for SEEK). Host lists are query constraints only: hostname never proves publisher identity. Informational `board:seek` edges annotate `soughtVia` / `sought_via_destination_class` and never authorize direct search or fetch.
+
+Discovery stays snippet-cheap (`aiSummary` omitted). A bounded `intent.budgets.enrichment` (derived, max 10) selects candidates for URL-attributed Exa contents / Tavily extract secondary evidence. Query-level Tavily `answer` is never mapped. Stage budgets: acquisition `min(100, max(topK*2, 20))`, enrichment `min(10, topK)`, deep extraction ≤20 observation-backed, final results `topK`. Public MCP `topK` remains 1–50. `ACQUISITION_CONTRACT_VERSION` and `SOURCE_CLASS_CONTRACT_VERSION` stay `1.0.0`.
+
+See [policy provenance](policy-provenance.md).

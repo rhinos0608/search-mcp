@@ -17,13 +17,16 @@ import {
   createDefaultIndexedProviderPorts,
   indexedProviderCapabilities,
 } from '../../jobs/acquisition/providers/ports.js';
-import {
-  JOBSPY_ADAPTER_ID,
-  DEFAULT_JOBSPY_BOARDS,
-  JOBSPY_CAPABILITY,
-} from '../../jobs/acquisition/adapters/jobspy.js';
+import { JOBSPY_ADAPTER_ID, JOBSPY_CAPABILITY } from '../../jobs/acquisition/adapters/jobspy.js';
 import { MANUAL_IMPORT_ADAPTER_ID } from '../../jobs/acquisition/adapters/manualImport.js';
 import { buildSeekEntry } from '../../jobs/acquisition/sourceClass/seek.js';
+import {
+  SEEK_POLICY_EVIDENCE,
+  boardPolicyEvidence,
+  indexedProviderEvidence,
+  manualImportEvidence,
+  requireLiveEvidenceRefs,
+} from '../../jobs/acquisition/sourceClass/evidence/livePolicyEvidence.js';
 import { AtsTenantRegistry } from '../../jobs/acquisition/sourceClass/atsTenants.js';
 import { SourceClassRegistry } from '../../jobs/acquisition/sourceClass/registry.js';
 import { destinationFetchCapabilities } from '../../jobs/acquisition/sourceClass/destinationFetchFlag.js';
@@ -39,13 +42,10 @@ type ScrapeJobsFn = (
   params: Record<string, unknown>,
   signal?: AbortSignal,
 ) => Promise<JobSpyScrapeResult>;
-const POLICY_REVIEWED_AT = '2026-01-01T00:00:00.000Z';
-
-// ---------------------------------------------------------------------------
-// Source-class entry builders (frozen policy inputs)
-// ---------------------------------------------------------------------------
 
 function indexedProviderPolicy(sourceId: string): SourcePolicy {
+  const evidence = indexedProviderEvidence(sourceId);
+  requireLiveEvidenceRefs(sourceId, [evidence.evidenceId]);
   return SourcePolicySchema.parse({
     sourceId,
     revision: 'jobs-mcp/1.0.0',
@@ -56,12 +56,14 @@ function indexedProviderPolicy(sourceId: string): SourcePolicy {
       manualImport: 'not_supported',
       employerApi: 'not_supported',
     },
-    evidenceRefs: [],
-    reviewedAt: POLICY_REVIEWED_AT,
+    evidenceRefs: [evidence.evidenceId],
+    reviewedAt: evidence.reviewedAt ?? evidence.capturedAt,
   });
 }
 
 function boardPolicy(board: string): SourcePolicy {
+  const evidence = boardPolicyEvidence(board);
+  requireLiveEvidenceRefs(`board:${board}`, [evidence.evidenceId]);
   return SourcePolicySchema.parse({
     sourceId: `board:${board}`,
     revision: 'jobs-mcp/1.0.0',
@@ -72,12 +74,14 @@ function boardPolicy(board: string): SourcePolicy {
       manualImport: 'not_supported',
       employerApi: 'not_supported',
     },
-    evidenceRefs: [],
-    reviewedAt: POLICY_REVIEWED_AT,
+    evidenceRefs: [evidence.evidenceId],
+    reviewedAt: evidence.reviewedAt,
   });
 }
 
 function manualPolicy(): SourcePolicy {
+  const evidence = manualImportEvidence();
+  requireLiveEvidenceRefs(MANUAL_IMPORT_ADAPTER_ID, [evidence.evidenceId]);
   return SourcePolicySchema.parse({
     sourceId: MANUAL_IMPORT_ADAPTER_ID,
     revision: 'jobs-mcp/1.0.0',
@@ -88,14 +92,10 @@ function manualPolicy(): SourcePolicy {
       manualImport: 'permitted',
       employerApi: 'not_supported',
     },
-    evidenceRefs: [],
-    reviewedAt: POLICY_REVIEWED_AT,
+    evidenceRefs: [evidence.evidenceId],
+    reviewedAt: evidence.reviewedAt ?? evidence.capturedAt,
   });
 }
-
-// ---------------------------------------------------------------------------
-// Public builder
-// ---------------------------------------------------------------------------
 
 export interface JobsMcpDependencies extends JobsSearchDeps {
   /** Configured ATS tenants (enabled only, policy-governed). */
@@ -120,7 +120,7 @@ export function buildJobsMcpDeps(cfg: SearchConfig): JobsMcpDependencies {
 
   const policies: SourcePolicy[] = [];
   for (const p of ports) policies.push(indexedProviderPolicy(p.providerId));
-  for (const b of DEFAULT_JOBSPY_BOARDS) policies.push(boardPolicy(b));
+  for (const b of cfg.jobsAcquisition.jobspyBoards) policies.push(boardPolicy(b));
   policies.push(manualPolicy());
 
   const capabilityRegistry = new AdapterCapabilityRegistry([
@@ -137,7 +137,11 @@ export function buildJobsMcpDeps(cfg: SearchConfig): JobsMcpDependencies {
     },
     ...destinationFetchCapabilities(cfg.jobsAcquisition),
   ]);
-  const sourceClassRegistry = new SourceClassRegistry([buildSeekEntry()]);
+  const sourceClassRegistry = new SourceClassRegistry();
+  for (const ev of SEEK_POLICY_EVIDENCE) sourceClassRegistry.registerEvidence(ev);
+  const seekEntry = buildSeekEntry(SEEK_POLICY_EVIDENCE);
+  requireLiveEvidenceRefs(seekEntry.sourceId, seekEntry.evidenceRefs);
+  sourceClassRegistry.register(seekEntry);
   const seekPolicies = sourceClassRegistry.materializeEdgePolicies({
     capabilityRegistry,
     availableCredentialRefs: new Set<string>(),
@@ -145,8 +149,6 @@ export function buildJobsMcpDeps(cfg: SearchConfig): JobsMcpDependencies {
   });
   const policyRegistry = new SourcePolicyRegistry(policies, seekPolicies);
 
-  // ATS tenants: configured entries flow through the tenant registry;
-  // hosts remain allowlisted per tenant — no arbitrary host selection.
   const tenantRegistry = new AtsTenantRegistry(cfg.jobsAcquisition.atsTenants);
   const tenants = tenantRegistry.list().map((t) => ({ sourceId: t.sourceId, enabled: t.enabled }));
 
@@ -160,11 +162,20 @@ export function buildJobsMcpDeps(cfg: SearchConfig): JobsMcpDependencies {
     atsTenants: tenants,
     destinationFetchCapable: destinationFetchCapabilities(cfg.jobsAcquisition).length > 0,
     seekBlocked: true,
-    // Riskier boards require explicit policy/config; default planner exposes only
-    // boards with established non-interactive acquisition policy.
-    jobspyBoards: [...DEFAULT_JOBSPY_BOARDS],
+    jobspyBoards: [...cfg.jobsAcquisition.jobspyBoards],
   };
 }
 
 /** Adapter ID constant re-export for plan builders. */
 export { JOBSPY_ADAPTER_ID };
+
+/**
+ * True when JobSpy is requested but zero boards are authorized — callers must
+ * surface `jobspy_unconfigured` instead of silently returning fewer sources.
+ */
+export function jobspyUnconfigured(
+  deps: Pick<JobsMcpDependencies, 'jobspyBoards'>,
+  useJobSpy?: boolean,
+): boolean {
+  return useJobSpy !== false && deps.jobspyBoards.length === 0;
+}
