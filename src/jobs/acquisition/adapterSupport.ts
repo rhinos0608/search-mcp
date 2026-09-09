@@ -109,7 +109,7 @@ export function normalizeHttpUrlMetadata(input: string): Readonly<HttpUrlMetadat
     parsed.hash = '';
     for (const key of parsed.searchParams.keys()) {
       if (
-        /(?:token|secret|password|passwd|authorization|auth|api[_-]?key|signature|sig|code)/iu.test(
+        /(?:^|[_-])(?:token|secret|password|passwd|authorization|auth|api[_-]?key|signature|sig|code)(?:[_-]|$)/iu.test(
           key,
         )
       ) {

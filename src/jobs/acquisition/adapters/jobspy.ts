@@ -352,12 +352,20 @@ export async function runJobSpyBoard(
       const controller = new AbortController();
       let timer: ReturnType<typeof setTimeout> | undefined;
       const callerSignal = request.abortSignal;
-      const onCallerAbort = (): void => {
-        controller.abort(callerSignal?.reason);
-      };
-      if (callerSignal?.aborted) controller.abort(callerSignal.reason);
-      else callerSignal?.addEventListener('abort', onCallerAbort, { once: true });
+      let onCallerAbort: (() => void) | undefined;
       const boundedScrape = new Promise<JobSpyScrapeResult>((resolve, reject) => {
+        if (callerSignal?.aborted) {
+          controller.abort(callerSignal.reason);
+          reject(callerSignal.reason instanceof Error ? callerSignal.reason : new Error('ABORTED'));
+          return;
+        }
+        onCallerAbort = (): void => {
+          controller.abort(callerSignal?.reason);
+          reject(
+            callerSignal?.reason instanceof Error ? callerSignal?.reason : new Error('ABORTED'),
+          );
+        };
+        callerSignal?.addEventListener('abort', onCallerAbort, { once: true });
         timer = setTimeout(() => {
           controller.abort(new Error('JOBSPY_TIMEOUT'));
           reject(new Error('JOBSPY_TIMEOUT'));
@@ -368,7 +376,9 @@ export async function runJobSpyBoard(
       });
       return boundedScrape.finally(() => {
         if (timer !== undefined) clearTimeout(timer);
-        callerSignal?.removeEventListener('abort', onCallerAbort);
+        if (onCallerAbort !== undefined) {
+          callerSignal?.removeEventListener('abort', onCallerAbort);
+        }
       });
     });
     if (exec.status !== 'executed') {

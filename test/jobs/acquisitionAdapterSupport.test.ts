@@ -389,6 +389,15 @@ test('normalizeHttpUrlMetadata preserves meaningful query', () => {
   assert.ok(m.canonicalUrl.includes('foo=1'));
 });
 
+test('normalizeHttpUrlMetadata allows benign keys like jobCode/postcode and rejects sensitive keys', () => {
+  assert.ok(normalizeHttpUrlMetadata('https://example.com/a?jobCode=123') !== undefined);
+  assert.ok(normalizeHttpUrlMetadata('https://example.com/a?postcode=2000') !== undefined);
+  assert.equal(normalizeHttpUrlMetadata('https://example.com/a?token=abc'), undefined);
+  assert.equal(normalizeHttpUrlMetadata('https://example.com/a?api_key=abc'), undefined);
+  assert.equal(normalizeHttpUrlMetadata('https://example.com/a?code=abc'), undefined);
+  assert.equal(normalizeHttpUrlMetadata('https://example.com/a?auth_code=abc'), undefined);
+});
+
 test('normalizeHttpUrlMetadata lowercases normalizedHost', () => {
   const m = normalizeHttpUrlMetadata('https://EXAMPLE.COM/Path');
   assert.ok(m !== undefined);
