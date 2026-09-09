@@ -552,6 +552,7 @@ const MAX_RESPONSE_BYTES = 50 * 1024 * 1024;
 export async function assertSafeResolvedHost(
   hostname: string,
   resolver?: (hostname: string) => Promise<{ address: string; family: 4 | 6 }[]>,
+  options?: { timeoutMs?: number; signal?: AbortSignal },
 ): Promise<void> {
   const resolve =
     resolver ??
@@ -559,7 +560,53 @@ export async function assertSafeResolvedHost(
       dns
         .lookup(host, { all: true, verbatim: true })
         .then((xs) => xs.map((x) => ({ address: x.address, family: x.family as 4 | 6 }))));
-  const answers = await resolve(hostname);
+  // Fail closed: never let an injected/default resolver hang or outlive the
+  // caller's deadline. Bound the await with the optional timeout/abort signal
+  // and reject on deadline or cancellation before any answer handling.
+  const answers = await new Promise<{ address: string; family: 4 | 6 }[]>((res, rej) => {
+    let settled = false;
+    const timer =
+      options?.timeoutMs !== undefined
+        ? setTimeout(() => {
+            finish(new Error(`DNS resolution timed out for host "${hostname}"`));
+          }, options.timeoutMs)
+        : undefined;
+    const abort = () => {
+      finish(new Error(`DNS resolution aborted for host "${hostname}"`));
+    };
+    const cleanup = () => {
+      if (timer) clearTimeout(timer);
+      options?.signal?.removeEventListener('abort', abort);
+    };
+    const finish = (error?: Error, value?: { address: string; family: 4 | 6 }[]) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      if (error) rej(error);
+      else if (value === undefined)
+        rej(new Error(`DNS resolution returned no result for host "${hostname}"`));
+      else res(value);
+    };
+    if (options?.signal) {
+      if (options.signal.aborted) {
+        abort();
+        return;
+      }
+      options.signal.addEventListener('abort', abort, { once: true });
+    }
+    resolve(hostname).then(
+      (value) => {
+        finish(undefined, value);
+      },
+      (error: unknown) => {
+        finish(
+          error instanceof Error
+            ? error
+            : new Error(`DNS resolution failed for host "${hostname}"`),
+        );
+      },
+    );
+  });
   if (answers.length === 0)
     throw new Error(`DNS resolution returned no answers for host "${hostname}"`);
   const valid = answers.filter(
