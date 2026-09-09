@@ -125,6 +125,8 @@ Open `http://localhost:8050/dashboard` and log in with the API key shown on firs
 
 **Quick Connect URL** (Tavily-style. Query-param key auth is **off by default**; enable explicitly with `MCP_ALLOW_QUERY_KEY=true` if a legacy client needs URL-based auth):
 
+> ⚠️ **Security warning:** the key in the URL is a bearer token. URLs are recorded in browser history, server and reverse-proxy access logs, and can leak through intermediaries. The **Authorization header config below is the recommended** connection method; use the Quick Connect URL only for legacy clients that cannot send headers.
+
 ```
 http://localhost:8050/mcp?key=smcp_xxxxxxxxxxxx
 ```
