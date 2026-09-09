@@ -3,9 +3,15 @@ import test from 'node:test';
 
 import { SEEK_DESTINATION_CLASS } from '../../src/jobs/acquisition/destinationClass.js';
 import type { IndexedProviderPort } from '../../src/jobs/acquisition/providers/ports.js';
-import { buildPlan, deriveStageBudgets, shareBudget } from '../../src/tools/jobs/planBuilder.js';
+import {
+  buildPlan,
+  deriveJobsRunBudget,
+  deriveStageBudgets,
+  shareBudget,
+  supportingIndexedProviderCount,
+} from '../../src/tools/jobs/planBuilder.js';
 
-function port(providerId: string, backend: string): IndexedProviderPort {
+function port(providerId: string, backend: string, withEnrichUrls = true): IndexedProviderPort {
   return {
     backend: backend as IndexedProviderPort['backend'],
     adapterId: `indexed-provider:${backend}`,
@@ -26,6 +32,9 @@ function port(providerId: string, backend: string): IndexedProviderPort {
     },
     maxDurationMs: 70000,
     search: async () => [],
+    ...(withEnrichUrls && (backend === 'exa' || backend === 'tavily')
+      ? { enrichUrls: async () => [] as never[] }
+      : {}),
   };
 }
 
@@ -78,6 +87,39 @@ test('buildPlan 4-arg still emits one broad indexed slice per provider', () => {
   assert.equal((plan[0] as { destinationClass?: unknown }).destinationClass, undefined);
 });
 
+test('4-arg buildPlan with one exa provider assigns the full stage candidate pool to its slice', () => {
+  // Without ctx no class slices are emitted, so sliceCount must not count
+  // classProviderIds: one slice receives deriveStageBudgets(10).acquisitionCandidates.
+  const plan = buildPlan({ query: 'registry officer' }, 'run-exa', ['search-provider:exa'], []);
+  assert.equal(plan.length, 1);
+  const slice = (plan[0] as { slice: { queryVariantId: string; budget: { candidates: number } } })
+    .slice;
+  assert.equal(slice.queryVariantId, 'qv-broad');
+  assert.equal(slice.budget.candidates, deriveStageBudgets(10).acquisitionCandidates);
+});
+
+test('supporting-provider criteria requires enrichUrls and is shared by slice and run budgets', () => {
+  const exa = port('search-provider:exa', 'exa', false);
+  const withEnrich = { ...exa, enrichUrls: async () => [] as never[] };
+  assert.equal(supportingIndexedProviderCount([withEnrich]), 1);
+  // supportsUrlAttributedSummary alone is not enough — enrichUrls must exist.
+  assert.equal(supportingIndexedProviderCount([exa]), 0);
+  const stage = deriveStageBudgets(10);
+  const plan = buildPlan({ query: 'nurse sydney' }, 'run-lr', [exa.providerId], [], {
+    topK: 10,
+    ports: [withEnrich],
+    stageBudgets: stage,
+  });
+  const run = deriveJobsRunBudget(plan.length, supportingIndexedProviderCount([withEnrich]), stage);
+  const sliceLogical = plan.reduce(
+    (acc, item) =>
+      acc +
+      (item as { slice: { budget: { logicalRequests: number } } }).slice.budget.logicalRequests,
+    0,
+  );
+  assert.equal(sliceLogical, run.logicalRequests);
+});
+
 test('Exa and Tavily get SEEK class slices with includeDomains; Brave omitted', () => {
   const ports = [
     port('search-provider:brave', 'brave'),
@@ -94,7 +136,7 @@ test('Exa and Tavily get SEEK class slices with includeDomains; Brave omitted', 
       ports,
       stageBudgets: deriveStageBudgets(10),
       informationalEdgesFor: (sourceId, providerId) => {
-        assert.equal(sourceId, 'board:seek');
+        assert.equal(sourceId, SEEK_DESTINATION_CLASS.id);
         return [
           {
             edgeId: `info-${providerId}-search` as never,

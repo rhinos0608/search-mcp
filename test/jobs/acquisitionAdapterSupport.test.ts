@@ -398,6 +398,24 @@ test('normalizeHttpUrlMetadata allows benign keys like jobCode/postcode and reje
   assert.equal(normalizeHttpUrlMetadata('https://example.com/a?auth_code=abc'), undefined);
 });
 
+test('normalizeHttpUrlMetadata rejects camelCase credential params and retains existing forms', () => {
+  // camelCase credential compounds must be rejected
+  assert.equal(normalizeHttpUrlMetadata('https://example.com/a?accessToken=abc'), undefined);
+  assert.equal(normalizeHttpUrlMetadata('https://example.com/a?authCode=abc'), undefined);
+  assert.equal(normalizeHttpUrlMetadata('https://example.com/a?clientSecret=abc'), undefined);
+  assert.equal(normalizeHttpUrlMetadata('https://example.com/a?AccessToken=abc'), undefined);
+  assert.equal(normalizeHttpUrlMetadata('https://example.com/a?bearerToken=abc'), undefined);
+  // existing separator forms still rejected
+  assert.equal(normalizeHttpUrlMetadata('https://example.com/a?access_token=abc'), undefined);
+  assert.equal(normalizeHttpUrlMetadata('https://example.com/a?client-secret=abc'), undefined);
+  assert.equal(normalizeHttpUrlMetadata('https://example.com/a?authCode=abc'), undefined);
+  // benign camelCase compounds with non-credential prefixes stay allowed
+  assert.ok(normalizeHttpUrlMetadata('https://example.com/a?jobCode=123') !== undefined);
+  assert.ok(normalizeHttpUrlMetadata('https://example.com/a?postcode=2000') !== undefined);
+  assert.ok(normalizeHttpUrlMetadata('https://example.com/a?authority=nsw') !== undefined);
+  assert.ok(normalizeHttpUrlMetadata('https://example.com/a?clientId=123') !== undefined);
+});
+
 test('normalizeHttpUrlMetadata lowercases normalizedHost', () => {
   const m = normalizeHttpUrlMetadata('https://EXAMPLE.COM/Path');
   assert.ok(m !== undefined);

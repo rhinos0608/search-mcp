@@ -34,6 +34,12 @@ export interface IndexedProviderPort {
   readonly providerId: string;
   readonly governance: ProviderGovernance;
   readonly maxDurationMs: number;
+  /**
+   * Worst-case aggregate wall clock for one search invocation: up to
+   * governance.maxAttempts attempts, each consuming the per-attempt fetch
+   * timeout, plus worst-case retry backoff. Must stay within slice budgets
+   * checked by runIndexedProvider.
+   */
   readonly searchTimeoutMs?: number;
   search(
     input: Readonly<{
@@ -167,6 +173,29 @@ const TAVILY_EXTRACT_URL = 'https://api.tavily.com/extract';
 
 function capText(text: string): string {
   return text.length > 8192 ? text.slice(0, 8192) : text;
+}
+
+// Per-attempt fetch timeout used by the provider implementations below
+// (AbortSignal.timeout(20_000)).
+const PROVIDER_ATTEMPT_TIMEOUT_MS = 20_000;
+// retryWithBackoff defaults: full jitter over initial 200ms, factor 2, cap 5s.
+const RETRY_INITIAL_DELAY_MS = 200;
+const RETRY_MAX_DELAY_MS = 5_000;
+
+/**
+ * Worst-case aggregate duration of one provider search: every attempt may burn
+ * the full per-attempt fetch timeout, and full-jitter exponential backoff can
+ * add up to initial * (2^(attempts-1) - 1) ms between attempts. Capped at
+ * maxDurationMs so it stays aligned with slice budgets and the runIndexedProvider
+ * BUDGET_EXHAUSTED check / duration report.
+ */
+export function aggregateSearchTimeoutMs(maxAttempts: number, maxDurationMs: number): number {
+  const attempts = Math.max(1, Math.floor(maxAttempts));
+  let backoff = 0;
+  for (let i = 1; i < attempts; i++) {
+    backoff += Math.min(RETRY_INITIAL_DELAY_MS * 2 ** (i - 1), RETRY_MAX_DELAY_MS);
+  }
+  return Math.min(PROVIDER_ATTEMPT_TIMEOUT_MS * attempts + backoff, maxDurationMs);
 }
 
 const EXA_HIGHLIGHTS_MAX_CHARACTERS = 2560;
@@ -539,7 +568,7 @@ export function createDefaultIndexedProviderPorts(
       providerId: def.providerId,
       governance: def.governance,
       maxDurationMs: def.maxDurationMs,
-      searchTimeoutMs: 20000,
+      searchTimeoutMs: aggregateSearchTimeoutMs(def.governance.maxAttempts, def.maxDurationMs),
       search,
     };
     if (def.backend === 'exa') {

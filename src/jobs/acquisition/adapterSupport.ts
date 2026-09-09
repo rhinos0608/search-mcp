@@ -72,6 +72,21 @@ export function acquiredContentHash(content: string): string {
   return out;
 }
 
+// Credential-shaped query parameters. Two layers:
+// 1. Separator-bounded sensitive terms (token, api_key, auth_code, sig, ...).
+// 2. camelCase credential compounds (accessToken, authCode, clientSecret,
+//    bearerToken, ...) where a credential word prefixes the sensitive term.
+//    Benign camelCase compounds with non-credential prefixes (jobCode,
+//    postcode, authority) stay allowed.
+const CREDENTIAL_PARAM_RE =
+  /(?:^|[_-])(?:token|secret|password|passwd|authorization|auth|api[_-]?key|signature|sig|code)(?:[_-]|$)/iu;
+const CAMEL_CREDENTIAL_PARAM_RE =
+  /(?:access|client|auth|oauth|bearer|consumer)[_-]?(?:token|secret|code|key|password)/i;
+
+function isCredentialQueryParam(key: string): boolean {
+  return CREDENTIAL_PARAM_RE.test(key) || CAMEL_CREDENTIAL_PARAM_RE.test(key);
+}
+
 export function normalizeHttpUrlMetadata(input: string): Readonly<HttpUrlMetadata> | undefined {
   try {
     if (typeof input !== 'string') {
@@ -108,11 +123,7 @@ export function normalizeHttpUrlMetadata(input: string): Readonly<HttpUrlMetadat
     }
     parsed.hash = '';
     for (const key of parsed.searchParams.keys()) {
-      if (
-        /(?:^|[_-])(?:token|secret|password|passwd|authorization|auth|api[_-]?key|signature|sig|code)(?:[_-]|$)/iu.test(
-          key,
-        )
-      ) {
+      if (isCredentialQueryParam(key)) {
         return undefined;
       }
     }

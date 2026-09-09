@@ -58,7 +58,7 @@ export function buildJobsSearchExecutionRequest(
       budgets: {
         requests: runBudget.logicalRequests,
         pages: 10,
-        bytes: 200000,
+        bytes: runBudget.bytes,
         milliseconds: runBudget.milliseconds,
         enrichment: stageBudgets.indexedEnrichment,
         reasoning: 0,

@@ -9,6 +9,8 @@ import { JOBSPY_BOARDS } from '../../src/jobs/acquisition/adapters/jobspy.js';
 // F1: operator-configured boards flow config → deps → policies → plan.
 // TEMPORARY LOCAL DEFAULT: unset env+config enables all boards (dev
 // convenience); revert to strict opt-in per ADR-011 before public release.
+// Restore work tracked at:
+// https://github.com/rhinos0608/search-mcp/issues?q=is%3Aissue+ADR-011
 // Unknown board names are dropped with a warning, never silently enabled.
 
 test('temporary local default: unset env and config enables all boards', () => {
@@ -38,6 +40,7 @@ test('JOBSPY_ENABLED=false opts out of jobspy entirely', () => {
 });
 
 test('JOBSPY_BOARDS env is validated against the known board allowlist', () => {
+  resetConfig();
   process.env.JOBSPY_BOARDS = 'linkedin, indeed, bogus_board, , linkedin';
   try {
     const cfg = loadConfig();
@@ -47,6 +50,20 @@ test('JOBSPY_BOARDS env is validated against the known board allowlist', () => {
     assert.ok(!(JOBSPY_BOARDS as readonly string[]).includes('bogus_board'));
   } finally {
     delete process.env.JOBSPY_BOARDS;
+    resetConfig();
+  }
+});
+
+test('blank JOBSPY_BOARDS overrides file/default as an explicit empty list', () => {
+  resetConfig();
+  delete process.env.JOBSPY_ENABLED;
+  process.env.JOBSPY_BOARDS = '';
+  try {
+    const cfg = loadConfig();
+    assert.deepEqual(cfg.jobsAcquisition.jobspyBoards, []);
+  } finally {
+    delete process.env.JOBSPY_BOARDS;
+    resetConfig();
   }
 });
 

@@ -14,6 +14,7 @@ import {
 import {
   INDEXED_PROVIDER_DEFINITIONS,
   createDefaultIndexedProviderPorts,
+  aggregateSearchTimeoutMs,
   indexedProviderCapabilities,
 } from '../../src/jobs/acquisition/providers/ports.js';
 import type { IndexedProviderPort } from '../../src/jobs/acquisition/providers/ports.js';
@@ -189,6 +190,34 @@ test('createDefaultIndexedProviderPorts filters unavailable ports and preserves 
   for (const p of ports) {
     assert.equal(p.maxDurationMs, 70000);
     ProviderGovernanceSchema.parse(p.governance);
+  }
+});
+
+test('searchTimeoutMs models aggregate duration of maxAttempts x per-attempt timeout plus worst-case backoff', async () => {
+  // aggregate formula: per-attempt 20s for every attempt + worst-case jitter
+  // backoff (initial 200ms, factor 2) between attempts, capped at maxDurationMs
+  assert.equal(aggregateSearchTimeoutMs(1, 70000), 20000);
+  assert.equal(aggregateSearchTimeoutMs(2, 70000), 40200); // 2*20000 + 200
+  assert.equal(aggregateSearchTimeoutMs(3, 70000), 60600); // 3*20000 + (200+400)
+  assert.equal(aggregateSearchTimeoutMs(3, 50000), 50000); // capped at maxDurationMs
+  const cfg = {
+    brave: { apiKey: 'b' },
+    searxng: { baseUrl: 'https://searxng.test' },
+    exa: { apiKey: 'e' },
+    tavily: { apiKey: 't' },
+    duckduckgo: { region: 'us-en', safeSearch: 'moderate' },
+    ollamaSearch: { baseUrl: 'o' },
+  } as unknown as import('../../src/config.js').SearchConfig;
+  const ports = createDefaultIndexedProviderPorts(cfg, {});
+  assert.ok(ports.length >= 6);
+  for (const p of ports) {
+    const def = INDEXED_PROVIDER_DEFINITIONS.find((d) => d.providerId === p.providerId);
+    assert.ok(def, `missing definition for ${p.providerId}`);
+    const expected = aggregateSearchTimeoutMs(def.governance.maxAttempts, def.maxDurationMs);
+    assert.equal(p.searchTimeoutMs, expected);
+    // must stay within the slice budget checked by runIndexedProvider
+    assert.ok(p.searchTimeoutMs !== undefined && p.searchTimeoutMs <= 70000);
+    assert.ok(p.searchTimeoutMs >= 20000 * def.governance.maxAttempts);
   }
 });
 

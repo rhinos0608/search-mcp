@@ -33,7 +33,10 @@ export interface DerivedStageBudgets {
 
 export interface PlanBuilderContext {
   topK: number;
-  ports: readonly Pick<IndexedProviderPort, 'providerId' | 'governance' | 'maxDurationMs'>[];
+  ports: readonly Pick<
+    IndexedProviderPort,
+    'providerId' | 'governance' | 'maxDurationMs' | 'enrichUrls'
+  >[];
   stageBudgets: DerivedStageBudgets;
   informationalEdgesFor?: (
     sourceId: string,
@@ -72,12 +75,13 @@ export function buildPlan(
 ): AcquisitionSlicePlanItem[] {
   const jobspyCount = opts.useJobSpy === false ? 0 : jobspyBoards.length;
   const classProviderIds = providerIds.filter((id) => supportsIndexedDomainFilter(id));
-  const sliceCount = providerIds.length + classProviderIds.length + jobspyCount;
+  // Class slices are only emitted inside the ctx-aware branch below.
+  const classSliceCount = ctx !== undefined ? classProviderIds.length : 0;
+  const sliceCount = providerIds.length + classSliceCount + jobspyCount;
   const stage = ctx?.stageBudgets ?? deriveStageBudgets(ctx?.topK ?? 10);
   const candidatePool = stage.acquisitionCandidates;
-  const supportingProviderCount = (ctx?.ports ?? []).filter(
-    (p) => p.governance.supportsUrlAttributedSummary,
-  ).length;
+  // Same supporting-provider criteria as the run budget (supportingIndexedProviderCount).
+  const supportingProviderCount = supportingIndexedProviderCount(ctx?.ports ?? []);
   const logicalTotal = Math.min(32, Math.max(1, sliceCount + supportingProviderCount));
   const reservedTotal = Math.min(10000, Math.max(20, 3 * Math.max(1, sliceCount)));
   const plan: AcquisitionSlicePlanItem[] = [];

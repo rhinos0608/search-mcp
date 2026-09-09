@@ -466,19 +466,23 @@ const JOBSPY_BOARDS_MAX = 16;
 /**
  * Resolve jobspyBoards from env (comma list, highest priority) or file config.
  * Unknown board names are dropped with a warning (never silently enabled).
+ * A defined-but-blank JOBSPY_BOARDS overrides both file config and the
+ * default as an explicit empty list (a deliberate opt-out, not "unset").
  *
  * TEMPORARY LOCAL DEFAULT (revert before public release): when neither env nor
  * file config lists boards, all known boards are enabled. Operators opt out
- * with JOBSPY_ENABLED=false or an explicit empty jobspyBoards list. ADR-011's
- * strict opt-in posture must be restored for any public release.
+ * with JOBSPY_ENABLED=false or an explicit empty jobspyBoards list. Restoring
+ * ADR-011's strict opt-in posture is tracked at
+ * https://github.com/rhinos0608/search-mcp/issues?q=is%3Aissue+ADR-011
  */
 function resolveJobspyBoards(
   envRaw: string | undefined,
   fileBoards: readonly string[] | undefined,
 ): string[] {
   if ((process.env.JOBSPY_ENABLED ?? '').trim().toLowerCase() === 'false') return [];
+  // A defined env var wins even when blank: blank = explicit empty list.
   const candidate: readonly string[] | undefined =
-    envRaw !== undefined && envRaw.trim().length > 0 ? envRaw.split(',') : fileBoards;
+    envRaw !== undefined ? envRaw.split(',') : fileBoards;
   if (candidate === undefined) return [...DEFAULT_JOBSPY_BOARDS];
   const known: string[] = [];
   const unknown: string[] = [];
