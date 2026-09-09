@@ -123,7 +123,7 @@ HTTP_PORT=8050 SEARCH_MCP_CONFIG_KEY="your-passphrase" npm start
 
 Open `http://localhost:8050/dashboard` and log in with the API key shown on first run. The **Overview** page shows copy-paste-ready config snippets for HTTP, Stdio (npx), and Remote (mcp-remote) clients — with your real API key embedded.
 
-**Quick Connect URL** (Tavily-style, enabled by default. Disable with `MCP_ALLOW_QUERY_KEY=false`):
+**Quick Connect URL** (Tavily-style. Query-param key auth is **off by default**; enable explicitly with `MCP_ALLOW_QUERY_KEY=true` if a legacy client needs URL-based auth):
 
 ```
 http://localhost:8050/mcp?key=smcp_xxxxxxxxxxxx

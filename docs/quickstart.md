@@ -93,7 +93,7 @@ See `docs/tools.md` for a full migration guide from stealth to user mode.
 
 ## HTTP Mode & Browser Dashboard
 
-Set `HTTP_PORT` to enable an HTTP MCP endpoint and a React dashboard for managing providers and API keys without touching config files.
+Set `HTTP_PORT` to enable an HTTP MCP endpoint and a React dashboard for managing providers and API keys without touching config files. The HTTP server binds `127.0.0.1` (loopback-only) by default; set `HTTP_HOST=0.0.0.0` to intentionally expose it on the network.
 
 ### Setup
 
@@ -143,7 +143,7 @@ The dashboard **Overview** page auto-generates ready-to-paste config snippets fo
 }
 ```
 
-**Quick Connect URL** — enabled by default. The dashboard shows a single URL with your API key embedded that works in most clients (disable with `MCP_ALLOW_QUERY_KEY=false`):
+**Quick Connect URL** — the dashboard shows a single URL with your API key embedded that works in most clients. Query-param key auth is **off by default**; enable explicitly with `MCP_ALLOW_QUERY_KEY=true` if your client needs URL-based auth:
 
 ```
 http://localhost:8050/mcp?key=smcp_xxxxxxxxxxxx

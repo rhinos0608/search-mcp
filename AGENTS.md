@@ -22,7 +22,7 @@ npm run build:dashboard    # Vite build → dist-dashboard/
 npm run build:all          # build + dashboard build
 ```
 
-HTTP mode: `HTTP_PORT=8050 SEARCH_MCP_CONFIG_KEY="passphrase" npm start`. First run prints `mcpApiKey` to stderr (dashboard login + MCP Bearer token).
+HTTP mode: `HTTP_PORT=8050 SEARCH_MCP_CONFIG_KEY="passphrase" npm start`. First run prints `mcpApiKey` to stderr (dashboard login + MCP Bearer token). Bind is loopback-only (`127.0.0.1`) by default; set `HTTP_HOST=0.0.0.0` (e.g. Docker compose) to expose externally.
 
 ## Architecture
 

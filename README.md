@@ -197,7 +197,7 @@ Parsers auto-discover `pdf-parse`/`officeparser` and degrade gracefully (a warni
 
 ## HTTP Mode & Browser Dashboard
 
-Set `HTTP_PORT` to enable an HTTP MCP transport and a React browser dashboard for managing API keys and provider configuration.
+Set `HTTP_PORT` to enable an HTTP MCP transport and a React browser dashboard for managing API keys and provider configuration. The HTTP server binds `127.0.0.1` (loopback-only) by default; set `HTTP_HOST=0.0.0.0` to intentionally expose it on a network.
 
 ### Quick setup
 
@@ -256,12 +256,13 @@ cd dashboard && npm run dev
 
 ### Environment variables (HTTP mode)
 
-| Variable                | Required | Description                                                       |
-| ----------------------- | -------- | ----------------------------------------------------------------- |
-| `HTTP_PORT`             | Yes      | Port to bind (e.g. `8050`). Unset = stdio-only mode.              |
-| `SEARCH_MCP_CONFIG_KEY` | Yes      | Passphrase for `config.enc` encryption.                           |
-| `SESSION_TTL_HOURS`     | No       | Dashboard session lifetime (default: `12`).                       |
-| `MCP_ALLOW_QUERY_KEY`   | No       | Allow `?key=` auth on `/mcp` (not recommended, may leak in logs). |
+| Variable                | Required | Description                                                                                                                                                       |
+| ----------------------- | -------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `HTTP_PORT`             | Yes      | Port to bind (e.g. `8050`). Unset = stdio-only mode.                                                                                                              |
+| `HTTP_HOST`             | No       | Bind address. Default `127.0.0.1` (loopback-only). Set `0.0.0.0` / `::` to intentionally expose on the network (Docker with published ports). Hostnames rejected. |
+| `SEARCH_MCP_CONFIG_KEY` | Yes      | Passphrase for `config.enc` encryption.                                                                                                                           |
+| `SESSION_TTL_HOURS`     | No       | Dashboard session lifetime (default: `12`).                                                                                                                       |
+| `MCP_ALLOW_QUERY_KEY`   | No       | Allow `?key=` auth on `/mcp`. **Off by default**; set `true` only for legacy URL-auth clients (key may leak via URLs/logs). Bearer header is primary.             |
 
 ### stdio-only mode (original, unchanged)
 

@@ -8,6 +8,7 @@ import { SessionStore, LoginRateLimiter } from './auth.js';
 import { parseSessionTtlMs } from './session-utils.js';
 import { HttpTransportManager } from './mcp-transport.js';
 import { handleDashboard, readBody } from './dashboard-router.js';
+import { resolveHttpListenHost } from './httpBind.js';
 import type { SearchMcpRuntime } from '../config/types.js';
 
 const PKG_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
@@ -21,7 +22,42 @@ function safeTimingEqual(a: string, b: string): boolean {
   }
 }
 
-function validateMcpKey(req: http.IncomingMessage, apiKey: string): boolean {
+/** Query-param API key auth is OFF by default; requires explicit MCP_ALLOW_QUERY_KEY=true. */
+export function queryKeyAuthEnabled(env = process.env): boolean {
+  return env.MCP_ALLOW_QUERY_KEY === 'true';
+}
+
+/** Query param names whose values must never appear in logs or error telemetry. */
+const SENSITIVE_QUERY_PARAM_NAMES = new Set([
+  'key',
+  'api_key',
+  'api-key',
+  'apikey',
+  'token',
+  'secret',
+  'auth',
+]);
+
+/**
+ * Redact sensitive query-parameter values from a request URL/path before
+ * logging. Preserves the pathname and non-sensitive parameters.
+ */
+export function redactRequestUrl(urlOrPath: string): string {
+  try {
+    const parsed = new URL(urlOrPath, 'http://localhost');
+    for (const name of [...parsed.searchParams.keys()]) {
+      if (SENSITIVE_QUERY_PARAM_NAMES.has(name.toLowerCase())) {
+        parsed.searchParams.set(name, '•••');
+      }
+    }
+    return parsed.toString();
+  } catch {
+    // Malformed URL fail closed
+    return '•••';
+  }
+}
+
+export function validateMcpKey(req: http.IncomingMessage, apiKey: string): boolean {
   if (!apiKey) return false;
   const auth = req.headers.authorization ?? '';
   if (auth.startsWith('Bearer ')) {
@@ -36,7 +72,7 @@ function validateMcpKey(req: http.IncomingMessage, apiKey: string): boolean {
       if (configKey.length > 0 && safeTimingEqual(token, configKey)) return true;
     }
   }
-  if (process.env.MCP_ALLOW_QUERY_KEY !== 'false') {
+  if (queryKeyAuthEnabled()) {
     const url = new URL(req.url ?? '/', 'http://localhost');
     const qKey = url.searchParams.get('key') ?? '';
     return safeTimingEqual(qKey, apiKey);
@@ -48,10 +84,12 @@ export async function startHttpServer(
   runtime: SearchMcpRuntime,
   configManager: ConfigManager,
   port: number,
+  host = '127.0.0.1',
 ): Promise<http.Server> {
-  if (process.env.MCP_ALLOW_QUERY_KEY !== 'false') {
+  // Query-param auth is opt-in: silent by default, announced only when enabled.
+  if (queryKeyAuthEnabled()) {
     logger.info(
-      'Query-param auth enabled (default). Set MCP_ALLOW_QUERY_KEY=false to disable. API key may appear in URLs and browser history.',
+      'Query-param auth enabled via MCP_ALLOW_QUERY_KEY=true. API key may appear in URLs and browser history; prefer the Bearer header.',
     );
   }
 
@@ -151,13 +189,21 @@ export async function startHttpServer(
   }
 
   await new Promise<void>((resolve, reject) => {
-    server.listen(port, '0.0.0.0', () => {
+    server.listen(port, host, () => {
       resolve();
     });
     server.on('error', reject);
   });
 
-  logger.info({ port }, 'HTTP server listening');
+  // Log the real security posture: loopback-only vs explicitly network-exposed.
+  const listen = resolveHttpListenHost(host);
+  const exposure = listen.exposure;
+  logger.info(
+    { host: listen.host, port, exposure },
+    exposure === 'loopback'
+      ? 'HTTP server listening (loopback-only)'
+      : 'HTTP server listening (network-exposed; HTTP_HOST set)',
+  );
 
   // Warn if no TLS termination indicator is present — the MCP endpoint
   // uses plaintext Bearer auth over HTTP, which is only safe behind a

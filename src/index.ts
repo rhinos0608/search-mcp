@@ -8,6 +8,7 @@ import { ConfigManager } from './config/manager.js';
 import * as http from 'node:http';
 import { startHttpServer } from './server/http.js';
 import { isAddressInUseError } from './server/startupErrors.js';
+import { resolveHttpListenHost } from './server/httpBind.js';
 import type { SearchMcpRuntime } from './config/types.js';
 import { startArtifactSweeper } from './tools/webSearchArtifact.js';
 import { startGitHubArtifactSweeper } from './tools/githubOverflowArtifact.js';
@@ -64,6 +65,18 @@ async function main(): Promise<void> {
       process.exit(1);
     }
 
+    const httpHostEnv = process.env.HTTP_HOST;
+    let listenTarget: ReturnType<typeof resolveHttpListenHost>;
+    try {
+      listenTarget = resolveHttpListenHost(httpHostEnv);
+    } catch {
+      logger.error(
+        { HTTP_HOST: httpHostEnv ?? '' },
+        'Invalid HTTP_HOST — must be an IP address (loopback 127.0.0.1/::1/localhost or wildcard 0.0.0.0/::)',
+      );
+      process.exit(1);
+    }
+
     const configManager = new ConfigManager();
     configManager.load();
     const cfg = configManager.get();
@@ -79,7 +92,7 @@ async function main(): Promise<void> {
 
     let httpServer: http.Server | undefined;
     try {
-      httpServer = await startHttpServer(runtime, configManager, port);
+      httpServer = await startHttpServer(runtime, configManager, port, listenTarget.host);
       logger.info({ port }, 'HTTP MCP transport active');
     } catch (err) {
       if (!isAddressInUseError(err)) {

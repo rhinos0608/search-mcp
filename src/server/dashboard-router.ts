@@ -12,6 +12,7 @@ import {
   buildClearCookieHeader,
 } from './auth.js';
 import { parseSessionTtlMs } from './session-utils.js';
+import { queryKeyAuthEnabled } from './http.js';
 import { classifyRequestOrigin, dashboardAllowed, LOOPBACK_ADDRS } from './access-provider.js';
 import type { HttpTransportManager } from './mcp-transport.js';
 import { timingSafeEqual } from 'node:crypto';
@@ -394,7 +395,7 @@ async function handleApi(
     json(res, 200, {
       mcpUrl,
       apiKey: cfg.mcpApiKey ?? '',
-      allowQueryKey: process.env.MCP_ALLOW_QUERY_KEY !== 'false',
+      allowQueryKey: queryKeyAuthEnabled(),
       localPort: port,
     });
     return;
