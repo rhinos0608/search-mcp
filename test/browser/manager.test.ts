@@ -312,3 +312,77 @@ test('partial unroute does not stop tracking, unrouteAll does', async () => {
   stopRequestTracking(page);
   assert.equal(isTracking(page), false);
 });
+
+// ── installSessionGuard cleanup scoping ──────────────────────────────────────
+
+interface GuardSpy {
+  contextClosed: number;
+  browserClosed: number;
+}
+
+function makeFailingGuardContext(spy: GuardSpy): import('playwright-core').BrowserContext {
+  return {
+    route: async () => {
+      throw new Error('route registration failed');
+    },
+    pages: () => [],
+    on: () => {},
+    close: async () => {
+      spy.contextClosed++;
+    },
+  } as unknown as import('playwright-core').BrowserContext;
+}
+
+function makeSpyBrowser(spy: GuardSpy): import('playwright-core').Browser {
+  return {
+    close: async () => {
+      spy.browserClosed++;
+    },
+  } as unknown as import('playwright-core').Browser;
+}
+
+async function expectInstallFailure(source: 'launch' | 'cdp' | 'user' | 'profile') {
+  const spy: GuardSpy = { contextClosed: 0, browserClosed: 0 };
+  const guard = (
+    browserManager as unknown as {
+      installSessionGuard: (
+        context: import('playwright-core').BrowserContext,
+        browser: import('playwright-core').Browser | null,
+        source: 'launch' | 'cdp' | 'user' | 'profile',
+      ) => Promise<() => Promise<void>>;
+    }
+  ).installSessionGuard;
+  await assert.rejects(
+    () => guard.call(browserManager, makeFailingGuardContext(spy), makeSpyBrowser(spy), source),
+    (err: unknown) =>
+      err instanceof BrowserError &&
+      err.code === 'SSRF_BLOCKED' &&
+      /Failed to install navigation SSRF guard/.test(err.message),
+    `source=${source}`,
+  );
+  return spy;
+}
+
+test('failed guard install closes manager-owned browser (launch)', async () => {
+  const spy = await expectInstallFailure('launch');
+  assert.equal(spy.contextClosed, 1, 'owned context must be closed');
+  assert.equal(spy.browserClosed, 1, 'owned browser must be closed');
+});
+
+test('failed guard install closes manager-owned persistent context (profile)', async () => {
+  const spy = await expectInstallFailure('profile');
+  assert.equal(spy.contextClosed, 1, 'owned context must be closed');
+  assert.equal(spy.browserClosed, 1, 'persistent profile browser is manager-owned and closed');
+});
+
+test('failed guard install never closes user browser or context (cdp)', async () => {
+  const spy = await expectInstallFailure('cdp');
+  assert.equal(spy.contextClosed, 0, 'user context must survive failed install');
+  assert.equal(spy.browserClosed, 0, 'user browser must survive failed install');
+});
+
+test('failed guard install never closes user browser or context (user)', async () => {
+  const spy = await expectInstallFailure('user');
+  assert.equal(spy.contextClosed, 0, 'user context must survive failed install');
+  assert.equal(spy.browserClosed, 0, 'user browser must survive failed install');
+});

@@ -103,15 +103,21 @@ export class BrowserManager {
     try {
       return await installNavigationSsrfGuard(context);
     } catch (err) {
-      try {
-        await context.close();
-      } catch {
-        /* best-effort cleanup during failed install */
-      }
-      try {
-        await browser?.close();
-      } catch {
-        /* best-effort cleanup during failed install */
+      // Only tear down resources the manager owns. CDP/user sessions wrap an
+      // already-running browser (and its default context with the user's
+      // tabs/logins) — closing those would kill the user's browser, so skip
+      // cleanup while still failing closed with an SSRF_BLOCKED error.
+      if (source === 'launch' || source === 'profile') {
+        try {
+          await context.close();
+        } catch {
+          /* best-effort cleanup during failed install */
+        }
+        try {
+          await browser?.close();
+        } catch {
+          /* best-effort cleanup during failed install */
+        }
       }
       throw new BrowserError(
         `Failed to install navigation SSRF guard (${source}): ${
