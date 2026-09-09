@@ -81,7 +81,7 @@ test('malformed contact metadata fails with sanitized schema error', () => {
   );
 });
 
-test('RED: posting locations survive put/get round-trip', () => {
+test('posting locations survive put/get round-trip', () => {
   const store = freshStore();
   store.putPostingProjection(makePosting());
   store.putLocations('posting-hyd', [{ city: 'Melbourne', country: 'AU' }]);
@@ -128,7 +128,7 @@ test('putRequirements failure leaves prior rows intact (atomic replace)', () => 
   assert.equal(got.requirements[0].rawText, 'Must know TypeScript');
 });
 
-test('RED: posting requirements survive put/get round-trip', () => {
+test('posting requirements survive put/get round-trip', () => {
   const store = freshStore();
   store.putPostingProjection(makePosting({ postingId: 'posting-req' }));
   store.putRequirements('posting-req', [
@@ -205,7 +205,7 @@ test('posting membership and evidence provenance survive put/get round-trip', ()
   assert.deepEqual(got.evidenceRefs, ['ev-1']);
 });
 
-test('RED: identity decision relations survive append/list round-trip', () => {
+test('identity decision relations survive append/list round-trip', () => {
   const store = freshStore();
   store.upsertListing({
     sourceListingId: 'listing-1',

@@ -13,10 +13,12 @@ import { JobsStoreError, JobsStoreErrorCode } from './contracts.js';
 import { applyJobsMigrations } from './migrations.js';
 import {
   deletePostingChildren,
+  prepareIdentityDecisionStatements,
   rowToIdentityDecision,
   rowToListing,
   rowToObservation,
   rowToPosting,
+  validateContactMetadata,
 } from './store-mappers.js';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -31,7 +33,10 @@ function runImmediate(db: JobsDatabase, fn: () => void): void {
     // The Database instance owns `transaction`; call it as a method so the
     // native implementation keeps its receiver (unbound-method safe).
     const runner = db.transaction?.(fn);
-    runner?.immediate();
+    if (!runner || typeof runner.immediate !== 'function') {
+      throw new Error('Transaction runner or immediate method missing');
+    }
+    runner.immediate();
     return;
   }
   db.exec('BEGIN IMMEDIATE');
@@ -198,6 +203,18 @@ export function createJobsStore(db: JobsDatabase): JobsStore {
       // a half-replaced projection if a later child insert throws.
       runImmediate(db, () => {
         deletePostingChildren(db, p.postingId);
+        let contactMetadataJson: string | null = null;
+        if (p.contactMetadata !== undefined) {
+          try {
+            validateContactMetadata(p.contactMetadata);
+          } catch {
+            throw new JobsStoreError(
+              JobsStoreErrorCode.VALIDATION_ERROR,
+              'invalid contact metadata',
+            );
+          }
+          contactMetadataJson = JSON.stringify(p.contactMetadata);
+        }
         db.prepare(
           `INSERT INTO postings (posting_id, schema_version, canonical_revision, title, normalized_title, organisation, organisation_unit, sector, industry, work_mode, employment_type, hours_fte, seniority, posted_at, closing_at, start_at, apply_url, description, vacancy_count, security_clearance, work_rights, targeted_position, contact_metadata, verification_state, lifecycle_state, confidence, identity_decision_revision) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(posting_id) DO UPDATE SET schema_version=excluded.schema_version, canonical_revision=excluded.canonical_revision, title=excluded.title, normalized_title=excluded.normalized_title, organisation=excluded.organisation, organisation_unit=excluded.organisation_unit, sector=excluded.sector, industry=excluded.industry, work_mode=excluded.work_mode, employment_type=excluded.employment_type, hours_fte=excluded.hours_fte, seniority=excluded.seniority, posted_at=excluded.posted_at, closing_at=excluded.closing_at, start_at=excluded.start_at, apply_url=excluded.apply_url, description=excluded.description, vacancy_count=excluded.vacancy_count, security_clearance=excluded.security_clearance, work_rights=excluded.work_rights, targeted_position=excluded.targeted_position, contact_metadata=excluded.contact_metadata, verification_state=excluded.verification_state, lifecycle_state=excluded.lifecycle_state, confidence=excluded.confidence, identity_decision_revision=excluded.identity_decision_revision`,
         ).run(
@@ -223,7 +240,7 @@ export function createJobsStore(db: JobsDatabase): JobsStore {
           p.securityClearance ?? null,
           p.workRights ?? null,
           p.targetedPosition === true ? 1 : p.targetedPosition === false ? 0 : null,
-          p.contactMetadata === undefined ? null : JSON.stringify(p.contactMetadata),
+          contactMetadataJson,
           p.verificationState,
           p.lifecycleState,
           p.confidence,
@@ -444,25 +461,30 @@ export function createJobsStore(db: JobsDatabase): JobsStore {
           );
           for (const evId of c.evidenceRefs) linkCandidateEvidence.run(c.candidateId, evId);
         };
-        if (resolved.state !== 'unresolved') {
-          upsertOne(resolved.selected as UpsertCandidateRecord);
-        }
-        for (const alt of resolved.alternatives) upsertOne(alt as UpsertCandidateRecord);
         if (resolved.state !== 'unresolved' && resolved.selected.origin === 'model_derived') {
           const observed = db
             .prepare(
-              "SELECT value_json FROM claim_candidates WHERE posting_id = ? AND field_path = ? AND origin = 'observed'",
+              "SELECT candidate_id, value_json FROM claim_candidates WHERE posting_id = ? AND field_path = ? AND origin = 'observed'",
             )
-            .all(postingId, fieldPath) as { value_json: string }[];
+            .all(postingId, fieldPath) as { candidate_id: string; value_json: string }[];
           if (observed.length > 0) {
             const sv = JSON.stringify(resolved.selected.value);
-            if (observed.some((o) => o.value_json !== sv))
+            if (
+              observed.some(
+                (o) => o.candidate_id !== resolved.selected.candidateId && o.value_json !== sv,
+              )
+            ) {
               throw new JobsStoreError(
                 JobsStoreErrorCode.OBSERVATION_IMMUTABLE,
                 'model_derived cannot overwrite observed claim',
               );
+            }
           }
         }
+        if (resolved.state !== 'unresolved') {
+          upsertOne(resolved.selected as UpsertCandidateRecord);
+        }
+        for (const alt of resolved.alternatives) upsertOne(alt as UpsertCandidateRecord);
         // Alternatives are replacement state, not append-only history.
         db.prepare(
           'DELETE FROM claim_resolution_alternatives WHERE posting_id = ? AND field_path = ?',
@@ -571,37 +593,40 @@ export function createJobsStore(db: JobsDatabase): JobsStore {
     },
 
     listIdentityHistory(opts) {
-      if (opts.postingId)
-        return db
+      let rows: Record<string, unknown>[] = [];
+      if (opts.postingId) {
+        rows = db
           .prepare(
             'SELECT DISTINCT d.* FROM identity_decisions d JOIN memberships m ON m.identity_decision_id = d.decision_id WHERE m.posting_id = ? ORDER BY d.created_at ASC',
           )
-          .all(opts.postingId)
-          .map((r) => rowToIdentityDecision(r as Record<string, unknown>, db)) as Any;
-      if (opts.observationId)
-        return db
+          .all(opts.postingId) as Record<string, unknown>[];
+      } else if (opts.observationId) {
+        rows = db
           .prepare(
             'SELECT d.* FROM identity_decisions d JOIN identity_decision_observations dio ON dio.decision_id = d.decision_id WHERE dio.observation_id = ? ORDER BY d.created_at ASC',
           )
-          .all(opts.observationId)
-          .map((r) => rowToIdentityDecision(r as Record<string, unknown>, db)) as Any;
-      if (opts.listingId)
-        return db
+          .all(opts.observationId) as Record<string, unknown>[];
+      } else if (opts.listingId) {
+        rows = db
           .prepare(
             'SELECT d.* FROM identity_decisions d JOIN identity_decision_listings dl ON dl.decision_id = d.decision_id WHERE dl.source_listing_id = ? ORDER BY d.created_at ASC',
           )
-          .all(opts.listingId)
-          .map((r) => rowToIdentityDecision(r as Record<string, unknown>, db)) as Any;
-      return [];
+          .all(opts.listingId) as Record<string, unknown>[];
+      }
+      if (rows.length === 0) return [];
+      const stmts = prepareIdentityDecisionStatements(db);
+      return rows.map((r) => rowToIdentityDecision(r, stmts)) as Any;
     },
 
     listActiveIdentityDecisions() {
-      return db
+      const rows = db
         .prepare(
           'SELECT * FROM identity_decisions WHERE superseded_by IS NULL ORDER BY created_at ASC',
         )
-        .all()
-        .map((r) => rowToIdentityDecision(r as Record<string, unknown>, db)) as Any;
+        .all() as Record<string, unknown>[];
+      if (rows.length === 0) return [];
+      const stmts = prepareIdentityDecisionStatements(db);
+      return rows.map((r) => rowToIdentityDecision(r, stmts)) as Any;
     },
 
     putIdentityClusterProjection(clusters) {

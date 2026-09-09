@@ -6,6 +6,8 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 
 import { createJobsStore } from '../../src/jobs/persistence/index.js';
+import { JOBS_V1_DDL } from '../../src/jobs/persistence/schema.sql.js';
+import { V1_CHECKSUM } from '../../src/jobs/persistence/migrations.js';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Any = any;
@@ -318,6 +320,50 @@ test('fallback path works when native transaction absent', () => {
   } finally {
     db.transaction = native;
   }
+});
+
+test('v1 database upgrades to v2 and preserves existing posting', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'jobs-txn-v1v2-'));
+  tmpDirs.push(dir);
+  const db = new Database(join(dir, 'jobs.sqlite'));
+  db.pragma('foreign_keys = ON');
+  db.exec(JOBS_V1_DDL);
+  db.prepare(
+    'INSERT INTO schema_migrations (version, name, checksum, applied_at) VALUES (?, ?, ?, ?)',
+  ).run(1, 'v1-create-jobs', V1_CHECKSUM, '2025-01-01T00:00:00+00:00');
+  db.prepare(
+    `INSERT INTO postings (
+      posting_id, schema_version, canonical_revision, title, normalized_title,
+      organisation, work_mode, employment_type, description,
+      verification_state, lifecycle_state, confidence, identity_decision_revision
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).run(
+    'posting-v1',
+    'posting/1',
+    0,
+    'Software Engineer',
+    'software engineer',
+    'Acme Corp',
+    'hybrid',
+    'full_time',
+    'Build things.',
+    'unverified',
+    'active',
+    0.9,
+    'dec-1',
+  );
+
+  const store = createJobsStore(db);
+  const columns = db.prepare('PRAGMA table_info(postings)').all() as { name: string }[];
+  assert.ok(
+    columns.some((column) => column.name === 'contact_metadata'),
+    'upgrade must add contact_metadata',
+  );
+  const posting = store.getPosting('posting-v1') as Any;
+  assert.ok(posting);
+  assert.equal(posting.title, 'Software Engineer');
+  assert.equal(posting.organisation, 'Acme Corp');
+  assert.equal(posting.contactMetadata, undefined);
 });
 
 process.on('exit', () => {

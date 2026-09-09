@@ -44,39 +44,60 @@ function rowToObservation(row: Record<string, unknown>, db: JobsDatabase) {
   };
 }
 
-function rowToIdentityDecision(row: Record<string, unknown>, db?: JobsDatabase) {
+interface IdentityDecisionStatements {
+  observations: { all: (id: string) => unknown[] };
+  listings: { all: (id: string) => unknown[] };
+  features: { all: (id: string) => unknown[] };
+  featureEvidence: { all: (id: string) => unknown[] };
+  contradictions: { all: (id: string) => unknown[] };
+}
+
+function prepareIdentityDecisionStatements(db: JobsDatabase): IdentityDecisionStatements {
+  return {
+    observations: db.prepare(
+      'SELECT observation_id FROM identity_decision_observations WHERE decision_id = ?',
+    ),
+    listings: db.prepare(
+      'SELECT source_listing_id FROM identity_decision_listings WHERE decision_id = ?',
+    ),
+    features: db.prepare(
+      'SELECT feature, contribution FROM identity_decision_features WHERE decision_id = ?',
+    ),
+    featureEvidence: db.prepare(
+      'SELECT feature, evidence_id FROM identity_decision_feature_evidence WHERE decision_id = ?',
+    ),
+    contradictions: db.prepare(
+      'SELECT evidence_id FROM identity_decision_contradictions WHERE decision_id = ?',
+    ),
+  };
+}
+
+function rowToIdentityDecision(
+  row: Record<string, unknown>,
+  dbOrStmts?: JobsDatabase | IdentityDecisionStatements,
+) {
   const decisionId = row['decision_id'] as string;
   // Join tables hold relations writer populates; hydrate them instead of
   // returning empties that would silently erase provenance on read.
-  const subjectObservationIds = db
-    ? (
-        db
-          .prepare(
-            'SELECT observation_id FROM identity_decision_observations WHERE decision_id = ?',
-          )
-          .all(decisionId) as { observation_id: string }[]
-      ).map((r) => r.observation_id)
+  const stmts =
+    dbOrStmts && 'prepare' in dbOrStmts
+      ? prepareIdentityDecisionStatements(dbOrStmts)
+      : (dbOrStmts as IdentityDecisionStatements | undefined);
+  const subjectObservationIds = stmts
+    ? (stmts.observations.all(decisionId) as { observation_id: string }[]).map(
+        (r) => r.observation_id,
+      )
     : [];
-  const subjectListingIds = db
-    ? (
-        db
-          .prepare('SELECT source_listing_id FROM identity_decision_listings WHERE decision_id = ?')
-          .all(decisionId) as { source_listing_id: string }[]
-      ).map((r) => r.source_listing_id)
+  const subjectListingIds = stmts
+    ? (stmts.listings.all(decisionId) as { source_listing_id: string }[]).map(
+        (r) => r.source_listing_id,
+      )
     : [];
-  const featureRows = db
-    ? (db
-        .prepare(
-          'SELECT feature, contribution FROM identity_decision_features WHERE decision_id = ?',
-        )
-        .all(decisionId) as { feature: string; contribution: number }[])
+  const featureRows = stmts
+    ? (stmts.features.all(decisionId) as { feature: string; contribution: number }[])
     : [];
-  const featureEvidenceRows = db
-    ? (db
-        .prepare(
-          'SELECT feature, evidence_id FROM identity_decision_feature_evidence WHERE decision_id = ?',
-        )
-        .all(decisionId) as { feature: string; evidence_id: string }[])
+  const featureEvidenceRows = stmts
+    ? (stmts.featureEvidence.all(decisionId) as { feature: string; evidence_id: string }[])
     : [];
   const evidenceByFeature = new Map<string, string[]>();
   for (const r of featureEvidenceRows) {
@@ -89,12 +110,8 @@ function rowToIdentityDecision(row: Record<string, unknown>, db?: JobsDatabase) 
     contribution: f.contribution,
     evidenceRefs: evidenceByFeature.get(f.feature) ?? [],
   }));
-  const contradictoryEvidenceRefs = db
-    ? (
-        db
-          .prepare('SELECT evidence_id FROM identity_decision_contradictions WHERE decision_id = ?')
-          .all(decisionId) as { evidence_id: string }[]
-      ).map((r) => r.evidence_id)
+  const contradictoryEvidenceRefs = stmts
+    ? (stmts.contradictions.all(decisionId) as { evidence_id: string }[]).map((r) => r.evidence_id)
     : [];
   return {
     decisionId,
@@ -115,22 +132,26 @@ function rowToIdentityDecision(row: Record<string, unknown>, db?: JobsDatabase) 
   };
 }
 
+function validateContactMetadata(obj: unknown): Record<string, string> {
+  if (obj === null || typeof obj !== 'object' || Array.isArray(obj)) throw new Error();
+  const entries = Object.entries(obj as Record<string, unknown>);
+  if (
+    entries.length > 32 ||
+    entries.some(
+      ([k, v]) => k.length === 0 || k.length > 128 || typeof v !== 'string' || v.length > 2048,
+    )
+  )
+    throw new Error();
+  return Object.fromEntries(entries) as Record<string, string>;
+}
+
 function parseContactMetadata(value: unknown): Record<string, string> | undefined {
   if (value === null || value === undefined) return undefined;
   if (typeof value !== 'string')
     throw new JobsStoreError(JobsStoreErrorCode.SCHEMA_INCOMPATIBLE, 'invalid contact metadata');
   try {
     const parsed: unknown = JSON.parse(value);
-    if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error();
-    const entries = Object.entries(parsed as Record<string, unknown>);
-    if (
-      entries.length > 32 ||
-      entries.some(
-        ([k, v]) => k.length === 0 || k.length > 128 || typeof v !== 'string' || v.length > 2048,
-      )
-    )
-      throw new Error();
-    return Object.fromEntries(entries) as Record<string, string>;
+    return validateContactMetadata(parsed);
   } catch {
     throw new JobsStoreError(JobsStoreErrorCode.SCHEMA_INCOMPATIBLE, 'invalid contact metadata');
   }
@@ -138,6 +159,7 @@ function parseContactMetadata(value: unknown): Record<string, string> | undefine
 
 function rowToPosting(row: Record<string, unknown>, db: JobsDatabase): Any {
   const pid = row['posting_id'] as string;
+  const contactMetadata = parseContactMetadata(row['contact_metadata']);
   // posting_role_families has no evidence column (frozen DDL v1): the writer
   // cannot persist per-family evidenceRefs, so hydration honestly returns [].
   // Joining claim_candidate_evidence here would misattribute every posting
@@ -206,8 +228,8 @@ function rowToPosting(row: Record<string, unknown>, db: JobsDatabase): Any {
       .prepare('SELECT * FROM posting_salaries WHERE posting_id = ? ORDER BY ordinal')
       .all(pid) as Record<string, Any>[]
   ).map((r) => ({
-    min: (r['min'] as number | null) ?? undefined,
-    max: (r['max'] as number | null) ?? undefined,
+    ...(r['min'] != null ? { min: r['min'] as number } : {}),
+    ...(r['max'] != null ? { max: r['max'] as number } : {}),
     currency: r['currency'] as string,
     unit: r['unit'] as Any,
     period: r['period'] as Any,
@@ -317,9 +339,7 @@ function rowToPosting(row: Record<string, unknown>, db: JobsDatabase): Any {
     ...(row['work_rights'] != null ? { workRights: row['work_rights'] as string } : {}),
     targetedPosition:
       row['targeted_position'] === 1 ? true : row['targeted_position'] === 0 ? false : undefined,
-    ...(parseContactMetadata(row['contact_metadata']) !== undefined
-      ? { contactMetadata: parseContactMetadata(row['contact_metadata']) }
-      : {}),
+    ...(contactMetadata !== undefined ? { contactMetadata } : {}),
     verificationState: row['verification_state'] as Any,
     ...(row['lifecycle_state'] != null ? { lifecycleState: row['lifecycle_state'] as Any } : {}),
     flags,
@@ -488,11 +508,13 @@ function deletePostingChildren(db: JobsDatabase, postingId: string): void {
     db.prepare(`DELETE FROM ${table} WHERE posting_id = ?`).run(postingId);
 }
 
-export type { LifecycleEvent, LifecycleState };
+export type { LifecycleEvent, LifecycleState, IdentityDecisionStatements };
 export {
   rowToListing,
   rowToObservation,
   rowToIdentityDecision,
+  prepareIdentityDecisionStatements,
+  validateContactMetadata,
   rowToPosting,
   deletePostingChildren,
 };

@@ -217,8 +217,8 @@ export function createProfileStore(deps: ProfileStoreDeps): ProfileStore {
   };
 
   /** Open or create DB for write operations. Generates key on first save. */
-  const initializeForWrite = async (): Promise<void> => {
-    if (db) return;
+  const initializeForWrite = async (): Promise<boolean> => {
+    if (db) return false;
     const key = await deps.keyProvider.read();
     const dbExists = await fsExists(deps.databasePath);
 
@@ -231,6 +231,7 @@ export function createProfileStore(deps: ProfileStoreDeps): ProfileStore {
           return k;
         });
       const newKey = generateKey();
+      let claimedKey = false;
       try {
         const claimed = deps.keyProvider.writeIfAbsent
           ? await deps.keyProvider.writeIfAbsent(newKey)
@@ -240,20 +241,23 @@ export function createProfileStore(deps: ProfileStoreDeps): ProfileStore {
           if (!existingKey) throw new ProfileStoreError('DATABASE_LOCKED', 'key_claim_lost');
           db = deps.databaseOpener.open(deps.databasePath, existingKey);
           applyMigrations(db);
-          return;
+          return false;
         }
+        claimedKey = true;
         db = deps.databaseOpener.open(deps.databasePath, newKey);
         applyMigrations(db);
+        return true;
       } catch (err) {
         if (db) {
           db.close();
           db = undefined;
         }
-        await removeDatabaseArtifacts();
-        await deps.keyProvider.delete();
+        if (claimedKey) {
+          await removeDatabaseArtifacts();
+          await deps.keyProvider.delete();
+        }
         throw err;
       }
-      return;
     }
 
     if (!key) throw new ProfileStoreError('DATABASE_LOCKED', 'database_locked');
@@ -261,14 +265,20 @@ export function createProfileStore(deps: ProfileStoreDeps): ProfileStore {
 
     db = deps.databaseOpener.open(deps.databasePath, key);
     applyMigrations(db);
+    return false;
   };
 
-  let writeInitialization: Promise<void> | undefined;
-  const initForWrite = async (): Promise<void> => {
-    writeInitialization ??= initializeForWrite().finally(() => {
+  let writeInitialization: Promise<boolean> | undefined;
+  const initForWrite = async (): Promise<boolean> => {
+    if (writeInitialization) {
+      await writeInitialization;
+      return false;
+    }
+    const p = initializeForWrite().finally(() => {
       writeInitialization = undefined;
     });
-    await writeInitialization;
+    writeInitialization = p;
+    return p;
   };
 
   // ---------------------------------------------------------------------------
@@ -390,8 +400,8 @@ export function createProfileStore(deps: ProfileStoreDeps): ProfileStore {
     const revId = revisionId(factIdsList, prefIdsList, correctionIdsList);
     const provId = provenanceId(LOCAL_PROFILE_ID, revId);
     const ts = new Date().toISOString();
-    const freshWrite =
-      !db && !(await deps.keyProvider.read()) && !(await fsExists(deps.databasePath));
+
+    const freshWrite = await initForWrite();
 
     const cleanupFreshWrite = async (): Promise<void> => {
       if (!freshWrite) return;
@@ -403,7 +413,6 @@ export function createProfileStore(deps: ProfileStoreDeps): ProfileStore {
       await deps.keyProvider.delete();
     };
 
-    await initForWrite();
     const d = ensureDb();
 
     // Serialize revision check and write against concurrent processes.
@@ -572,9 +581,18 @@ export function createProfileStore(deps: ProfileStoreDeps): ProfileStore {
     } catch (err) {
       try {
         d.exec('ROLLBACK TO SAVEPOINT w2b_save');
-      } finally {
+      } catch {
+        /* best-effort: transaction already failed */
+      }
+      try {
         d.exec('RELEASE SAVEPOINT w2b_save');
+      } catch {
+        /* best-effort: transaction already failed */
+      }
+      try {
         d.exec('ROLLBACK');
+      } catch {
+        /* best-effort: transaction already failed */
       }
       await cleanupFreshWrite();
       throw err;
@@ -619,9 +637,18 @@ export function createProfileStore(deps: ProfileStoreDeps): ProfileStore {
     } catch (err) {
       try {
         d.exec('ROLLBACK TO SAVEPOINT w2b_delete');
-      } finally {
+      } catch {
+        /* best-effort: transaction already failed */
+      }
+      try {
         d.exec('RELEASE SAVEPOINT w2b_delete');
+      } catch {
+        /* best-effort: transaction already failed */
+      }
+      try {
         d.exec('ROLLBACK');
+      } catch {
+        /* best-effort: transaction already failed */
       }
       throw err;
     }
