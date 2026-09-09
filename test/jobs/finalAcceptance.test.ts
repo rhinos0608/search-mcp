@@ -32,19 +32,26 @@ test('final acceptance: MCP registration exposes live jobs surfaces', () => {
   assert.equal(typeof tools.jobs?.handler, 'function');
 });
 
+// Each subprocess suite must run to completion with its full expected scope:
+// exact per-file test count, exact pass count, zero failures. A shared assert
+// on 'some tests passed' would let a silently truncated suite (e.g. a file
+// failing to load) satisfy the acceptance gate.
+const SUBPROCESS_SUITES = [
+  { file: 'test/jobs/jobsSearchSeam.test.ts', expectedTests: 27 },
+  { file: 'test/jobs/evaluationAGates.test.ts', expectedTests: 17 },
+] as const;
+
 test('final acceptance: seam and evaluation fixtures execute', () => {
-  const result = spawnSync(
-    process.execPath,
-    [
-      '--import',
-      'tsx',
-      '--test',
-      'test/jobs/jobsSearchSeam.test.ts',
-      'test/jobs/evaluationAGates.test.ts',
-    ],
-    { encoding: 'utf8', env: { ...process.env, NODE_TEST_CONTEXT: undefined } },
-  );
-  assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
-  assert.match(`${result.stdout}\n${result.stderr}`, /fail\s+0/);
-  assert.match(`${result.stdout}\n${result.stderr}`, /pass\s+[1-9]\d*/);
+  for (const suite of SUBPROCESS_SUITES) {
+    const result = spawnSync(process.execPath, ['--import', 'tsx', '--test', suite.file], {
+      encoding: 'utf8',
+      env: { ...process.env, NODE_TEST_CONTEXT: undefined },
+    });
+    const output = `${result.stdout}\n${result.stderr}`;
+    assert.equal(result.status, 0, output);
+    assert.match(output, new RegExp(`^ℹ tests ${suite.expectedTests}$`, 'm'), output);
+    assert.match(output, new RegExp(`^ℹ pass ${suite.expectedTests}$`, 'm'), output);
+    assert.match(output, /^ℹ fail 0$/m, output);
+    assert.match(output, /^ℹ cancelled 0$/m, output);
+  }
 });

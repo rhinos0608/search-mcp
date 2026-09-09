@@ -18,6 +18,7 @@ import {
   baseDeps,
   jobspyScrape,
   jobRecord,
+  snippetRecord,
 } from './seamFixtures.js';
 
 function jobspyPlan(board: string = 'linkedin') {
@@ -56,7 +57,7 @@ test('RED: executeJobsSearch seam exists with typed contract', async () => {
     ],
   });
   await assert.rejects(
-    () => executeJobsSearch(req, baseDeps([port]) as never),
+    () => executeJobsSearch(req, baseDeps([port])),
     /acquisition produced zero candidates/,
   );
 });
@@ -76,7 +77,7 @@ test('direct observation-backed: jobspy slice yields observation candidate', asy
       adapterId: 'jobspy',
       adapterVersion: '1.7.0',
       edges: [{ operation: 'automatedSearch', route: 'direct', targetKind: 'board' }],
-    } as unknown as never,
+    },
   ]);
   const req = baseRequest({ plan: jobspyPlan('linkedin') });
   const deps = {
@@ -85,7 +86,7 @@ test('direct observation-backed: jobspy slice yields observation candidate', asy
     ports: [],
     scrapeJobs: jobspyScrape([jobRecord()]),
   };
-  const result = await executeJobsSearch(req, deps as never);
+  const result = await executeJobsSearch(req, deps);
   assert.equal(result.schemaVersion, '1.0.0');
   assert.ok(result.candidates.length >= 1);
   const first = result.candidates[0]!;
@@ -100,20 +101,11 @@ test('direct observation-backed: jobspy slice yields observation candidate', asy
 // indexed-only evidence preserved without fabricated observations
 test('indexed-only: snippet candidate stays indexed_only with empty observation ids', async () => {
   const port = mockPort('search-provider:brave', async () => [
-    {
+    snippetRecord({
       title: 'Indexed Engineer',
       url: 'https://example.test/indexed/1',
       description: 'snippet only',
-      position: 1,
-      domain: 'example.test',
-      source: 'brave',
-      age: null,
-      ageKind: 'unknown',
-      extraSnippet: null,
-      deepLinks: null,
-      contentKind: 'snippet',
-      generatedSummary: null,
-    } as unknown as never,
+    }),
   ]);
   const req = baseRequest({
     plan: [
@@ -125,7 +117,7 @@ test('indexed-only: snippet candidate stays indexed_only with empty observation 
       },
     ],
   });
-  const result = await executeJobsSearch(req, baseDeps([port]) as never);
+  const result = await executeJobsSearch(req, baseDeps([port]));
   assert.ok(result.candidates.length >= 1);
   const first = result.candidates[0]!;
   assert.equal(first.evidenceState, 'indexed_only');
@@ -138,7 +130,7 @@ test('indexed-only: snippet candidate stays indexed_only with empty observation 
 // manual inline content performs zero fetch
 test('manual inline: user_supplied with zero fetch evidence', async () => {
   const req = baseRequest({ plan: manualPlan('Manual Engineer at Acme. Build things.') });
-  const result = await executeJobsSearch(req, baseDeps([]) as never);
+  const result = await executeJobsSearch(req, baseDeps([]));
   assert.ok(result.candidates.length >= 1);
   const first = result.candidates[0]!;
   assert.equal(first.evidenceState, 'user_supplied');
@@ -153,7 +145,7 @@ test('blocked SEEK: direct jobspy seek rejected, no direct calls', async () => {
       adapterId: 'jobspy',
       adapterVersion: '1.7.0',
       edges: [{ operation: 'automatedSearch', route: 'direct', targetKind: 'board' }],
-    } as unknown as never,
+    },
   ]);
   const reg = new SourcePolicyRegistry([policy('board:seek', 'blocked')]);
   let calls = 0;
@@ -163,7 +155,7 @@ test('blocked SEEK: direct jobspy seek rejected, no direct calls', async () => {
     ports: [],
     scrapeJobs: async () => {
       calls += 1;
-      return { jobs: [], totalScraped: 0, newCount: 0 } as unknown as never;
+      return { jobs: [], totalScraped: 0, newCount: 0 };
     },
   };
   // Direct SEEK automation is blocked at the source-class layer: the SEEK
@@ -181,7 +173,7 @@ test('blocked SEEK: direct jobspy seek rejected, no direct calls', async () => {
         baseRequest({
           plan: [{ kind: 'jobspy', slice: baseSlice(), board: 'seek' }],
         }),
-        deps as never,
+        deps,
       ),
     /VALIDATION_ERROR/,
   );
@@ -191,20 +183,11 @@ test('blocked SEEK: direct jobspy seek rejected, no direct calls', async () => {
 // partial provider failure isolated, surviving slice still ranks
 test('partial provider failure: one slice fails, other still yields ranked output', async () => {
   const good = mockPort('search-provider:brave', async () => [
-    {
+    snippetRecord({
       title: 'Good Engineer',
       url: 'https://example.test/good/1',
       description: 'good snippet',
-      position: 1,
-      domain: 'example.test',
-      source: 'brave',
-      age: null,
-      ageKind: 'unknown',
-      extraSnippet: null,
-      deepLinks: null,
-      contentKind: 'snippet',
-      generatedSummary: null,
-    } as unknown as never,
+    }),
   ]);
   const bad = mockPort('search-provider:exa', async () => {
     throw new Error('provider boom');
@@ -227,7 +210,7 @@ test('partial provider failure: one slice fails, other still yields ranked outpu
       },
     ],
   });
-  const result = await executeJobsSearch(req, baseDeps(ports) as never);
+  const result = await executeJobsSearch(req, baseDeps(ports));
   assert.ok(result.candidates.length >= 1);
   assert.ok(
     result.coverageOutcomes.some((o) => o.sliceId === 's-bad' && o.isolated),
@@ -239,20 +222,11 @@ test('partial provider failure: one slice fails, other still yields ranked outpu
 // deterministic rerun: same deps produce identical candidate order + utility
 test('deterministic rerun: identical order and utility', async () => {
   const port = mockPort('search-provider:brave', async () => [
-    {
+    snippetRecord({
       title: 'Deterministic Engineer',
       url: 'https://example.test/det/1',
       description: 'stable snippet',
-      position: 1,
-      domain: 'example.test',
-      source: 'brave',
-      age: null,
-      ageKind: 'unknown',
-      extraSnippet: null,
-      deepLinks: null,
-      contentKind: 'snippet',
-      generatedSummary: null,
-    } as unknown as never,
+    }),
   ]);
   const plan = [
     {
@@ -265,27 +239,18 @@ test('deterministic rerun: identical order and utility', async () => {
   const fixedNow = () => 1700000000000;
   const r1 = await executeJobsSearch(
     baseRequest({ plan, nowMs: 1700000000000, monotonicNow: fixedNow }),
-    baseDeps([port]) as never,
+    baseDeps([port]),
   );
   const port2 = mockPort('search-provider:brave', async () => [
-    {
+    snippetRecord({
       title: 'Deterministic Engineer',
       url: 'https://example.test/det/1',
       description: 'stable snippet',
-      position: 1,
-      domain: 'example.test',
-      source: 'brave',
-      age: null,
-      ageKind: 'unknown',
-      extraSnippet: null,
-      deepLinks: null,
-      contentKind: 'snippet',
-      generatedSummary: null,
-    } as unknown as never,
+    }),
   ]);
   const r2 = await executeJobsSearch(
     baseRequest({ plan, nowMs: 1700000000000, monotonicNow: fixedNow }),
-    baseDeps([port2]) as never,
+    baseDeps([port2]),
   );
   assert.deepEqual(
     r1.candidates.map((c) => [c.candidateId, c.utility, c.rank]),
@@ -296,20 +261,11 @@ test('deterministic rerun: identical order and utility', async () => {
 // reasoning failure falls back without losing ranked output
 test('reasoning failure fallback: provider throw keeps ranked candidates', async () => {
   const port = mockPort('search-provider:brave', async () => [
-    {
+    snippetRecord({
       title: 'Reasoning Engineer',
       url: 'https://example.test/rea/1',
       description: 'reasoning snippet',
-      position: 1,
-      domain: 'example.test',
-      source: 'brave',
-      age: null,
-      ageKind: 'unknown',
-      extraSnippet: null,
-      deepLinks: null,
-      contentKind: 'snippet',
-      generatedSummary: null,
-    } as unknown as never,
+    }),
   ]);
   const req = baseRequest({
     plan: [
@@ -329,7 +285,7 @@ test('reasoning failure fallback: provider throw keeps ranked candidates', async
       },
     },
   });
-  const result = await executeJobsSearch(req, baseDeps([port]) as never);
+  const result = await executeJobsSearch(req, baseDeps([port]));
   assert.ok(result.candidates.length >= 1);
   // runOptionalReasoning never throws on provider I/O: throw/timeout/abort
   // degrades to skipped fallback; ranked output is unaffected either way.
@@ -343,20 +299,11 @@ test('reasoning failure fallback: provider throw keeps ranked candidates', async
 // later authoritative upgrade preserves both observations (no destructive merge)
 test('authoritative upgrade: second observation for same listing preserved alongside first', async () => {
   const port = mockPort('search-provider:brave', async () => [
-    {
+    snippetRecord({
       title: 'Upgrade Engineer',
       url: 'https://example.test/up/1',
       description: 'v1 snippet',
-      position: 1,
-      domain: 'example.test',
-      source: 'brave',
-      age: null,
-      ageKind: 'unknown',
-      extraSnippet: null,
-      deepLinks: null,
-      contentKind: 'snippet',
-      generatedSummary: null,
-    } as unknown as never,
+    }),
   ]);
   const plan = [
     {
@@ -366,27 +313,15 @@ test('authoritative upgrade: second observation for same listing preserved along
       safeSearch: 'moderate',
     },
   ];
-  const r1 = await executeJobsSearch(
-    baseRequest({ plan, runId: 'run-up-1' }),
-    baseDeps([port]) as never,
-  );
+  const r1 = await executeJobsSearch(baseRequest({ plan, runId: 'run-up-1' }), baseDeps([port]));
   assert.ok(r1.candidates.length >= 1);
   // Same canonical URL re-seen: dedup retains one candidate, provenance intact
   const port2 = mockPort('search-provider:brave', async () => [
-    {
+    snippetRecord({
       title: 'Upgrade Engineer',
       url: 'https://example.test/up/1',
       description: 'v2 snippet, authoritative refresh',
-      position: 1,
-      domain: 'example.test',
-      source: 'brave',
-      age: null,
-      ageKind: 'unknown',
-      extraSnippet: null,
-      deepLinks: null,
-      contentKind: 'snippet',
-      generatedSummary: null,
-    } as unknown as never,
+    }),
   ]);
   const plan2 = [
     {
@@ -398,7 +333,7 @@ test('authoritative upgrade: second observation for same listing preserved along
   ];
   const r2 = await executeJobsSearch(
     baseRequest({ plan: plan2, runId: 'run-up-2' }),
-    baseDeps([port2]) as never,
+    baseDeps([port2]),
   );
   assert.ok(r2.candidates.length >= 1);
   // Identity layer never merges on org+title alone: distinct runs keep
@@ -410,36 +345,19 @@ test('authoritative upgrade: second observation for same listing preserved along
 // profile affects fit/rank: structured role hint boosts matching family
 test('profile fit: structured role hint changes rank order deterministically', async () => {
   const snippets = [
-    {
+    snippetRecord({
       title: 'Nurse Practitioner',
       url: 'https://example.test/prof/1',
       description: 'nursing role',
-      position: 1,
-      domain: 'example.test',
-      source: 'brave',
-      age: null,
-      ageKind: 'unknown',
-      extraSnippet: null,
-      deepLinks: null,
-      contentKind: 'snippet',
-      generatedSummary: null,
-    },
-    {
+    }),
+    snippetRecord({
       title: 'registry officer',
       url: 'https://example.test/prof/2',
       description: 'registry records role',
       position: 2,
-      domain: 'example.test',
-      source: 'brave',
-      age: null,
-      ageKind: 'unknown',
-      extraSnippet: null,
-      deepLinks: null,
-      contentKind: 'snippet',
-      generatedSummary: null,
-    },
+    }),
   ];
-  const mkPort = () => mockPort('search-provider:brave', async () => snippets as unknown as never);
+  const mkPort = () => mockPort('search-provider:brave', async () => snippets);
   const planFor = (sliceId: string, adapterId: string) => [
     {
       kind: 'indexed',
@@ -449,7 +367,7 @@ test('profile fit: structured role hint changes rank order deterministically', a
     },
   ];
   const domainPack = {
-    kind: 'domain',
+    kind: 'domain' as const,
     id: 'admin',
     version: '1.0.0',
     effectiveFrom: '2026-01-01',
@@ -467,10 +385,11 @@ test('profile fit: structured role hint changes rank order deterministically', a
     requirementTerminology: {},
     expansionGuards: [],
     evidenceCitations: ['fixture:domain'],
+    evaluationFixtures: [],
   };
   const noProfile = await executeJobsSearch(
     baseRequest({ plan: planFor('s-p1', mkPort().adapterId), domainPack }),
-    baseDeps([mkPort()]) as never,
+    baseDeps([mkPort()]),
   );
   assert.equal(noProfile.candidates.length, 2);
   // Structured profile with minimized role term 'registry' (pack admin v1.0.0)
@@ -496,7 +415,7 @@ test('profile fit: structured role hint changes rank order deterministically', a
       profileInput,
       allowedProfileTermRefs: allowed,
     }),
-    baseDeps([mkPort()]) as never,
+    baseDeps([mkPort()]),
   );
   assert.equal(withProfile.candidates.length, 2);
   assert.ok(withProfile.candidates.some((c) => c.profileApplied));
@@ -522,7 +441,7 @@ test('profile fit: structured role hint changes rank order deterministically', a
       profileInput,
       allowedProfileTermRefs: allowed,
     }),
-    baseDeps([mkPort()]) as never,
+    baseDeps([mkPort()]),
   );
   assert.deepEqual(
     withProfile2.candidates.map((c) => [c.title, c.utility, c.rank]),
@@ -533,20 +452,11 @@ test('profile fit: structured role hint changes rank order deterministically', a
 // explicit preferences outrank learned: learned residual on explicit key ignored
 test('explicit outranks learned: residual on explicit role key has zero effect', async () => {
   const port = mockPort('search-provider:brave', async () => [
-    {
+    snippetRecord({
       title: 'Explicit Engineer',
       url: 'https://example.test/exp/1',
       description: 'explicit snippet',
-      position: 1,
-      domain: 'example.test',
-      source: 'brave',
-      age: null,
-      ageKind: 'unknown',
-      extraSnippet: null,
-      deepLinks: null,
-      contentKind: 'snippet',
-      generatedSummary: null,
-    } as unknown as never,
+    }),
   ]);
   const plan = [
     {
@@ -556,29 +466,20 @@ test('explicit outranks learned: residual on explicit role key has zero effect',
       safeSearch: 'moderate',
     },
   ];
-  const plain = await executeJobsSearch(baseRequest({ plan }), baseDeps([port]) as never);
+  const plain = await executeJobsSearch(baseRequest({ plan }), baseDeps([port]));
   const port2 = mockPort('search-provider:brave', async () => [
-    {
+    snippetRecord({
       title: 'Explicit Engineer',
       url: 'https://example.test/exp/1',
       description: 'explicit snippet',
-      position: 1,
-      domain: 'example.test',
-      source: 'brave',
-      age: null,
-      ageKind: 'unknown',
-      extraSnippet: null,
-      deepLinks: null,
-      contentKind: 'snippet',
-      generatedSummary: null,
-    } as unknown as never,
+    }),
   ]);
   // Learned residual pushing 'role' dimension + explicit key on same dimension:
   // applyLearnedResidual skips explicit keys, so utility must equal plain.
   const { zeroResidual } = await import('../../src/jobs/feedback/residual.js');
   const residual = {
     ...zeroResidual('2026-01-02T00:00:00Z'),
-    features: [{ key: { dimension: 'role', value: 'engineering' }, value: 0.09 }],
+    features: [{ key: { dimension: 'role' as const, value: 'engineering' }, value: 0.09 }],
   };
   const withLearned = await executeJobsSearch(
     baseRequest({
@@ -586,7 +487,7 @@ test('explicit outranks learned: residual on explicit role key has zero effect',
       learnedResidual: residual,
       explicitPreferenceKeys: [{ dimension: 'role', value: 'engineering' }],
     }),
-    baseDeps([port2]) as never,
+    baseDeps([port2]),
   );
   assert.equal(withLearned.candidates[0]!.utility, plain.candidates[0]!.utility);
 });
@@ -594,20 +495,11 @@ test('explicit outranks learned: residual on explicit role key has zero effect',
 // no locale assumptions absent pack: geography channel omitted, no AU defaults
 test('no locale pack: no geography assumptions, generic core holds', async () => {
   const port = mockPort('search-provider:brave', async () => [
-    {
+    snippetRecord({
       title: 'Sydney Engineer',
       url: 'https://example.test/noloc/1',
       description: 'Sydney NSW role',
-      position: 1,
-      domain: 'example.test',
-      source: 'brave',
-      age: null,
-      ageKind: 'unknown',
-      extraSnippet: null,
-      deepLinks: null,
-      contentKind: 'snippet',
-      generatedSummary: null,
-    } as unknown as never,
+    }),
   ]);
   const result = await executeJobsSearch(
     baseRequest({
@@ -621,7 +513,7 @@ test('no locale pack: no geography assumptions, generic core holds', async () =>
       ],
       intent: baseIntent({ query: 'engineer Sydney', locations: [] }),
     }),
-    baseDeps([port]) as never,
+    baseDeps([port]),
   );
   assert.ok(result.candidates.length >= 1);
   const meta = result.candidates[0]!.retrievalMetadata;
@@ -637,20 +529,11 @@ test('no locale pack: no geography assumptions, generic core holds', async () =>
 // unknown eligibility is not contradiction: conditionally_eligible surfaces, never hidden
 test('eligibility separated: utility/coverage/confidence distinct, ineligible never upgraded', async () => {
   const port = mockPort('search-provider:brave', async () => [
-    {
+    snippetRecord({
       title: 'Eligibility Engineer',
       url: 'https://example.test/eli/1',
       description: 'eligibility snippet',
-      position: 1,
-      domain: 'example.test',
-      source: 'brave',
-      age: null,
-      ageKind: 'unknown',
-      extraSnippet: null,
-      deepLinks: null,
-      contentKind: 'snippet',
-      generatedSummary: null,
-    } as unknown as never,
+    }),
   ]);
   const result = await executeJobsSearch(
     baseRequest({
@@ -663,7 +546,7 @@ test('eligibility separated: utility/coverage/confidence distinct, ineligible ne
         },
       ],
     }),
-    baseDeps([port]) as never,
+    baseDeps([port]),
   );
   const c = result.candidates[0]!;
   assert.ok(typeof c.utility === 'number');
@@ -684,34 +567,17 @@ test('eligibility separated: utility/coverage/confidence distinct, ineligible ne
 // RRF is metadata only: identical RRF ranks with different utilities keep utility order
 test('RRF not utility: rank follows utilityScore, not rrfRank', async () => {
   const port = mockPort('search-provider:brave', async () => [
-    {
+    snippetRecord({
       title: 'alpha engineer omega',
       url: 'https://example.test/rrf/1',
       description: 'alpha',
-      position: 1,
-      domain: 'example.test',
-      source: 'brave',
-      age: null,
-      ageKind: 'unknown',
-      extraSnippet: null,
-      deepLinks: null,
-      contentKind: 'snippet',
-      generatedSummary: null,
-    } as unknown as never,
-    {
+    }),
+    snippetRecord({
       title: 'unrelated title here',
       url: 'https://example.test/rrf/2',
       description: 'unrelated',
       position: 2,
-      domain: 'example.test',
-      source: 'brave',
-      age: null,
-      ageKind: 'unknown',
-      extraSnippet: null,
-      deepLinks: null,
-      contentKind: 'snippet',
-      generatedSummary: null,
-    } as unknown as never,
+    }),
   ]);
   const result = await executeJobsSearch(
     baseRequest({
@@ -725,7 +591,7 @@ test('RRF not utility: rank follows utilityScore, not rrfRank', async () => {
       ],
       intent: baseIntent({ query: 'alpha engineer omega' }),
     }),
-    baseDeps([port]) as never,
+    baseDeps([port]),
   );
   assert.equal(result.candidates.length, 2);
   const [first, second] = [result.candidates[0]!, result.candidates[1]!];
@@ -758,11 +624,13 @@ test('SEEK class informational edges do not count as direct SEEK calls', async (
       },
     ];
   });
-  const edges = informationalSeekEdgesFromEntry(
-    seekEntry,
-    { kind: 'provider', namespace: 'search-provider', id: port.providerId },
-    '2026-01-02T00:00:00.000Z',
-  );
+  const edges = informationalSeekEdgesFromEntry(seekEntry, {
+    kind: 'provider',
+    namespace: 'search-provider',
+    id: port.providerId,
+  });
+  // Contract: exactly the automatedSearch + automatedFetch informational pair.
+  assert.equal(edges.length, 2);
   assert.ok(edges.every((e) => e.state === 'blocked'));
   assert.ok(edges.every((e) => e.effect === 'informational_capability'));
   const req = baseRequest({
@@ -778,7 +646,7 @@ test('SEEK class informational edges do not count as direct SEEK calls', async (
       },
     ],
   });
-  const result = await executeJobsSearch(req, baseDeps([port]) as never);
+  const result = await executeJobsSearch(req, baseDeps([port]));
   assert.ok(result.candidates.length >= 1);
   const first = result.candidates[0]!;
   assert.ok(
@@ -798,7 +666,7 @@ test('selective enrichment calls enrichUrls only for selected candidates', async
   const enrichCalls: string[][] = [];
   const def = INDEXED_PROVIDER_DEFINITIONS.find((d) => d.providerId === 'search-provider:exa')!;
   const port: IndexedProviderPort = {
-    backend: def.backend as never,
+    backend: def.backend,
     adapterId: def.adapterId,
     providerId: def.providerId,
     governance: def.governance,
@@ -847,7 +715,7 @@ test('selective enrichment calls enrichUrls only for selected candidates', async
       },
     ],
   });
-  const result = await executeJobsSearch(req, baseDeps([port]) as never);
+  const result = await executeJobsSearch(req, baseDeps([port]));
   assert.equal(enrichCalls.length, 1);
   assert.equal(enrichCalls[0]?.length, 1);
   assert.ok(result.candidates.some((c) => c.caveats.includes('provider_generated_summary')));
@@ -890,7 +758,7 @@ test('unsupported enrichUrls keeps snippet and warns', async () => {
       },
     ],
   });
-  const result = await executeJobsSearch(req, baseDeps([port]) as never);
+  const result = await executeJobsSearch(req, baseDeps([port]));
   assert.equal(result.candidates.length, 1);
   assert.ok(result.warnings.includes('indexed_enrichment_skipped'));
 });
@@ -898,7 +766,7 @@ test('unsupported enrichUrls keeps snippet and warns', async () => {
 test('enrichUrls throw keeps snippet and records failure', async () => {
   const def = INDEXED_PROVIDER_DEFINITIONS.find((d) => d.providerId === 'search-provider:tavily')!;
   const port: IndexedProviderPort = {
-    backend: def.backend as never,
+    backend: def.backend,
     adapterId: def.adapterId,
     providerId: def.providerId,
     governance: def.governance,
@@ -943,7 +811,7 @@ test('enrichUrls throw keeps snippet and records failure', async () => {
       },
     ],
   });
-  const result = await executeJobsSearch(req, baseDeps([port]) as never);
+  const result = await executeJobsSearch(req, baseDeps([port]));
   assert.equal(result.candidates.length, 1);
   assert.ok(result.warnings.includes('indexed_enrichment_failed'));
 });
@@ -952,7 +820,7 @@ test('duplicate URL is enriched once', async () => {
   const enrichCalls: string[][] = [];
   const def = INDEXED_PROVIDER_DEFINITIONS.find((d) => d.providerId === 'search-provider:exa')!;
   const makePort = (): IndexedProviderPort => ({
-    backend: def.backend as never,
+    backend: def.backend,
     adapterId: def.adapterId,
     providerId: def.providerId,
     governance: def.governance,
@@ -1009,7 +877,7 @@ test('duplicate URL is enriched once', async () => {
       },
     ],
   });
-  await executeJobsSearch(req, baseDeps([port]) as never);
+  await executeJobsSearch(req, baseDeps([port]));
   assert.equal(enrichCalls.length, 1);
   assert.equal(enrichCalls[0]?.length, 1);
 });
@@ -1032,7 +900,7 @@ test('enrichment falls back to later discoverer of same URL when retained port c
   const brave = mockPort('search-provider:brave', async () => [{ ...hit, source: 'brave' }]);
   const def = INDEXED_PROVIDER_DEFINITIONS.find((d) => d.providerId === 'search-provider:exa')!;
   const exa: IndexedProviderPort = {
-    backend: def.backend as never,
+    backend: def.backend,
     adapterId: def.adapterId,
     providerId: def.providerId,
     governance: def.governance,
@@ -1107,7 +975,7 @@ test('enrichment falls back to later discoverer of same URL when retained port c
       },
     ],
   });
-  const result = await executeJobsSearch(req, baseDeps([brave, exa]) as never);
+  const result = await executeJobsSearch(req, baseDeps([brave, exa]));
   assert.equal(enrichCalls.length, 1);
   assert.equal(enrichCalls[0]?.length, 1);
   assert.ok(enrichCalls[0]?.[0]?.includes('seek.com.au/job/1'));
@@ -1117,7 +985,7 @@ test('enrichment falls back to later discoverer of same URL when retained port c
 test('topK=50 Exa can return 50 candidates', async () => {
   const def = INDEXED_PROVIDER_DEFINITIONS.find((d) => d.providerId === 'search-provider:exa')!;
   const port: IndexedProviderPort = {
-    backend: def.backend as never,
+    backend: def.backend,
     adapterId: def.adapterId,
     providerId: def.providerId,
     governance: def.governance,
@@ -1165,7 +1033,7 @@ test('topK=50 Exa can return 50 candidates', async () => {
       },
     ],
   });
-  const result = await executeJobsSearch(req, baseDeps([port]) as never);
+  const result = await executeJobsSearch(req, baseDeps([port]));
   assert.equal(result.candidates.length, 50);
 });
 
@@ -1188,7 +1056,7 @@ test('partial provider failure isolates the failed slice', async () => {
   ]);
   const badDef = INDEXED_PROVIDER_DEFINITIONS.find((d) => d.providerId === 'search-provider:exa')!;
   const bad: IndexedProviderPort = {
-    backend: badDef.backend as never,
+    backend: badDef.backend,
     adapterId: badDef.adapterId,
     providerId: badDef.providerId,
     governance: badDef.governance,
@@ -1213,7 +1081,7 @@ test('partial provider failure isolates the failed slice', async () => {
       },
     ],
   });
-  const result = await executeJobsSearch(req, baseDeps([good, bad]) as never);
+  const result = await executeJobsSearch(req, baseDeps([good, bad]));
   assert.ok(result.candidates.length >= 1);
   assert.ok(result.coverageOutcomes.some((c) => c.isolated === true));
 });
@@ -1221,7 +1089,7 @@ test('partial provider failure isolates the failed slice', async () => {
 test('Tavily-only topK=50 is capped at provider max 20, not an error', async () => {
   const def = INDEXED_PROVIDER_DEFINITIONS.find((d) => d.providerId === 'search-provider:tavily')!;
   const port: IndexedProviderPort = {
-    backend: def.backend as never,
+    backend: def.backend,
     adapterId: def.adapterId,
     providerId: def.providerId,
     governance: def.governance,
@@ -1269,9 +1137,10 @@ test('Tavily-only topK=50 is capped at provider max 20, not an error', async () 
       },
     ],
   });
-  const result = await executeJobsSearch(req, baseDeps([port]) as never);
-  assert.ok(result.candidates.length <= 20);
-  assert.ok(result.candidates.length >= 1);
+  const result = await executeJobsSearch(req, baseDeps([port]));
+  // Provider governance caps Tavily at 20 results per request; the seam must
+  // honor the cap deterministically — exactly 20, not an error, not fewer.
+  assert.equal(result.candidates.length, 20);
 });
 
 // F2 seam safety net: a jobspy aggregate URL is withheld with an explicit
@@ -1286,7 +1155,7 @@ test('aggregate page withheld with warning; NO_CANDIDATES not thrown', async () 
       adapterId: 'jobspy',
       adapterVersion: '1.7.0',
       edges: [{ operation: 'automatedSearch', route: 'direct', targetKind: 'board' }],
-    } as unknown as never,
+    },
   ]);
   const req = baseRequest({ plan: jobspyPlan('linkedin') });
   const deps = {
@@ -1297,7 +1166,7 @@ test('aggregate page withheld with warning; NO_CANDIDATES not thrown', async () 
       jobRecord({ job_url: 'https://www.linkedin.com/jobs/search?keywords=engineer' }),
     ]),
   };
-  const result = await executeJobsSearch(req, deps as never);
+  const result = await executeJobsSearch(req, deps);
   assert.equal(result.candidates.length, 0);
   assert.ok(
     result.warnings.some((w) => w.startsWith('aggregate_page_withheld:')),
@@ -1308,20 +1177,11 @@ test('aggregate page withheld with warning; NO_CANDIDATES not thrown', async () 
 // F3: indexed-only candidate exposes the canonical posting locator URL.
 test('indexed-only candidate carries listingUrl, never description placeholder', async () => {
   const port = mockPort('search-provider:brave', async () => [
-    {
+    snippetRecord({
       title: 'Indexed Engineer',
       url: 'https://example.test/job/424242',
       description: 'snippet only',
-      position: 1,
-      domain: 'example.test',
-      source: 'brave',
-      age: null,
-      ageKind: 'unknown',
-      extraSnippet: null,
-      deepLinks: null,
-      contentKind: 'snippet',
-      generatedSummary: null,
-    } as unknown as never,
+    }),
   ]);
   const req = baseRequest({
     plan: [
@@ -1333,7 +1193,7 @@ test('indexed-only candidate carries listingUrl, never description placeholder',
       },
     ],
   });
-  const result = await executeJobsSearch(req, baseDeps([port]) as never);
+  const result = await executeJobsSearch(req, baseDeps([port]));
   assert.ok(result.candidates.length >= 1);
   const first = result.candidates[0]!;
   assert.equal(first.listingUrl, 'https://example.test/job/424242');
@@ -1351,7 +1211,7 @@ test('jobspy envelope yields clean title, org, location, salaryText', async () =
       adapterId: 'jobspy',
       adapterVersion: '1.7.0',
       edges: [{ operation: 'automatedSearch', route: 'direct', targetKind: 'board' }],
-    } as unknown as never,
+    },
   ]);
   const req = baseRequest({ plan: jobspyPlan('linkedin') });
   const deps = {
@@ -1365,7 +1225,7 @@ test('jobspy envelope yields clean title, org, location, salaryText', async () =
       }),
     ]),
   };
-  const result = await executeJobsSearch(req, deps as never);
+  const result = await executeJobsSearch(req, deps);
   assert.ok(result.candidates.length >= 1);
   const first = result.candidates[0]!;
   assert.equal(first.title, 'Senior Plumber');
@@ -1383,20 +1243,11 @@ test('jobspy envelope yields clean title, org, location, salaryText', async () =
 // the caller on the error path (never silent).
 test('indexed-only all-aggregate run: NO_CANDIDATES carries skipped-aggregate warning', async () => {
   const port = mockPort('search-provider:brave', async () => [
-    {
+    snippetRecord({
       title: 'Engineering jobs',
       url: 'https://example.test/jobs/search?keywords=engineer',
       description: 'aggregate listing page',
-      position: 1,
-      domain: 'example.test',
-      source: 'brave',
-      age: null,
-      ageKind: 'unknown',
-      extraSnippet: null,
-      deepLinks: null,
-      contentKind: 'snippet',
-      generatedSummary: null,
-    } as unknown as never,
+    }),
   ]);
   const req = baseRequest({
     plan: [
@@ -1408,7 +1259,7 @@ test('indexed-only all-aggregate run: NO_CANDIDATES carries skipped-aggregate wa
       },
     ],
   });
-  await assert.rejects(executeJobsSearch(req, baseDeps([port]) as never), (err: unknown) => {
+  await assert.rejects(executeJobsSearch(req, baseDeps([port])), (err: unknown) => {
     assert.ok(err instanceof JobsSearchError, 'expected JobsSearchError');
     assert.equal(err.code, 'NO_CANDIDATES');
     assert.ok(

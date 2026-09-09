@@ -7,6 +7,7 @@ import {
 import type { IndexedProviderPort } from '../../src/jobs/acquisition/providers/ports.js';
 import type { SourcePolicy } from '../../src/jobs/acquisition/policy/sourcePolicy.js';
 import type { JobsSearchRequest } from '../../src/jobs/orchestration/searchContracts.js';
+import type { SearchIntent } from '../../src/jobs/domain/intent.js';
 
 export function policy(sourceId: string, state: string = 'permitted'): SourcePolicy {
   return {
@@ -67,9 +68,13 @@ export function mockPort(
   providerId = 'search-provider:brave',
   searchFn: IndexedProviderPort['search'] = async () => [],
 ): IndexedProviderPort {
-  const def = INDEXED_PROVIDER_DEFINITIONS.find((d) => d.providerId === providerId)!;
+  const def = INDEXED_PROVIDER_DEFINITIONS.find((d) => d.providerId === providerId);
+  if (def === undefined) {
+    const known = INDEXED_PROVIDER_DEFINITIONS.map((d) => d.providerId).join(', ');
+    throw new RangeError(`unknown indexed provider '${providerId}'; known providers: ${known}`);
+  }
   return {
-    backend: def.backend as never,
+    backend: def.backend,
     adapterId: def.adapterId,
     providerId: def.providerId,
     governance: def.governance,
@@ -78,7 +83,7 @@ export function mockPort(
   };
 }
 
-export function baseIntent(overrides: Record<string, unknown> = {}) {
+export function baseIntent(overrides: Partial<SearchIntent> = {}): SearchIntent {
   return {
     query: 'software engineer',
     localePackIds: [],
@@ -107,7 +112,28 @@ export function baseIntent(overrides: Record<string, unknown> = {}) {
   };
 }
 
-export function baseSlice(overrides: Record<string, unknown> = {}) {
+/** Structural fixture view of AcquisitionSlice (contract run/slice IDs are branded in src). */
+export interface SliceFixture {
+  schemaVersion: '1.0.0';
+  runId: string;
+  sliceId: string;
+  ordinal: number;
+  queryVariantId: string;
+  query: string;
+  reason: string;
+  adapterIds: string[];
+  localePackRefs: string[];
+  domainPackRefs: string[];
+  budget: {
+    logicalRequests: number;
+    reservedAttempts: number;
+    candidates: number;
+    bytes: number;
+    milliseconds: number;
+  };
+}
+
+export function baseSlice(overrides: Partial<SliceFixture> = {}): SliceFixture {
   return {
     schemaVersion: '1.0.0',
     runId: 'run-1',
@@ -130,7 +156,14 @@ export function baseSlice(overrides: Record<string, unknown> = {}) {
   };
 }
 
-export function baseRequest(overrides: Record<string, unknown> = {}): JobsSearchRequest {
+/**
+ * baseRequest returns the full JobsSearchRequest contract. Overrides stay typed
+ * Partial<JobsSearchRequest> except plan, which is loosened because test plan
+ * literals are validated downstream by the coordinator's zod schemas.
+ */
+export function baseRequest(
+  overrides: Partial<Omit<JobsSearchRequest, 'plan'>> & { plan?: readonly unknown[] } = {},
+): JobsSearchRequest {
   return {
     intent: baseIntent(),
     plan: [],
@@ -162,7 +195,20 @@ export function jobspyScrape(jobs: unknown[]) {
     ({ jobs, totalScraped: jobs.length, newCount: jobs.length }) as unknown as never;
 }
 
-export function jobRecord(overrides: Record<string, unknown> = {}) {
+/** Structural fixture view of a JobSpy job payload (snake_case per jobspy output). */
+export interface JobRecordFixture {
+  title: string;
+  company: string;
+  location: string;
+  job_url: string;
+  job_url_direct: null;
+  description: string;
+  site: string;
+}
+
+export function jobRecord(
+  overrides: Partial<JobRecordFixture> & { salary?: string } = {},
+): JobRecordFixture & { salary?: string } {
   return {
     title: 'Software Engineer',
     company: 'Acme Corp',

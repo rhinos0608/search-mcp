@@ -65,11 +65,11 @@ describe('checkpoint D MCP surface', () => {
 
   test('registered MCP handler executes seam successfully with injected provider', async () => {
     const cfg = { ...loadConfig(), brave: { apiKey: 'test-key' } };
-    const baseDeps = buildJobsMcpDeps(cfg);
+    const mcpDeps = buildJobsMcpDeps(cfg);
     const def = INDEXED_PROVIDER_DEFINITIONS.find((d) => d.providerId === 'search-provider:brave');
     assert.ok(def);
     const deps = {
-      ...baseDeps,
+      ...mcpDeps,
       ports: [
         {
           backend: def.backend,
@@ -97,7 +97,7 @@ describe('checkpoint D MCP surface', () => {
       ],
       providerIds: [def.providerId],
       jobspyBoards: [],
-    } as typeof baseDeps;
+    } as typeof mcpDeps;
     const server = testServer();
     registerJobsSearch(server, cfg, deps);
     const res = await callTool(server, 'jobs_search', { query: 'engineer', useJobSpy: false });
@@ -107,11 +107,11 @@ describe('checkpoint D MCP surface', () => {
 
   test('public candidate output carries listingUrl locator and bounded facts, no evidence text', async () => {
     const cfg = { ...loadConfig(), brave: { apiKey: 'test-key' } };
-    const baseDeps = buildJobsMcpDeps(cfg);
+    const mcpDeps = buildJobsMcpDeps(cfg);
     const def = INDEXED_PROVIDER_DEFINITIONS.find((d) => d.providerId === 'search-provider:brave');
     assert.ok(def);
     const deps = {
-      ...baseDeps,
+      ...mcpDeps,
       ports: [
         {
           backend: def.backend,
@@ -139,7 +139,7 @@ describe('checkpoint D MCP surface', () => {
       ],
       providerIds: [def.providerId],
       jobspyBoards: [],
-    } as typeof baseDeps;
+    } as typeof mcpDeps;
     const server = testServer();
     registerJobsSearch(server, cfg, deps);
     const res = await callTool(server, 'jobs_search', { query: 'engineer', useJobSpy: false });
@@ -172,11 +172,11 @@ describe('checkpoint D MCP surface', () => {
 
   test('jobspy_unconfigured warning surfaces when useJobSpy requested with zero boards', async () => {
     const cfg = { ...loadConfig(), brave: { apiKey: 'test-key' } };
-    const baseDeps = buildJobsMcpDeps(cfg);
+    const mcpDeps = buildJobsMcpDeps(cfg);
     const def = INDEXED_PROVIDER_DEFINITIONS.find((d) => d.providerId === 'search-provider:brave');
     assert.ok(def);
     const deps = {
-      ...baseDeps,
+      ...mcpDeps,
       ports: [
         {
           backend: def.backend,
@@ -204,7 +204,7 @@ describe('checkpoint D MCP surface', () => {
       ],
       providerIds: [def.providerId],
       jobspyBoards: [],
-    } as typeof baseDeps;
+    } as typeof mcpDeps;
     const server = testServer();
     registerJobsSearch(server, cfg, deps);
     const res = await callTool(server, 'jobs_search', { query: 'engineer' });
