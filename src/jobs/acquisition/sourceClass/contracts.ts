@@ -37,6 +37,24 @@ export const ExternalAccessStatusSchema = z.enum([
 export type ExternalAccessStatus = z.infer<typeof ExternalAccessStatusSchema>;
 
 // ---------------------------------------------------------------------------
+// Policy operations (shared five-value operation/mode vocabulary)
+// ---------------------------------------------------------------------------
+
+/**
+ * Single five-value policy operation/mode vocabulary. Shared by evidence
+ * `appliesTo` operation/policyMode, execution bindings, edge policies,
+ * registry mode overrides, and SourcePolicy modes.
+ */
+export const PolicyOperationSchema = z.enum([
+  'automatedSearch',
+  'automatedFetch',
+  'userSuppliedContent',
+  'manualImport',
+  'employerApi',
+]);
+export type PolicyOperation = z.infer<typeof PolicyOperationSchema>;
+
+// ---------------------------------------------------------------------------
 // Authorization evidence
 // ---------------------------------------------------------------------------
 
@@ -75,27 +93,17 @@ export const AuthorizationEvidenceSchema = z
         'insufficient_public_basis',
         /** Operator-listed board; not a legal holding. Board scraping still requires per-board operator review. */
         'operator_configured_board_search',
+        /** Operator-reviewed user-supplied manual import; not a legal holding. Never permits automated access. */
+        'manual_import_user_supplied',
       ])
       .optional(),
     appliesTo: z
       .object({
         sourceId: z.string().min(1).max(256),
-        operation: z.enum([
-          'automatedSearch',
-          'automatedFetch',
-          'userSuppliedContent',
-          'manualImport',
-          'employerApi',
-        ]),
+        operation: PolicyOperationSchema,
         route: z.enum(['direct', 'indexed', 'user_supplied']),
         targetKind: z.enum(['discovery_provider', 'publisher', 'board', 'adapter', 'ats_tenant']),
-        policyMode: z.enum([
-          'automatedSearch',
-          'automatedFetch',
-          'userSuppliedContent',
-          'manualImport',
-          'employerApi',
-        ]),
+        policyMode: PolicyOperationSchema,
       })
       .strict()
       .optional(),
@@ -141,13 +149,7 @@ export const SourceExecutionBindingSchema = z
       })
       .strict(),
     adapterId: z.string().min(1).max(256),
-    operation: z.enum([
-      'automatedSearch',
-      'automatedFetch',
-      'userSuppliedContent',
-      'manualImport',
-      'employerApi',
-    ]),
+    operation: PolicyOperationSchema,
     route: z.enum(['direct', 'indexed', 'user_supplied']),
     stateOverride: z
       .enum(['blocked', 'requires_configuration', 'requires_review', 'not_supported'])
@@ -174,13 +176,7 @@ export const SourceRegistryEntrySchema = z
     reviewedAt: z.iso.datetime({ offset: true }),
     modeOverrides: z
       .partialRecord(
-        z.enum([
-          'automatedSearch',
-          'automatedFetch',
-          'userSuppliedContent',
-          'manualImport',
-          'employerApi',
-        ]),
+        PolicyOperationSchema,
         z.enum(['blocked', 'requires_configuration', 'requires_review', 'not_supported']),
       )
       .optional(),
@@ -218,13 +214,7 @@ export const SourceEdgePolicySchema = z
         id: z.string().min(1).max(256),
       })
       .strict(),
-    operation: z.enum([
-      'automatedSearch',
-      'automatedFetch',
-      'userSuppliedContent',
-      'manualImport',
-      'employerApi',
-    ]),
+    operation: PolicyOperationSchema,
     route: z.enum(['direct', 'indexed', 'user_supplied']),
     state: z.enum([
       'permitted',

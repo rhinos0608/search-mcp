@@ -35,6 +35,7 @@ import {
   informationalSeekEdgesFromEntry,
 } from '../../jobs/acquisition/sourceClass/seek.js';
 import { SEEK_POLICY_EVIDENCE } from '../../jobs/acquisition/sourceClass/evidence/livePolicyEvidence.js';
+import { SEEK_DESTINATION_CLASS } from '../../jobs/acquisition/destinationClass.js';
 import { mapPublicProfile, publicProfileSchema } from '../jobs/profileMapping.js';
 import { buildJobsSearchExecutionRequest, projectJobsCandidate } from '../jobs/searchBuilder.js';
 
@@ -152,12 +153,12 @@ const jobsFamily: FamilyDefinition = {
             ports: deps.ports,
             stageBudgets,
             informationalEdgesFor: (sourceId, providerId) =>
-              sourceId === 'board:seek'
-                ? informationalSeekEdgesFromEntry(
-                    seekEntry,
-                    { kind: 'provider', namespace: 'search-provider', id: providerId },
-                    capturedAt,
-                  )
+              sourceId === SEEK_DESTINATION_CLASS.id
+                ? informationalSeekEdgesFromEntry(seekEntry, {
+                    kind: 'provider',
+                    namespace: 'search-provider',
+                    id: providerId,
+                  })
                 : [],
           },
         );

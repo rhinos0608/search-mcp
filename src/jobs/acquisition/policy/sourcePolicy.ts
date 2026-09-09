@@ -1,14 +1,11 @@
 import { z } from 'zod/v4';
 
+import { PolicyOperationSchema } from '../sourceClass/contracts.js';
+
 export const SOURCE_POLICY_VERSION = '0.1.0';
 
-export const SourcePolicyModeSchema = z.enum([
-  'automatedSearch',
-  'automatedFetch',
-  'userSuppliedContent',
-  'manualImport',
-  'employerApi',
-]);
+/** Shared five-value policy operation/mode vocabulary (see sourceClass/contracts.ts). */
+export const SourcePolicyModeSchema = PolicyOperationSchema;
 export type SourcePolicyMode = z.infer<typeof SourcePolicyModeSchema>;
 
 export const SourcePolicyStateSchema = z.enum([

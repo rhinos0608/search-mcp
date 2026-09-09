@@ -19,11 +19,16 @@ const SEEK_REVIEWED_AT = '2025-01-01T00:00:00.000Z';
 /**
  * Build the frozen SEEK source-class entry.
  * Tests may omit evidence (empty refs). Live jobsDeps must pass reviewed records.
+ * reviewedAt is the max evidence timestamp; falls back to the test-path date.
  */
 export function buildSeekEntry(
   evidence: readonly AuthorizationEvidence[] = [],
 ): SourceRegistryEntry {
-  const reviewedAt = evidence[0]?.reviewedAt ?? SEEK_REVIEWED_AT;
+  const reviewedAt =
+    evidence.reduce<string | undefined>((max, e) => {
+      const t = e.reviewedAt ?? e.capturedAt;
+      return max === undefined || t > max ? t : max;
+    }, undefined) ?? SEEK_REVIEWED_AT;
   return {
     schemaVersion: '1.0.0',
     sourceId: SEEK_SOURCE_ID,
@@ -75,7 +80,6 @@ export function buildSeekEntry(
 export function informationalSeekEdgesFromEntry(
   seekEntry: SourceRegistryEntry,
   actor: { kind: 'provider'; namespace: 'search-provider'; id: string },
-  _capturedAt: string,
 ): AcquisitionPolicyEdge[] {
   const ops = ['automatedSearch', 'automatedFetch'] as const;
   const edges: AcquisitionPolicyEdge[] = [];

@@ -72,6 +72,23 @@ export const SEEK_TERMS_SEARCH_EVIDENCE: AuthorizationEvidence = record({
   appliesTo: seekApplies('automatedSearch'),
 });
 
+/**
+ * Dedicated SEEK automatedFetch evidence. Distinct citation anchor and
+ * sourceEvidenceId from the search terms record; cited on the blocked
+ * SEEK fetch edge. Anchor is a section reference in the cited document,
+ * not a byte-capture claim.
+ */
+export const SEEK_TERMS_FETCH_EVIDENCE: AuthorizationEvidence = record({
+  sourceId: SEEK_SOURCE_ID,
+  kind: 'published_access_terms',
+  capturedAt: SEEK_TERMS_AT,
+  citationRef: 'https://au.seek.com/terms/en#automated-access',
+  documentTitle: 'SEEK Website Terms',
+  reviewedAt: SEEK_TERMS_AT,
+  conclusion: 'direct_automated_access_blocked',
+  appliesTo: seekApplies('automatedFetch'),
+});
+
 export const SEEK_ROBOTS_EVIDENCE: AuthorizationEvidence = record({
   sourceId: SEEK_SOURCE_ID,
   kind: 'robots_metadata',
@@ -84,6 +101,7 @@ export const SEEK_ROBOTS_EVIDENCE: AuthorizationEvidence = record({
 
 export const SEEK_POLICY_EVIDENCE: readonly AuthorizationEvidence[] = [
   SEEK_TERMS_SEARCH_EVIDENCE,
+  SEEK_TERMS_FETCH_EVIDENCE,
   SEEK_ROBOTS_EVIDENCE,
 ];
 
@@ -118,7 +136,7 @@ export function manualImportEvidence(): AuthorizationEvidence {
     capturedAt: OPERATOR_REVIEWED_AT,
     citationRef: ADR_012,
     reviewedAt: OPERATOR_REVIEWED_AT,
-    conclusion: 'indexed_provider_operator_authorized',
+    conclusion: 'manual_import_user_supplied',
     appliesTo: {
       sourceId: MANUAL_IMPORT_ADAPTER_ID,
       operation: 'manualImport',
