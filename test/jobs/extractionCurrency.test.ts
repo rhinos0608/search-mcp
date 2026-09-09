@@ -117,6 +117,14 @@ describe('JSON-LD structured salary and URL parsing', () => {
       'https://example.com/apply',
     );
     assert.equal(
+      extractJsonLdJobPosting({ url: 'http://example.com/apply' }, 'obs-1').fields.applyUrl?.value,
+      'http://example.com/apply',
+    );
+    assert.equal(
+      extractJsonLdJobPosting({ url: 'javascript:alert(1)' }, 'obs-1').fields.applyUrl,
+      undefined,
+    );
+    assert.equal(
       extractJsonLdJobPosting({ url: 'ftp://example.com/apply' }, 'obs-1').fields.applyUrl,
       undefined,
     );

@@ -432,7 +432,7 @@ export async function extractObservation(
       if (parsed.success) {
         out.push(parsed.data);
       } else {
-        warns.push('structured_unstructured_conflict');
+        warns.push('location_parse_failed');
       }
     }
     return { locations: out, warnings: warns };

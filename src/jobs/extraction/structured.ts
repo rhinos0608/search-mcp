@@ -222,8 +222,11 @@ function parseJsonLdSalary(
   baseSalary: JsonLdJobPosting['baseSalary'] | undefined,
   observationId: string,
 ): { value?: Record<string, unknown>; evidenceId?: JobsEvidenceId; warning?: string } | undefined {
-  if (baseSalary === undefined) return undefined;
-  const raw: Record<string, unknown> = baseSalary;
+  // JSON-LD is untrusted input; the type system cannot guarantee the runtime
+  // shape, so the null/primitive guard stays even if types say it is dead.
+  const rawBase: unknown = baseSalary;
+  if (rawBase === null || typeof rawBase !== 'object') return undefined;
+  const raw = rawBase as Record<string, unknown>;
   const inner =
     raw.value !== null && typeof raw.value === 'object'
       ? (raw.value as Record<string, unknown>)
@@ -262,6 +265,12 @@ function parseJsonLdSalary(
     return { warning: 'salary_parse_failed' };
   if (min !== undefined && max !== undefined && min > max)
     return { warning: 'salary_parse_failed' };
+  const boundsText =
+    min !== undefined && max !== undefined
+      ? min !== max
+        ? `${String(min)}-${String(max)}`
+        : String(min)
+      : String(min ?? max ?? '');
   return {
     value: {
       ...(min !== undefined ? { min } : {}),
@@ -269,7 +278,7 @@ function parseJsonLdSalary(
       currency,
       unit,
       period: 'stated',
-      raw: `${currency} ${String(min ?? '')}${min !== max ? `-${String(max ?? '')}` : ''} per ${unit}`,
+      raw: `${currency} ${boundsText} per ${unit}`,
     },
     evidenceId: jobsEvidenceId(
       observationId,

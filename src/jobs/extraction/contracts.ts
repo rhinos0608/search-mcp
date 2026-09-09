@@ -166,6 +166,7 @@ export const ExtractionWarningSchema = z.enum([
   'pack_interpretation_applied',
   'identified_position_detected',
   'salary_parse_failed',
+  'location_parse_failed',
   'missing_title',
   'missing_organisation',
   'indexed_evidence_ignored',
