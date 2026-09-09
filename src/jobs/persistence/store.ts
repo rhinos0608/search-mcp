@@ -468,10 +468,23 @@ export function createJobsStore(db: JobsDatabase): JobsStore {
             )
             .all(postingId, fieldPath) as { candidate_id: string; value_json: string }[];
           if (observed.length > 0) {
-            const sv = JSON.stringify(resolved.selected.value);
+            // Observed values are authoritative and rows are immutable.
+            // Comparisons use value_json ONLY (never candidate_id, which a
+            // model could reuse to smuggle a different value past this
+            // guard). A model_derived selection must restate one of the
+            // observed values — carrying the observed value as a mere
+            // alternative does not legitimize a contradicting selection —
+            // and no incoming candidate (selection or alternative) may
+            // overwrite an observed row's value via candidate_id reuse.
+            const incoming = [resolved.selected, ...resolved.alternatives];
+            const selectedValue = JSON.stringify(resolved.selected.value);
             if (
-              observed.some(
-                (o) => o.candidate_id !== resolved.selected.candidateId && o.value_json !== sv,
+              !observed.some((o) => o.value_json === selectedValue) ||
+              incoming.some((c) =>
+                observed.some(
+                  (o) =>
+                    o.candidate_id === c.candidateId && o.value_json !== JSON.stringify(c.value),
+                ),
               )
             ) {
               throw new JobsStoreError(

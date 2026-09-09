@@ -6,6 +6,10 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 
 import { createJobsStore } from '../../src/jobs/persistence/index.js';
+import {
+  prepareIdentityDecisionStatements,
+  rowToIdentityDecision,
+} from '../../src/jobs/persistence/store-mappers.js';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Any = any;
@@ -203,6 +207,95 @@ test('posting membership and evidence provenance survive put/get round-trip', ()
   assert.deepEqual(got.sourceListingIds, ['listing-1']);
   assert.deepEqual(got.observationIds, ['obs-1']);
   assert.deepEqual(got.evidenceRefs, ['ev-1']);
+});
+
+test('rowToIdentityDecision derives statements from the thin DB wrapper and always hydrates provenance', () => {
+  const store = freshStore();
+  store.upsertListing({
+    sourceListingId: 'listing-1',
+    adapterId: 'adapter-a',
+    firstSeenAt: '2025-01-01T00:00:00+00:00',
+    lastSeenAt: '2025-01-01T00:00:00+00:00',
+    currentObservationId: 'obs-1',
+  } as Any);
+  store.insertObservation({
+    observationId: 'obs-1',
+    sourceListingId: 'listing-1',
+    fetchedAt: '2025-01-01T00:00:00+00:00',
+    contentHash: 'hash-abc',
+    evidenceRefs: [],
+    extractionVersion: 'extraction/1',
+    adapterVersion: 'adapter/1',
+    fetchOutcome: 'success',
+    sourceConfidence: { source: 0.9 },
+    immutable: true,
+  } as Any);
+  // Evidence rows must exist before the identity decision: FK enforcement on.
+  // subject_type CHECK allows 'identity' only (not 'observation').
+  store.putEvidence([
+    {
+      evidenceId: 'ev-1',
+      subjectType: 'identity',
+      subjectId: 'dec-wrapper',
+      kind: 'structured_field',
+      capturedAt: '2025-01-01T00:00:00+00:00',
+      confidence: 0.9,
+      retentionClass: 'short',
+    } as Any,
+    {
+      evidenceId: 'ev-2',
+      subjectType: 'identity',
+      subjectId: 'dec-wrapper',
+      kind: 'structured_field',
+      capturedAt: '2025-01-01T00:00:00+00:00',
+      confidence: 0.9,
+      retentionClass: 'short',
+    } as Any,
+  ]);
+  store.appendIdentityDecision({
+    decisionId: 'dec-wrapper',
+    subjectObservationIds: ['obs-1'],
+    subjectListingIds: ['listing-1'],
+    outcome: 'same_posting',
+    confidence: 0.9,
+    featureContributions: [{ feature: 'canonical_url', contribution: 1, evidenceRefs: ['ev-1'] }],
+    contradictoryEvidenceRefs: ['ev-2'],
+    resolverVersion: 'identity-resolver/1.0.0',
+    createdAt: '2025-01-01T00:00:00+00:00',
+  } as Any);
+  const row = store.db
+    .prepare('SELECT * FROM identity_decisions WHERE decision_id = ?')
+    .get('dec-wrapper') as Record<string, unknown>;
+  // Thin DB wrapper: statements are derived from the raw JobsDatabase handle.
+  const decision = rowToIdentityDecision(row, store.db) as Any;
+  assert.deepEqual(decision.subjectObservationIds, ['obs-1']);
+  assert.deepEqual(decision.subjectListingIds, ['listing-1']);
+  assert.deepEqual(decision.featureContributions, [
+    { feature: 'canonical_url', contribution: 1, evidenceRefs: ['ev-1'] },
+  ]);
+  assert.deepEqual(decision.contradictoryEvidenceRefs, ['ev-2']);
+});
+
+test('rowToIdentityDecision accepts caller-prepared statements', () => {
+  const store = freshStore();
+  store.appendIdentityDecision({
+    decisionId: 'dec-stmts',
+    subjectObservationIds: [],
+    subjectListingIds: [],
+    outcome: 'distinct',
+    confidence: 0.5,
+    featureContributions: [],
+    contradictoryEvidenceRefs: [],
+    resolverVersion: 'identity-resolver/1.0.0',
+    createdAt: '2025-01-01T00:00:00+00:00',
+  } as Any);
+  const row = store.db
+    .prepare('SELECT * FROM identity_decisions WHERE decision_id = ?')
+    .get('dec-stmts') as Record<string, unknown>;
+  const decision = rowToIdentityDecision(row, prepareIdentityDecisionStatements(store.db)) as Any;
+  assert.equal(decision.decisionId, 'dec-stmts');
+  assert.deepEqual(decision.subjectObservationIds, []);
+  assert.deepEqual(decision.featureContributions, []);
 });
 
 test('identity decision relations survive append/list round-trip', () => {

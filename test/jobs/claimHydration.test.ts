@@ -144,6 +144,101 @@ test('RED: claim resolutions survive put/get round-trip', () => {
   assert.equal(got.claimResolutions.title.alternatives.length, 2);
 });
 
+test('model_derived cannot overwrite observed value even via reused candidate_id', () => {
+  const store = freshStore();
+  store.putPostingProjection(makePosting('posting-obs'));
+  store.putEvidence([
+    {
+      evidenceId: 'ev-1',
+      subjectType: 'posting',
+      subjectId: 'posting-obs',
+      kind: 'structured_field',
+      capturedAt: '2025-01-01T00:00:00+00:00',
+      confidence: 0.9,
+      retentionClass: 'short',
+    } as Any,
+  ]);
+  // Observed claim first.
+  store.putClaimResolution('posting-obs', 'title', {
+    state: 'resolved',
+    selected: candidate('cc-obs', 'Software Engineer'),
+    alternatives: [],
+  } as Any);
+  // Model selection reuses the observed candidate_id with a different value:
+  // id-based comparison would let this overwrite observed provenance.
+  assert.throws(
+    () =>
+      store.putClaimResolution('posting-obs', 'title', {
+        state: 'resolved',
+        selected: { ...candidate('cc-obs', 'Senior Engineer'), origin: 'model_derived' },
+        alternatives: [],
+      } as Any),
+    /model_derived cannot overwrite observed claim/,
+  );
+  // Observed value is intact.
+  const got = store.getPosting('posting-obs') as Any;
+  assert.equal(got.claimResolutions.title.selected.value, 'Software Engineer');
+});
+
+test('model_derived alternatives cannot overwrite observed values', () => {
+  const store = freshStore();
+  store.putPostingProjection(makePosting('posting-alt'));
+  store.putEvidence([
+    {
+      evidenceId: 'ev-1',
+      subjectType: 'posting',
+      subjectId: 'posting-alt',
+      kind: 'structured_field',
+      capturedAt: '2025-01-01T00:00:00+00:00',
+      confidence: 0.9,
+      retentionClass: 'short',
+    } as Any,
+  ]);
+  store.putClaimResolution('posting-alt', 'title', {
+    state: 'resolved',
+    selected: candidate('cc-obs', 'Software Engineer'),
+    alternatives: [],
+  } as Any);
+  assert.throws(
+    () =>
+      store.putClaimResolution('posting-alt', 'title', {
+        state: 'resolved',
+        selected: { ...candidate('cc-new', 'Software Engineer'), origin: 'model_derived' },
+        alternatives: [{ ...candidate('cc-obs', 'Contradicting Value'), origin: 'model_derived' }],
+      } as Any),
+    /model_derived cannot overwrite observed claim/,
+  );
+});
+
+test('model_derived selection agreeing with observed value is accepted', () => {
+  const store = freshStore();
+  store.putPostingProjection(makePosting('posting-agree'));
+  store.putEvidence([
+    {
+      evidenceId: 'ev-1',
+      subjectType: 'posting',
+      subjectId: 'posting-agree',
+      kind: 'structured_field',
+      capturedAt: '2025-01-01T00:00:00+00:00',
+      confidence: 0.9,
+      retentionClass: 'short',
+    } as Any,
+  ]);
+  store.putClaimResolution('posting-agree', 'title', {
+    state: 'resolved',
+    selected: candidate('cc-obs', 'Software Engineer'),
+    alternatives: [],
+  } as Any);
+  // Same value under a different candidate_id is agreement, not overwrite.
+  store.putClaimResolution('posting-agree', 'title', {
+    state: 'resolved',
+    selected: { ...candidate('cc-model', 'Software Engineer'), origin: 'model_derived' },
+    alternatives: [],
+  } as Any);
+  const got = store.getPosting('posting-agree') as Any;
+  assert.equal(got.claimResolutions.title.selected.value, 'Software Engineer');
+});
+
 process.on('exit', () => {
   for (const dir of tmpDirs) {
     try {

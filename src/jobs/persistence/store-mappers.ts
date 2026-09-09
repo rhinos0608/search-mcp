@@ -74,31 +74,29 @@ function prepareIdentityDecisionStatements(db: JobsDatabase): IdentityDecisionSt
 
 function rowToIdentityDecision(
   row: Record<string, unknown>,
-  dbOrStmts?: JobsDatabase | IdentityDecisionStatements,
+  dbOrStmts: JobsDatabase | IdentityDecisionStatements,
 ) {
   const decisionId = row['decision_id'] as string;
   // Join tables hold relations writer populates; hydrate them instead of
   // returning empties that would silently erase provenance on read.
-  const stmts =
-    dbOrStmts && 'prepare' in dbOrStmts
-      ? prepareIdentityDecisionStatements(dbOrStmts)
-      : (dbOrStmts as IdentityDecisionStatements | undefined);
-  const subjectObservationIds = stmts
-    ? (stmts.observations.all(decisionId) as { observation_id: string }[]).map(
-        (r) => r.observation_id,
-      )
-    : [];
-  const subjectListingIds = stmts
-    ? (stmts.listings.all(decisionId) as { source_listing_id: string }[]).map(
-        (r) => r.source_listing_id,
-      )
-    : [];
-  const featureRows = stmts
-    ? (stmts.features.all(decisionId) as { feature: string; contribution: number }[])
-    : [];
-  const featureEvidenceRows = stmts
-    ? (stmts.featureEvidence.all(decisionId) as { feature: string; evidence_id: string }[])
-    : [];
+  // Provenance is always queried: the union accepts either the thin DB
+  // wrapper (statements derived here) or caller-prepared statements for
+  // reuse across rows; there is no statements-absent path.
+  const stmts = 'prepare' in dbOrStmts ? prepareIdentityDecisionStatements(dbOrStmts) : dbOrStmts;
+  const subjectObservationIds = (
+    stmts.observations.all(decisionId) as { observation_id: string }[]
+  ).map((r) => r.observation_id);
+  const subjectListingIds = (stmts.listings.all(decisionId) as { source_listing_id: string }[]).map(
+    (r) => r.source_listing_id,
+  );
+  const featureRows = stmts.features.all(decisionId) as {
+    feature: string;
+    contribution: number;
+  }[];
+  const featureEvidenceRows = stmts.featureEvidence.all(decisionId) as {
+    feature: string;
+    evidence_id: string;
+  }[];
   const evidenceByFeature = new Map<string, string[]>();
   for (const r of featureEvidenceRows) {
     const list = evidenceByFeature.get(r.feature) ?? [];
@@ -110,9 +108,9 @@ function rowToIdentityDecision(
     contribution: f.contribution,
     evidenceRefs: evidenceByFeature.get(f.feature) ?? [],
   }));
-  const contradictoryEvidenceRefs = stmts
-    ? (stmts.contradictions.all(decisionId) as { evidence_id: string }[]).map((r) => r.evidence_id)
-    : [];
+  const contradictoryEvidenceRefs = (
+    stmts.contradictions.all(decisionId) as { evidence_id: string }[]
+  ).map((r) => r.evidence_id);
   return {
     decisionId,
     subjectObservationIds,
