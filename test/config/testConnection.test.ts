@@ -94,6 +94,21 @@ test('crawl4ai: allowlisted loopback sidecar succeeds', async () => {
   }
 });
 
+test('non-2xx sidecar response reports HTTP status without network detail', async () => {
+  const { mgr, dir, cfg } = makeManager();
+  try {
+    (cfg as { searxng: { baseUrl: string } }).searxng = { baseUrl: 'http://example.test' };
+    const result = await mgr.testConnection('searxng', {
+      resolver: publicResolver,
+      request: () => okResponse(503),
+    });
+    assert.equal(result.ok, false);
+    assert.equal(result.error, 'HTTP 503');
+  } finally {
+    cleanup(dir);
+  }
+});
+
 test('crawl4ai: non-HTTP base URL is rejected as invalid', async () => {
   const { mgr, dir, cfg } = makeManager();
   try {

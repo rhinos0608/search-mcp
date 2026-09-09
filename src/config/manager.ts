@@ -376,40 +376,22 @@ export class ConfigManager {
     });
     try {
       switch (provider) {
-        case 'searxng': {
-          const url = cfg.searxng.baseUrl;
-          if (!url) return { provider, ok: false, error: 'Not configured' };
-          const health = buildHealthUrl(url, '/healthz');
-          if (!health) return fail('Invalid URL');
-          // operator_internal: operator-configured sidecar, hostname-pinned to
-          // the configured base URL. Redirects to any other host fail the allowlist.
-          const opts: SafeFetchOptions = {
-            timeoutMs: 5000,
-            maxBytes: 64 * 1024,
-            networkPolicy: 'operator_internal',
-            internalAllowlist: [new URL(health).hostname],
-          };
-          if (inject.resolver !== undefined) opts.resolver = inject.resolver;
-          if (inject.request !== undefined) opts.request = inject.request;
-          const r = await safeFetch(health, {}, opts);
-          return { provider, ok: r.status >= 200 && r.status < 300, latencyMs: Date.now() - start };
-        }
-        case 'crawl4ai': {
-          const url = cfg.crawl4ai.baseUrl;
-          if (!url) return { provider, ok: false, error: 'Not configured' };
-          const health = buildHealthUrl(url, '/health');
-          if (!health) return fail('Invalid URL');
-          const opts: SafeFetchOptions = {
-            timeoutMs: 5000,
-            maxBytes: 64 * 1024,
-            networkPolicy: 'operator_internal',
-            internalAllowlist: [new URL(health).hostname],
-          };
-          if (inject.resolver !== undefined) opts.resolver = inject.resolver;
-          if (inject.request !== undefined) opts.request = inject.request;
-          const r = await safeFetch(health, {}, opts);
-          return { provider, ok: r.status >= 200 && r.status < 300, latencyMs: Date.now() - start };
-        }
+        case 'searxng':
+          return await this.testSidecarHealth(
+            provider,
+            cfg.searxng.baseUrl,
+            '/healthz',
+            start,
+            inject,
+          );
+        case 'crawl4ai':
+          return await this.testSidecarHealth(
+            provider,
+            cfg.crawl4ai.baseUrl,
+            '/health',
+            start,
+            inject,
+          );
         case 'brave': {
           if (!cfg.brave.apiKey) return { provider, ok: false, error: 'Not configured' };
           // Brave is a public API, not an operator sidecar: public policy so a
@@ -426,7 +408,15 @@ export class ConfigManager {
             { headers: { 'X-Subscription-Token': cfg.brave.apiKey } },
             opts,
           );
-          return { provider, ok: r.status >= 200 && r.status < 300, latencyMs: Date.now() - start };
+          const ok = r.status >= 200 && r.status < 300;
+          return ok
+            ? { provider, ok, latencyMs: Date.now() - start }
+            : {
+                provider,
+                ok,
+                error: `HTTP ${String(r.status)}`,
+                latencyMs: Date.now() - start,
+              };
         }
         default:
           return { provider, ok: false, error: `No test available for provider "${provider}"` };
@@ -434,6 +424,44 @@ export class ConfigManager {
     } catch (err) {
       return fail(sanitizeTestConnectionError(err));
     }
+  }
+
+  /**
+   * Shared health-check probe for operator-configured sidecars (searxng,
+   * crawl4ai). Pins the operator_internal network policy to the configured
+   * hostname, forwards test hooks, and reports the HTTP status on non-2xx
+   * responses. Transport errors propagate to the caller's sanitizer.
+   */
+  private async testSidecarHealth(
+    provider: string,
+    baseUrl: string,
+    path: string,
+    start: number,
+    inject: {
+      resolver?: SafeFetchOptions['resolver'];
+      request?: SafeFetchOptions['request'];
+    },
+  ): Promise<ProviderTestResult> {
+    if (!baseUrl) return { provider, ok: false, error: 'Not configured' };
+    const health = buildHealthUrl(baseUrl, path);
+    if (!health) {
+      return { provider, ok: false, error: 'Invalid URL', latencyMs: Date.now() - start };
+    }
+    // operator_internal: operator-configured sidecar, hostname-pinned to
+    // the configured base URL. Redirects to any other host fail the allowlist.
+    const opts: SafeFetchOptions = {
+      timeoutMs: 5000,
+      maxBytes: 64 * 1024,
+      networkPolicy: 'operator_internal',
+      internalAllowlist: [new URL(health).hostname],
+    };
+    if (inject.resolver !== undefined) opts.resolver = inject.resolver;
+    if (inject.request !== undefined) opts.request = inject.request;
+    const r = await safeFetch(health, {}, opts);
+    const ok = r.status >= 200 && r.status < 300;
+    return ok
+      ? { provider, ok, latencyMs: Date.now() - start }
+      : { provider, ok, error: `HTTP ${String(r.status)}`, latencyMs: Date.now() - start };
   }
 
   private _writeEncrypted(cfg: SearchConfig, password: string): void {
