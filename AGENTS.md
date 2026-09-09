@@ -2,7 +2,7 @@
 
 > **Max 300 lines.** Keep this file concise. Details belong in source or dedicated docs.
 
-MCP server over stdio/HTTP exposing 14 tools (63 actions): web search/crawl, RSS/Atom, semantic RAG, GitHub, YouTube, Reddit, academic/community research (15 backends), HN, Stack Overflow, npm, PyPI, jobs, browser automation, agentic browsing.
+MCP server over stdio/HTTP exposing 14 tools (66 actions): web search/crawl, RSS/Atom, semantic RAG, GitHub, YouTube, Reddit, academic/community research (15 backends), HN, Stack Overflow, npm, PyPI, jobs, browser automation, agentic browsing.
 
 ## Commands
 

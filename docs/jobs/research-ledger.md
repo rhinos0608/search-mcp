@@ -6,7 +6,7 @@ This ledger records dossier evidence and caveats; it is not a new source of fact
 | ------- | -------------------------------------------------------------------------- | -------------------------------------------------------------------------------- |
 | E01     | Acquisition uses coordinator-owned policy-wired in-process JobSpy fallback | `src/jobs/acquisition/coordinator.ts`; `src/jobs/acquisition/adapters/jobspy.ts` |
 | E02     | JobSpy defaults no boards; explicit policy required                        | `src/jobs/acquisition/adapters/jobspy.ts`                                        |
-| E03     | One location, remote filtering, fixed 72h semantics                        | `src/tools/semanticJobs.ts:98-117`                                               |
+| E03     | One location, remote filtering, fixed 72h semantics (historical)           | `src/tools/semanticJobs.ts:98-117` (historical)                                  |
 | E04     | Quality policy embeds Sydney/AU/seniority assumptions                      | `src/rag/quality/types.ts:138-150`                                               |
 | E05     | Metadata rank stage ignores query                                          | `src/rag/jobRanking.ts:47-55`; pipeline `378-398`                                |
 | E06     | Enrichment truncates before semantic relevance                             | `src/rag/jobPipeline.ts:404-405,606-651`                                         |
@@ -21,7 +21,7 @@ This ledger records dossier evidence and caveats; it is not a new source of fact
 | E15     | EthicalJobs XML publishes listings, not discovery API                      | Official EthicalJobs help evidence                                               |
 | E16     | NSW framework and APS WLS structures validated                             | NSW Government/APSC primary evidence                                             |
 | E17     | SSRF guard lacks resolved-address/redirect validation                      | `src/httpGuards.ts:71-174`                                                       |
-| E18     | Raw job queries/location can enter logs                                    | `src/tools/standalone/semanticJobs.ts:113`; client `149-175`                     |
+| E18     | Raw job queries/location can enter logs (historical)                       | `src/tools/standalone/semanticJobs.ts:113` (historical); client `149-175`        |
 | E19–E22 | Observation/lifecycle, missing weights, `$HOME`, dual-write defects        | Prior dossier; corrected in frozen design                                        |
 
 Research roles: A current architecture/call graph/tests; B acquisition/source ecosystem; C Sydney/NSW topology; D classifications/enrichment; E retrieval/ranking/evaluation; F profile/reasoning; G MCP interaction; H persistence/security/operations. Oracle pass 1 reconciled research and corrected source overclaims; user review supplied binding amendments; Oracle pass 2 froze this dossier.

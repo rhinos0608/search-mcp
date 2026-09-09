@@ -6,7 +6,7 @@ Guidance for Claude Code working in this repository. See [AGENTS.md](./AGENTS.md
 
 ## What This Is
 
-MCP server over stdio/HTTP exposing **14 tools, 63 actions**: web search/crawl, semantic RAG, GitHub, YouTube, Reddit, academic research (14 backends), HN, Stack Overflow, npm, PyPI, jobs, browser automation, agentic browsing. Clients (Claude Desktop, Claude CLI) connect via stdin/stdout or HTTP.
+MCP server over stdio/HTTP exposing **14 tools, 66 actions**: web search/crawl, semantic RAG, GitHub, YouTube, Reddit, academic research (14 backends), HN, Stack Overflow, npm, PyPI, jobs, browser automation, agentic browsing. Clients (Claude Desktop, Claude CLI) connect via stdin/stdout or HTTP.
 
 V6.0.0 adds opt-in HTTP transport with React dashboard (`HTTP_PORT` to enable). ConfigManager with AES-256-GCM encrypted config. Dual-mode startup: stdio-only or HTTP+stdio.
 

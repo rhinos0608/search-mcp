@@ -35,7 +35,7 @@ graph LR
 | Wave | Work packages                                                                                                                 | Gate                                                                             |
 | ---- | ----------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------- |
 | 0    | PII-safe telemetry; safe fetch; parser/network budgets; SourcePolicy skeleton                                                 | Authorized; precedes source expansion                                            |
-| 1    | IDs/evidence/claims; listing/observation; posting/intent; reversible identity; pack contracts; legacy mapper                  | Authorized; no unresolved blocker                                                |
+| 1    | IDs/evidence/claims; listing/observation; posting/intent; reversible identity; pack contracts; legacy mapper (historical)     | Authorized; no unresolved blocker                                                |
 | 2    | Secure reader/parser; minimized profile store; profile actions; refresh                                                       | W2A bounded/non-persistent authorized; W2B blocked by encryption + retention ADR |
 | 3    | Adapter contract/registry; edge-scoped policy coordinator; additive indexed discovery; JobSpy; slices; budgets; manual import | Authorized; provider authorization does not grant direct publisher access        |
 | 4–6  | NSW/source inventory; extraction; enrichment                                                                                  | Per-source/persistence gates unresolved                                          |

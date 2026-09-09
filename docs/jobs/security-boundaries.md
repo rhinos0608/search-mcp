@@ -39,7 +39,7 @@ This is not an OS sandbox. Child-process termination is a resource and failure b
 
 Deployment must supply controls absent from portable application code:
 
-- run server, browser automation, Crawl4AI, embedding, and JobSpy integrations as separate principals/containers where possible; JobSpy is now in-process `jobspy-js`, not a Python sidecar;
+- run server, browser automation, Crawl4AI, and embedding integrations as separate principals/containers where possible; in-process jobspy-js shares the server process and is governed by SourcePolicy and adapter controls;
 - deny egress by default (`egress_denied`) for parser/profile workers, then allow only required operator endpoints;
 - apply CPU and wall-clock limits, native-memory/container memory limits, process and file-descriptor limits;
 - mount only required filesystem paths read-only where possible; keep profiles and credentials outside the server's default `$HOME` capability;

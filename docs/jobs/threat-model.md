@@ -4,14 +4,14 @@
 
 ## Assets and trust boundaries
 
-| Asset                                                     | Threat actor / path                                  | Boundary and required control                                                                                               |
-| --------------------------------------------------------- | ---------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
-| Internal network and metadata endpoints                   | Caller-controlled URL, redirect, DNS rebinding       | `safeFetch` validates URL and resolved addresses on every hop; public mode rejects private/reserved and mixed answers       |
-| Server credentials and host filesystem                    | Profile path, parser input, extracted content        | Trusted roots/configured grants, canonicalization, containment, symlink checks, size/type checks; no default `$HOME` access |
-| Parser process and host resources                         | Malformed PDF/Office input, parser/native dependency | Disposable child, V8 heap cap, timeout, abort, bounded input/output, malformed-protocol rejection                           |
-| Browser session and cookies                               | Arbitrary web page or browser automation action      | Dedicated browser principal, restricted mounts/credentials, deployment egress and resource limits                           |
-| Crawl4AI and embedding sidecars; in-process JobSpy client | Compromised or malformed sidecar traffic             | Separate principals, explicit operator endpoint configuration, deployment network policy                                    |
-| Source acquisition legality/policy                        | Adapter bypass or accidental automation              | Versioned SourcePolicy coordinator; unknown/blocked states fail closed                                                      |
+| Asset                                                     | Threat actor / path                                  | Boundary and required control                                                                                                                           |
+| --------------------------------------------------------- | ---------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Internal network and metadata endpoints                   | Caller-controlled URL, redirect, DNS rebinding       | `safeFetch` validates URL and resolved addresses on every hop; public mode rejects private/reserved and mixed answers                                   |
+| Server credentials and host filesystem                    | Profile path, parser input, extracted content        | Trusted roots/configured grants, canonicalization, containment, symlink checks, size/type checks; no default `$HOME` access                             |
+| Parser process and host resources                         | Malformed PDF/Office input, parser/native dependency | Disposable child, V8 heap cap, timeout, abort, bounded input/output, malformed-protocol rejection                                                       |
+| Browser session and cookies                               | Arbitrary web page or browser automation action      | Dedicated browser principal, restricted mounts/credentials, deployment egress and resource limits                                                       |
+| Crawl4AI and embedding sidecars; in-process JobSpy client | Compromised or malformed integration traffic         | Separate principals for sidecars (Crawl4AI, embedding); in-process jobspy-js shares server process and is governed by SourcePolicy and adapter controls |
+| Source acquisition legality/policy                        | Adapter bypass or accidental automation              | Versioned SourcePolicy coordinator; unknown/blocked states fail closed                                                                                  |
 
 ## Implemented controls
 
@@ -19,7 +19,7 @@
 
 Covered callers are `src/crawl/spiders.ts`, `src/tools/families/agenticBrowse.ts`, `src/tools/semanticCrawl.ts`, `src/tools/standalone/rss.ts`, `src/tools/webRead.ts`, `src/tools/webSearchDocEnrich.ts`, `src/utils/documentExtraction.ts`, and `src/utils/externalRecovery.ts`. It supports only `GET`/`HEAD`; enforces URL credentials rejection, DNS validation per hop, private/reserved-address blocking, redirect limit, deadline, byte cap, identity encoding, and cross-origin header reduction. `operator_internal` requires an operator allowlist and is never caller-provided authorization.
 
-Excluded from this guarantee: browser/CDP traffic, Crawl4AI traffic, embedding and JobSpy sidecar traffic, content safety, malware scanning, and OS-level egress controls. These require separate principals and deployment controls.
+Excluded from this guarantee: browser/CDP traffic, Crawl4AI traffic, embedding sidecar traffic, content safety, malware scanning, and OS-level egress controls (which require separate principals and deployment controls); in-process jobspy-js shares the server process and is governed by SourcePolicy and adapter controls.
 
 ### Portable parser capability
 
