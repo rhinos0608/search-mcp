@@ -204,6 +204,31 @@ function extractFromText(
 
 // ── Evidence and claim builders ─────────────────────────────────────────
 
+// Structured and unstructured values for the same fieldPath conflict only when
+// their content differs. Object values (e.g. Location shapes from JSON-LD vs
+// comma-split text) compare by JSON content with sorted keys so equivalent
+// locations do not raise a false conflict (schema parsing may reorder keys);
+// primitives compare directly.
+function canonicalize(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(canonicalize);
+  if (value !== null && typeof value === 'object') {
+    const obj = value as Record<string, unknown>;
+    return Object.fromEntries(
+      Object.keys(obj)
+        .sort()
+        .map((k) => [k, canonicalize(obj[k])]),
+    );
+  }
+  return value;
+}
+
+function fieldValuesConflict(a: unknown, b: unknown): boolean {
+  if (a !== null && b !== null && typeof a === 'object' && typeof b === 'object') {
+    return JSON.stringify(canonicalize(a)) !== JSON.stringify(canonicalize(b));
+  }
+  return a !== b;
+}
+
 function buildEvidence(field: ExtractedField, observationId: string, capturedAt: string): Evidence {
   return {
     evidenceId: field.evidenceId as Evidence['evidenceId'],
@@ -355,7 +380,7 @@ export async function extractObservation(
       fields.set(uf.fieldPath, uf);
     } else {
       const existing = fields.get(uf.fieldPath);
-      if (existing && existing.value !== uf.value) {
+      if (existing && fieldValuesConflict(existing.value, uf.value)) {
         warnings.push('structured_unstructured_conflict');
       }
     }

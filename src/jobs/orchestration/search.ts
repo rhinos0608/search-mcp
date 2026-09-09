@@ -194,11 +194,24 @@ function postingFromExtraction(
   // Posting locator URLs: canonical listing URL (credential-free) plus apply
   // URL when extraction observed one. listingUrl is a locator, not evidence text.
   const firstCanonicalUrl = first.listing.canonicalUrl;
+  // Locator URLs must be valid http(s) URLs bounded at 8192 chars; an invalid
+  // or oversized applyUrl string would reject the whole posting schema.
+  const validLocator = (u: string): string | null => {
+    if (u.length === 0 || u.length > 8192) return null;
+    try {
+      const parsed = new URL(u);
+      return parsed.protocol === 'http:' || parsed.protocol === 'https:' ? u : null;
+    } catch {
+      return null;
+    }
+  };
+  const applyUrl = typeof fields.applyUrl === 'string' ? validLocator(fields.applyUrl) : null;
   const listingUrls = [
     ...new Set(
-      [firstCanonicalUrl, asText(fields.applyUrl)].filter(
-        (u): u is string => typeof u === 'string' && u.length > 0,
-      ),
+      [firstCanonicalUrl, applyUrl]
+        .filter((u): u is string => u !== null && u !== undefined)
+        .map((u) => validLocator(u))
+        .filter((u): u is string => u !== null),
     ),
   ];
   // Adopt every extracted hot field; fall back to placeholders only when the
@@ -256,7 +269,7 @@ function postingFromExtraction(
     classifications: [],
     ...(typeof fields.postedAt === 'string' ? { postedAt: fields.postedAt } : {}),
     ...(typeof fields.closingAt === 'string' ? { closingAt: fields.closingAt } : {}),
-    ...(typeof fields.applyUrl === 'string' ? { applyUrl: fields.applyUrl } : {}),
+    ...(applyUrl !== null ? { applyUrl } : {}),
     listingUrls,
     description,
     responsibilities: [],
@@ -375,12 +388,18 @@ export async function executeJobsSearch(
       ...(request.monotonicNow !== undefined ? { monotonicNow: request.monotonicNow } : {}),
     });
     const enrichCap = Math.min(10, intent.budgets.enrichment);
-    const enriched = await applyIndexedEnrichment(acquisition, deps.ports, intent.query, enrichCap);
+    const enriched = await applyIndexedEnrichment(
+      acquisition,
+      deps.ports,
+      intent.query,
+      enrichCap,
+      capturedAt,
+    );
     acquisition = enriched.run;
     if (enriched.warnings.length > 0) {
       acquisition = {
         ...acquisition,
-        warnings: [...acquisition.warnings, ...enriched.warnings].slice(0, 100),
+        warnings: [...new Set([...acquisition.warnings, ...enriched.warnings])].slice(0, 100),
       };
     }
   } catch (err) {
@@ -481,7 +500,12 @@ export async function executeJobsSearch(
         extractionWarnings: [],
         identityDecision: null,
         identityConfidence: 0,
-        sliceOrdinal: request.plan.findIndex((item) => item.slice.sliceId === cand.sliceId),
+        // Unmatched slices sort after every valid plan ordinal (findIndex
+        // returns -1, which would otherwise sort first).
+        sliceOrdinal: (() => {
+          const idx = request.plan.findIndex((item) => item.slice.sliceId === cand.sliceId);
+          return idx === -1 ? request.plan.length : idx;
+        })(),
       });
     }
   }
@@ -535,6 +559,8 @@ export async function executeJobsSearch(
       return idA < idB ? -1 : idA > idB ? 1 : 0;
     })
     .slice(0, 20);
+  // Extraction cap is a real truncation: surface it, never silent.
+  if (extractable.length > 20) warnings.push('extraction_truncated');
   for (const a of extractable) {
     if (a.envelopes.length === 0) continue; // indexed-only: no extraction, no fabrication
     const env = a.envelopes[0];
@@ -1341,11 +1367,17 @@ export async function executeJobsSearch(
           rawDescription === 'No description available.'
             ? undefined
             : rawDescription.slice(0, 2048);
+        // Output contract bounds location/salaryText at 256 chars; truncate
+        // rather than reject the whole result at schema parse.
         return {
           ...(listingUrl !== undefined ? { listingUrl } : {}),
           ...(applyUrl !== undefined ? { applyUrl } : {}),
-          ...(location !== undefined && location.length > 0 ? { location } : {}),
-          ...(salaryText !== undefined ? { salaryText } : {}),
+          ...(location !== undefined && location.length > 0
+            ? { location: location.slice(0, 256) }
+            : {}),
+          ...(salaryText !== undefined && salaryText.length > 0
+            ? { salaryText: salaryText.slice(0, 256) }
+            : {}),
           ...(description !== undefined ? { description } : {}),
         };
       })(),

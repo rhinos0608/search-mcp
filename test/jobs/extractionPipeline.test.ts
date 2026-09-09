@@ -231,6 +231,81 @@ test('extractTitleFromText strips Title:/Location:/Salary: label prefixes', asyn
   assert.equal(extractLocationFromText('no location label'), undefined);
 });
 
+test('extractTitleFromText skips non-title labelled lines, strips Title: only', async () => {
+  const { extractTitleFromText } = await import('../../src/jobs/extraction/normalize.js');
+  assert.equal(
+    extractTitleFromText('Location: Sydney, NSW\nSenior Electrician'),
+    'Senior Electrician',
+  );
+  assert.equal(extractTitleFromText('Company: Acme\nSalary: $100k\nFitter'), 'Fitter');
+  assert.equal(extractTitleFromText('Location: Sydney\nTitle: Site Supervisor'), 'Site Supervisor');
+});
+
+test('equivalent structured and unstructured locations do not conflict', async () => {
+  const jsonLd = JSON.stringify({
+    title: 'Senior Electrician',
+    hiringOrganization: { name: 'Acme' },
+    jobLocation: {
+      address: { addressLocality: 'Sydney', addressRegion: 'NSW', addressCountry: 'Australia' },
+    },
+    // Pushes the JSON line past the 200-char title cap so the unstructured
+    // title extractor skips it and only the location values are compared.
+    description: 'x'.repeat(300),
+  });
+  const evidence = (evidenceId: string, boundedText: string) => ({
+    evidenceId: evidenceId as DiscoveryEvidenceId,
+    kind: 'destination_content' as const,
+    targetCanonicalUrl: 'https://example.com/job/1',
+    boundedText,
+    contentHash: 'hash-1',
+    capturedAt: '2025-01-01T00:00:00Z',
+    observationId: 'obs-1',
+    sourceListingId: 'listing-1',
+  });
+  const input = makeInput({
+    evidence: [evidence('ev-1', jsonLd), evidence('ev-2', 'Location: Sydney, NSW, Australia')],
+  });
+  const result = await extractObservation(input as any);
+  assert.strictEqual(result.projection.fields.title, 'Senior Electrician');
+  assert.ok(!result.projection.warnings.includes('structured_unstructured_conflict'));
+  assert.strictEqual(result.projection.coverage, 'succeeded');
+});
+
+test('differing structured and unstructured locations still conflict', async () => {
+  const jsonLd = JSON.stringify({
+    title: 'Senior Electrician',
+    jobLocation: {
+      address: { addressLocality: 'Melbourne', addressRegion: 'VIC', addressCountry: 'Australia' },
+    },
+  });
+  const input = makeInput({
+    evidence: [
+      {
+        evidenceId: 'ev-1' as DiscoveryEvidenceId,
+        kind: 'destination_content' as const,
+        targetCanonicalUrl: 'https://example.com/job/1',
+        boundedText: jsonLd,
+        contentHash: 'hash-1',
+        capturedAt: '2025-01-01T00:00:00Z',
+        observationId: 'obs-1',
+        sourceListingId: 'listing-1',
+      },
+      {
+        evidenceId: 'ev-2' as DiscoveryEvidenceId,
+        kind: 'destination_content' as const,
+        targetCanonicalUrl: 'https://example.com/job/1',
+        boundedText: 'Location: Sydney, NSW, Australia',
+        contentHash: 'hash-1',
+        capturedAt: '2025-01-01T00:00:00Z',
+        observationId: 'obs-1',
+        sourceListingId: 'listing-1',
+      },
+    ],
+  });
+  const result = await extractObservation(input as any);
+  assert.ok(result.projection.warnings.includes('structured_unstructured_conflict'));
+});
+
 test('jobspy-shaped evidence text extracts location and salary into projection', async () => {
   const { runJobSpyBoard, JOBSPY_CAPABILITY } =
     await import('../../src/jobs/acquisition/adapters/jobspy.js');

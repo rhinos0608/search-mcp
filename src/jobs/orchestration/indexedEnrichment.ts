@@ -209,15 +209,25 @@ function makeSummaryEvidence(
   } as DiscoveryEvidence;
 }
 
+/**
+ * Deterministic run-capturedAt threading: every enrichment evidence timestamp
+ * comes from the acquisition run's capturedAt (request provenance), never from
+ * wall-clock `new Date()`, so identical deps reproduce identical output.
+ */
+function normalizeWarnings(warnings: string[]): string[] {
+  return [...new Set(warnings)].slice(0, 50);
+}
+
 export async function applyIndexedEnrichment(
   run: AcquisitionRunResult,
   ports: readonly IndexedProviderPort[],
   query: string,
   cap: number,
+  runCapturedAt: string,
 ): Promise<{ run: AcquisitionRunResult; warnings: string[] }> {
   const warnings: string[] = [];
   const selected = selectIndexedEnrichmentCandidates(run, query, cap);
-  if (selected.length === 0) return { run, warnings };
+  if (selected.length === 0) return { run, warnings: normalizeWarnings(warnings) };
 
   const portByProvider = new Map(ports.map((p) => [p.providerId, p]));
   const sliceById = new Map(run.slices.map((s) => [s.sliceId, s]));
@@ -288,10 +298,12 @@ export async function applyIndexedEnrichment(
       const slice = structuredClone(original);
       const target = slice.candidates.find((c) => c.candidateId === cand.candidateId);
       if (!target) continue;
+      // Non-indexed discovery provenance: fall back to the run's capturedAt
+      // (threaded from the request), never wall-clock time.
       const capturedAt =
         target.provenance.kind === 'indexed_discovery'
           ? target.provenance.capturedAt
-          : new Date().toISOString();
+          : runCapturedAt;
       const ev = makeSummaryEvidence(
         slice,
         batch.port.providerId,
@@ -322,7 +334,7 @@ export async function applyIndexedEnrichment(
     }
   }
 
-  if (mutatedSlices.size === 0) return { run, warnings };
+  if (mutatedSlices.size === 0) return { run, warnings: normalizeWarnings(warnings) };
   const slices = run.slices.map((s) => mutatedSlices.get(s.sliceId) ?? s);
-  return { run: { ...run, slices }, warnings: [...new Set(warnings)].slice(0, 50) };
+  return { run: { ...run, slices }, warnings: normalizeWarnings(warnings) };
 }

@@ -97,14 +97,19 @@ export const JSONLD_FIELD_MAPPINGS: readonly JsonLdFieldMapping[] = [
 
 // ── Unstructured title extraction ──────────────────────────────────────
 
-const TEXT_LABEL_PREFIX = /^(Title|Location|Company|Organisation|Employer|Salary|Description):\s*/i;
+// Title: is the only label whose value is a title candidate; other labelled
+// lines are skipped so their values are never mistaken for the title.
+const TITLE_LABEL_PREFIX = /^Title:\s*/i;
+const NON_TITLE_LABEL_PREFIX = /^(Location|Company|Organisation|Employer|Salary|Description):\s*/i;
 
 export function extractTitleFromText(text: string): string | undefined {
   const lines = text.split('\n');
   for (const line of lines) {
-    const trimmed = line.trim().replace(TEXT_LABEL_PREFIX, '');
-    if (trimmed.length > 0 && trimmed.length <= 200 && !trimmed.startsWith('#')) {
-      return trimmed;
+    const trimmed = line.trim();
+    if (NON_TITLE_LABEL_PREFIX.test(trimmed)) continue;
+    const candidate = trimmed.replace(TITLE_LABEL_PREFIX, '');
+    if (candidate.length > 0 && candidate.length <= 200 && !candidate.startsWith('#')) {
+      return candidate;
     }
   }
   // Also try first heading
