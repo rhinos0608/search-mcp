@@ -239,6 +239,10 @@ export const JobsAcquisitionConfigSchema = z
   .object({
     destinationFetchEnabled: z.boolean(),
     atsTenants: z.array(AtsTenantConfigSchema).max(64),
+    /** Operator-listed JobSpy boards. Load-time default (when env and file config are unset) is all boards — TEMPORARY local default, revert to strict opt-in before public release. Unknown names are dropped with a warning at load time. Explicit empty list opts out. */
+    jobspyBoards: z.array(z.string().min(1).max(64)).max(16).default([]),
+    /** Whether JobSpy record descriptions are fetched (cost; keep false unless operator explicitly opts in). */
+    jobspyFetchDescription: z.boolean().default(false),
   })
   .strict();
 export type JobsAcquisitionConfig = z.infer<typeof JobsAcquisitionConfigSchema>;
@@ -246,4 +250,6 @@ export type JobsAcquisitionConfig = z.infer<typeof JobsAcquisitionConfigSchema>;
 export const DEFAULT_JOBS_ACQUISITION_CONFIG: Readonly<JobsAcquisitionConfig> = Object.freeze({
   destinationFetchEnabled: false,
   atsTenants: [],
+  jobspyBoards: [],
+  jobspyFetchDescription: false,
 });

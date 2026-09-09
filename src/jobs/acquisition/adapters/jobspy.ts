@@ -54,8 +54,11 @@ export const JOBSPY_BOARDS = [
 
 export type JobSpyBoard = (typeof JOBSPY_BOARDS)[number];
 
-// No boards are authorized by default. Operators must provide explicit policy evidence.
-export const DEFAULT_JOBSPY_BOARDS = [] as const;
+// TEMPORARY LOCAL DEFAULT (revert before public release): deviates from
+// ADR-011 strict opt-in so local development has job boards without setup.
+// Public release must restore: `export const DEFAULT_JOBSPY_BOARDS = [] as const;`
+// and the strict opt-in posture (operators list boards explicitly).
+export const DEFAULT_JOBSPY_BOARDS = JOBSPY_BOARDS;
 
 const JOBSPY_BOARD_SET = new Set<string>(JOBSPY_BOARDS as readonly string[]);
 
@@ -73,6 +76,8 @@ export interface JobSpyBoardRequest {
   capturedAt: string;
   /** Caller cancellation is composed with adapter timeout. */
   abortSignal?: AbortSignal;
+  /** Operator opt-in: fetch descriptions where the board supports it (cost). */
+  fetchDescription?: boolean;
   filters?: {
     location?: string;
     isRemote?: boolean;
@@ -316,8 +321,8 @@ export async function runJobSpyBoard(
     is_remote: typeof filters?.isRemote === 'boolean' ? filters.isRemote : false,
     results_wanted: cappedResults,
     description_format: 'markdown',
-    linkedin_fetch_description: false,
-    indeed_fetch_description: false,
+    linkedin_fetch_description: request.fetchDescription === true,
+    indeed_fetch_description: request.fetchDescription === true,
   };
   if (typeof filters?.jobType === 'string' && VALID_JOB_TYPES.has(filters.jobType)) {
     params.job_type = filters.jobType;
@@ -476,6 +481,9 @@ export async function runJobSpyBoard(
     if (title.trim().length > 0) parts.push(`Title: ${title.trim()}`);
     if (company.trim().length > 0) parts.push(`Company: ${company.trim()}`);
     if (locationStr.trim().length > 0) parts.push(`Location: ${locationStr.trim()}`);
+    const salaryRaw =
+      typeof rec.salary === 'string' || typeof rec.salary === 'number' ? String(rec.salary) : '';
+    if (salaryRaw.trim().length > 0) parts.push(`Salary: ${salaryRaw.trim()}`);
     if (description.trim().length > 0) parts.push(`Description:\n${description.trim()}`);
     let boundedText = parts.join('\n\n');
     if (boundedText.length > 32768) boundedText = boundedText.slice(0, 32768);

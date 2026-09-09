@@ -1,6 +1,15 @@
 # ADR-011: SourcePolicy independent from adapters
 
-**Status:** Approved
+**Status:** Approved — amended (temporary local default)
+
+## Amendment (temporary local default — revert before public release)
+
+The strict opt-in posture (JobSpy boards empty until the operator lists them) is
+**temporarily relaxed for local development**: when neither `JOBSPY_BOARDS` nor
+`jobsAcquisition.jobspyBoards` is configured, all known JobSpy boards are
+enabled by default, with opt-out via `JOBSPY_ENABLED=false` or an explicit empty
+board list. This deviation is local-only and must be reverted to strict opt-in
+(`DEFAULT_JOBSPY_BOARDS = []`) before any public release.
 
 ## Decision
 

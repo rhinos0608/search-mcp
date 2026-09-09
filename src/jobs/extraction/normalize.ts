@@ -97,10 +97,12 @@ export const JSONLD_FIELD_MAPPINGS: readonly JsonLdFieldMapping[] = [
 
 // ── Unstructured title extraction ──────────────────────────────────────
 
+const TEXT_LABEL_PREFIX = /^(Title|Location|Company|Organisation|Employer|Salary|Description):\s*/i;
+
 export function extractTitleFromText(text: string): string | undefined {
   const lines = text.split('\n');
   for (const line of lines) {
-    const trimmed = line.trim();
+    const trimmed = line.trim().replace(TEXT_LABEL_PREFIX, '');
     if (trimmed.length > 0 && trimmed.length <= 200 && !trimmed.startsWith('#')) {
       return trimmed;
     }
@@ -114,6 +116,32 @@ export function extractTitleFromText(text: string): string | undefined {
     }
   }
   return undefined;
+}
+
+// ── Unstructured organisation extraction ───────────────────────────────
+
+/**
+ * Parse a free-text `Location:` label into a Location object (comma-separated
+ * city, region, country). Deterministic heuristic; no geo resolution.
+ */
+export function extractLocationFromText(
+  text: string,
+): { city?: string; region?: string; country?: string } | undefined {
+  const match = /^Location:\s*(.+)$/im.exec(text);
+  const value = match?.[1];
+  if (value === undefined) return undefined;
+  const parts = value
+    .split(',')
+    .map((p) => p.trim())
+    .filter((p) => p.length > 0)
+    .slice(0, 3);
+  const [first, second, third] = parts;
+  if (first === undefined) return undefined;
+  if (second !== undefined && third !== undefined) {
+    return { city: first, region: second, country: third };
+  }
+  if (second !== undefined) return { city: first, region: second };
+  return { city: first };
 }
 
 // ── Unstructured organisation extraction ───────────────────────────────

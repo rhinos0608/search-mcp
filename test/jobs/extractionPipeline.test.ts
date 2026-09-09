@@ -214,3 +214,116 @@ describe('W5 extraction pipeline', () => {
     }
   });
 });
+
+// F4: unstructured extraction never leaks field labels, and parses
+// Location:/salary from bounded adapter evidence text.
+test('extractTitleFromText strips Title:/Location:/Salary: label prefixes', async () => {
+  const { extractTitleFromText, extractLocationFromText } =
+    await import('../../src/jobs/extraction/normalize.js');
+  assert.equal(extractTitleFromText('Title: Senior Plumber'), 'Senior Plumber');
+  assert.equal(extractTitleFromText('Title: Senior Plumber\n\nCompany: Acme'), 'Senior Plumber');
+  assert.deepEqual(extractLocationFromText('Location: Melbourne VIC'), { city: 'Melbourne VIC' });
+  assert.deepEqual(extractLocationFromText('Location: Sydney, NSW, Australia'), {
+    city: 'Sydney',
+    region: 'NSW',
+    country: 'Australia',
+  });
+  assert.equal(extractLocationFromText('no location label'), undefined);
+});
+
+test('jobspy-shaped evidence text extracts location and salary into projection', async () => {
+  const { runJobSpyBoard, JOBSPY_CAPABILITY } =
+    await import('../../src/jobs/acquisition/adapters/jobspy.js');
+  const { AdapterCapabilityRegistry } =
+    await import('../../src/jobs/acquisition/adapterRegistry.js');
+  const { SourcePolicyRegistry } = await import('../../src/jobs/acquisition/policy/registry.js');
+  const { resolveExecutionPolicyEdge } =
+    await import('../../src/jobs/acquisition/policy/edgeCoordinator.js');
+  const slice = {
+    schemaVersion: '1.0.0',
+    runId: 'run-1',
+    sliceId: 'slice-js',
+    ordinal: 0,
+    queryVariantId: 'qv-1',
+    query: 'plumber',
+    reason: 'test',
+    adapterIds: ['jobspy'],
+    localePackRefs: [],
+    domainPackRefs: [],
+    budget: {
+      logicalRequests: 2,
+      reservedAttempts: 5,
+      candidates: 10,
+      bytes: 100000,
+      milliseconds: 70000,
+    },
+  };
+  const reg = new SourcePolicyRegistry([
+    {
+      sourceId: 'linkedin',
+      revision: 'r',
+      modes: {
+        automatedSearch: 'permitted',
+        automatedFetch: 'permitted',
+        userSuppliedContent: 'permitted',
+        manualImport: 'permitted',
+        employerApi: 'not_supported',
+      },
+      evidenceRefs: ['ev1'],
+      reviewedAt: '2026-01-01T00:00:00Z',
+    } as never,
+  ]);
+  const edge = resolveExecutionPolicyEdge(
+    reg,
+    {
+      edgeId: 'edge-1',
+      actor: { kind: 'adapter', namespace: 'adapter', id: 'jobspy' },
+      operation: 'automatedSearch',
+      route: 'direct',
+      target: { kind: 'board', sourceId: 'linkedin' },
+    } as never,
+    { decidedAt: '2026-01-02T00:00:00Z' },
+  );
+  const caps = new AdapterCapabilityRegistry([JOBSPY_CAPABILITY]);
+  const res = await runJobSpyBoard(
+    {
+      slice: slice as never,
+      board: 'linkedin' as never,
+      executionEdge: edge as never,
+      capturedAt: '2026-01-02T00:00:00Z',
+    },
+    {
+      capabilityRegistry: caps,
+      policyRegistry: reg,
+      scrapeJobs: (async () => ({
+        jobs: [
+          {
+            title: 'Senior Plumber',
+            company: 'Acme Corp',
+            location: 'Melbourne VIC',
+            job_url: 'https://example.test/jobs/1',
+            description: 'Fix pipes.',
+            site: 'linkedin',
+            salary: 'AUD 120,000 to 140,000 per year',
+          },
+        ],
+        totalScraped: 1,
+        newCount: 1,
+      })) as never,
+    },
+  );
+  assert.ok(res.evidence.length >= 1);
+  const bounded = (res.evidence[0] as unknown as { boundedText?: string }).boundedText ?? '';
+  assert.ok(bounded.includes('Salary: AUD 120,000 to 140,000 per year'));
+  const out = await extractObservation({
+    schemaVersion: '1.0.0',
+    envelope: res.observations[0],
+    evidence: res.evidence,
+    attachments: [],
+    now: '2026-01-02T00:00:00Z',
+  } as never);
+  assert.equal(out.projection.fields.title, 'Senior Plumber');
+  assert.equal(out.projection.fields.organisation, 'Acme Corp');
+  assert.deepEqual(out.projection.locations[0], { city: 'Melbourne VIC' });
+  assert.ok(out.projection.salaries[0]?.raw.includes('120,000'));
+});

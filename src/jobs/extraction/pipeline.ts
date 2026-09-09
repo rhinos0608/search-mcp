@@ -34,6 +34,7 @@ import {
   extractWorkModeFromText,
   extractEmploymentTypeFromText,
   extractSalaryFromText,
+  extractLocationFromText,
   normalizeTitle,
 } from './normalize.js';
 
@@ -150,6 +151,21 @@ function extractFromText(
     fields.push({
       fieldPath: 'organisation',
       value: org,
+      evidenceId: eid,
+      method: 'text_span',
+      origin,
+      confidence: METHOD_CONFIDENCE.text_span,
+    });
+  }
+
+  // Location: label → Location-shaped object (comma = city, region, country).
+  // Schema-validated downstream; invalid shapes drop with a warning.
+  const location = extractLocationFromText(text);
+  if (location) {
+    const eid = jobsEvidenceId(observationId, 'text_span', 'location', null, null, null);
+    fields.push({
+      fieldPath: 'location',
+      value: location,
       evidenceId: eid,
       method: 'text_span',
       origin,

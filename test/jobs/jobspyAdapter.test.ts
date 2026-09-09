@@ -140,8 +140,8 @@ test('JOBSPY_BOARDS exact ordered list', () => {
   );
 });
 
-test('DEFAULT_JOBSPY_BOARDS exact', () => {
-  assert.deepEqual([...DEFAULT_JOBSPY_BOARDS], []);
+test('DEFAULT_JOBSPY_BOARDS exact (temporary local default: all boards on)', () => {
+  assert.deepEqual([...DEFAULT_JOBSPY_BOARDS], [...JOBSPY_BOARDS]);
 });
 
 test('JOBSPY_CAPABILITY exact triple automatedSearch/direct/board', () => {

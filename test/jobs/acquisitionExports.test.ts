@@ -224,7 +224,8 @@ test('W3-D/E/F barrel smoke: indexed definitions, capabilities, rakes, manual sc
     'zip_recruiter',
     'glassdoor',
   ]);
-  assert.deepEqual([...DEFAULT_JOBSPY_BOARDS], []);
+  // Temporary local default: all boards on; revert to [] before public release.
+  assert.deepEqual([...DEFAULT_JOBSPY_BOARDS], [...JOBSPY_BOARDS]);
   assert.equal(JOBSPY_CAPABILITY.edges.length, 1);
   assert.deepEqual(JOBSPY_CAPABILITY.edges[0], {
     operation: 'automatedSearch',

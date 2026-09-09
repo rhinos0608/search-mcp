@@ -287,7 +287,12 @@ test('case 16: SEEK entry has correct contract', () => {
 });
 
 test('case 17: destination fetch flag false gives zero capabilities', () => {
-  const config = { destinationFetchEnabled: false, atsTenants: [] };
+  const config = {
+    destinationFetchEnabled: false,
+    atsTenants: [],
+    jobspyBoards: [],
+    jobspyFetchDescription: false,
+  };
   const caps = destinationFetchCapabilities(config);
   assert.equal(caps.length, 0);
 });
@@ -394,6 +399,8 @@ test('case 23: invalid jobs config fails closed to defaults', () => {
   assert.deepEqual(DEFAULT_JOBS_ACQUISITION_CONFIG, {
     destinationFetchEnabled: false,
     atsTenants: [],
+    jobspyBoards: [],
+    jobspyFetchDescription: false,
   });
 });
 

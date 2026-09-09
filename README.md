@@ -187,6 +187,15 @@ Parsers auto-discover `pdf-parse`/`officeparser` and degrade gracefully (a warni
 | `SEMANTIC_CRAWL_DEFAULT_MAX_BYTES` | `52428800` | Default max bytes per crawl (50 MB) |
 | `SEMANTIC_CRAWL_MAX_MAX_BYTES`     | `52428800` | Hard cap on max bytes (50 MB)       |
 
+### Jobs (JobSpy boards)
+
+| Variable         | Default                              | Description                                                                                                                                                                                                                                                                                                   |
+| ---------------- | ------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `JOBSPY_BOARDS`  | All boards (temporary local default) | Comma-separated JobSpy board names for `jobs_search`/`jobs` (e.g. `linkedin,indeed`). Unset = **all supported boards enabled** (temporary local default; public release restores opt-in, unset = JobSpy disabled). Set `JOBSPY_ENABLED=false` to opt out. Overrides `jobsAcquisition.jobspyBoards` in config. |
+| `JOBSPY_ENABLED` | `true` (temporary)                   | Set to `false` to disable JobSpy acquisition entirely regardless of `JOBSPY_BOARDS`.                                                                                                                                                                                                                          |
+
+Supported board names: `linkedin`, `indeed`, `zip_recruiter`, `glassdoor`, `google`, `google_careers`, `bayt`, `naukri`, `bdjobs`. Unknown names are dropped with a warning; at most 16 boards are accepted. **Note:** default-on is a temporary local-development behaviour; it will be switched back to strict opt-in per ADR-011 before any public release.
+
 ### Misc
 
 | Variable                      | Default                               | Description                                     |

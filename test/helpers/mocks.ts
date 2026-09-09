@@ -53,6 +53,8 @@ const baseConfig: SearchConfig = {
   jobsAcquisition: {
     destinationFetchEnabled: false,
     atsTenants: [],
+    jobspyBoards: [],
+    jobspyFetchDescription: false,
   },
   browser: {
     enabled: false,

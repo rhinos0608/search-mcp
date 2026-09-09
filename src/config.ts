@@ -14,6 +14,7 @@ import { logger } from './logger.js';
 import { DEFAULT_SEMANTIC_MAX_BYTES } from './semanticLimits.js';
 import type { AccessConfig } from './config/types.js';
 import type { JobsAcquisitionConfig } from './jobs/acquisition/sourceClass/contracts.js';
+import { JOBSPY_BOARDS, DEFAULT_JOBSPY_BOARDS } from './jobs/acquisition/adapters/jobspy.js';
 import { decryptConfig } from './config/crypto.js';
 import { codexConfigured } from './tools/codexSearch.js';
 
@@ -386,6 +387,8 @@ const DEFAULTS: Omit<SearchConfig, 'rescoreWeights'> = {
   jobsAcquisition: {
     destinationFetchEnabled: false,
     atsTenants: [],
+    jobspyBoards: [],
+    jobspyFetchDescription: false,
   },
   browser: {
     enabled: true,
@@ -456,6 +459,57 @@ type EnvConfig = Omit<
   duckduckgo?: Partial<{ region: string; safeSearch: string }>;
   ollamaSearch?: Partial<{ baseUrl: string; apiKey: string }>;
 };
+
+const JOBSPY_BOARD_SET = new Set<string>(JOBSPY_BOARDS as readonly string[]);
+const JOBSPY_BOARDS_MAX = 16;
+
+/**
+ * Resolve jobspyBoards from env (comma list, highest priority) or file config.
+ * Unknown board names are dropped with a warning (never silently enabled).
+ *
+ * TEMPORARY LOCAL DEFAULT (revert before public release): when neither env nor
+ * file config lists boards, all known boards are enabled. Operators opt out
+ * with JOBSPY_ENABLED=false or an explicit empty jobspyBoards list. ADR-011's
+ * strict opt-in posture must be restored for any public release.
+ */
+function resolveJobspyBoards(
+  envRaw: string | undefined,
+  fileBoards: readonly string[] | undefined,
+): string[] {
+  if ((process.env.JOBSPY_ENABLED ?? '').trim().toLowerCase() === 'false') return [];
+  const candidate: readonly string[] | undefined =
+    envRaw !== undefined && envRaw.trim().length > 0 ? envRaw.split(',') : fileBoards;
+  if (candidate === undefined) return [...DEFAULT_JOBSPY_BOARDS];
+  const known: string[] = [];
+  const unknown: string[] = [];
+  for (const raw of candidate) {
+    const name = raw.trim().toLowerCase();
+    if (name.length === 0) continue;
+    if (JOBSPY_BOARD_SET.has(name)) {
+      if (!known.includes(name)) known.push(name);
+    } else {
+      unknown.push(name);
+    }
+  }
+  if (unknown.length > 0) {
+    logger.warn(
+      { unknown: unknown.slice(0, 16), known: JOBSPY_BOARDS },
+      'JOBSPY_BOARDS: unknown board names dropped',
+    );
+  }
+  return known.slice(0, JOBSPY_BOARDS_MAX);
+}
+
+function resolveJobsAcquisitionConfig(
+  fileConfig: Partial<JobsAcquisitionConfig> | undefined,
+): JobsAcquisitionConfig {
+  return {
+    destinationFetchEnabled: false,
+    atsTenants: [],
+    jobspyBoards: resolveJobspyBoards(process.env.JOBSPY_BOARDS, fileConfig?.jobspyBoards),
+    jobspyFetchDescription: fileConfig?.jobspyFetchDescription === true,
+  };
+}
 
 function loadFromEnv(): EnvConfig {
   const cfg: EnvConfig = {};
@@ -1165,10 +1219,7 @@ export function loadConfig(): SearchConfig {
           DEFAULTS.access.tailscale.allowDashboardOverFunnel,
       },
     },
-    jobsAcquisition: {
-      destinationFetchEnabled: false,
-      atsTenants: [],
-    },
+    jobsAcquisition: resolveJobsAcquisitionConfig(fileConfig.jobsAcquisition),
   };
 
   // Validate weights
