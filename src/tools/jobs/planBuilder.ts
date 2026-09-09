@@ -1,5 +1,10 @@
-import type { AcquisitionPolicyEdge } from '../../jobs/acquisition/contracts.js';
-import type { AcquisitionSlicePlanItem } from '../../jobs/acquisition/coordinator.js';
+import type { AcquisitionPolicyEdge, AcquisitionSlice } from '../../jobs/acquisition/contracts.js';
+import type { AcquisitionRunId, AcquisitionSliceId } from '../../jobs/acquisition/ids.js';
+import type {
+  AcquisitionSlicePlanItem,
+  IndexedSlicePlanItem,
+  JobSpySlicePlanItem,
+} from '../../jobs/acquisition/coordinator.js';
 import {
   SEEK_DESTINATION_CLASS,
   supportsIndexedDomainFilter,
@@ -77,12 +82,16 @@ export function buildPlan(
   const reservedTotal = Math.min(10000, Math.max(20, 3 * Math.max(1, sliceCount)));
   const plan: AcquisitionSlicePlanItem[] = [];
   let ordinal = 0;
-  const sliceBase = (sliceId: string, adapterIds: string[], queryVariantId: string) => {
+  const sliceBase = (
+    sliceId: string,
+    adapterIds: string[],
+    queryVariantId: string,
+  ): AcquisitionSlice => {
     const sliceIndex = ordinal;
     return {
       schemaVersion: '1.0.0' as const,
-      runId,
-      sliceId,
+      runId: runId as AcquisitionRunId,
+      sliceId: sliceId as AcquisitionSliceId,
       ordinal: ordinal++,
       queryVariantId,
       query: opts.query.slice(0, 2048),
@@ -100,7 +109,7 @@ export function buildPlan(
     };
   };
   for (const providerId of providerIds) {
-    plan.push({
+    const item: IndexedSlicePlanItem = {
       kind: 'indexed',
       slice: sliceBase(
         `slice-indexed-${providerId.replace(/[^A-Za-z0-9_-]/g, '-')}`,
@@ -109,12 +118,13 @@ export function buildPlan(
       ),
       providerId,
       safeSearch: 'moderate',
-    } as unknown as AcquisitionSlicePlanItem);
+    };
+    plan.push(item);
   }
   if (ctx !== undefined) {
     for (const providerId of classProviderIds) {
       const edges = ctx.informationalEdgesFor?.(SEEK_DESTINATION_CLASS.id, providerId) ?? [];
-      const item: Record<string, unknown> = {
+      const item: IndexedSlicePlanItem = {
         kind: 'indexed',
         slice: sliceBase(
           `slice-indexed-${providerId.replace(/[^A-Za-z0-9_-]/g, '-')}-seek`,
@@ -128,15 +138,15 @@ export function buildPlan(
           targetKind: SEEK_DESTINATION_CLASS.targetKind,
         },
         includeDomains: [...SEEK_DESTINATION_CLASS.includeDomains],
+        ...(edges.length > 0 ? { informationalEdges: [...edges] } : {}),
       };
-      if (edges.length > 0) item.informationalEdges = edges;
-      plan.push(item as unknown as AcquisitionSlicePlanItem);
+      plan.push(item);
     }
   }
   if (opts.useJobSpy !== false) {
     const loc = Array.isArray(opts.location) ? opts.location[0] : opts.location;
     for (const board of jobspyBoards) {
-      plan.push({
+      const item: JobSpySlicePlanItem = {
         kind: 'jobspy',
         slice: sliceBase(`slice-jobspy-${board}`, ['jobspy'], 'qv-1'),
         board,
@@ -147,7 +157,8 @@ export function buildPlan(
           ...(opts.jobType ? { jobType: opts.jobType } : {}),
           resultsWanted: opts.resultsWanted ?? 20,
         },
-      } as unknown as AcquisitionSlicePlanItem);
+      };
+      plan.push(item);
     }
   }
   return plan;
@@ -183,3 +194,5 @@ export function deriveJobsRunBudget(
     milliseconds,
   };
 }
+
+export type JobsRunBudget = ReturnType<typeof deriveJobsRunBudget>;

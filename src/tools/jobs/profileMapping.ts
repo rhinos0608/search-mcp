@@ -1,39 +1,41 @@
+import { z } from 'zod/v4';
 import { canonicalProfileTermKey } from '../../jobs/profile/minimize.js';
 import type { DomainPack } from '../../jobs/packs/types.js';
 
-export interface PublicProfileInput {
-  roleHints?: readonly string[];
-  capabilities?: readonly string[];
-}
+export const publicProfileSchema = z
+  .object({
+    roleHints: z.array(z.string().trim().min(1).max(128)).max(32).optional(),
+    capabilities: z.array(z.string().trim().min(1).max(128)).max(32).optional(),
+  })
+  .strict()
+  .refine((value) => value.roleHints !== undefined || value.capabilities !== undefined, {
+    message: 'profile requires roleHints or capabilities',
+  });
+
+export type PublicProfileInput = z.infer<typeof publicProfileSchema>;
+
+export type MappedProfileTerm =
+  | { kind: 'role'; packId: string; packVersion: string; termId: string }
+  | { kind: 'capability'; packId: string; packVersion: string; termId: string };
 
 export interface MappedProfile {
   profileInput: {
     kind: 'structured_profile';
     profile: {
-      roleHints?: { kind: 'role'; packId: string; packVersion: string; termId: string }[];
-      capabilities?: {
-        kind: 'capability';
-        packId: string;
-        packVersion: string;
-        termId: string;
-      }[];
+      roleHints?: MappedProfileTerm[];
+      capabilities?: MappedProfileTerm[];
     };
   };
   allowedTermRefs: ReadonlySet<string>;
 }
 
-const clean = (value: string): string => value.trim().toLocaleLowerCase();
+const clean = (value: string): string => value.trim().toLocaleLowerCase('en-US');
 
 export function mapPublicProfile(input: unknown, pack: DomainPack): MappedProfile {
   if (!input || typeof input !== 'object' || Array.isArray(input))
     throw new Error('profile must be an object with pack-approved roleHints/capabilities');
   const value = input as Record<string, unknown>;
-  const mapTerms = <K extends 'role' | 'capability'>(
-    raw: unknown,
-    kind: K,
-  ): K extends 'role'
-    ? { kind: 'role'; packId: string; packVersion: string; termId: string }[] | undefined
-    : { kind: 'capability'; packId: string; packVersion: string; termId: string }[] | undefined => {
+  const mapTerms = (raw: unknown, kind: 'role' | 'capability'): MappedProfileTerm[] | undefined => {
     if (raw === undefined) return undefined;
     if (
       !Array.isArray(raw) ||
@@ -43,7 +45,7 @@ export function mapPublicProfile(input: unknown, pack: DomainPack): MappedProfil
       throw new Error(
         `profile.${kind === 'role' ? 'roleHints' : 'capabilities'} must be bounded strings`,
       );
-    const mapped = raw.map((term) => {
+    return raw.map((term): MappedProfileTerm => {
       const needle = clean(term as string);
       const node =
         kind === 'role'
@@ -59,9 +61,6 @@ export function mapPublicProfile(input: unknown, pack: DomainPack): MappedProfil
       if (!termId) throw new Error(`profile term is not approved by ${pack.id}: ${String(term)}`);
       return { kind, packId: pack.id, packVersion: pack.version, termId };
     });
-    return mapped as unknown as K extends 'role'
-      ? { kind: 'role'; packId: string; packVersion: string; termId: string }[]
-      : { kind: 'capability'; packId: string; packVersion: string; termId: string }[];
   };
   const roleHints = mapTerms(value.roleHints, 'role');
   const capabilities = mapTerms(value.capabilities, 'capability');

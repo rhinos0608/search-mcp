@@ -102,14 +102,47 @@ test('fix2 execution edge metadata mismatch fails closed before scrape', async (
   assert.equal(result.coverage[0]?.state, 'not_supported');
 });
 
+import { projectJobsCandidate } from '../../src/tools/jobs/searchBuilder.js';
+import type { JobsSearchCandidate } from '../../src/jobs/orchestration/searchContracts.js';
+
 test('fix2 MCP candidate mapping exposes bounded source provenance', () => {
-  // Contract-level guard: fields mapped by jobs_search already exist and are bounded.
-  const candidate = {
-    provenance: ['indexed'],
-    sourceListingIds: ['listing-1'],
-    observationIds: [],
+  const rawCandidate: JobsSearchCandidate = {
+    candidateId: 'cand-1',
+    rank: 1,
+    title: 'Senior Engineer',
+    organisation: 'GovNSW',
+    utility: 0.95,
+    coverage: 0.8,
+    confidence: 0.9,
+    eligibility: 'eligible',
+    eligibilityGates: [],
     evidenceState: 'indexed_only',
+    flags: [],
+    caveats: [],
+    evidenceRefs: [],
+    provenance: Array.from({ length: 8 }, () => 'indexed' as const),
+    sourceListingIds: Array.from({ length: 20 }, (_, i) => `listing-${i}`),
+    observationIds: Array.from({ length: 20 }, (_, i) => `obs-${i}`),
+    profileApplied: false,
+    identityDecisionRevision: '1',
+    retrievalMetadata: {
+      rrfRank: 1,
+      rrfScore: 0.5,
+      scoredChannelCount: 1,
+      textBm25Score: 1,
+    },
+    groupScores: {
+      relevance: 1,
+      candidateFit: 1,
+      preferenceFit: 1,
+      marketState: 1,
+      evidenceQuality: 1,
+      personalAdaptation: 1,
+    },
   };
-  assert.deepEqual(candidate.provenance, ['indexed']);
-  assert.equal(candidate.evidenceState, 'indexed_only');
+  const projected = projectJobsCandidate(rawCandidate);
+  assert.equal(projected.provenance.length, 8);
+  assert.equal(projected.sourceListingIds.length, 16);
+  assert.equal(projected.observationIds.length, 16);
+  assert.equal(projected.evidenceState, 'indexed_only');
 });

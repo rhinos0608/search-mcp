@@ -16,8 +16,7 @@ import { logger } from '../../logger.js';
 import { tolerant } from '../normalize.js';
 import { makeResult, errorResponse, successResponse } from '../response.js';
 import { jobErrorCode, jobTelemetry } from '../../utils/jobTelemetry.js';
-import { executeJobsSearch, JobsSearchError } from '../../jobs/orchestration/search.js';
-import { AU_NSW_SYDNEY_LOCALE_PACK } from '../../jobs/packs/auNswSydney.locale.js';
+import { executeJobsSearch } from '../../jobs/orchestration/search.js';
 import { NSW_PUBLIC_ADMIN_DOMAIN_PACK } from '../../jobs/packs/nswPublicAdmin.domain.js';
 import {
   buildJobsMcpDeps,
@@ -35,17 +34,12 @@ import {
   informationalSeekEdgesFromEntry,
 } from '../../jobs/acquisition/sourceClass/seek.js';
 import { SEEK_POLICY_EVIDENCE } from '../../jobs/acquisition/sourceClass/evidence/livePolicyEvidence.js';
-import { mapPublicProfile, type PublicProfileInput } from '../jobs/profileMapping.js';
-
-const publicProfileSchema = z
-  .object({
-    roleHints: z.array(z.string().trim().min(1).max(128)).max(32).optional(),
-    capabilities: z.array(z.string().trim().min(1).max(128)).max(32).optional(),
-  })
-  .strict()
-  .refine((value) => value.roleHints !== undefined || value.capabilities !== undefined, {
-    message: 'profile requires roleHints or capabilities',
-  });
+import {
+  mapPublicProfile,
+  publicProfileSchema,
+  type PublicProfileInput,
+} from '../jobs/profileMapping.js';
+import { buildJobsSearchExecutionRequest, projectJobsCandidate } from '../jobs/searchBuilder.js';
 
 const inputSchema = {
   query: z
@@ -146,13 +140,12 @@ export function registerJobsSearch(
         }
         const runId = randomUUID();
         const capturedAt = new Date().toISOString();
+        if (args.profile !== undefined && !sydney) {
+          throw new Error('profile requires sydney:true so terms can be pack-approved');
+        }
         const mappedProfile =
           args.profile !== undefined
-            ? sydney
-              ? mapPublicProfile(args.profile, NSW_PUBLIC_ADMIN_DOMAIN_PACK)
-              : (() => {
-                  throw new Error('profile requires sydney:true so terms can be pack-approved');
-                })()
+            ? mapPublicProfile(args.profile, NSW_PUBLIC_ADMIN_DOMAIN_PACK)
             : undefined;
         const topK = args.topK ?? 10;
         const stageBudgets = deriveStageBudgets(topK);
@@ -185,79 +178,29 @@ export function registerJobsSearch(
         );
         const supporting = supportingIndexedProviderCount(deps.ports);
         const runBudget = deriveJobsRunBudget(plannedSlices.length, supporting, stageBudgets);
-        const data = await executeJobsSearch(
-          {
-            intent: {
-              query: args.query,
-              localePackIds: sydney ? ['au-nsw-sydney'] : [],
-              domainPackIds: sydney ? ['nsw-public-admin'] : [],
-              requestedRoleFamilies: [],
-              sectors: [],
-              locations: (args.location ?? []).map((city) => ({ city })),
-              workModes: (args.workMode ?? []).map((m) =>
-                m === 'remote' ? 'remote' : m === 'hybrid' ? 'hybrid' : 'onsite',
-              ),
-              employmentTypes: [],
-              compensation: [],
-              sourceIds: [],
-              explorationBreadth: 'balanced',
-              strictness: 'normal',
-              unknownPolicy: 'include',
-              topK,
-              budgets: {
-                requests: runBudget.logicalRequests,
-                pages: 10,
-                bytes: 200000,
-                milliseconds: runBudget.milliseconds,
-                enrichment: stageBudgets.indexedEnrichment,
-                reasoning: 0,
-              },
-              evidenceRefs: [],
-            },
-            plan: plannedSlices,
-            runId,
-            capturedAt,
-            budget: runBudget,
-            ...(sydney
-              ? { localePack: AU_NSW_SYDNEY_LOCALE_PACK, domainPack: NSW_PUBLIC_ADMIN_DOMAIN_PACK }
-              : {}),
-            ...(mappedProfile !== undefined
-              ? {
-                  profileInput: mappedProfile.profileInput,
-                  allowedProfileTermRefs: mappedProfile.allowedTermRefs,
-                }
-              : {}),
-          },
-          deps,
-        );
+        const request = buildJobsSearchExecutionRequest({
+          query: args.query,
+          topK,
+          sydney,
+          locations: (args.location ?? []).map((city) => ({ city })),
+          workModes: (args.workMode ?? []).map((m) =>
+            m === 'remote' ? 'remote' : m === 'hybrid' ? 'hybrid' : 'onsite',
+          ),
+          plan: plannedSlices,
+          runId,
+          capturedAt,
+          runBudget,
+          stageBudgets,
+          mappedProfile,
+        });
+        const data = await executeJobsSearch(request, deps);
         const result = makeResult(
           'jobs_search',
           {
             runId: data.runId,
             status: data.status,
             packVersions: data.versions.packVersions,
-            candidates: data.candidates.map((c) => ({
-              rank: c.rank,
-              title: c.title,
-              organisation: c.organisation,
-              utility: Math.round(c.utility * 1000) / 1000,
-              coverage: Math.round(c.coverage * 1000) / 1000,
-              confidence: Math.round(c.confidence * 1000) / 1000,
-              eligibility: c.eligibility,
-              evidenceState: c.evidenceState,
-              // Posting locator (canonical, credential-free) + bounded
-              // posting facts. Evidence refs/text stay non-public.
-              ...(c.listingUrl !== undefined ? { listingUrl: c.listingUrl } : {}),
-              ...(c.applyUrl !== undefined ? { applyUrl: c.applyUrl } : {}),
-              ...(c.location !== undefined ? { location: c.location } : {}),
-              ...(c.salaryText !== undefined ? { salaryText: c.salaryText } : {}),
-              ...(c.description !== undefined ? { description: c.description } : {}),
-              provenance: c.provenance.slice(0, 8),
-              sourceListingIds: c.sourceListingIds.slice(0, 16),
-              observationIds: c.observationIds.slice(0, 16),
-              flags: c.flags,
-              caveats: c.caveats,
-            })),
+            candidates: data.candidates.map(projectJobsCandidate),
             eligibilitySummary: data.eligibilitySummary,
             coverageOutcomes: data.coverageOutcomes,
           },
@@ -281,9 +224,6 @@ export function registerJobsSearch(
           { tool: 'jobs_search', stage: 'tool', errorCode: jobErrorCode(err) },
           'Tool failed',
         );
-        if (err instanceof JobsSearchError) {
-          return errorResponse(err, 'jobs_search');
-        }
         return errorResponse(err, 'jobs_search');
       }
     },

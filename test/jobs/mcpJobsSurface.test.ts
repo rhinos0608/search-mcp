@@ -8,6 +8,15 @@ import { buildJobsMcpDeps } from '../../src/tools/jobs/jobsDeps.js';
 import { loadConfig } from '../../src/config.js';
 import { INDEXED_PROVIDER_DEFINITIONS } from '../../src/jobs/acquisition/providers/ports.js';
 import { createServer } from '../../src/server.js';
+import { executeJobsSearch } from '../../src/jobs/orchestration/search.js';
+import {
+  mockPort,
+  baseIntent,
+  baseSlice,
+  baseRequest,
+  baseDeps,
+  snippetRecord,
+} from './seamFixtures.js';
 
 type RegisteredTools = Record<
   string,
@@ -211,7 +220,10 @@ describe('checkpoint D MCP surface', () => {
 
   test('useJobSpy:false does not treat disabled boards as available', async () => {
     const server = testServer();
-    registerJobsSearch(server, loadConfig(), { providerIds: [], jobspyBoards: [] } as never);
+    registerJobsSearch(server, loadConfig(), {
+      providerIds: [],
+      jobspyBoards: ['linkedin'],
+    } as never);
     const res = await callTool(server, 'jobs_search', { query: 'engineer', useJobSpy: false });
     assert.equal(res.isError, true);
     assert.match(res.text, /no indexed providers configured/i);
@@ -285,285 +297,79 @@ describe('checkpoint D MCP surface', () => {
 
 describe('checkpoint D MCP boundary paths', () => {
   test('partial source failure surfaces isolated coverage, ranked survivors', async () => {
-    const { executeJobsSearch } = await import('../../src/jobs/orchestration/search.js');
-    const { SourcePolicyRegistry } = await import('../../src/jobs/acquisition/policy/registry.js');
-    const { AdapterCapabilityRegistry } =
-      await import('../../src/jobs/acquisition/adapterRegistry.js');
-    const { INDEXED_PROVIDER_DEFINITIONS } =
-      await import('../../src/jobs/acquisition/providers/ports.js');
-    const mkPort2 = (search: () => Promise<unknown[]>, providerId: string) => {
-      const def = INDEXED_PROVIDER_DEFINITIONS.find((d) => d.providerId === providerId)!;
-      return {
-        backend: def.backend,
-        adapterId: def.adapterId,
-        providerId: def.providerId,
-        governance: def.governance,
-        maxDurationMs: def.maxDurationMs,
-        search,
-      };
-    };
-    const good = mkPort2(
-      async () => [
-        {
-          title: 'Good Engineer',
-          url: 'https://example.test/good/1',
-          description: 'good snippet',
-          position: 1,
-          domain: 'example.test',
-          source: 'brave',
-          age: null,
-          ageKind: 'unknown',
-          extraSnippet: null,
-          deepLinks: null,
-          contentKind: 'snippet',
-          generatedSummary: null,
-        },
-      ],
-      'search-provider:brave',
-    );
-    const bad = mkPort2(async () => {
-      throw new Error('provider boom');
-    }, 'search-provider:exa');
-    const pol = (sourceId: string) => ({
-      sourceId,
-      revision: 'rev-1',
-      modes: {
-        automatedSearch: 'permitted',
-        automatedFetch: 'permitted',
-        userSuppliedContent: 'permitted',
-        manualImport: 'permitted',
-        employerApi: 'not_supported',
-      },
-      evidenceRefs: [],
-      reviewedAt: '2026-01-01T00:00:00Z',
-    });
-    const ports = [good, bad];
-    const { indexedProviderCapabilities } =
-      await import('../../src/jobs/acquisition/providers/ports.js');
-    const reg = new SourcePolicyRegistry([
-      pol(good.providerId),
-      pol(bad.providerId),
-      pol('manual'),
-    ] as never);
-    const caps = new AdapterCapabilityRegistry([
-      ...indexedProviderCapabilities(ports as never),
-      {
-        schemaVersion: '1.0.0',
-        adapterId: 'manual',
-        adapterVersion: '1.0.0',
-        edges: [
-          { operation: 'manualImport', route: 'user_supplied', targetKind: 'adapter' },
-          { operation: 'userSuppliedContent', route: 'user_supplied', targetKind: 'adapter' },
-        ],
-      } as never,
+    const good = mockPort('search-provider:brave', async () => [
+      snippetRecord({
+        title: 'Good Engineer',
+        url: 'https://example.test/good/1',
+        description: 'good snippet',
+        source: 'brave',
+      }),
     ]);
-    const slice = (runId: string, sliceId: string, adapterId: string) => ({
-      schemaVersion: '1.0.0',
-      runId,
-      sliceId,
-      ordinal: 0,
-      queryVariantId: 'qv-1',
-      query: 'engineer',
-      reason: 'partial failure',
-      adapterIds: [adapterId],
-      localePackRefs: [],
-      domainPackRefs: [],
-      budget: {
-        logicalRequests: 2,
-        reservedAttempts: 5,
-        candidates: 10,
-        bytes: 100000,
-        milliseconds: 70000,
-      },
+    const bad = mockPort('search-provider:exa', async () => {
+      throw new Error('provider boom');
     });
     const result = await executeJobsSearch(
-      {
-        intent: {
-          query: 'engineer',
-          localePackIds: [],
-          domainPackIds: [],
-          requestedRoleFamilies: [],
-          sectors: [],
-          locations: [],
-          workModes: [],
-          employmentTypes: [],
-          compensation: [],
-          sourceIds: [],
-          explorationBreadth: 'balanced',
-          strictness: 'normal',
-          unknownPolicy: 'include',
-          topK: 10,
-          budgets: {
-            requests: 10,
-            pages: 10,
-            bytes: 200000,
-            milliseconds: 60000,
-            enrichment: 0,
-            reasoning: 0,
-          },
-          evidenceRefs: [],
-        },
+      baseRequest({
+        intent: baseIntent({ query: 'engineer' }),
         plan: [
           {
             kind: 'indexed',
-            slice: slice('run-pf', 's-good', good.adapterId),
+            slice: baseSlice({
+              runId: 'run-pf',
+              sliceId: 's-good',
+              adapterIds: [good.adapterId],
+              reason: 'partial failure',
+            }),
             providerId: good.providerId,
             safeSearch: 'moderate',
           },
           {
             kind: 'indexed',
-            slice: slice('run-pf', 's-bad', bad.adapterId),
+            slice: baseSlice({
+              runId: 'run-pf',
+              sliceId: 's-bad',
+              adapterIds: [bad.adapterId],
+              reason: 'partial failure',
+            }),
             providerId: bad.providerId,
             safeSearch: 'moderate',
           },
         ],
         runId: 'run-pf',
-        capturedAt: '2026-01-02T00:00:00Z',
-        budget: {
-          logicalRequests: 10,
-          reservedAttempts: 20,
-          candidates: 10,
-          bytes: 200000,
-          milliseconds: 70000,
-        },
-      } as never,
-      {
-        policyRegistry: reg,
-        capabilityRegistry: caps,
-        ports: ports as never,
-        scrapeJobs: async () => ({ jobs: [], totalScraped: 0, newCount: 0 }) as never,
-      } as never,
+      }),
+      baseDeps([good, bad]) as never,
     );
     assert.ok(result.candidates.length >= 1);
     assert.ok(result.coverageOutcomes.some((o) => o.sliceId === 's-bad' && o.isolated));
   });
 
   test('indexed-only candidate carries no observation ids', async () => {
-    const { executeJobsSearch } = await import('../../src/jobs/orchestration/search.js');
-    const { SourcePolicyRegistry } = await import('../../src/jobs/acquisition/policy/registry.js');
-    const { AdapterCapabilityRegistry } =
-      await import('../../src/jobs/acquisition/adapterRegistry.js');
-    const { INDEXED_PROVIDER_DEFINITIONS, indexedProviderCapabilities } =
-      await import('../../src/jobs/acquisition/providers/ports.js');
-    const def = INDEXED_PROVIDER_DEFINITIONS.find((d) => d.providerId === 'search-provider:brave')!;
-    const port = {
-      backend: def.backend,
-      adapterId: def.adapterId,
-      providerId: def.providerId,
-      governance: def.governance,
-      maxDurationMs: def.maxDurationMs,
-      search: async () => [
-        {
-          title: 'Indexed Engineer',
-          url: 'https://example.test/idx/1',
-          description: 'snippet only',
-          position: 1,
-          domain: 'example.test',
-          source: 'brave',
-          age: null,
-          ageKind: 'unknown',
-          extraSnippet: null,
-          deepLinks: null,
-          contentKind: 'snippet',
-          generatedSummary: null,
-        },
-      ],
-    };
-    const pol = (sourceId: string) => ({
-      sourceId,
-      revision: 'rev-1',
-      modes: {
-        automatedSearch: 'permitted',
-        automatedFetch: 'permitted',
-        userSuppliedContent: 'permitted',
-        manualImport: 'permitted',
-        employerApi: 'not_supported',
-      },
-      evidenceRefs: [],
-      reviewedAt: '2026-01-01T00:00:00Z',
-    });
-    const reg = new SourcePolicyRegistry([pol(def.providerId), pol('manual')] as never);
-    const caps = new AdapterCapabilityRegistry([
-      ...indexedProviderCapabilities([port] as never),
-      {
-        schemaVersion: '1.0.0',
-        adapterId: 'manual',
-        adapterVersion: '1.0.0',
-        edges: [
-          { operation: 'manualImport', route: 'user_supplied', targetKind: 'adapter' },
-          { operation: 'userSuppliedContent', route: 'user_supplied', targetKind: 'adapter' },
-        ],
-      } as never,
+    const port = mockPort('search-provider:brave', async () => [
+      snippetRecord({
+        title: 'Indexed Engineer',
+        url: 'https://example.test/idx/1',
+        description: 'snippet only',
+      }),
     ]);
     const result = await executeJobsSearch(
-      {
-        intent: {
-          query: 'engineer',
-          localePackIds: [],
-          domainPackIds: [],
-          requestedRoleFamilies: [],
-          sectors: [],
-          locations: [],
-          workModes: [],
-          employmentTypes: [],
-          compensation: [],
-          sourceIds: [],
-          explorationBreadth: 'balanced',
-          strictness: 'normal',
-          unknownPolicy: 'include',
-          topK: 10,
-          budgets: {
-            requests: 10,
-            pages: 10,
-            bytes: 200000,
-            milliseconds: 60000,
-            enrichment: 0,
-            reasoning: 0,
-          },
-          evidenceRefs: [],
-        },
+      baseRequest({
+        intent: baseIntent({ query: 'engineer' }),
         plan: [
           {
             kind: 'indexed',
-            slice: {
-              schemaVersion: '1.0.0',
+            slice: baseSlice({
               runId: 'run-idx',
               sliceId: 's-idx',
-              ordinal: 0,
-              queryVariantId: 'qv-1',
-              query: 'engineer',
+              adapterIds: [port.adapterId],
               reason: 'indexed only',
-              adapterIds: [def.adapterId],
-              localePackRefs: [],
-              domainPackRefs: [],
-              budget: {
-                logicalRequests: 2,
-                reservedAttempts: 5,
-                candidates: 10,
-                bytes: 100000,
-                milliseconds: 70000,
-              },
-            },
-            providerId: def.providerId,
+            }),
+            providerId: port.providerId,
             safeSearch: 'moderate',
           },
         ],
         runId: 'run-idx',
-        capturedAt: '2026-01-02T00:00:00Z',
-        budget: {
-          logicalRequests: 10,
-          reservedAttempts: 20,
-          candidates: 10,
-          bytes: 200000,
-          milliseconds: 70000,
-        },
-      } as never,
-      {
-        policyRegistry: reg,
-        capabilityRegistry: caps,
-        ports: [port] as never,
-        scrapeJobs: async () => ({ jobs: [], totalScraped: 0, newCount: 0 }) as never,
-      } as never,
+      }),
+      baseDeps([port]) as never,
     );
     assert.ok(result.candidates.length >= 1);
     const first = result.candidates[0]!;

@@ -9,7 +9,7 @@
  * Generic core stays assumption-free; applies ONLY when explicitly selected.
  */
 
-import type { DomainPack } from './types.js';
+import { DomainPackSchema, type DomainPack } from './types.js';
 import { freeze } from './freeze.js';
 
 const RULE = (ruleId: string, description: string) => ({
@@ -127,168 +127,170 @@ const EDGE = (
   rule: RULE(ruleId, `${from} ${type} ${to}`),
 });
 
-export const NSW_PUBLIC_ADMIN_DOMAIN_PACK: DomainPack = freeze({
-  kind: 'domain',
-  id: 'nsw-public-admin',
-  version: '1.0.0',
-  effectiveFrom: '2026-01-01',
-  attribution: {
-    author: 'search-mcp jobs subsystem',
-    license: 'MIT',
-    source: 'docs/jobs/adr/ADR-004-core-and-packs.md',
-  },
-  roleNodes: NODES.map((n) => ({
-    id: n.id,
-    label: n.label,
-    aliases: n.aliases,
-    capabilities: n.capabilities,
-  })),
-  edges: [
-    // Regulatory/compliance cluster
-    EDGE(
-      'regulatory-officer',
-      'integrity-officer',
-      'prerequisite',
-      'fixture:reg-integrity',
-      'edge-6',
-    ),
-    EDGE(
-      'regulatory-officer',
-      'public-admin-officer',
-      'capability_transfer',
-      'fixture:reg-admin',
-      'edge-7',
-    ),
-    // Intelligence/investigations/integrity cluster
-    EDGE(
-      'intelligence-officer',
-      'investigations-officer',
-      'adjacent',
-      'fixture:intel-invest',
-      'edge-1',
-    ),
-    EDGE(
-      'investigations-officer',
-      'integrity-officer',
-      'capability_transfer',
-      'fixture:invest-integrity',
-      'edge-2',
-    ),
-    EDGE(
-      'intelligence-officer',
-      'policy-analyst',
-      'capability_transfer',
-      'fixture:intel-policy',
-      'edge-8',
-    ),
-    // Analyst/research cluster
-    EDGE('policy-analyst', 'research-officer', 'adjacent', 'fixture:policy-research', 'edge-3'),
-    EDGE(
-      'research-officer',
-      'university-admin-officer',
-      'capability_transfer',
-      'fixture:research-uniadmin',
-      'edge-9',
-    ),
-    // Courts/registry cluster
-    EDGE(
-      'court-registry-officer',
-      'public-admin-officer',
-      'capability_transfer',
-      'fixture:registry-admin',
-      'edge-4',
-    ),
-    EDGE(
-      'court-registry-officer',
-      'local-government-officer',
-      'capability_transfer',
-      'fixture:registry-lga',
-      'edge-10',
-    ),
-    // Health admin cluster
-    EDGE(
-      'health-admin-officer',
-      'public-admin-officer',
-      'adjacent',
-      'fixture:health-admin',
-      'edge-11',
-    ),
-    EDGE(
-      'health-admin-officer',
-      'service-operations-officer',
-      'capability_transfer',
-      'fixture:health-service',
-      'edge-12',
-    ),
-    // University/research admin cluster
-    EDGE(
-      'university-admin-officer',
-      'public-admin-officer',
-      'adjacent',
-      'fixture:uniadmin-admin',
-      'edge-13',
-    ),
-    // Local government cluster
-    EDGE(
-      'local-government-officer',
-      'public-admin-officer',
-      'adjacent',
-      'fixture:lga-admin',
-      'edge-14',
-    ),
-    EDGE(
-      'local-government-officer',
-      'service-operations-officer',
-      'capability_transfer',
-      'fixture:lga-service',
-      'edge-15',
-    ),
-    // NFP/disability/service ops cluster
-    EDGE(
-      'service-operations-officer',
-      'general-admin-officer',
-      'capability_transfer',
-      'fixture:service-admin',
-      'edge-16',
-    ),
-    // General admin/ops + project/program support cluster
-    EDGE(
-      'project-support-officer',
-      'general-admin-officer',
-      'adjacent',
-      'fixture:project-admin',
-      'edge-5',
-    ),
-    EDGE(
-      'project-support-officer',
-      'public-admin-officer',
-      'capability_transfer',
-      'fixture:project-pubadmin',
-      'edge-17',
-    ),
-    // Records support is a shared capability, never an equivalence claim:
-    // general-admin links to court-registry via capability_transfer only.
-    EDGE(
-      'general-admin-officer',
-      'court-registry-officer',
-      'capability_transfer',
-      'fixture:admin-registry',
-      'edge-18',
-    ),
-  ],
-  capabilityVocabulary: [...new Set(NODES.flatMap((n) => n.capabilities))],
-  requirementTerminology: {
-    'working with children check': 'employment_check',
-    'national police check': 'employment_check',
-    'australian work rights': 'work_rights',
-  },
-  expansionGuards: [
-    { token: 'officer', requiresContext: ['registry', 'compliance', 'intelligence', 'project'] },
-    { token: 'analyst', requiresContext: ['policy', 'intelligence', 'research'] },
-    { token: 'assistant', requiresContext: ['admin', 'research'] },
-    { token: 'support', requiresContext: ['project', 'program', 'disability', 'service'] },
-    { token: 'clerk', requiresContext: ['grade', 'nsw', 'registry'] },
-  ],
-  evidenceCitations: ['fixture:nsw-public-admin-v1'],
-  evaluationFixtures: [{ id: 'nsw-roles-basic', path: 'fixtures/nsw/roles.json' }],
-});
+export const NSW_PUBLIC_ADMIN_DOMAIN_PACK: DomainPack = freeze(
+  DomainPackSchema.parse({
+    kind: 'domain',
+    id: 'nsw-public-admin',
+    version: '1.0.0',
+    effectiveFrom: '2026-01-01',
+    attribution: {
+      author: 'search-mcp jobs subsystem',
+      license: 'MIT',
+      source: 'docs/jobs/adr/ADR-004-core-and-packs.md',
+    },
+    roleNodes: NODES.map((n) => ({
+      id: n.id,
+      label: n.label,
+      aliases: n.aliases,
+      capabilities: n.capabilities,
+    })),
+    edges: [
+      // Regulatory/compliance cluster
+      EDGE(
+        'regulatory-officer',
+        'integrity-officer',
+        'prerequisite',
+        'fixture:reg-integrity',
+        'edge-6',
+      ),
+      EDGE(
+        'regulatory-officer',
+        'public-admin-officer',
+        'capability_transfer',
+        'fixture:reg-admin',
+        'edge-7',
+      ),
+      // Intelligence/investigations/integrity cluster
+      EDGE(
+        'intelligence-officer',
+        'investigations-officer',
+        'adjacent',
+        'fixture:intel-invest',
+        'edge-1',
+      ),
+      EDGE(
+        'investigations-officer',
+        'integrity-officer',
+        'capability_transfer',
+        'fixture:invest-integrity',
+        'edge-2',
+      ),
+      EDGE(
+        'intelligence-officer',
+        'policy-analyst',
+        'capability_transfer',
+        'fixture:intel-policy',
+        'edge-8',
+      ),
+      // Analyst/research cluster
+      EDGE('policy-analyst', 'research-officer', 'adjacent', 'fixture:policy-research', 'edge-3'),
+      EDGE(
+        'research-officer',
+        'university-admin-officer',
+        'capability_transfer',
+        'fixture:research-uniadmin',
+        'edge-9',
+      ),
+      // Courts/registry cluster
+      EDGE(
+        'court-registry-officer',
+        'public-admin-officer',
+        'capability_transfer',
+        'fixture:registry-admin',
+        'edge-4',
+      ),
+      EDGE(
+        'court-registry-officer',
+        'local-government-officer',
+        'capability_transfer',
+        'fixture:registry-lga',
+        'edge-10',
+      ),
+      // Health admin cluster
+      EDGE(
+        'health-admin-officer',
+        'public-admin-officer',
+        'adjacent',
+        'fixture:health-admin',
+        'edge-11',
+      ),
+      EDGE(
+        'health-admin-officer',
+        'service-operations-officer',
+        'capability_transfer',
+        'fixture:health-service',
+        'edge-12',
+      ),
+      // University/research admin cluster
+      EDGE(
+        'university-admin-officer',
+        'public-admin-officer',
+        'adjacent',
+        'fixture:uniadmin-admin',
+        'edge-13',
+      ),
+      // Local government cluster
+      EDGE(
+        'local-government-officer',
+        'public-admin-officer',
+        'adjacent',
+        'fixture:lga-admin',
+        'edge-14',
+      ),
+      EDGE(
+        'local-government-officer',
+        'service-operations-officer',
+        'capability_transfer',
+        'fixture:lga-service',
+        'edge-15',
+      ),
+      // NFP/disability/service ops cluster
+      EDGE(
+        'service-operations-officer',
+        'general-admin-officer',
+        'capability_transfer',
+        'fixture:service-admin',
+        'edge-16',
+      ),
+      // General admin/ops + project/program support cluster
+      EDGE(
+        'project-support-officer',
+        'general-admin-officer',
+        'adjacent',
+        'fixture:project-admin',
+        'edge-5',
+      ),
+      EDGE(
+        'project-support-officer',
+        'public-admin-officer',
+        'capability_transfer',
+        'fixture:project-pubadmin',
+        'edge-17',
+      ),
+      // Records support is a shared capability, never an equivalence claim:
+      // general-admin links to court-registry via capability_transfer only.
+      EDGE(
+        'general-admin-officer',
+        'court-registry-officer',
+        'capability_transfer',
+        'fixture:admin-registry',
+        'edge-18',
+      ),
+    ],
+    capabilityVocabulary: [...new Set(NODES.flatMap((n) => n.capabilities))],
+    requirementTerminology: {
+      'working with children check': 'employment_check',
+      'national police check': 'employment_check',
+      'australian work rights': 'work_rights',
+    },
+    expansionGuards: [
+      { token: 'officer', requiresContext: ['registry', 'compliance', 'intelligence', 'project'] },
+      { token: 'analyst', requiresContext: ['policy', 'intelligence', 'research'] },
+      { token: 'assistant', requiresContext: ['admin', 'research'] },
+      { token: 'support', requiresContext: ['project', 'program', 'disability', 'service'] },
+      { token: 'clerk', requiresContext: ['grade', 'nsw', 'registry'] },
+    ],
+    evidenceCitations: ['fixture:nsw-public-admin-v1'],
+    evaluationFixtures: [{ id: 'nsw-roles-basic', path: 'fixtures/nsw/roles.json' }],
+  }),
+);

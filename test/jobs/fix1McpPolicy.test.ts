@@ -21,8 +21,9 @@ test('fix1 profile maps only exact pack role/capability terms', () => {
   assert.equal(mapped.profileInput.profile.roleHints?.[0]?.termId, 'policy-analyst');
   assert.equal(mapped.profileInput.profile.capabilities?.[0]?.termId, 'research');
   assert.equal(mapped.allowedTermRefs.size, 2);
-  assert.throws(() =>
-    mapPublicProfile({ roleHints: ['invented role'] }, NSW_PUBLIC_ADMIN_DOMAIN_PACK),
+  assert.throws(
+    () => mapPublicProfile({ roleHints: ['invented role'] }, NSW_PUBLIC_ADMIN_DOMAIN_PACK),
+    /profile term is not approved by nsw-public-admin: invented role/,
   );
 });
 

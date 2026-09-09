@@ -3,6 +3,11 @@ import { describe, test } from 'node:test';
 
 import { executeJobsSearch } from '../../src/jobs/orchestration/search.js';
 import { JobsSearchCandidateSchema } from '../../src/jobs/orchestration/searchContracts.js';
+import {
+  extractIdentityFeatures,
+  mergeSubjects,
+  scoreIdentityPair,
+} from '../../src/jobs/identity/index.js';
 import { SourcePolicyRegistry } from '../../src/jobs/acquisition/policy/registry.js';
 import { AdapterCapabilityRegistry } from '../../src/jobs/acquisition/adapterRegistry.js';
 import {
@@ -266,7 +271,6 @@ describe('reviewer fix cycle: failing first', () => {
 
 describe('reviewer fix cycle: seam-level adoption and preservation', () => {
   test('(1) extracted title/location/salary adopted into schema-valid posting', async () => {
-    const { executeJobsSearch } = await import('../../src/jobs/orchestration/search.js');
     const port = mockPort(async () => [
       snippet(
         'https://example.test/adopt/1',
@@ -312,13 +316,8 @@ describe('reviewer fix cycle: seam-level adoption and preservation', () => {
   });
 
   test('(3) merged same_posting pair emits ONE candidate with union refs', async () => {
-    const { executeJobsSearch } = await import('../../src/jobs/orchestration/search.js');
     // Two jobspy slices over the same board+URL: same canonical URL dedups in
     // acquisition; identity merge tested at unit level below.
-    const { mergeSubjects } = await import('../../src/jobs/identity/index.js');
-    const { extractIdentityFeatures } = await import('../../src/jobs/identity/index.js');
-    const { scoreIdentityPair } = await import('../../src/jobs/identity/index.js');
-
     const sameUrl = 'https://example.test/jobs/same';
     const jobRecord = (url: string) => ({
       title: 'Merged Engineer',
@@ -410,7 +409,6 @@ describe('reviewer fix cycle: seam-level adoption and preservation', () => {
   });
 
   test('(4) frozen reruns match byte-for-byte on deterministic contract', async () => {
-    const { executeJobsSearch } = await import('../../src/jobs/orchestration/search.js');
     const mk = () =>
       mockPort(async () => [
         snippet('https://example.test/fz/1', 'Frozen Engineer', 'frozen desc'),
@@ -460,7 +458,6 @@ describe('reviewer fix cycle: seam-level adoption and preservation', () => {
   });
 
   test('(5) seam manual candidate keeps user_supplied provenance priority', async () => {
-    const { executeJobsSearch } = await import('../../src/jobs/orchestration/search.js');
     const { reg, caps } = registries([]);
     const result = await executeJobsSearch(
       {
@@ -498,7 +495,6 @@ describe('reviewer fix cycle: seam-level adoption and preservation', () => {
   });
 
   test('(7) every acquired candidate is emitted or covered: no silent drops', async () => {
-    const { executeJobsSearch } = await import('../../src/jobs/orchestration/search.js');
     const port = mockPort(async () => [
       snippet('https://example.test/nd/1', 'ND One', 'first'),
       snippet('https://example.test/nd/2', 'ND Two', 'second'),
@@ -551,7 +547,6 @@ describe('reviewer fix cycle: seam-level adoption and preservation', () => {
 
 describe('reviewer P1+P2: bm25 key match and merge state label', () => {
   test('P1 RED: text_bm25 channel scores non-null when posting exists', async () => {
-    const { executeJobsSearch } = await import('../../src/jobs/orchestration/search.js');
     const port = mockPort(async () => [
       snippet(
         'https://example.test/bm/1',
@@ -601,44 +596,24 @@ describe('reviewer P1+P2: bm25 key match and merge state label', () => {
   });
 
   test('P2: merged observation-only group stays observation_backed', async () => {
-    const { executeJobsSearch } = await import('../../src/jobs/orchestration/search.js');
-    // Two identical jobspy postings for the same canonical URL: acquisition
-    // dedups or identity merges observation-only evidence; either way no
-    // indexed evidence coexists, so the surviving unit must NOT be
-    // mixed_upgradeable.
-    const job = (url: string) => ({
+    const job = {
       title: 'Merge Only Engineer',
       company: 'Acme Corp',
       location: 'Melbourne VIC',
-      job_url: url,
+      job_url: 'https://example.test/jobs/merge-only',
       job_url_direct: null,
       description: 'Same canonical posting twice.',
       site: 'linkedin',
-    });
-    const url = 'https://example.test/jobs/merge-only';
-    const mkDeps = () => {
-      const policies: never[] = [];
-      void policies;
-      return null;
     };
-    void mkDeps;
-    void job;
-    void url;
-    // Unit-level assertion via seam: indexed-only singles stay indexed_only,
-    // observation-backed singles stay observation_backed (no spurious mixed).
-    const port = mockPort(async () => [
-      snippet('https://example.test/mo/1', 'MO Engineer', 'mo desc'),
-    ]);
-    const { reg, caps } = registries([port]);
+    const { reg, caps } = registries([]);
     const result = await executeJobsSearch(
       {
         intent: intent(),
         plan: [
           {
-            kind: 'indexed',
-            slice: slice('run-mo', 's-mo', port.adapterId),
-            providerId: port.providerId,
-            safeSearch: 'moderate',
+            kind: 'jobspy',
+            slice: slice('run-mo', 's-mo', 'jobspy'),
+            board: 'linkedin',
           },
         ],
         runId: 'run-mo',
@@ -654,10 +629,12 @@ describe('reviewer P1+P2: bm25 key match and merge state label', () => {
       {
         policyRegistry: reg,
         capabilityRegistry: caps,
-        ports: [port],
-        scrapeJobs: async () => ({ jobs: [], totalScraped: 0, newCount: 0 }) as unknown as never,
+        ports: [],
+        scrapeJobs: async () =>
+          ({ jobs: [job, job], totalScraped: 2, newCount: 2 }) as unknown as never,
       } as never,
     );
-    assert.equal(result.candidates[0]!.evidenceState, 'indexed_only');
+    assert.ok(result.candidates.length >= 1);
+    assert.equal(result.candidates[0]!.evidenceState, 'observation_backed');
   });
 });

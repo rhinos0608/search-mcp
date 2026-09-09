@@ -18,9 +18,12 @@ import type { SearchConfig } from '../../config.js';
 import { logger } from '../../logger.js';
 import { registerFamily, type FamilyDefinition } from '../registry.js';
 import { executeJobsSearch } from '../../jobs/orchestration/search.js';
-import { AU_NSW_SYDNEY_LOCALE_PACK } from '../../jobs/packs/auNswSydney.locale.js';
 import { NSW_PUBLIC_ADMIN_DOMAIN_PACK } from '../../jobs/packs/nswPublicAdmin.domain.js';
-import { buildJobsMcpDeps, jobspyUnconfigured } from '../jobs/jobsDeps.js';
+import {
+  buildJobsMcpDeps,
+  jobspyUnconfigured,
+  type JobsMcpDependencies,
+} from '../jobs/jobsDeps.js';
 import {
   buildPlan,
   deriveJobsRunBudget,
@@ -32,17 +35,8 @@ import {
   informationalSeekEdgesFromEntry,
 } from '../../jobs/acquisition/sourceClass/seek.js';
 import { SEEK_POLICY_EVIDENCE } from '../../jobs/acquisition/sourceClass/evidence/livePolicyEvidence.js';
-import { mapPublicProfile } from '../jobs/profileMapping.js';
-
-const publicProfileSchema = z
-  .object({
-    roleHints: z.array(z.string().trim().min(1).max(128)).max(32).optional(),
-    capabilities: z.array(z.string().trim().min(1).max(128)).max(32).optional(),
-  })
-  .strict()
-  .refine((value) => value.roleHints !== undefined || value.capabilities !== undefined, {
-    message: 'profile requires roleHints or capabilities',
-  });
+import { mapPublicProfile, publicProfileSchema } from '../jobs/profileMapping.js';
+import { buildJobsSearchExecutionRequest, projectJobsCandidate } from '../jobs/searchBuilder.js';
 
 const searchAction = z.object({
   action: z.literal('search').describe('Run a deterministic jobs search over the live seam'),
@@ -96,6 +90,17 @@ const ACTION_CARDS = [
   },
 ] as const;
 
+export const JOBS_SEARCH_UNAVAILABLE_MESSAGE =
+  'Configure a search backend (EXA_API_KEY, BRAVE_API_KEY, SEARXNG_BASE_URL) or use JobSpy boards.';
+
+export function isSearchAvailable(
+  deps: Pick<JobsMcpDependencies, 'providerIds' | 'jobspyBoards'>,
+  useJobSpy?: boolean,
+): boolean {
+  const jobspyPermitted = useJobSpy !== false && deps.jobspyBoards.length > 0;
+  return deps.providerIds.length > 0 || jobspyPermitted;
+}
+
 const jobsFamily: FamilyDefinition = {
   name: 'jobs',
   description:
@@ -112,21 +117,20 @@ const jobsFamily: FamilyDefinition = {
         const a = args as z.infer<typeof searchAction>;
         const deps = buildJobsMcpDeps(cfg);
         const sydney = a.sydney === true;
-        if (deps.providerIds.length === 0 && (!a.useJobSpy || deps.jobspyBoards.length === 0)) {
+        if (!isSearchAvailable(deps, a.useJobSpy)) {
           throw new Error(
             'jobs.search unavailable: no indexed providers configured and no permitted JobSpy boards are configured. ' +
-              'Configure a search backend or an explicitly approved JobSpy board.',
+              JOBS_SEARCH_UNAVAILABLE_MESSAGE,
           );
         }
         const runId = randomUUID();
         const capturedAt = new Date().toISOString();
+        if (a.profile !== undefined && !sydney) {
+          throw new Error('profile requires sydney:true so terms can be pack-approved');
+        }
         const mappedProfile =
           a.profile !== undefined
-            ? sydney
-              ? mapPublicProfile(a.profile, NSW_PUBLIC_ADMIN_DOMAIN_PACK)
-              : (() => {
-                  throw new Error('profile requires sydney:true so terms can be pack-approved');
-                })()
+            ? mapPublicProfile(a.profile, NSW_PUBLIC_ADMIN_DOMAIN_PACK)
             : undefined;
         const topK = a.topK;
         const stageBudgets = deriveStageBudgets(topK);
@@ -159,76 +163,26 @@ const jobsFamily: FamilyDefinition = {
         );
         const supporting = supportingIndexedProviderCount(deps.ports);
         const runBudget = deriveJobsRunBudget(plannedSlices.length, supporting, stageBudgets);
-        const data = await executeJobsSearch(
-          {
-            intent: {
-              query: a.query,
-              localePackIds: sydney ? ['au-nsw-sydney'] : [],
-              domainPackIds: sydney ? ['nsw-public-admin'] : [],
-              requestedRoleFamilies: [],
-              sectors: [],
-              locations: a.location ? [{ city: a.location }] : [],
-              workModes: [],
-              employmentTypes: [],
-              compensation: [],
-              sourceIds: [],
-              explorationBreadth: 'balanced',
-              strictness: 'normal',
-              unknownPolicy: 'include',
-              topK,
-              budgets: {
-                requests: runBudget.logicalRequests,
-                pages: 10,
-                bytes: 200000,
-                milliseconds: runBudget.milliseconds,
-                enrichment: stageBudgets.indexedEnrichment,
-                reasoning: 0,
-              },
-              evidenceRefs: [],
-            },
-            plan: plannedSlices,
-            runId,
-            capturedAt,
-            budget: runBudget,
-            ...(sydney
-              ? { localePack: AU_NSW_SYDNEY_LOCALE_PACK, domainPack: NSW_PUBLIC_ADMIN_DOMAIN_PACK }
-              : {}),
-            ...(mappedProfile !== undefined
-              ? {
-                  profileInput: mappedProfile.profileInput,
-                  allowedProfileTermRefs: mappedProfile.allowedTermRefs,
-                }
-              : {}),
-          },
-          deps,
-        );
+        const request = buildJobsSearchExecutionRequest({
+          query: a.query,
+          topK,
+          sydney,
+          locations: a.location ? [{ city: a.location }] : [],
+          workModes: [],
+          plan: plannedSlices,
+          runId,
+          capturedAt,
+          runBudget,
+          stageBudgets,
+          mappedProfile,
+        });
+        const data = await executeJobsSearch(request, deps);
         const unconfigured = jobspyUnconfigured(deps, a.useJobSpy);
         return {
           runId: data.runId,
           status: data.status,
           packVersions: data.versions.packVersions,
-          candidates: data.candidates.map((c) => ({
-            rank: c.rank,
-            title: c.title,
-            organisation: c.organisation,
-            utility: Math.round(c.utility * 1000) / 1000,
-            coverage: Math.round(c.coverage * 1000) / 1000,
-            confidence: Math.round(c.confidence * 1000) / 1000,
-            eligibility: c.eligibility,
-            evidenceState: c.evidenceState,
-            // Posting locator (canonical, credential-free) + bounded posting
-            // facts. Evidence refs/text stay non-public.
-            ...(c.listingUrl !== undefined ? { listingUrl: c.listingUrl } : {}),
-            ...(c.applyUrl !== undefined ? { applyUrl: c.applyUrl } : {}),
-            ...(c.location !== undefined ? { location: c.location } : {}),
-            ...(c.salaryText !== undefined ? { salaryText: c.salaryText } : {}),
-            ...(c.description !== undefined ? { description: c.description } : {}),
-            flags: c.flags,
-            caveats: c.caveats,
-            provenance: c.provenance,
-            sourceListingIds: c.sourceListingIds,
-            observationIds: c.observationIds,
-          })),
+          candidates: data.candidates.map(projectJobsCandidate),
           eligibilitySummary: data.eligibilitySummary,
           coverageOutcomes: data.coverageOutcomes,
           ...(unconfigured || data.warnings.length > 0
@@ -252,7 +206,7 @@ const jobsFamily: FamilyDefinition = {
       handler: async (args, cfg) => {
         void args;
         const deps = buildJobsMcpDeps(cfg);
-        const searchAvailable = deps.providerIds.length > 0 || deps.jobspyBoards.length > 0;
+        const searchAvailable = isSearchAvailable(deps);
         return ACTION_CARDS.map((c) =>
           c.name === 'jobs.search'
             ? {
@@ -261,8 +215,7 @@ const jobsFamily: FamilyDefinition = {
                 ...(searchAvailable
                   ? {}
                   : {
-                      remediation:
-                        'Configure a search backend (EXA_API_KEY, BRAVE_API_KEY, SEARXNG_BASE_URL) or use JobSpy boards.',
+                      remediation: JOBS_SEARCH_UNAVAILABLE_MESSAGE,
                     }),
               }
             : c,
@@ -312,14 +265,11 @@ export function registerJobsTool(server: McpServer, cfg: SearchConfig): void {
 
 export function jobsCapabilities(cfg: SearchConfig) {
   const deps = buildJobsMcpDeps(cfg);
-  const searchAvailable = deps.providerIds.length > 0 || deps.jobspyBoards.length > 0;
+  const searchAvailable = isSearchAvailable(deps);
   return jobsFamily.actions.map((a) => ({
     name: `jobs.${a.name}`,
     available: a.name === 'search' ? searchAvailable : true,
-    issue:
-      a.name === 'search' && !searchAvailable
-        ? 'Configure an indexed provider or enable JobSpy boards.'
-        : null,
+    issue: a.name === 'search' && !searchAvailable ? JOBS_SEARCH_UNAVAILABLE_MESSAGE : null,
   }));
 }
 

@@ -43,8 +43,10 @@ type ScrapeJobsFn = (
   signal?: AbortSignal,
 ) => Promise<JobSpyScrapeResult>;
 
-function indexedProviderPolicy(sourceId: string): SourcePolicy {
-  const evidence = indexedProviderEvidence(sourceId);
+function automatedSearchPolicy(sourceId: string): SourcePolicy {
+  const evidence = sourceId.startsWith('board:')
+    ? boardPolicyEvidence(sourceId.slice('board:'.length))
+    : indexedProviderEvidence(sourceId);
   requireLiveEvidenceRefs(sourceId, [evidence.evidenceId]);
   return SourcePolicySchema.parse({
     sourceId,
@@ -58,24 +60,6 @@ function indexedProviderPolicy(sourceId: string): SourcePolicy {
     },
     evidenceRefs: [evidence.evidenceId],
     reviewedAt: evidence.reviewedAt ?? evidence.capturedAt,
-  });
-}
-
-function boardPolicy(board: string): SourcePolicy {
-  const evidence = boardPolicyEvidence(board);
-  requireLiveEvidenceRefs(`board:${board}`, [evidence.evidenceId]);
-  return SourcePolicySchema.parse({
-    sourceId: `board:${board}`,
-    revision: 'jobs-mcp/1.0.0',
-    modes: {
-      automatedSearch: 'permitted',
-      automatedFetch: 'not_supported',
-      userSuppliedContent: 'not_supported',
-      manualImport: 'not_supported',
-      employerApi: 'not_supported',
-    },
-    evidenceRefs: [evidence.evidenceId],
-    reviewedAt: evidence.reviewedAt,
   });
 }
 
@@ -119,10 +103,12 @@ export function buildJobsMcpDeps(cfg: SearchConfig): JobsMcpDependencies {
   const ports = createDefaultIndexedProviderPorts(cfg);
 
   const policies: SourcePolicy[] = [];
-  for (const p of ports) policies.push(indexedProviderPolicy(p.providerId));
-  for (const b of cfg.jobsAcquisition.jobspyBoards) policies.push(boardPolicy(b));
+  for (const p of ports) policies.push(automatedSearchPolicy(p.providerId));
+  for (const b of cfg.jobsAcquisition.jobspyBoards)
+    policies.push(automatedSearchPolicy(`board:${b}`));
   policies.push(manualPolicy());
 
+  const destFetchCapabilities = destinationFetchCapabilities(cfg.jobsAcquisition);
   const capabilityRegistry = new AdapterCapabilityRegistry([
     ...indexedProviderCapabilities(ports),
     JOBSPY_CAPABILITY,
@@ -135,7 +121,7 @@ export function buildJobsMcpDeps(cfg: SearchConfig): JobsMcpDependencies {
         { operation: 'userSuppliedContent', route: 'user_supplied', targetKind: 'adapter' },
       ],
     },
-    ...destinationFetchCapabilities(cfg.jobsAcquisition),
+    ...destFetchCapabilities,
   ]);
   const sourceClassRegistry = new SourceClassRegistry();
   for (const ev of SEEK_POLICY_EVIDENCE) sourceClassRegistry.registerEvidence(ev);
@@ -160,7 +146,7 @@ export function buildJobsMcpDeps(cfg: SearchConfig): JobsMcpDependencies {
       (jobspyScrape as unknown as ScrapeJobsFn)(params, signal),
     providerIds: ports.map((p) => p.providerId),
     atsTenants: tenants,
-    destinationFetchCapable: destinationFetchCapabilities(cfg.jobsAcquisition).length > 0,
+    destinationFetchCapable: destFetchCapabilities.length > 0,
     seekBlocked: true,
     jobspyBoards: [...cfg.jobsAcquisition.jobspyBoards],
   };
