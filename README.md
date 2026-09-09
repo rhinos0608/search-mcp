@@ -265,13 +265,13 @@ cd dashboard && npm run dev
 
 ### Environment variables (HTTP mode)
 
-| Variable                | Required | Description                                                                                                                                                       |
-| ----------------------- | -------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `HTTP_PORT`             | Yes      | Port to bind (e.g. `8050`). Unset = stdio-only mode.                                                                                                              |
-| `HTTP_HOST`             | No       | Bind address. Default `127.0.0.1` (loopback-only). Set `0.0.0.0` / `::` to intentionally expose on the network (Docker with published ports). Hostnames rejected. |
-| `SEARCH_MCP_CONFIG_KEY` | Yes      | Passphrase for `config.enc` encryption.                                                                                                                           |
-| `SESSION_TTL_HOURS`     | No       | Dashboard session lifetime (default: `12`).                                                                                                                       |
-| `MCP_ALLOW_QUERY_KEY`   | No       | Allow `?key=` auth on `/mcp`. **Off by default**; set `true` only for legacy URL-auth clients (key may leak via URLs/logs). Bearer header is primary.             |
+| Variable                | Required | Description                                                                                                                                                                                                                  |
+| ----------------------- | -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `HTTP_PORT`             | Yes      | Port to bind (e.g. `8050`). Unset = stdio-only mode.                                                                                                                                                                         |
+| `HTTP_HOST`             | No       | Bind address. Default `127.0.0.1` (loopback-only; all of `127.0.0.0/8` counts). Set `0.0.0.0` / `::` to intentionally expose on the network (Docker with published ports). Hostnames rejected (only exception: `localhost`). |
+| `SEARCH_MCP_CONFIG_KEY` | Yes      | Passphrase for `config.enc` encryption.                                                                                                                                                                                      |
+| `SESSION_TTL_HOURS`     | No       | Dashboard session lifetime (default: `12`).                                                                                                                                                                                  |
+| `MCP_ALLOW_QUERY_KEY`   | No       | Allow `?key=` auth on `/mcp`. **Off by default**; set `true` only for legacy URL-auth clients (key may leak via URLs/logs). Bearer header is primary.                                                                        |
 
 ### stdio-only mode (original, unchanged)
 

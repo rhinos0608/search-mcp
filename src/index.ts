@@ -92,7 +92,7 @@ async function main(): Promise<void> {
 
     let httpServer: http.Server | undefined;
     try {
-      httpServer = await startHttpServer(runtime, configManager, port, listenTarget.host);
+      httpServer = await startHttpServer(runtime, configManager, port, listenTarget);
       logger.info({ port }, 'HTTP MCP transport active');
     } catch (err) {
       if (!isAddressInUseError(err)) {

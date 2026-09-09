@@ -3,7 +3,8 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type * as http from 'node:http';
-import { queryKeyAuthEnabled, redactRequestUrl, validateMcpKey } from '../../src/server/http.js';
+import { queryKeyAuthEnabled } from '../../src/server/authEnv.js';
+import { redactRequestUrl, validateMcpKey } from '../../src/server/http.js';
 
 function fakeRequest(opts: { url?: string; authorization?: string }): http.IncomingMessage {
   const headers: Record<string, string> = {};
@@ -99,9 +100,9 @@ test('redactRequestUrl removes secret query values', () => {
 });
 
 test('redactRequestUrl handles absolute URLs and invalid input', () => {
-  const redacted = redactRequestUrl('https://example.com/mcp?key=abc');
-  assert.ok(!redacted.includes('abc=') || redacted.includes('key='), 'key param redacted');
-  assert.ok(!redacted.includes('abc&'), 'secret value gone');
+  const redacted = redactRequestUrl('https://example.com/mcp?key=secretvalue123');
+  assert.ok(!redacted.includes('secretvalue123'), 'actual secret value must be absent');
+  assert.ok(redacted.includes('/mcp'), 'pathname preserved');
   // Invalid input must not throw
   assert.equal(typeof redactRequestUrl('not a url ??'), 'string');
 });

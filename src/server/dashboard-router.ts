@@ -12,7 +12,7 @@ import {
   buildClearCookieHeader,
 } from './auth.js';
 import { parseSessionTtlMs } from './session-utils.js';
-import { queryKeyAuthEnabled } from './http.js';
+import { queryKeyAuthEnabled } from './authEnv.js';
 import { classifyRequestOrigin, dashboardAllowed, LOOPBACK_ADDRS } from './access-provider.js';
 import type { HttpTransportManager } from './mcp-transport.js';
 import { timingSafeEqual } from 'node:crypto';

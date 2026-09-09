@@ -3,8 +3,10 @@
  *
  * Secure default: bind to loopback only. External exposure requires an
  * explicit `HTTP_HOST` opt-in (`0.0.0.0`, `::`, or a specific interface IP).
- * Hostnames are rejected — only literal IP addresses are accepted, so the
- * operator's intent (loopback vs network) is unambiguous.
+ * Hostnames are rejected — only literal IP addresses are accepted — with a
+ * single exception: `localhost` is accepted and classified as loopback, so
+ * the operator's intent (loopback vs network) stays unambiguous.
+ * All of 127.0.0.0/8 counts as loopback.
  */
 
 import net from 'node:net';
@@ -37,6 +39,11 @@ export function resolveHttpListenHost(raw: string | undefined): HttpListenTarget
   if (WILDCARD_HOSTS.has(normalized)) {
     const host = normalized === '[::]' ? '::' : normalized;
     return { host, exposure: 'network' };
+  }
+
+  // Entire 127.0.0.0/8 block is loopback
+  if (net.isIP(value) === 4 && value.startsWith('127.')) {
+    return { host: value, exposure: 'loopback' };
   }
 
   if (net.isIP(value) === 4 || net.isIP(value) === 6) {

@@ -8,7 +8,8 @@ import { SessionStore, LoginRateLimiter } from './auth.js';
 import { parseSessionTtlMs } from './session-utils.js';
 import { HttpTransportManager } from './mcp-transport.js';
 import { handleDashboard, readBody } from './dashboard-router.js';
-import { resolveHttpListenHost } from './httpBind.js';
+import type { HttpListenTarget } from './httpBind.js';
+import { queryKeyAuthEnabled } from './authEnv.js';
 import type { SearchMcpRuntime } from '../config/types.js';
 
 const PKG_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
@@ -20,11 +21,6 @@ function safeTimingEqual(a: string, b: string): boolean {
   } catch {
     return false;
   }
-}
-
-/** Query-param API key auth is OFF by default; requires explicit MCP_ALLOW_QUERY_KEY=true. */
-export function queryKeyAuthEnabled(env = process.env): boolean {
-  return env.MCP_ALLOW_QUERY_KEY === 'true';
 }
 
 /** Query param names whose values must never appear in logs or error telemetry. */
@@ -84,7 +80,7 @@ export async function startHttpServer(
   runtime: SearchMcpRuntime,
   configManager: ConfigManager,
   port: number,
-  host = '127.0.0.1',
+  listenTarget: HttpListenTarget = { host: '127.0.0.1', exposure: 'loopback' },
 ): Promise<http.Server> {
   // Query-param auth is opt-in: silent by default, announced only when enabled.
   if (queryKeyAuthEnabled()) {
@@ -92,6 +88,8 @@ export async function startHttpServer(
       'Query-param auth enabled via MCP_ALLOW_QUERY_KEY=true. API key may appear in URLs and browser history; prefer the Bearer header.',
     );
   }
+
+  const host = listenTarget.host;
 
   const ttlMs = parseSessionTtlMs();
   const sessionStore = new SessionStore(ttlMs);
@@ -195,11 +193,11 @@ export async function startHttpServer(
     server.on('error', reject);
   });
 
-  // Log the real security posture: loopback-only vs explicitly network-exposed.
-  const listen = resolveHttpListenHost(host);
-  const exposure = listen.exposure;
+  // Log the real security posture using the exposure resolved BEFORE listen —
+  // never re-derive it from the bound host after the fact.
+  const exposure = listenTarget.exposure;
   logger.info(
-    { host: listen.host, port, exposure },
+    { host, port, exposure },
     exposure === 'loopback'
       ? 'HTTP server listening (loopback-only)'
       : 'HTTP server listening (network-exposed; HTTP_HOST set)',

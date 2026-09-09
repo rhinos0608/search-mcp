@@ -4,6 +4,13 @@ import { EventEmitter } from 'node:events';
 import * as http from 'node:http';
 import { Readable } from 'node:stream';
 import { readBody, isHttps } from '../../src/server/dashboard-router.js';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+
+test('dashboard-router does not import http.js (no import cycle)', () => {
+  const source = readFileSync(join(process.cwd(), 'src/server/dashboard-router.ts'), 'utf8');
+  assert.ok(!source.includes("from './http.js'"), 'dashboard-router must not import http.js');
+});
 
 // ── readBody tests ─────────────────────────────────────────────────────────
 

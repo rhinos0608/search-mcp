@@ -48,6 +48,14 @@ test('loopback values keep loopback exposure', () => {
   }
 });
 
+test('entire 127.0.0.0/8 block is loopback', () => {
+  for (const host of ['127.0.0.2', '127.8.8.8', '127.255.255.255']) {
+    const t = resolveHttpListenHost(host);
+    assert.equal(t.host, host, host);
+    assert.equal(t.exposure, 'loopback', host);
+  }
+});
+
 test('other valid IP addresses are explicit network exposure', () => {
   for (const host of ['192.168.1.10', '10.0.0.1', '::2', '2001:db8::1']) {
     const t = resolveHttpListenHost(host);
