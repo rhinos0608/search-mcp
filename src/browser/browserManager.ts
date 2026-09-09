@@ -15,6 +15,7 @@ import {
 } from './stealth.js';
 import { launchCloakBrowser, launchCloakPersistentContext } from './cloak.js';
 import { assertSafeUrl } from '../httpGuards.js';
+import { installNavigationSsrfGuard } from './safeNavigate.js';
 import { logger } from '../logger.js';
 
 /** Default CDP ports to probe for user browsers. */
@@ -91,6 +92,37 @@ export class BrowserManager {
   private activeMode: 'stealth' | 'user' | 'profile' | null = null;
 
   /**
+   * Install the session-level navigation SSRF guard. Fails closed: on install
+   * failure the context/browser is closed so no unguarded session can be used.
+   */
+  private async installSessionGuard(
+    context: import('playwright-core').BrowserContext,
+    browser: import('playwright-core').Browser | null,
+    source: BrowserSession['source'],
+  ): Promise<() => Promise<void>> {
+    try {
+      return await installNavigationSsrfGuard(context);
+    } catch (err) {
+      try {
+        await context.close();
+      } catch {
+        /* best-effort cleanup during failed install */
+      }
+      try {
+        await browser?.close();
+      } catch {
+        /* best-effort cleanup during failed install */
+      }
+      throw new BrowserError(
+        `Failed to install navigation SSRF guard (${source}): ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+        'SSRF_BLOCKED',
+      );
+    }
+  }
+
+  /**
    * Launch a new Chromium browser instance.
    */
   async launch(config: BrowserSessionConfig): Promise<BrowserSession> {
@@ -143,6 +175,9 @@ export class BrowserManager {
       await page.setViewportSize(config.viewport);
     }
 
+    // Session-level SSRF guard must be in place before the session is usable.
+    const ssrfGuardDispose = await this.installSessionGuard(context, browser, 'launch');
+
     const now = new Date().toISOString();
     const session: BrowserSession = {
       id: `browser-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
@@ -158,6 +193,7 @@ export class BrowserManager {
       source: 'launch',
       browserEngine: config.browserEngine,
       lastSnapshotRoot: null,
+      ssrfGuardDispose,
     };
 
     // Set up session timeout
@@ -261,6 +297,7 @@ export class BrowserManager {
       source: 'cdp',
       browserEngine: synthConfig.browserEngine,
       lastSnapshotRoot: null,
+      ssrfGuardDispose: await this.installSessionGuard(context, browser, 'cdp'),
     };
 
     this.activeSession = session;
@@ -402,6 +439,7 @@ export class BrowserManager {
       source: 'user',
       browserEngine: synthConfig.browserEngine,
       lastSnapshotRoot: null,
+      ssrfGuardDispose: await this.installSessionGuard(context, browser, 'user'),
     };
 
     this.activeSession = session;
@@ -502,6 +540,7 @@ export class BrowserManager {
       source: 'profile',
       browserEngine: config.browserEngine,
       lastSnapshotRoot: null,
+      ssrfGuardDispose: await this.installSessionGuard(context, b, 'profile'),
     };
 
     if (config.maxSessionTimeMs > 0) {
@@ -526,6 +565,15 @@ export class BrowserManager {
   async close(session: BrowserSession): Promise<void> {
     if (session.timeoutHandle) {
       clearTimeout(session.timeoutHandle);
+    }
+    // Remove the navigation SSRF guard routes before closing the context.
+    if (session.ssrfGuardDispose) {
+      try {
+        await session.ssrfGuardDispose();
+      } catch {
+        /* guard removal is best-effort during close */
+      }
+      session.ssrfGuardDispose = undefined;
     }
     // Cleanup network listeners (idempotent, safe if page already closed)
     try {

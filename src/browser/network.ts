@@ -1,5 +1,6 @@
 import type { Page } from 'playwright-core';
 import type { NetworkRequest, NetworkRequestDetail, RouteHandlerAction } from './types.js';
+import { continueIfNavigationSafe } from './safeNavigate.js';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // § Types
@@ -39,7 +40,7 @@ const SENSITIVE_HEADER_EXACT = new Set([
 const SENSITIVE_HEADER_SUBSTR =
   /token|secret|api[_-]?key|password|session|signature|credential|authorization/i;
 const SENSITIVE_QUERY_PARAM =
-  /(token|secret|api[_-]?key|apikey|password|passwd|pwd|auth|session|signature|credential|amz|x-amz)/i;
+  /(token|secret|api[_-]?key|apikey|password|passwd|pwd|auth|session|signature|credential|amz|x-amz|^key$)/i;
 const SENSITIVE_BODY_KEY =
   /password|passwd|pwd|secret|token|credential|authorization|api[_-]?key|session|signature/i;
 
@@ -277,10 +278,13 @@ export async function addRoute(
         break;
       }
       case 'continue':
-        await route.continue();
+        // Session SSRF guard: navigation requests re-checked per hop.
+        // Page-level routes registered later shadow the context-level guard,
+        // so every continue here must re-apply the navigation policy.
+        await continueIfNavigationSafe(route, route.request());
         break;
       case 'headers':
-        await route.continue({ headers: handler.headers });
+        await continueIfNavigationSafe(route, route.request(), { headers: handler.headers });
         break;
     }
   });

@@ -36,6 +36,8 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { SearchConfig } from '../../config.js';
 import type { DownloadResult } from '../../browser/types.js';
 import { assertSafeUrl } from '../../httpGuards.js';
+import { safeGoto } from '../../browser/safeNavigate.js';
+import { projectCookies } from '../../browser/cookieProjection.js';
 import { registerFamily, type FamilyDefinition } from '../registry.js';
 import { logger } from '../../logger.js';
 import { callOpenAiChatCompletion } from '../../utils/llmChat.js';
@@ -172,6 +174,13 @@ const storageSchema = z.object({
     .enum(['save', 'restore', 'list-cookies', 'clear-cookies', 'list-profiles'])
     .describe('Storage operation'),
   filename: z.string().optional().describe('Profile name for save/restore'),
+  includeValues: z
+    .boolean()
+    .optional()
+    .default(false)
+    .describe(
+      'Return cookie values (list-cookies only). Default redacts values and reports valueRedacted: true.',
+    ),
 });
 
 const networkSchema = z.object({
@@ -585,7 +594,7 @@ const browserFamily: FamilyDefinition = {
         };
         assertSafeUrl(url);
         return withSession(cfg, async (page) => {
-          await page.goto(url, { waitUntil, timeout });
+          await safeGoto(page, url, { waitUntil, timeout });
           // Invalidate snapshot refs and iframe context after navigation
           const { browserManager } = await import('../../browser/browserManager.js');
           const session = browserManager.getActiveSession();
@@ -943,7 +952,7 @@ const browserFamily: FamilyDefinition = {
               switch (actionName) {
                 case 'navigate': {
                   assertSafeUrl(target);
-                  await page.goto(target, { waitUntil: 'domcontentloaded', timeout: 15_000 });
+                  await safeGoto(page, target, { waitUntil: 'domcontentloaded', timeout: 15_000 });
                   results.push({
                     action: 'navigate',
                     success: true,
@@ -1171,7 +1180,11 @@ const browserFamily: FamilyDefinition = {
       description: 'Manage browser storage (save/restore profiles, list/clear cookies)',
       schema: storageSchema,
       handler: async (args, cfg) => {
-        const { op, filename } = args as { op: string; filename?: string };
+        const { op, filename, includeValues } = args as {
+          op: string;
+          filename?: string;
+          includeValues?: boolean;
+        };
         return withSession(cfg, async (page) => {
           const { sessionStore } = await import('../../browser/session.js');
           switch (op) {
@@ -1189,7 +1202,9 @@ const browserFamily: FamilyDefinition = {
             }
             case 'list-cookies': {
               const cookies = await page.context().cookies();
-              return { cookies };
+              // Cookie values only behind the explicit includeValues opt-in.
+              // Default response omits values entirely (never empty strings).
+              return { cookies: projectCookies(cookies, includeValues === true) };
             }
             case 'clear-cookies': {
               await page.context().clearCookies();
@@ -1299,7 +1314,7 @@ const browserFamily: FamilyDefinition = {
             session.pages.push(newPage);
             if (url) {
               assertSafeUrl(url);
-              await newPage.goto(url);
+              await safeGoto(newPage, url);
             }
             return { index: session.pages.length - 1, url: newPage.url() };
           }
@@ -1639,7 +1654,7 @@ const browserFamily: FamilyDefinition = {
                     await page.locator(trigger.target).click();
                   } else if (trigger.action === 'navigate' && trigger.url) {
                     assertSafeUrl(trigger.url);
-                    await page.goto(trigger.url);
+                    await safeGoto(page, trigger.url);
                   }
                 },
                 dlCfg,
@@ -1832,7 +1847,7 @@ const browserFamily: FamilyDefinition = {
                   case 'navigate':
                     if (step.value) {
                       assertSafeUrl(step.value);
-                      await page.goto(step.value, { waitUntil: 'domcontentloaded' });
+                      await safeGoto(page, step.value, { waitUntil: 'domcontentloaded' });
                     }
                     break;
                   case 'scroll':

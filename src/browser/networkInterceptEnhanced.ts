@@ -6,6 +6,7 @@ import type {
   NetworkModifyConfig,
   NetworkInterceptResult,
 } from './types.js';
+import { continueIfNavigationSafe } from './safeNavigate.js';
 
 /** Active intercept rules per page. */
 const activeRulesByPage = new WeakMap<Page, { type: string; pattern: string }[]>();
@@ -39,7 +40,8 @@ export async function blockResources(
 
       // Check allow-list first
       if (allowPatterns?.some((p) => matchGlob(request.url(), p))) {
-        route.continue().catch((err: unknown) => {
+        // Continue through the navigation SSRF guard (page routes shadow the context guard)
+        continueIfNavigationSafe(route, request).catch((err: unknown) => {
           logger.debug({ err }, 'network: route.continue failed (allowlist match)');
         });
         return;
@@ -50,7 +52,7 @@ export async function blockResources(
           logger.debug({ err }, 'network: route.abort failed (blocked type)');
         });
       } else {
-        route.continue().catch((err: unknown) => {
+        continueIfNavigationSafe(route, request).catch((err: unknown) => {
           logger.debug({ err }, 'network: route.continue failed (non-blocked type)');
         });
       }
@@ -94,7 +96,7 @@ export async function injectHeaders(
       await page.route(pattern, async (route) => {
         const newHeaders = { ...route.request().headers(), ...headers };
         try {
-          await route.continue({ headers: newHeaders });
+          await continueIfNavigationSafe(route, route.request(), { headers: newHeaders });
         } catch {
           route.abort().catch((err: unknown) => {
             logger.debug({ err }, 'network: route.abort failed after header inject failure');
@@ -109,7 +111,7 @@ export async function injectHeaders(
     await page.route('**/*', async (route) => {
       const newHeaders = { ...route.request().headers(), ...headers };
       try {
-        await route.continue({ headers: newHeaders });
+        await continueIfNavigationSafe(route, route.request(), { headers: newHeaders });
       } catch {
         route.abort().catch((err: unknown) => {
           logger.debug({ err }, 'network: route.abort failed after header inject failure (global)');

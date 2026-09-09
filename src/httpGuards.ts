@@ -396,7 +396,7 @@ export async function safeFetch(
         status,
         statusText: result.statusMessage ?? '',
         headers: new Headers(
-          Object.entries(result.headers).flatMap(([key, value]) =>
+          Object.entries(result.headers).flatMap(([key, value]): [string, string][] =>
             value === undefined ? [] : [[key, Array.isArray(value) ? value.join(', ') : value]],
           ),
         ),
@@ -538,6 +538,38 @@ export function assertSafeUrl(url: string, allowInternal = false): void {
 
 /** Maximum response body size in bytes (50 MB). */
 const MAX_RESPONSE_BYTES = 50 * 1024 * 1024;
+
+/**
+ * Validate that a hostname's DNS answers are all public before navigation.
+ * Mirrors safeFetch's public-policy DNS check: lookup all answers, fail closed
+ * on empty/invalid answers or any private/reserved address. Raw-IP and scheme
+ * checks belong to {@link assertSafeUrl}; this covers hostname resolution only.
+ *
+ * Note: this validates resolution at check time — it does not pin DNS, and
+ * Chromium re-resolves at connection time. Do not describe this as DNS
+ * rebinding prevention.
+ */
+export async function assertSafeResolvedHost(
+  hostname: string,
+  resolver?: (hostname: string) => Promise<{ address: string; family: 4 | 6 }[]>,
+): Promise<void> {
+  const resolve =
+    resolver ??
+    ((host: string) =>
+      dns
+        .lookup(host, { all: true, verbatim: true })
+        .then((xs) => xs.map((x) => ({ address: x.address, family: x.family as 4 | 6 }))));
+  const answers = await resolve(hostname);
+  if (answers.length === 0)
+    throw new Error(`DNS resolution returned no answers for host "${hostname}"`);
+  const valid = answers.filter(
+    (entry) => net.isIP(entry.address.replace(/^\[|\]$/g, '')) === entry.family,
+  );
+  if (valid.length !== answers.length)
+    throw new Error(`DNS resolver returned invalid address or family for host "${hostname}"`);
+  if (answers.some(({ address }) => isPrivateOrReservedAddress(address)))
+    throw new Error(`Blocked mixed or private DNS answers for host "${hostname}"`);
+}
 
 /**
  * Read the response body as text, enforcing a size limit.

@@ -35,6 +35,8 @@ export interface BrowserSession {
   browserEngine: BrowserEngine;
   /** Last captured accessibility snapshot tree root (for ref-based targeting). */
   lastSnapshotRoot: SnapshotNode | null;
+  /** Disposer for the session-level navigation SSRF guard (set by BrowserManager). */
+  ssrfGuardDispose?: (() => Promise<void>) | undefined;
 }
 
 /** Configuration for browser session launch or connect. */
