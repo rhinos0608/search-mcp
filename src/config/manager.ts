@@ -5,6 +5,8 @@ import { randomBytes } from 'node:crypto';
 import { encryptConfig, decryptConfig } from './crypto.js';
 import { loadConfig, resetConfig } from '../config.js';
 import type { SearchConfig } from '../config.js';
+import { safeFetch } from '../httpGuards.js';
+import type { SafeFetchOptions } from '../httpGuards.js';
 import { MUTABLE_CONFIG_KEYS } from './types.js';
 import type {
   AccessConfig,
@@ -32,6 +34,42 @@ const SECRET_LEAF_PATHS = new Set([
 
 /** Key-name suffixes that indicate a credential value to redact under browser.credentials. */
 const CREDENTIAL_KEY_PATTERN = /^(password|totpSecret|totp)$/i;
+
+/**
+ * Build the health-check endpoint URL for an operator-configured sidecar.
+ * Returns null for malformed or non-http(s) base URLs.
+ */
+function buildHealthUrl(baseUrl: string, path: string): string | null {
+  try {
+    const parsed = new URL(baseUrl);
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return null;
+    return `${parsed.origin}${parsed.pathname.replace(/\/$/, '')}${path}`;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Map testConnection failures to sanitized, actionable messages.
+ * Never includes internal error detail, URLs, headers, or tokens.
+ */
+function sanitizeTestConnectionError(err: unknown): string {
+  const message = err instanceof Error ? err.message : '';
+  if (
+    /Invalid URL|Blocked|private|reserved|allowlist|requires configured endpoint|No DNS answers|invalid address or family/i.test(
+      message,
+    )
+  ) {
+    return 'Blocked unsafe URL';
+  }
+  if (/deadline|aborted|timeout|ETIMEDOUT|ECONNRESET/i.test(message)) {
+    return 'Connection timed out';
+  }
+  if (/size limit/i.test(message)) {
+    return 'Response too large';
+  }
+  return 'Connection failed';
+}
 
 /**
  * Deep merge two config objects.
@@ -320,36 +358,81 @@ export class ConfigManager {
     return newKey;
   }
 
-  async testConnection(provider: string): Promise<ProviderTestResult> {
+  async testConnection(
+    provider: string,
+    inject: {
+      /** Test hooks mirroring SafeFetchOptions; production callers omit these. */
+      resolver?: SafeFetchOptions['resolver'];
+      request?: SafeFetchOptions['request'];
+    } = {},
+  ): Promise<ProviderTestResult> {
     const cfg = this.get();
     const start = Date.now();
+    const fail = (error: string): ProviderTestResult => ({
+      provider,
+      ok: false,
+      error,
+      latencyMs: Date.now() - start,
+    });
     try {
       switch (provider) {
         case 'searxng': {
           const url = cfg.searxng.baseUrl;
           if (!url) return { provider, ok: false, error: 'Not configured' };
-          const r = await fetch(`${url}/healthz`, { signal: AbortSignal.timeout(5000) });
-          return { provider, ok: r.ok, latencyMs: Date.now() - start };
+          const health = buildHealthUrl(url, '/healthz');
+          if (!health) return fail('Invalid URL');
+          // operator_internal: operator-configured sidecar, hostname-pinned to
+          // the configured base URL. Redirects to any other host fail the allowlist.
+          const opts: SafeFetchOptions = {
+            timeoutMs: 5000,
+            maxBytes: 64 * 1024,
+            networkPolicy: 'operator_internal',
+            internalAllowlist: [new URL(health).hostname],
+          };
+          if (inject.resolver !== undefined) opts.resolver = inject.resolver;
+          if (inject.request !== undefined) opts.request = inject.request;
+          const r = await safeFetch(health, {}, opts);
+          return { provider, ok: r.status >= 200 && r.status < 300, latencyMs: Date.now() - start };
         }
         case 'crawl4ai': {
           const url = cfg.crawl4ai.baseUrl;
           if (!url) return { provider, ok: false, error: 'Not configured' };
-          const r = await fetch(`${url}/health`, { signal: AbortSignal.timeout(5000) });
-          return { provider, ok: r.ok, latencyMs: Date.now() - start };
+          const health = buildHealthUrl(url, '/health');
+          if (!health) return fail('Invalid URL');
+          const opts: SafeFetchOptions = {
+            timeoutMs: 5000,
+            maxBytes: 64 * 1024,
+            networkPolicy: 'operator_internal',
+            internalAllowlist: [new URL(health).hostname],
+          };
+          if (inject.resolver !== undefined) opts.resolver = inject.resolver;
+          if (inject.request !== undefined) opts.request = inject.request;
+          const r = await safeFetch(health, {}, opts);
+          return { provider, ok: r.status >= 200 && r.status < 300, latencyMs: Date.now() - start };
         }
         case 'brave': {
           if (!cfg.brave.apiKey) return { provider, ok: false, error: 'Not configured' };
-          const r = await fetch('https://api.search.brave.com/res/v1/web/search?q=test&count=1', {
-            headers: { 'X-Subscription-Token': cfg.brave.apiKey },
-            signal: AbortSignal.timeout(5000),
-          });
-          return { provider, ok: r.ok, latencyMs: Date.now() - start };
+          // Brave is a public API, not an operator sidecar: public policy so a
+          // redirect to loopback/private/metadata is re-checked and blocked.
+          const opts: SafeFetchOptions = {
+            timeoutMs: 5000,
+            maxBytes: 64 * 1024,
+            networkPolicy: 'public',
+          };
+          if (inject.resolver !== undefined) opts.resolver = inject.resolver;
+          if (inject.request !== undefined) opts.request = inject.request;
+          const r = await safeFetch(
+            'https://api.search.brave.com/res/v1/web/search?q=test&count=1',
+            { headers: { 'X-Subscription-Token': cfg.brave.apiKey } },
+            opts,
+          );
+          return { provider, ok: r.status >= 200 && r.status < 300, latencyMs: Date.now() - start };
         }
         default:
           return { provider, ok: false, error: `No test available for provider "${provider}"` };
       }
     } catch (err) {
-      return { provider, ok: false, error: String(err), latencyMs: Date.now() - start };
+      return fail(sanitizeTestConnectionError(err));
     }
   }
 
