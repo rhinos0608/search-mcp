@@ -41,6 +41,13 @@ const PROVIDER_GROUPS = [
   { id: 'searxng', label: 'SearXNG', fields: [{ key: 'baseUrl', label: 'Base URL' }] },
   { id: 'exa', label: 'Exa', fields: [{ key: 'apiKey', label: 'API Key' }] },
   { id: 'tavily', label: 'Tavily', fields: [{ key: 'apiKey', label: 'API Key' }] },
+  { id: 'jina', label: 'Jina Search', fields: [{ key: 'apiKey', label: 'API Key' }] },
+  // Firecrawl scrapeFallback.enabled is deliberately NOT card-editable: the
+  // dashboard patch pattern only carries string values, and this gate must
+  // stay a strict boolean (set it via config.json or
+  // FIRECRAWL_SCRAPE_FALLBACK_ENABLED).
+  { id: 'firecrawl', label: 'Firecrawl', fields: [{ key: 'apiKey', label: 'API Key' }] },
+  { id: 'diffbot', label: 'Diffbot Search', fields: [{ key: 'apiKey', label: 'API Key' }] },
   // ── Crawl ──
   { id: 'crawl4ai', label: 'Crawl4AI', fields: [{ key: 'baseUrl', label: 'Base URL' }, { key: 'apiToken', label: 'API Token' }] },
   // ── Social / Video ──

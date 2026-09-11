@@ -54,7 +54,7 @@ export function registerWebSearch(
           .optional()
           .default('moderate')
           .describe(
-            'Safe-search level. strict restricts fanout to backends with verified strict support (DuckDuckGo, SearXNG, Brave, Exa with moderation); Tavily, Codex, and Ollama search are excluded under strict. moderate (default) and off retain full provider fanout.',
+            'Safe-search level. strict restricts fanout to backends with verified strict support (DuckDuckGo, SearXNG, Brave, Exa with moderation); Tavily, Codex, Ollama search, Jina, Firecrawl, and Diffbot are excluded under strict. moderate (default) and off retain full provider fanout.',
           ),
         expandQuery: z
           .boolean()

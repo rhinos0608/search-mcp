@@ -24,7 +24,7 @@ export interface CrawlResponse {
   /** Whether the response was recovered from an external source (Wayback, Google Cache). */
   recovered?: boolean;
   /** Source label for recovered content. */
-  recoverySource?: 'wayback' | 'google-cache' | 'aggressive-render' | undefined;
+  recoverySource?: 'wayback' | 'google-cache' | 'aggressive-render' | 'firecrawl' | undefined;
 }
 
 export interface CrawlOptions {

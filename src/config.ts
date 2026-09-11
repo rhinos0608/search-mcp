@@ -62,7 +62,10 @@ export type SearchBackend =
   | 'duckduckgo'
   | 'ollama-search'
   | 'tavily'
-  | 'codex';
+  | 'codex'
+  | 'jina'
+  | 'firecrawl'
+  | 'diffbot';
 
 export interface RescoreWeights {
   rrfAnchor: number;
@@ -147,6 +150,26 @@ export interface RedditConfig {
 
 export interface ExaConfig {
   apiKey?: string;
+}
+
+export interface JinaConfig {
+  apiKey?: string;
+}
+
+export interface DiffbotConfig {
+  apiKey?: string;
+}
+
+/** Firecrawl search key + double-gated billable scrape fallback for web_crawl. */
+export interface FirecrawlConfig {
+  apiKey?: string;
+  scrapeFallback: {
+    /**
+     * Master gate for the Firecrawl scrape fallback in web_crawl. Default
+     * false — a configured key alone never enables billable fallback calls.
+     */
+    enabled: boolean;
+  };
 }
 
 export interface Crawl4aiConfig {
@@ -235,6 +258,9 @@ export interface SearchConfig {
   searxng: { baseUrl: string };
   exa: ExaConfig;
   tavily: { apiKey?: string };
+  jina: JinaConfig;
+  firecrawl: FirecrawlConfig;
+  diffbot: DiffbotConfig;
   youtube: { apiKey?: string };
   stackexchange: { apiKey?: string };
   github: GitHubConfig;
@@ -271,13 +297,16 @@ export interface FeatureConfiguration {
 export const FEATURE_REQUIREMENTS: Record<string, FeatureRequirement> = {
   web_search_keyed_backends: {
     required: [
-      'EXA_API_KEY or BRAVE_API_KEY or SEARXNG_BASE_URL or TAVILY_API_KEY or CODEX_ACCESS_TOKEN or SEARCH_OLLAMA_BASE_URL',
+      'EXA_API_KEY or BRAVE_API_KEY or SEARXNG_BASE_URL or TAVILY_API_KEY or JINA_API_KEY or FIRECRAWL_API_KEY or DIFFBOT_API_KEY or CODEX_ACCESS_TOKEN or SEARCH_OLLAMA_BASE_URL',
     ],
     isConfigured: (cfg) =>
       (cfg.exa.apiKey ?? '').length > 0 ||
       (cfg.brave.apiKey ?? '').length > 0 ||
       cfg.searxng.baseUrl.length > 0 ||
       (cfg.tavily.apiKey ?? '').length > 0 ||
+      (cfg.jina.apiKey ?? '').length > 0 ||
+      (cfg.firecrawl.apiKey ?? '').length > 0 ||
+      (cfg.diffbot.apiKey ?? '').length > 0 ||
       cfg.ollamaSearch.baseUrl.length > 0 ||
       codexConfigured(process.env),
   },
@@ -335,6 +364,9 @@ const DEFAULTS: Omit<SearchConfig, 'rescoreWeights'> = {
   searxng: { baseUrl: '' },
   exa: { apiKey: '' },
   tavily: { apiKey: '' },
+  jina: { apiKey: '' },
+  firecrawl: { apiKey: '', scrapeFallback: { enabled: false } },
+  diffbot: { apiKey: '' },
   youtube: { apiKey: '' },
   stackexchange: { apiKey: '' },
   github: { token: '' },
@@ -425,6 +457,9 @@ const VALID_BACKENDS = new Set<string>([
   'ollama-search',
   'tavily',
   'codex',
+  'jina',
+  'firecrawl',
+  'diffbot',
 ]);
 
 type EnvConfig = Omit<
@@ -441,6 +476,9 @@ type EnvConfig = Omit<
   | 'exa'
   | 'duckduckgo'
   | 'ollamaSearch'
+  | 'jina'
+  | 'firecrawl'
+  | 'diffbot'
   | 'browser'
 > & {
   challengeLatencyThreshold?: number;
@@ -452,6 +490,9 @@ type EnvConfig = Omit<
   github?: Partial<GitHubConfig>;
   exa?: Partial<ExaConfig>;
   tavily?: Partial<{ apiKey: string }>;
+  jina?: Partial<{ apiKey: string }>;
+  firecrawl?: Partial<{ apiKey: string; scrapeFallback: { enabled: boolean } }>;
+  diffbot?: Partial<{ apiKey: string }>;
   embeddingSidecar?: Partial<EmbeddingSidecarConfig>;
   semanticCrawl?: Partial<SemanticCrawlConfig>;
   domainTrust?: Partial<DomainTrustConfig>;
@@ -515,6 +556,21 @@ function resolveJobsAcquisitionConfig(
   };
 }
 
+/**
+ * Resolve the billable Firecrawl scrape-fallback gate from the already-coerced
+ * env boolean (loadFromEnv maps FIRECRAWL_SCRAPE_FALLBACK_ENABLED strictly:
+ * 'true'/'1' → true, anything else — including 'false' — → false) and the
+ * config-file boolean. Nullish precedence: an explicitly set env value wins
+ * over the file value in BOTH directions; then only boolean true enables the
+ * gate (a string value anywhere fails closed — the gate is billable).
+ */
+export function resolveScrapeFallbackEnabled(
+  envEnabled: boolean | undefined,
+  fileEnabled: boolean | undefined,
+): boolean {
+  return (envEnabled ?? fileEnabled) === true;
+}
+
 function loadFromEnv(): EnvConfig {
   const cfg: EnvConfig = {};
 
@@ -546,6 +602,32 @@ function loadFromEnv(): EnvConfig {
   if (tavilyKey) {
     cfg.tavily = { apiKey: tavilyKey };
     cfg.searchBackend ??= 'tavily';
+  }
+
+  const jinaKey = process.env.JINA_API_KEY;
+  if (jinaKey) {
+    cfg.jina = { apiKey: jinaKey };
+    cfg.searchBackend ??= 'jina';
+  }
+
+  const firecrawlKey = process.env.FIRECRAWL_API_KEY;
+  const firecrawlFallback = process.env.FIRECRAWL_SCRAPE_FALLBACK_ENABLED;
+  if (firecrawlKey !== undefined || firecrawlFallback !== undefined) {
+    const fc: Partial<{ apiKey: string; scrapeFallback: { enabled: boolean } }> = {};
+    if (firecrawlKey !== undefined) {
+      fc.apiKey = firecrawlKey;
+      cfg.searchBackend ??= 'firecrawl';
+    }
+    if (firecrawlFallback !== undefined) {
+      fc.scrapeFallback = { enabled: firecrawlFallback === 'true' || firecrawlFallback === '1' };
+    }
+    cfg.firecrawl = fc;
+  }
+
+  const diffbotKey = process.env.DIFFBOT_API_KEY;
+  if (diffbotKey) {
+    cfg.diffbot = { apiKey: diffbotKey };
+    cfg.searchBackend ??= 'diffbot';
   }
 
   const ytKey = process.env.YOUTUBE_API_KEY;
@@ -1001,6 +1083,26 @@ export function loadConfig(): SearchConfig {
     },
     tavily: {
       apiKey: envConfig.tavily?.apiKey ?? fileConfig.tavily?.apiKey ?? DEFAULTS.tavily.apiKey ?? '',
+    },
+    jina: {
+      apiKey: envConfig.jina?.apiKey ?? fileConfig.jina?.apiKey ?? DEFAULTS.jina.apiKey ?? '',
+    },
+    firecrawl: {
+      apiKey:
+        envConfig.firecrawl?.apiKey ??
+        fileConfig.firecrawl?.apiKey ??
+        DEFAULTS.firecrawl.apiKey ??
+        '',
+      scrapeFallback: {
+        enabled: resolveScrapeFallbackEnabled(
+          envConfig.firecrawl?.scrapeFallback?.enabled,
+          fileConfig.firecrawl?.scrapeFallback?.enabled,
+        ),
+      },
+    },
+    diffbot: {
+      apiKey:
+        envConfig.diffbot?.apiKey ?? fileConfig.diffbot?.apiKey ?? DEFAULTS.diffbot.apiKey ?? '',
     },
     youtube: {
       apiKey:

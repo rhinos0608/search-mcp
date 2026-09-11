@@ -162,6 +162,13 @@ export function registerWebCrawl(server: McpServer, cfg: SearchConfig): void {
         }
 
         const llmFallback = buildLlmFallback(extractionConfig, cfg.llm);
+        // Double-gated Firecrawl scrape fallback: explicit flag AND key. The
+        // gate is closed by default — a configured key alone never enables
+        // billable fallback calls. Crawl4AI remains the required primary.
+        const firecrawlFallback =
+          cfg.firecrawl.scrapeFallback.enabled && (cfg.firecrawl.apiKey ?? '').length > 0
+            ? { apiKey: cfg.firecrawl.apiKey ?? '' }
+            : undefined;
         const data = await webCrawl(url, cfg.crawl4ai.baseUrl, cfg.crawl4ai.apiToken, {
           strategy,
           maxDepth,
@@ -173,6 +180,7 @@ export function registerWebCrawl(server: McpServer, cfg: SearchConfig): void {
           jsCode,
           ...(extractionConfig ? { extractionConfig } : {}),
           ...(llmFallback ? { llmFallback } : {}),
+          ...(firecrawlFallback !== undefined ? { firecrawlFallback } : {}),
         });
         warnings.push(...extractionWarnings(data), ...(data.warnings ?? []));
 

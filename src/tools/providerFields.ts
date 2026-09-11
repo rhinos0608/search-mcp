@@ -20,6 +20,18 @@ export function strOrNull(value: unknown): string | null {
 }
 
 /**
+ * Best-effort hostname from an untrusted URL string; '' when parsing fails.
+ * Shared by snippet providers so a malformed url never throws during mapping.
+ */
+export function safeDomain(url: string): string {
+  try {
+    return new URL(url).hostname;
+  } catch {
+    return '';
+  }
+}
+
+/**
  * Return the string entries of `value` when it is an array of strings,
  * otherwise an empty array. Non-string entries are dropped so a malformed
  * highlight never throws or corrupts output.

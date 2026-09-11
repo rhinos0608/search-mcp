@@ -44,3 +44,22 @@ export function installFetchMock(handler?: (url: string, init?: RequestInit) => 
 export function restoreFetchMock(): void {
   globalThis.fetch = realFetch;
 }
+
+export function headerMap(headers: HeadersInit | undefined): Record<string, string> {
+  const out: Record<string, string> = {};
+  if (!headers) return out;
+  if (headers instanceof Headers) {
+    headers.forEach((value, key) => {
+      out[key.toLowerCase()] = value;
+    });
+    return out;
+  }
+  if (Array.isArray(headers)) {
+    for (const [key, value] of headers) out[key.toLowerCase()] = value;
+    return out;
+  }
+  if (typeof headers === 'object') {
+    for (const [key, value] of Object.entries(headers)) out[key.toLowerCase()] = value;
+  }
+  return out;
+}

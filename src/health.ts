@@ -100,11 +100,14 @@ const OPTIONAL_CONFIG: Record<string, OptionalRule> = {
       cfg.searxng.baseUrl.length > 0 ||
       (cfg.tavily.apiKey ?? '').length > 0 ||
       cfg.ollamaSearch.baseUrl.length > 0 ||
-      codexConfigured(process.env),
+      codexConfigured(process.env) ||
+      (cfg.jina.apiKey ?? '').length > 0 ||
+      (cfg.firecrawl.apiKey ?? '').length > 0 ||
+      (cfg.diffbot.apiKey ?? '').length > 0,
     degradedMessage:
       'No key-backed search backend configured; DuckDuckGo fallback remains available.',
     remediation:
-      'Set EXA_API_KEY, BRAVE_API_KEY, SEARXNG_BASE_URL, TAVILY_API_KEY, CODEX_ACCESS_TOKEN, or SEARCH_OLLAMA_BASE_URL for higher-quality web search.',
+      'Set EXA_API_KEY, BRAVE_API_KEY, SEARXNG_BASE_URL, TAVILY_API_KEY, JINA_API_KEY, FIRECRAWL_API_KEY, DIFFBOT_API_KEY, CODEX_ACCESS_TOKEN, or SEARCH_OLLAMA_BASE_URL for higher-quality web search.',
   },
 };
 
@@ -160,6 +163,12 @@ function searchBackendConfigured(cfg: SearchConfig, backend: SearchBackend): boo
       return true;
     case 'codex':
       return codexConfigured(process.env);
+    case 'jina':
+      return (cfg.jina.apiKey ?? '').length > 0;
+    case 'firecrawl':
+      return (cfg.firecrawl.apiKey ?? '').length > 0;
+    case 'diffbot':
+      return (cfg.diffbot.apiKey ?? '').length > 0;
   }
 }
 
@@ -178,7 +187,11 @@ export function orderedSearchBackends(
   return resolveBackends(cfg, undefined, codexAvailable);
 }
 
-async function probeSearchBackend(cfg: SearchConfig, backend: SearchBackend): Promise<ToolHealth> {
+/** Exported for config-only health tests; mirrors runHealthProbes' per-backend probe. */
+export async function probeSearchBackend(
+  cfg: SearchConfig,
+  backend: SearchBackend,
+): Promise<ToolHealth> {
   const start = Date.now();
   if (!searchBackendConfigured(cfg, backend)) {
     return {
@@ -213,6 +226,20 @@ async function probeSearchBackend(cfg: SearchConfig, backend: SearchBackend): Pr
         const { ollamaSearch } = await import('./tools/ollamaSearch.js');
         await ollamaSearch('health check', 1, 'moderate', cfg.ollamaSearch);
         break;
+      }
+      case 'jina':
+      case 'firecrawl':
+      case 'diffbot': {
+        // Config-only: never send a billable probe query to these providers.
+        // (Jina ≥10k tokens/search, Firecrawl 2 credits/search, Diffbot
+        // credits/query.) Automatic and dashboard-triggered paid probes are
+        // deliberately not implemented.
+        return {
+          status: 'degraded',
+          message: `${backend} backend is configured (config-only check; no live probe sent — live queries are billable).`,
+          latencyMs: Date.now() - start,
+          tier: 'optional',
+        };
       }
     }
     return {
@@ -249,6 +276,12 @@ function webSearchBackendRemediation(backend: SearchBackend): string {
       return 'Check outbound network access to DuckDuckGo Lite.';
     case 'codex':
       return 'Set CODEX_ACCESS_TOKEN or run `codex login` to create ~/.codex/auth.json (auto-detected). Limited support: undocumented ChatGPT endpoint, may be rate-limited or unavailable.';
+    case 'jina':
+      return 'Set JINA_API_KEY or select another SEARCH_BACKEND. Note: Jina search queries are billable (≥10k tokens/search).';
+    case 'firecrawl':
+      return 'Set FIRECRAWL_API_KEY or select another SEARCH_BACKEND. Note: Firecrawl search queries are billable (2 credits / 10 results).';
+    case 'diffbot':
+      return 'Set DIFFBOT_API_KEY or select another SEARCH_BACKEND. Note: Diffbot web search queries are billable.';
   }
 }
 

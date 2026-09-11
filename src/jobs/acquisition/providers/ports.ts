@@ -163,6 +163,12 @@ export function indexedProviderConfigured(
       return (config.tavily.apiKey ?? '').length > 0;
     case 'codex':
       return codexConfigured(env);
+    case 'jina':
+    case 'firecrawl':
+    case 'diffbot':
+      // Not wired as indexed jobs providers — compile exhaustiveness only; no
+      // jobs acquisition behavior change.
+      return false;
   }
 }
 

@@ -80,7 +80,17 @@ export interface SearchResult {
   /** Domain extracted from the result URL (e.g. "example.com"). */
   domain: string;
   /** Which search backend produced this result. */
-  source: 'brave' | 'searxng' | 'exa' | 'duckduckgo' | 'ollama-search' | 'tavily' | 'codex';
+  source:
+    | 'brave'
+    | 'searxng'
+    | 'exa'
+    | 'duckduckgo'
+    | 'ollama-search'
+    | 'tavily'
+    | 'codex'
+    | 'jina'
+    | 'firecrawl'
+    | 'diffbot';
   /** Which backends reported this result (when cross-backend merging is active). */
   engines?: string[] | undefined;
   /**
@@ -744,7 +754,7 @@ export interface CrawlPageResult extends StructuredContent {
   errorMessage: string | null;
   extractedData?: Record<string, unknown>[];
   /** Source of recovered content when the primary crawl failed. */
-  recoverySource?: 'wayback' | 'google-cache' | 'aggressive-render';
+  recoverySource?: 'wayback' | 'google-cache' | 'aggressive-render' | 'firecrawl';
 }
 
 export interface WebCrawlResult {
@@ -802,7 +812,7 @@ export interface SemanticCrawlPageMetadata {
   truncatedSuspected: boolean;
   consentWallSuspected: boolean;
   errorMessage: string | null;
-  recoverySource?: 'wayback' | 'google-cache' | 'aggressive-render';
+  recoverySource?: 'wayback' | 'google-cache' | 'aggressive-render' | 'firecrawl';
 }
 
 export type SemanticCrawlWarning =

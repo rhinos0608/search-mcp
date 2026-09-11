@@ -17,6 +17,10 @@ import type { WebCrawlResult, CrawlPageResult } from '../types.js';
 import type { DomainTrustConfig } from '../config.js';
 import type { ExtractionConfig } from '../utils/extractionConfig.js';
 import type { CrawlOptions } from '../crawl/types.js';
+import {
+  withFirecrawlScrapeFallback,
+  type FirecrawlFallbackConfig,
+} from './firecrawlScrapeFallback.js';
 
 export interface WebCrawlOptions {
   strategy: 'bfs' | 'dfs';
@@ -32,6 +36,12 @@ export interface WebCrawlOptions {
   extractionConfig?: ExtractionConfig;
   llmFallback?: { provider: string; apiToken: string; baseUrl?: string };
   domainTrust?: DomainTrustConfig | undefined;
+  /**
+   * Double-gated Firecrawl scrape fallback (flag + key). Absent = gate closed:
+   * primary behavior is unchanged. Wraps only the primary client execution —
+   * request-phase policy guards always run and are never bypassed.
+   */
+  firecrawlFallback?: FirecrawlFallbackConfig | undefined;
 }
 
 /**
@@ -112,8 +122,12 @@ export async function webCrawl(
     'web_crawl: executing middleware chain',
   );
 
-  const response = await chain.execute(url, baseUrl, apiToken, buildCrawlOptions(opts), (req) =>
-    clientMw.crawl(req),
+  const response = await chain.execute(
+    url,
+    baseUrl,
+    apiToken,
+    buildCrawlOptions(opts),
+    withFirecrawlScrapeFallback((req) => clientMw.crawl(req), opts.firecrawlFallback),
   );
 
   // Clean up noise in markdown output: literal \n sequences,

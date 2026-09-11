@@ -4,6 +4,9 @@ import { braveSearch } from './braveSearch.js';
 import { searxngSearch } from './searxngSearch.js';
 import { exaSearch } from './exaSearch.js';
 import { tavilySearch } from './tavilySearch.js';
+import { jinaSearch } from './jinaSearch.js';
+import { firecrawlSearch } from './firecrawlSearch.js';
+import { diffbotSearch } from './diffbotSearch.js';
 import { rrfMerge, type RrfMergeResult } from '../utils/fusion.js';
 import {
   multiSignalRescore,
@@ -70,6 +73,9 @@ export const FALLBACK_ORDER: SearchBackend[] = [
   'brave',
   'exa',
   'tavily',
+  'jina',
+  'firecrawl',
+  'diffbot',
   'ollama-search',
 ];
 
@@ -83,8 +89,13 @@ export const FALLBACK_ORDER: SearchBackend[] = [
  * - Exa has documented `moderation` filtering; strict maps to `moderation: true`.
  *
  * Excluded: Tavily (strict maps to a news-topic workaround, no real filter),
- * Codex (undocumented endpoint, no filter parameter), and Ollama experimental
- * search (body carries no safety field).
+ * Codex (undocumented endpoint, no filter parameter), Ollama experimental
+ * search (body carries no safety field), Jina and Diffbot (no documented
+ * strict-safe-search parameter), and Firecrawl — Firecrawl v2 search does
+ * document a boolean `safe` (SafeSearch) parameter, but it is a single-level
+ * filter with no strict guarantee verified against a live key, so strict
+ * fanout still excludes it rather than silently downgrading. Revisit if live
+ * verification confirms strict-equivalent filtering.
  */
 export const STRICT_SAFE_BACKENDS: ReadonlySet<SearchBackend> = new Set([
   'duckduckgo',
@@ -298,6 +309,12 @@ function backendAvailable(
         return (cfg.exa.apiKey ?? '').length > 0;
       case 'tavily':
         return (cfg.tavily.apiKey ?? '').length > 0;
+      case 'jina':
+        return (cfg.jina.apiKey ?? '').length > 0;
+      case 'firecrawl':
+        return (cfg.firecrawl.apiKey ?? '').length > 0;
+      case 'diffbot':
+        return (cfg.diffbot.apiKey ?? '').length > 0;
       case 'duckduckgo':
         return true;
       case 'ollama-search':
@@ -377,6 +394,23 @@ async function runBackend(
       }
       case 'codex':
         results = await (deps.codexSearch ?? codexSearch)(query, limit);
+        break;
+      case 'jina':
+        results = await (deps.jinaSearch ?? jinaSearch)(query, cfg.jina.apiKey ?? '', limit);
+        break;
+      case 'firecrawl':
+        results = await (deps.firecrawlSearch ?? firecrawlSearch)(
+          query,
+          cfg.firecrawl.apiKey ?? '',
+          limit,
+        );
+        break;
+      case 'diffbot':
+        results = await (deps.diffbotSearch ?? diffbotSearch)(
+          query,
+          cfg.diffbot.apiKey ?? '',
+          limit,
+        );
         break;
       default:
         throw new Error(`Unhandled search backend: ${backend as string}`);
@@ -462,6 +496,12 @@ export interface WebSearchDeps {
   exaSearch: typeof import('./exaSearch.js').exaSearch;
   tavilySearch: typeof import('./tavilySearch.js').tavilySearch;
   /** Optional — defaults to the real implementation when omitted. */
+  jinaSearch?: typeof import('./jinaSearch.js').jinaSearch;
+  /** Optional — defaults to the real implementation when omitted. */
+  firecrawlSearch?: typeof import('./firecrawlSearch.js').firecrawlSearch;
+  /** Optional — defaults to the real implementation when omitted. */
+  diffbotSearch?: typeof import('./diffbotSearch.js').diffbotSearch;
+  /** Optional — defaults to the real implementation when omitted. */
   codexSearch?: typeof import('./codexSearch.js').codexSearch;
   /** Optional — defaults to semanticMatch-based ranking when embedding is configured. */
   semanticRerank?: typeof semanticRerankSearchResults;
@@ -523,7 +563,7 @@ export async function searchWithBackends(
     strictFiltered = true;
     if (scope.length === 0) {
       throw validationError(
-        'safeSearch="strict" requires at least one backend with verified strict safe-search support. Supported: DuckDuckGo (zero-key), SearXNG (SEARXNG_BASE_URL), Brave (BRAVE_API_KEY), Exa (EXA_API_KEY). Tavily, Codex, and Ollama search cannot enforce strict filtering and are excluded from strict fanout.',
+        'safeSearch="strict" requires at least one backend with verified strict safe-search support. Supported: DuckDuckGo (zero-key), SearXNG (SEARXNG_BASE_URL), Brave (BRAVE_API_KEY), Exa (EXA_API_KEY). Tavily, Codex, Ollama search, Jina, Diffbot, and Firecrawl cannot enforce verified strict filtering and are excluded from strict fanout.',
         { backend: 'duckduckgo,searxng,brave,exa' },
       );
     }
@@ -843,6 +883,9 @@ export async function webSearch(
       searxngSearch,
       exaSearch,
       tavilySearch,
+      jinaSearch,
+      firecrawlSearch,
+      diffbotSearch,
       ...(config !== undefined ? { config } : {}),
     },
     undefined,

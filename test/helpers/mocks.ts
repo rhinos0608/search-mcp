@@ -8,6 +8,9 @@ const baseConfig: SearchConfig = {
   searxng: { baseUrl: '' },
   exa: { apiKey: '' },
   tavily: { apiKey: '' },
+  jina: { apiKey: '' },
+  firecrawl: { apiKey: '', scrapeFallback: { enabled: false } },
+  diffbot: { apiKey: '' },
   youtube: { apiKey: '' },
   stackexchange: { apiKey: '' },
   github: { token: '' },
@@ -127,6 +130,19 @@ export function createMockConfig(
     searxng: { ...baseConfig.searxng, ...(overrides?.searxng ?? {}) },
     exa: { ...baseConfig.exa, ...(overrides?.exa ?? {}) },
     tavily: { ...baseConfig.tavily, ...(overrides?.tavily ?? {}) },
+    jina: { ...baseConfig.jina, ...(overrides?.jina ?? {}) },
+    firecrawl: {
+      ...baseConfig.firecrawl,
+      ...(overrides?.firecrawl ?? {}),
+      // Nested object must be copied too: a shallow spread would share
+      // scrapeFallback with baseConfig across every mock in the process, so a
+      // test flipping enabled would leak into later mocks.
+      scrapeFallback: {
+        ...baseConfig.firecrawl.scrapeFallback,
+        ...(overrides?.firecrawl?.scrapeFallback ?? {}),
+      },
+    },
+    diffbot: { ...baseConfig.diffbot, ...(overrides?.diffbot ?? {}) },
     duckduckgo: { ...baseConfig.duckduckgo, ...(overrides?.duckduckgo ?? {}) },
     ollamaSearch: { ...baseConfig.ollamaSearch, ...(overrides?.ollamaSearch ?? {}) },
     rescoreWeights: { ...baseConfig.rescoreWeights, ...(overrides?.rescoreWeights ?? {}) },

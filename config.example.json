@@ -13,6 +13,21 @@
     "//": "Tavily search API (V3.4). API key free at tavily.com. Uses TAVILY_API_KEY env var.",
     "apiKey": ""
   },
+  "jina": {
+    "//": "Jina Search (s.jina.ai). JINA_API_KEY env var. WARNING: every search query is billable (≥10,000 tokens/search); query expansion multiplies billable requests.",
+    "apiKey": ""
+  },
+  "firecrawl": {
+    "//": "Firecrawl v2 search (api.firecrawl.dev). FIRECRAWL_API_KEY env var. WARNING: search costs 2 credits per 10 results; query expansion multiplies billable requests. scrapeFallback.enabled ALSO gates the billable web_crawl Firecrawl scrape fallback (FIRECRAWL_SCRAPE_FALLBACK_ENABLED env var); it is off by default and never bypasses Crawl4AI as the required primary.",
+    "apiKey": "",
+    "scrapeFallback": {
+      "enabled": false
+    }
+  },
+  "diffbot": {
+    "//": "Diffbot Web Search (llm.diffbot.com). DIFFBOT_API_KEY env var. WARNING: search queries are billable; query expansion multiplies billable requests.",
+    "apiKey": ""
+  },
   "youtube": {
     "apiKey": ""
   },

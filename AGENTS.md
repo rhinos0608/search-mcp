@@ -98,7 +98,7 @@ Key modules: `pipeline.ts` (prepareCorpus/retrieveCorpus), `embedding.ts` (multi
 
 ```bash
 # Search (at least one)
-EXA_API_KEY, BRAVE_API_KEY, SEARXNG_BASE_URL, SEARCH_BACKEND (brave|searxng|exa|duckduckgo|ollama-search|tavily|codex), TAVILY_API_KEY
+EXA_API_KEY, BRAVE_API_KEY, SEARXNG_BASE_URL, SEARCH_BACKEND (brave|searxng|exa|duckduckgo|ollama-search|tavily|codex|jina|firecrawl|diffbot), TAVILY_API_KEY
 CODEX_ACCESS_TOKEN, CODEX_ACCOUNT_ID (optional), CODEX_HOME (default ~/.codex)  # Codex/ChatGPT default search backend; limited support
 # Social
 NITTER_BASE_URL, REDDIT_CLIENT_ID+SECRET (must pair), REDDIT_USER_AGENT, YOUTUBE_API_KEY

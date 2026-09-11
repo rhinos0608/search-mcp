@@ -22,6 +22,9 @@ const SECRET_LEAF_PATHS = new Set([
   'brave.apiKey',
   'exa.apiKey',
   'tavily.apiKey',
+  'jina.apiKey',
+  'firecrawl.apiKey',
+  'diffbot.apiKey',
   'youtube.apiKey',
   'stackexchange.apiKey',
   'github.token',
@@ -161,6 +164,9 @@ const VALID_SEARCH_BACKENDS = new Set([
   'ollama-search',
   'tavily',
   'codex',
+  'jina',
+  'firecrawl',
+  'diffbot',
 ]);
 
 const VALID_EMBEDDING_PROVIDERS = new Set(['sidecar', 'ollama', 'transformers', 'openai']);
@@ -196,6 +202,20 @@ function validateConfigValues(cfg: Record<string, unknown>): string | null {
     if (val !== undefined && val !== null && typeof val !== 'boolean') {
       return `${field} must be a boolean, got ${typeof val}`;
     }
+  }
+
+  // firecrawl.scrapeFallback.enabled gates the billable web_crawl Firecrawl
+  // fallback; a string value (e.g. "false" from a dashboard patch) would be
+  // truthy-coerced at the runtime gate, silently opening the gate.
+  const firecrawl = cfg.firecrawl as Record<string, unknown> | undefined;
+  const scrapeFallback = firecrawl?.scrapeFallback as Record<string, unknown> | undefined;
+  const fallbackEnabled = scrapeFallback?.enabled;
+  if (
+    fallbackEnabled !== undefined &&
+    fallbackEnabled !== null &&
+    typeof fallbackEnabled !== 'boolean'
+  ) {
+    return `firecrawl.scrapeFallback.enabled must be a boolean, got ${typeof fallbackEnabled}`;
   }
 
   // URL-ish fields: empty string is fine (not configured), but non-empty
