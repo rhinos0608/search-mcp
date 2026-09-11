@@ -131,7 +131,6 @@ function formatTypedData(r: BraveWebResult): string {
   const parts: string[] = [];
 
   if (r.language) parts.push(`Language: ${r.language}`);
-  if (r.thumbnail?.original) parts.push(`Thumbnail: ${r.thumbnail.original}`);
 
   if (r.article) {
     const sub: string[] = [];

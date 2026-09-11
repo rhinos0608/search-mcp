@@ -192,12 +192,27 @@ function stripRawHtml(markdown: string): string {
   return (
     text
       .replace(/&nbsp;/g, ' ')
+      // Numeric entities (hex and decimal) decoded before named ones so
+      // &amp;#39; stays as the literal text &#39; rather than double-decoding.
+      .replace(/&#x([0-9a-f]+);/gi, (_m, hex: string) => {
+        const cp = parseInt(hex, 16);
+        return cp > 0 && cp <= 0x10ffff ? String.fromCodePoint(cp) : '';
+      })
+      .replace(/&#([0-9]+);/g, (_m, dec: string) => {
+        const cp = parseInt(dec, 10);
+        return cp > 0 && cp <= 0x10ffff ? String.fromCodePoint(cp) : '';
+      })
       .replace(/&amp;/g, '&')
       .replace(/&lt;/g, '<')
       .replace(/&gt;/g, '>')
       .replace(/&quot;/g, '"')
-      .replace(/&#39;/g, "'")
       .replace(/&apos;/g, "'")
+      // Named typographic entities.
+      .replace(/&lsquo;|&rsquo;/g, "'")
+      .replace(/&ldquo;|&rdquo;/g, '"')
+      .replace(/&mdash;/g, '—')
+      .replace(/&ndash;/g, '–')
+      .replace(/&hellip;/g, '…')
       .replace(/</g, '&lt;')
       .replace(/>/g, '&gt;')
       // Restore line-leading `&gt;` (a markdown blockquote marker) back to `>`.
@@ -987,7 +1002,7 @@ export function isNavigationOnlySearchResult(result: SearchResult): boolean {
   return !hasSubstantiveBody(cleaned);
 }
 
-/** True when the cleaned body contains at least one substantive line. */
+/** True when the cleaned body contains at least one substantive non-heading line. */
 function hasSubstantiveBody(markdown: string): boolean {
   const lines = markdown.split('\n');
   for (const line of lines) {
@@ -997,7 +1012,10 @@ function hasSubstantiveBody(markdown: string): boolean {
     if (t.length === 0) continue;
     // Standalone link, image, or link-only list item (pure navigation / link grid).
     if (/^(?:\s*(?:[-*+]|\d+\.)\s+)?!?\[[^\]]*\]\([^)]*\)\s*$/.test(t)) continue;
-    return true; // any other nonempty line (prose, heading, quote, list text) is substantive
+    // A heading alone is not substantive — heading-only bodies are navigation
+    // chrome (e.g. a tracker page that lists model names as h3 with no body text).
+    if (/^#{1,6}\s+\S/.test(t)) continue;
+    return true; // prose, quote, non-heading list text, or non-link line
   }
   return false;
 }
