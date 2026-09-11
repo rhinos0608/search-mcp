@@ -1292,7 +1292,7 @@ test('attempts bound reaches provable maximum 10101 (handoffs + identity-missing
 
   // --- W3-H addendum: exact coverage precedence matrix ---
 
-  test('W3-H 1. mixed upgraded + blocked not_permitted → partial/results', async () => {
+  await test('W3-H 1. mixed upgraded + blocked not_permitted → partial/results', async () => {
     const reg = new SourcePolicyRegistry([
       policy(PROVIDER_ID),
       policy(PUBLISHER_SOURCE_ID, 'permitted'),
@@ -1322,7 +1322,7 @@ test('attempts bound reaches provable maximum 10101 (handoffs + identity-missing
     assert.equal(result.status, 'partial');
   });
 
-  test('W3-H 2. mixed upgraded + capability_missing → partial/results', async () => {
+  await test('W3-H 2. mixed upgraded + capability_missing → partial/results', async () => {
     const reg = makeRegistries().reg;
     const run = await buildMergedRun(
       { reg, slicePublishers: { 'slice-1': PUBLISHER_SOURCE_ID } },
@@ -1353,7 +1353,7 @@ test('attempts bound reaches provable maximum 10101 (handoffs + identity-missing
     assert.equal(result.status, 'partial');
   });
 
-  test('W3-H 3. mixed upgraded + publisher_identity_missing → partial/results', async () => {
+  await test('W3-H 3. mixed upgraded + publisher_identity_missing → partial/results', async () => {
     const reg = makeRegistries().reg;
     const run = await buildMergedRun(
       { reg, slicePublishers: { 'slice-1': PUBLISHER_SOURCE_ID } },
@@ -1377,7 +1377,7 @@ test('attempts bound reaches provable maximum 10101 (handoffs + identity-missing
     assert.equal(result.status, 'partial');
   });
 
-  test('W3-H 4. mixed upgraded + structural capacity_exhausted → partial/results, run partial', async () => {
+  await test('W3-H 4. mixed upgraded + structural capacity_exhausted → partial/results, run partial', async () => {
     const reg = makeRegistries().reg;
     const run = await buildMergedRun(
       { reg, slicePublishers: { 'slice-1': PUBLISHER_SOURCE_ID } },
@@ -1422,7 +1422,7 @@ test('attempts bound reaches provable maximum 10101 (handoffs + identity-missing
     assert.equal(result.status, 'partial');
   });
 
-  test('W3-H 5. zero upgrades with attempted fetch failure → failed/no_results', async () => {
+  await test('W3-H 5. zero upgrades with attempted fetch failure → failed/no_results', async () => {
     const reg = makeRegistries().reg;
     const run = await buildRun({ reg });
     makeEligible(run, 'slice-1', reg);
@@ -1445,7 +1445,7 @@ test('attempts bound reaches provable maximum 10101 (handoffs + identity-missing
     assert.equal(cov.attemptsReserved, 1);
   });
 
-  test('W3-H 6. all blocked → policy_blocked/unknown with zero calls', async () => {
+  await test('W3-H 6. all blocked → policy_blocked/unknown with zero calls', async () => {
     const reg = makeRegistries('blocked').reg;
     const run = await buildRun({ reg, sliceIds: ['slice-1', 'slice-2'] });
     const { fn, calls } = okFetch();
@@ -1468,7 +1468,7 @@ test('attempts bound reaches provable maximum 10101 (handoffs + identity-missing
     assert.equal(result.status, 'partial');
   });
 
-  test('W3-H 7. all requires_configuration/requires_review → disabled/unknown with zero calls', async () => {
+  await test('W3-H 7. all requires_configuration/requires_review → disabled/unknown with zero calls', async () => {
     const reg = new SourcePolicyRegistry([
       policy(PROVIDER_ID),
       policy(PUBLISHER_SOURCE_ID, 'requires_configuration'),
@@ -1498,7 +1498,7 @@ test('attempts bound reaches provable maximum 10101 (handoffs + identity-missing
     }
   });
 
-  test('W3-H 8. all capability-missing/policy-not-supported → not_supported/unknown with zero calls', async () => {
+  await test('W3-H 8. all capability-missing/policy-not-supported → not_supported/unknown with zero calls', async () => {
     const reg = new SourcePolicyRegistry([
       policy(PROVIDER_ID),
       policy(PUBLISHER_SOURCE_ID, 'not_supported'),
@@ -1535,7 +1535,7 @@ test('attempts bound reaches provable maximum 10101 (handoffs + identity-missing
     }
   });
 
-  test('W3-H 9. mixed zero-call blocked + disabled, zero upgrades → partial/no_results', async () => {
+  await test('W3-H 9. mixed zero-call blocked + disabled, zero upgrades → partial/no_results', async () => {
     const reg = new SourcePolicyRegistry([
       policy(PROVIDER_ID),
       policy(PUBLISHER_SOURCE_ID, 'blocked'),
@@ -1563,7 +1563,7 @@ test('attempts bound reaches provable maximum 10101 (handoffs + identity-missing
     assert.equal(cov.logicalRequestsUsed, 0);
   });
 
-  test('W3-H 10. abort after successful candidate → slice succeeded/results, run aborted', async () => {
+  await test('W3-H 10. abort after successful candidate → slice succeeded/results, run aborted', async () => {
     const reg = makeRegistries().reg;
     const run = await buildRun({ reg, sliceIds: ['slice-1', 'slice-2'] });
     const controller = new AbortController();
@@ -1592,7 +1592,7 @@ test('attempts bound reaches provable maximum 10101 (handoffs + identity-missing
     assert.equal(result.status, 'aborted');
   });
 
-  test('W3-H 11. deadline after successful candidate → slice succeeded/results, run deadline_exceeded', async () => {
+  await test('W3-H 11. deadline after successful candidate → slice succeeded/results, run deadline_exceeded', async () => {
     const reg = makeRegistries().reg;
     const run = await buildRun({ reg, sliceIds: ['slice-1', 'slice-2'] });
     let m = 0;
@@ -1619,7 +1619,7 @@ test('attempts bound reaches provable maximum 10101 (handoffs + identity-missing
   });
 
   for (const dim of ['logicalRequests', 'reservedAttempts'] as const) {
-    test(`W3-H 12/13. ${dim}:1 budget exhaustion → one fetch, second capacity_exhausted, run budget_exhausted`, async () => {
+    await test(`W3-H 12/13. ${dim}:1 budget exhaustion → one fetch, second capacity_exhausted, run budget_exhausted`, async () => {
       const reg = makeRegistries().reg;
       const run = await buildRun({ reg, sliceIds: ['slice-1', 'slice-2'] });
       const { fn, calls } = okFetch();
@@ -1647,7 +1647,7 @@ test('attempts bound reaches provable maximum 10101 (handoffs + identity-missing
     });
   }
 
-  test('W3-H 14. manual-handoff-only run stays completed with no destination-fetch coverage', async () => {
+  await test('W3-H 14. manual-handoff-only run stays completed with no destination-fetch coverage', async () => {
     const { reg, caps } = makeRegistries();
     const run = await buildRun({ reg, withPublisher: false });
     run.slices[0]!.candidates = [];

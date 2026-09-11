@@ -49,9 +49,9 @@ test('final acceptance: seam and evaluation fixtures execute', () => {
     });
     const output = `${result.stdout}\n${result.stderr}`;
     assert.equal(result.status, 0, output);
-    assert.match(output, new RegExp(`^ℹ tests ${suite.expectedTests}$`, 'm'), output);
-    assert.match(output, new RegExp(`^ℹ pass ${suite.expectedTests}$`, 'm'), output);
-    assert.match(output, /^ℹ fail 0$/m, output);
-    assert.match(output, /^ℹ cancelled 0$/m, output);
+    assert.match(output, new RegExp(`^(?:ℹ tests|# tests) ${suite.expectedTests}$`, 'm'), output);
+    assert.match(output, new RegExp(`^(?:ℹ pass|# pass) ${suite.expectedTests}$`, 'm'), output);
+    assert.match(output, /^(?:ℹ fail|# fail) 0$/m, output);
+    assert.match(output, /^(?:ℹ cancelled|# cancelled) 0$/m, output);
   }
 });
